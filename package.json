@@ -4,13 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "server": "node server/index.js",
+    "dev:server": "NODE_ENV=development node server/index.js",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "firebase": "^10.12.2",
     "lucide-react": "^0.447.0",
+    "express": "^4.19.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

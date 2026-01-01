@@ -1,14 +1,35 @@
-# React + Vite
+# Artes
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Een Vite + React applicatie met een eenvoudige Node/Express-backend.
 
-Currently, two official plugins are available:
+## Ontwikkeling
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+1. Installeer afhankelijkheden: `npm install`.
+2. Start de backend: `npm start` (standaard op poort 5000).
+3. Start de frontend in een tweede terminal: `npm run dev` (Vite proxy't `/api` automatisch naar poort 5000).
+4. Open http://localhost:5173 in je browser.
 
-## Deploy/development stappen
+### Beschikbare API-routes
+- `GET /api/health` – eenvoudige health-check met uptime en timestamp.
+- `GET /api/posts` – levert demo-posts uit de lokale datastore.
 
-1. Installeer afhankelijkheden en voer na configuratie `npm run build` uit. Dit genereert de productieklare `dist`-map.
-2. Configureer je backend of statische server om `dist/index.html` en de gecompileerde assets te serveren. Een aangepaste `base` in Vite is niet nodig; de standaardwaarde volstaat.
-3. Zorg dat eventuele API-endpoints die data leveren beschikbaar zijn op dezelfde host als waar je de frontend serveert. Zo kan de applicatie zonder extra proxy-instellingen laden.
+## Productie
+
+1. Build de frontend: `npm run build` (output in `dist/`).
+2. Start de server: `npm start` (serveert API-routes en statische assets).
+
+## Docker
+
+Een multi-stage Dockerfile is beschikbaar:
+
+```bash
+# bouwen
+npm ci
+npm run build
+# of via Docker
+DOCKER_BUILDKIT=1 docker build -t artes .
+# draaien
+docker run -p 5000:5000 artes
+```
+
+De container serveert de backend op poort 5000 en levert tegelijkertijd de gecompileerde frontend-bestanden vanuit `dist/`.

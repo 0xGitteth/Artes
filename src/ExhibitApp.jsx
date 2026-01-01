@@ -1,48 +1,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Image as ImageIcon, Search, Users, Plus, Hand, Cloud, Bookmark, 
-  Settings, LogOut, Shield, Camera, Handshake, ChevronLeft, 
+import {
+  Image as ImageIcon, Search, Users, Plus, Hand, Cloud, Bookmark,
+  Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
   Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe
 } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged,
-  signInWithCustomToken,
-  signOut
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  onSnapshot, 
-  query, 
-  orderBy, 
-  serverTimestamp, 
-  doc, 
-  setDoc, 
-  getDoc,
-  writeBatch,
-  updateDoc
-} from 'firebase/firestore';
-
-// --- Firebase Configuration ---
-const firebaseConfig = typeof __firebase_config !== 'undefined'
-  ? JSON.parse(__firebase_config)
-  : {
-      apiKey: "demo-api-key",
-      authDomain: "demo.firebaseapp.com",
-      projectId: "demo-project",
-      messagingSenderId: "000000000000",
-      appId: "0:000000000000:web:demo",
-    };
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+import {
+  createProfile,
+  ensureUserSignedIn,
+  fetchUserIndex,
+  logout,
+  publishPost,
+  seedDemoContent,
+  subscribeToAuth,
+  subscribeToPosts,
+  subscribeToProfile,
+  subscribeToUsers,
+  updateProfile as updateProfileData,
+} from './services/firebaseClient';
 
 // --- Constants & Styling ---
 
@@ -216,15 +192,7 @@ export default function ExhibitApp() {
      const checkAndSeed = async () => {
         if (!user) return;
         try {
-            const check = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', 'user_sophie'));
-            if (!check.exists()) {
-                const batch = writeBatch(db);
-                SEED_USERS.forEach(u => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', u.uid), u));
-                SEED_POSTS.forEach(p => {
-                    batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'posts', p.id), { ...p, createdAt: serverTimestamp() });
-                });
-                await batch.commit();
-            }
+            await seedDemoContent(SEED_USERS, SEED_POSTS);
         } catch (e) { console.error('Seeding error', e); }
      };
      checkAndSeed();
@@ -232,16 +200,18 @@ export default function ExhibitApp() {
 
   // Auth & Profile Listener
   useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
-      else await signInAnonymously(auth);
-    };
-    initAuth();
+    let unsubscribeProfile = null;
+    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : undefined;
+    ensureUserSignedIn(token).catch((error) => console.error('Auth init error', error));
 
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+    const unsubscribe = subscribeToAuth(async (u) => {
        setUser(u);
+       if (unsubscribeProfile) {
+          unsubscribeProfile();
+          unsubscribeProfile = null;
+       }
        if (u) {
-          const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'users', u.uid, 'profile', 'main'), (snap) => {
+          unsubscribeProfile = subscribeToProfile(u.uid, (snap) => {
              if (snap.exists()) {
                  setProfile(snap.data());
                  if (view === 'loading') setView('gallery');
@@ -249,23 +219,21 @@ export default function ExhibitApp() {
                  setView('login');
              }
           });
-          return () => unsubProfile();
        } else {
           setView('login');
        }
     });
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribeProfile) unsubscribeProfile();
+      unsubscribe();
+    };
   }, []);
 
   // Data Listeners
   useEffect(() => {
      if (!user) return;
-     const unsubPosts = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'posts'), orderBy('createdAt', 'desc')), (s) => {
-        setPosts(s.docs.map(d => ({ id: d.id, ...d.data() })));
-     });
-     const unsubUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'user_indices'), (s) => {
-        setUsers(s.docs.map(d => ({ id: d.id, ...d.data() })));
-     });
+     const unsubPosts = subscribeToPosts(setPosts);
+     const unsubUsers = subscribeToUsers(setUsers);
      return () => { unsubPosts(); unsubUsers(); };
   }, [user]);
 
@@ -358,7 +326,7 @@ export default function ExhibitApp() {
 
         {/* Modals */}
         {showUploadModal && <UploadModal onClose={() => setShowUploadModal(false)} user={user} profile={profile} users={users} />}
-        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await signOut(auth); setProfile(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
+        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await logout(); setProfile(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
         
@@ -469,10 +437,9 @@ function Onboarding({ user, setProfile, setView, users, startTour }) {
               const finalProfile = {
                 uid: user.uid, displayName: profileData.displayName || 'Nieuwe Maker', bio: profileData.bio,
                 roles: roles, themes: ['General'], avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-                linkedAgencyName: profileData.linkedAgencyName, linkedCompanyName: profileData.linkedCompanyName, createdAt: serverTimestamp()
+                linkedAgencyName: profileData.linkedAgencyName, linkedCompanyName: profileData.linkedCompanyName,
               };
-              await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'), finalProfile);
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', user.uid), finalProfile);
+              await createProfile(user.uid, finalProfile);
               setProfile(finalProfile);
               setView('gallery');
               startTour();
@@ -695,10 +662,10 @@ function UploadModal({ onClose, user, profile, users }) {
   };
 
   const handlePublish = async () => {
-    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'posts'), {
-       title, description: desc, imageUrl: image, authorId: user.uid, authorName: profile.displayName, authorRole: uploaderRole, 
+    await publishPost({
+       title, description: desc, imageUrl: image, authorId: user.uid, authorName: profile.displayName, authorRole: uploaderRole,
        styles: selectedStyles, sensitive: isSensitive, triggers: activeTriggers, credits,
-       likes: 0, createdAt: serverTimestamp() 
+       likes: 0
     });
     onClose();
   };
@@ -803,8 +770,7 @@ function EditProfileModal({ onClose, profile, user }) {
   const [tab, setTab] = useState('general');
   
   const handleSave = async () => {
-     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'), formData);
-     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', user.uid), formData);
+     await updateProfileData(user.uid, formData);
      onClose();
   };
 
@@ -901,7 +867,7 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers }) {
   useEffect(() => {
     const existing = allUsers.find(u => u.uid === userId);
     if(existing) setFetchedUser(existing);
-    else getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', userId)).then(s => { if(s.exists()) setFetchedUser(s.data()) });
+    else fetchUserIndex(userId).then((data) => { if (data) setFetchedUser(data); });
   }, [userId, allUsers]);
   if (!fetchedUser) return <div>Loading...</div>;
   return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} />;

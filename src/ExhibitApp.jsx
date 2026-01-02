@@ -751,7 +751,7 @@ function UploadModal({ onClose, user, profile, users }) {
                          </div>
                       </div>
                       <div>
-                         <label className="text-sm font-bold block mb-2 dark:text-white">Thema's</label>
+                     <label className="text-sm font-bold block mb-2 dark:text-white">Thema&apos;s</label>
                          <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar">{THEMES.map(t => <button key={t} onClick={() => setSelectedStyles(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t])} className={`px-2 py-1 rounded text-xs border ${selectedStyles.includes(t) ? 'bg-blue-600 text-white' : ''} ${getThemeStyle(t)}`}>{t}</button>)}</div>
                       </div>
                       <Button onClick={handlePublish} className="w-full">Publiceren</Button>
@@ -826,7 +826,7 @@ function CommunityList({ setView }) {
          <div className="bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/20 p-6 rounded-2xl border border-amber-200 dark:border-amber-800/30 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
             <div>
                <h3 className="font-bold text-amber-900 dark:text-amber-400 text-lg mb-1 flex items-center gap-2"><Star className="w-5 h-5 fill-amber-500 text-amber-500" /> Weekly Challenge</h3>
-               <p className="text-sm text-amber-800 dark:text-amber-200/80 mb-0">Thema: "Shadow Play"</p>
+               <p className="text-sm text-amber-800 dark:text-amber-200/80 mb-0">Thema: &quot;Shadow Play&quot;</p>
             </div>
             <Button className="bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/20" asChild>Doe mee</Button>
          </div>

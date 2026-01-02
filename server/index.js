@@ -30,14 +30,12 @@ app.get('/api/posts', (_req, res) => {
 if (SERVE_CLIENT && fs.existsSync(DIST_PATH)) {
   app.use(express.static(DIST_PATH));
 
-  app.get('*', (req, res, next) => {
+  app.get('/*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
     return res.sendFile(path.join(DIST_PATH, 'index.html'));
   });
 } else if (SERVE_CLIENT) {
-  /* eslint-disable no-console */
   console.warn('dist/ map niet gevonden, statische bestanden worden niet geserveerd.');
-  /* eslint-enable no-console */
 }
 
 app.use((req, res) => {
@@ -48,7 +46,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  /* eslint-disable no-console */
   console.log(`Server listening on http://localhost:${PORT}`);
-  /* eslint-enable no-console */
 });

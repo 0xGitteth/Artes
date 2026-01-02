@@ -60,25 +60,34 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
-    initAuth().finally(() => setReady(true));
-    const unsub = observeAuth(async (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        const profileSnap = await fetchUserProfile(firebaseUser.uid);
-        if (!profileSnap.exists()) {
-          await createUserProfile(firebaseUser.uid, initialProfile(firebaseUser));
-        }
-        subscribeToProfile(firebaseUser.uid, (docSnap) => {
-          const data = docSnap.data();
-          setProfile(data);
-          const storedDark = data?.darkMode ?? JSON.parse(localStorage.getItem('darkMode') || 'false');
-          setDarkMode(storedDark);
+    let unsub = null;
+    const bootstrap = async () => {
+      try {
+        await initAuth();
+        unsub = observeAuth(async (firebaseUser) => {
+          setUser(firebaseUser);
+          if (firebaseUser) {
+            const profileSnap = await fetchUserProfile(firebaseUser.uid);
+            if (!profileSnap.exists()) {
+              await createUserProfile(firebaseUser.uid, initialProfile(firebaseUser));
+            }
+            subscribeToProfile(firebaseUser.uid, (docSnap) => {
+              const data = docSnap.data();
+              setProfile(data);
+              const storedDark = data?.darkMode ?? JSON.parse(localStorage.getItem('darkMode') || 'false');
+              setDarkMode(storedDark);
+            });
+          } else {
+            setProfile(null);
+          }
         });
-      } else {
-        setProfile(null);
+      } finally {
+        setReady(true);
       }
-    });
-    return () => unsub();
+    };
+
+    bootstrap();
+    return () => unsub && unsub();
   }, []);
 
   useEffect(() => {
@@ -96,6 +105,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!posts.length) return undefined;
     const unsubs = posts.map((post) =>
       subscribeToLikes(post.id, (snap) => {
         setLikesMap((prev) => ({
@@ -132,11 +142,25 @@ export default function App() {
   }, [posts, likesMap, commentCounts, profile?.sensitivePreference]);
 
   const handleRegister = async (email, password, displayName) => {
-    const newUser = await registerWithEmail(email, password, displayName);
-    await createUserProfile(newUser.uid, initialProfile({ ...newUser, displayName }));
+    try {
+      setError(null);
+      const newUser = await registerWithEmail(email, password, displayName);
+      await createUserProfile(newUser.uid, initialProfile({ ...newUser, displayName }));
+    } catch (err) {
+      setError(err.message || 'Registreren mislukt');
+      throw err;
+    }
   };
 
-  const handleLogin = (email, password) => loginWithEmail(email, password);
+  const handleLogin = async (email, password) => {
+    try {
+      setError(null);
+      await loginWithEmail(email, password);
+    } catch (err) {
+      setError(err.message || 'Inloggen mislukt');
+      throw err;
+    }
+  };
 
   const handlePublish = async (payload) => {
     if (!user) throw new Error('Je moet ingelogd zijn');

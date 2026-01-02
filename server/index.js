@@ -30,8 +30,7 @@ app.get('/api/posts', (_req, res) => {
 if (SERVE_CLIENT && fs.existsSync(DIST_PATH)) {
   app.use(express.static(DIST_PATH));
 
-  app.get('/*', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
+  app.get(/^(?!\/api).*/, (_req, res) => {
     return res.sendFile(path.join(DIST_PATH, 'index.html'));
   });
 } else if (SERVE_CLIENT) {

@@ -25,10 +25,10 @@ export default function AuthPanel({ onLogin, onRegister, error }) {
     <div className="max-w-3xl mx-auto bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl shadow-slate-800/10 overflow-hidden">
       <div className="grid md:grid-cols-2">
         <div className="p-10 bg-gradient-to-br from-blue-600 via-blue-500 to-indigo-600 text-white">
-          <p className="text-sm uppercase tracking-widest opacity-80 mb-3">Exhibit</p>
+          <p className="text-sm uppercase tracking-widest opacity-80 mb-3">Artes</p>
           <h1 className="text-3xl font-bold mb-4">Log in of maak een account</h1>
           <p className="opacity-90 leading-relaxed">
-            Behoud de vertrouwde Exhibit ervaring maar nu met echte Firebase-authenticatie. Werk samen, deel posts en beheer je profiel.
+            Behoud de vertrouwde Artes ervaring maar nu met echte Firebase-authenticatie. Werk samen, deel posts en beheer je profiel.
           </p>
           <div className="mt-8 space-y-3 text-sm opacity-90">
             <div className="flex items-center gap-3"><Mail size={18} /> Email + wachtwoord</div>
@@ -56,7 +56,7 @@ export default function AuthPanel({ onLogin, onRegister, error }) {
           <Input
             label="Email"
             type="email"
-            placeholder="studio@exhibit.app"
+            placeholder="studio@artes.app"
             value={form.email}
             onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
           />

@@ -1,4 +1,4 @@
-# Exhibit App (Vite + Firebase)
+# Artes App (Vite + Firebase)
 
 Productieklare React/Vite-app met Tailwind, Firebase Auth en Firestore. De app ondersteunt registratie/login, profielbeheer, posts met likes/comments en gevoelige-content voorkeuren.
 
@@ -38,7 +38,7 @@ firebase deploy --only firestore:rules
 De app draait in één container met Node/Express.
 
 ```bash
-docker build -t exhibit-app .
+docker build -t artes-app .
 docker run -p 5000:5000 \
   -e PORT=5000 \
   -e VITE_FIREBASE_API_KEY=... \
@@ -47,7 +47,7 @@ docker run -p 5000:5000 \
   -e VITE_FIREBASE_STORAGE_BUCKET=... \
   -e VITE_FIREBASE_MESSAGING_SENDER_ID=... \
   -e VITE_FIREBASE_APP_ID=... \
-  exhibit-app
+  artes-app
 ```
 
 ### Sliplane deploy stappen

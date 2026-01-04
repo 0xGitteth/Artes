@@ -10,15 +10,22 @@ import {
   createProfile,
   ensureUserSignedIn,
   fetchUserIndex,
-  logout,
+  logout as firebaseLogout,
   publishPost,
   seedDemoContent,
   subscribeToAuth,
   subscribeToPosts,
-  subscribeToProfile,
   subscribeToUsers,
   updateProfile as updateProfileData,
 } from './services/firebaseClient';
+import {
+  fetchProfile as fetchProfileApi,
+  getStoredToken,
+  login as apiLogin,
+  logout as apiLogout,
+  saveProfile as saveProfileApi,
+  signup as apiSignup,
+} from './services/apiClient';
 
 // --- Constants & Styling ---
 
@@ -98,9 +105,19 @@ const COMMUNITIES = [
 ];
 
 const TRIGGERS = [
-  'Naakt (Artistiek)', 'Naakt (Expliciet)', 'Bloed / Gore', 'Naalden', 'Spinnen / Insecten', 
+  'Naakt (Artistiek)', 'Naakt (Expliciet)', 'Bloed / Gore', 'Naalden', 'Spinnen / Insecten',
   'Wapens', 'Geweld', 'Eetstoornissen', 'Zelfbeschadiging', 'Flitsende beelden'
 ];
+
+const loadStoredUser = () => {
+  try {
+    const raw = localStorage.getItem('auth_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    console.error('Failed to parse stored user', e);
+    return null;
+  }
+};
 
 // --- SEED DATA ---
 const SEED_USERS = [
@@ -172,6 +189,10 @@ export default function ExhibitApp() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [view, setView] = useState('loading');
+  const [authUser, setAuthUser] = useState(loadStoredUser());
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
+  const [authPending, setAuthPending] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
   
@@ -200,33 +221,42 @@ export default function ExhibitApp() {
 
   // Auth & Profile Listener
   useEffect(() => {
-    let unsubscribeProfile = null;
     const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : undefined;
     ensureUserSignedIn(token).catch((error) => console.error('Auth init error', error));
 
     const unsubscribe = subscribeToAuth(async (u) => {
        setUser(u);
-       if (unsubscribeProfile) {
-          unsubscribeProfile();
-          unsubscribeProfile = null;
-       }
-       if (u) {
-          unsubscribeProfile = subscribeToProfile(u.uid, (snap) => {
-             if (snap.exists()) {
-                 setProfile(snap.data());
-                 if (view === 'loading') setView('gallery');
-             } else {
-                 setView('login');
-             }
-          });
-       } else {
-          setView('login');
-       }
     });
     return () => {
-      if (unsubscribeProfile) unsubscribeProfile();
       unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      try {
+        const storedUser = loadStoredUser();
+        const token = getStoredToken();
+        if (storedUser && token) {
+          setAuthUser(storedUser);
+          const prof = await fetchProfileApi();
+          if (prof) {
+            setProfile(prof);
+            setView('gallery');
+          } else {
+            setView('onboarding');
+          }
+        } else {
+          setView('login');
+        }
+      } catch (e) {
+        console.error('Failed to bootstrap session', e);
+        setView('login');
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    bootstrap();
   }, []);
 
   // Data Listeners
@@ -244,6 +274,63 @@ export default function ExhibitApp() {
   const handleTourComplete = (targetView) => {
     setShowTour(false);
     if(typeof targetView === 'string') setView(targetView);
+  };
+
+  const persistUser = (u) => localStorage.setItem('auth_user', JSON.stringify(u));
+
+  const handleLogin = async (email, password) => {
+    try {
+      setAuthError(null);
+      setAuthPending(true);
+      const { user: loggedInUser } = await apiLogin({ email, password });
+      setAuthUser(loggedInUser);
+      persistUser(loggedInUser);
+      const prof = await fetchProfileApi();
+      if (prof) {
+        setProfile(prof);
+        setView('gallery');
+      } else {
+        setView('onboarding');
+      }
+    } catch (e) {
+      setAuthError(e.message);
+      setView('login');
+    } finally {
+      setAuthPending(false);
+    }
+  };
+
+  const handleSignup = async (email, password, displayName) => {
+    try {
+      setAuthError(null);
+      setAuthPending(true);
+      const { user: newUser } = await apiSignup({ email, password, displayName });
+      setAuthUser(newUser);
+      persistUser(newUser);
+      setView('onboarding');
+    } catch (e) {
+      setAuthError(e.message);
+      throw e;
+    } finally {
+      setAuthPending(false);
+    }
+  };
+
+  const handleCompleteProfile = async (profileData, roles) => {
+    const finalProfile = {
+      uid: authUser?.uid,
+      displayName: profileData.displayName || 'Nieuwe Maker',
+      bio: profileData.bio,
+      roles,
+      themes: ['General'],
+      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.uid || 'exhibit'}`,
+      linkedAgencyName: profileData.linkedAgencyName,
+      linkedCompanyName: profileData.linkedCompanyName,
+    };
+    const saved = await saveProfileApi(finalProfile);
+    setProfile(saved);
+    setView('gallery');
+    startTour();
   };
 
   return (
@@ -271,9 +358,9 @@ export default function ExhibitApp() {
         <main className="h-full overflow-y-auto pb-24 pt-16 scroll-smooth">
           {view === 'loading' && <div className="h-full flex items-center justify-center"><div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}
           
-          {view === 'login' && <LoginScreen setView={setView} />}
-          
-          {view === 'onboarding' && <Onboarding user={user} setProfile={setProfile} setView={setView} users={users} startTour={() => setShowTour(true)} />}
+          {view === 'login' && <LoginScreen setView={setView} onLogin={handleLogin} error={authError} loading={authPending} />}
+
+          {view === 'onboarding' && <Onboarding setView={setView} users={users} onSignup={handleSignup} onCompleteProfile={handleCompleteProfile} authUser={authUser} authError={authError} />}
           
           {view === 'gallery' && (
             <Gallery 
@@ -326,7 +413,7 @@ export default function ExhibitApp() {
 
         {/* Modals */}
         {showUploadModal && <UploadModal onClose={() => setShowUploadModal(false)} user={user} profile={profile} users={users} />}
-        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await logout(); setProfile(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
+        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await firebaseLogout(); apiLogout(); localStorage.removeItem('auth_user'); setProfile(null); setAuthUser(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
         
@@ -341,7 +428,9 @@ export default function ExhibitApp() {
 
 // --- SUB COMPONENTS ---
 
-function LoginScreen({ setView }) {
+function LoginScreen({ setView, onLogin, error, loading }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900">
        <div className="max-w-md w-full text-center">
@@ -350,9 +439,10 @@ function LoginScreen({ setView }) {
           <p className="text-slate-500 dark:text-slate-400 mb-8 text-lg">Connect, Create, Inspire.</p>
           <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700">
              <div className="space-y-4">
-                <Input label="E-mailadres" placeholder="naam@voorbeeld.nl" />
-                <Input label="Wachtwoord" type="password" placeholder="••••••••" />
-                <Button className="w-full" onClick={() => setView('gallery')}>Inloggen</Button>
+               <Input label="E-mailadres" placeholder="naam@voorbeeld.nl" value={email} onChange={(e) => setEmail(e.target.value)} />
+               <Input label="Wachtwoord" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+               {error && <p className="text-sm text-red-500 text-left">{error}</p>}
+               <Button className="w-full" disabled={loading} onClick={() => onLogin?.(email, password)}>{loading ? 'Bezig met inloggen...' : 'Inloggen'}</Button>
              </div>
              <div className="relative my-8">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200 dark:border-slate-700"></div></div>
@@ -365,12 +455,23 @@ function LoginScreen({ setView }) {
   );
 }
 
-function Onboarding({ user, setProfile, setView, users, startTour }) {
+function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, authError }) {
     const [step, setStep] = useState(1);
     const [roles, setRoles] = useState([]);
-    const [profileData, setProfileData] = useState({ 
+    const [profileData, setProfileData] = useState({
        displayName: '', bio: '', insta: '', linkedAgencyName: '', linkedCompanyName: ''
     });
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [accountCreated, setAccountCreated] = useState(!!authUser);
+    const [pending, setPending] = useState(false);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+      if (!accountCreated && step > 1) {
+        setStep(1);
+      }
+    }, [accountCreated, step]);
 
     if (step === 1) return (
       <div className="max-w-md mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
@@ -378,9 +479,23 @@ function Onboarding({ user, setProfile, setView, users, startTour }) {
         <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">Welkom bij Exhibit</h1>
         <p className="text-slate-600 dark:text-slate-400 mb-8">Maak een account aan om te beginnen.</p>
         <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
-          <Input label="E-mailadres" />
-          <Input label="Wachtwoord" type="password" />
-          <Button onClick={() => setStep(2)} className="w-full">Account aanmaken</Button>
+          <Input label="E-mailadres" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <Input label="Wachtwoord" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <Input label="Weergavenaam" value={profileData.displayName} onChange={e => setProfileData({...profileData, displayName: e.target.value})} />
+          {(error || authError) && <p className="text-sm text-red-500">{error || authError}</p>}
+          <Button onClick={async () => {
+              try {
+                setPending(true);
+                setError(null);
+                await onSignup?.(email, password, profileData.displayName);
+                setAccountCreated(true);
+                setStep(2);
+              } catch (e) {
+                setError(e.message);
+              } finally {
+                setPending(false);
+              }
+          }} className="w-full" disabled={pending || !email || !password}> {pending ? 'Bezig...' : 'Account aanmaken'} </Button>
         </div>
       </div>
     );
@@ -432,18 +547,18 @@ function Onboarding({ user, setProfile, setView, users, startTour }) {
              </div>
           </div>
 
-          <Button className="w-full mt-4" onClick={async () => {
-              if (!user) return;
-              const finalProfile = {
-                uid: user.uid, displayName: profileData.displayName || 'Nieuwe Maker', bio: profileData.bio,
-                roles: roles, themes: ['General'], avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-                linkedAgencyName: profileData.linkedAgencyName, linkedCompanyName: profileData.linkedCompanyName,
-              };
-              await createProfile(user.uid, finalProfile);
-              setProfile(finalProfile);
-              setView('gallery');
-              startTour();
-          }}>Afronden</Button>
+          {error && <p className="text-sm text-red-500">{error}</p>}
+          <Button className="w-full mt-4" disabled={!accountCreated || pending || roles.length === 0} onClick={async () => {
+              try {
+                setPending(true);
+                setError(null);
+                await onCompleteProfile?.(profileData, roles);
+              } catch (e) {
+                setError(e.message);
+              } finally {
+                setPending(false);
+              }
+          }}>{pending ? 'Opslaan...' : 'Afronden'}</Button>
         </div>
       </div>
     );

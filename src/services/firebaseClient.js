@@ -21,20 +21,18 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 
-const firebaseConfig = typeof __firebase_config !== 'undefined'
-  ? JSON.parse(__firebase_config)
-  : {
-      apiKey: 'demo-api-key',
-      authDomain: 'demo.firebaseapp.com',
-      projectId: 'demo-project',
-      messagingSenderId: '000000000000',
-      appId: '0:000000000000:web:demo',
-    };
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'demo-api-key',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'demo.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'demo-project',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '000000000000',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '0:000000000000:web:demo',
+};
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const appId = import.meta.env.VITE_FIREBASE_APP_ID || 'default-app-id';
 
 const artifactsPath = ['artifacts', appId];
 

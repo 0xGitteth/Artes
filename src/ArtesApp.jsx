@@ -4,7 +4,7 @@ import {
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
-  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe
+  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2
 } from 'lucide-react';
 import {
   createProfile,
@@ -170,16 +170,17 @@ const Badge = ({ children, colorClass, onClick, className = '' }) => (
   </span>
 );
 
-const Input = ({ label, type = "text", placeholder, value, onChange }) => (
+const Input = ({ label, type = "text", placeholder, value, onChange, error }) => (
   <div className="mb-4">
     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{label}</label>
-    <input 
-      type={type} 
-      className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+    <input
+      type={type}
+      className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all ${error ? 'border-red-500 focus:ring-red-400' : 'border-slate-200 dark:border-slate-700'}`}
       placeholder={placeholder}
       value={value}
       onChange={onChange}
     />
+    {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
   </div>
 );
 
@@ -335,7 +336,7 @@ export default function ArtesApp() {
       }
     setProfile(saved);
     setView('gallery');
-    startTour();
+    setShowTour(true);
   };
 
   return (
@@ -750,6 +751,9 @@ function UploadModal({ onClose, user, profile, users }) {
   const [activeTriggers, setActiveTriggers] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [uploaderRole, setUploaderRole] = useState(profile.roles[0]);
+  const [errors, setErrors] = useState({});
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState('');
 
   // Contributor search logic
   const [contributorSearch, setContributorSearch] = useState('');
@@ -761,7 +765,7 @@ function UploadModal({ onClose, user, profile, users }) {
   const handleFile = (e) => {
     if (e.target.files[0]) {
       const r = new FileReader();
-      r.onload = ev => { setImage(ev.target.result); setStep(2); };
+      r.onload = ev => { setImage(ev.target.result); setStep(2); setErrors(prev => ({ ...prev, image: undefined })); };
       r.readAsDataURL(e.target.files[0]);
     }
   };
@@ -790,13 +794,53 @@ function UploadModal({ onClose, user, profile, users }) {
      }
   };
 
+  const toggleStyle = (theme) => {
+    setSelectedStyles((prev) => prev.includes(theme) ? prev.filter(x => x !== theme) : [...prev, theme]);
+    setErrors(prev => ({ ...prev, styles: undefined }));
+  };
+
   const handlePublish = async () => {
-    await publishPost({
-       title, description: desc, imageUrl: image, authorId: user.uid, authorName: profile.displayName, authorRole: uploaderRole,
-       styles: selectedStyles, sensitive: isSensitive, triggers: activeTriggers, credits,
-       likes: 0
-    });
-    onClose();
+    const validationErrors = {};
+
+    if (!image) validationErrors.image = 'Voeg een afbeelding toe.';
+    if (!title.trim()) validationErrors.title = 'Titel is verplicht.';
+    if (selectedStyles.length === 0) validationErrors.styles = 'Kies minstens één thema.';
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+
+    setPublishing(true);
+    setPublishError('');
+
+    try {
+      await publishPost({
+         title, description: desc, imageUrl: image, authorId: user.uid, authorName: profile.displayName, authorRole: uploaderRole,
+         styles: selectedStyles, sensitive: isSensitive, triggers: activeTriggers, credits,
+         likes: 0
+      });
+
+      setErrors({});
+      setImage(null);
+      setTitle('');
+      setDesc('');
+      setSelectedStyles([]);
+      setCredits([]);
+      setNewCredit({ role: 'model', name: '', link: '' });
+      setShowInvite(false);
+      setIsSensitive(false);
+      setActiveTriggers([]);
+      setAiLoading(false);
+      setUploaderRole(profile.roles[0]);
+      setStep(1);
+      setPublishing(false);
+      onClose();
+    } catch (error) {
+      console.error('Publish error', error);
+      setPublishError('Er ging iets mis bij het publiceren. Probeer het opnieuw.');
+      setPublishing(false);
+    }
   };
 
   return (
@@ -811,6 +855,7 @@ function UploadModal({ onClose, user, profile, users }) {
                          <img src={image} className="w-full h-full object-cover"/>
                          {isSensitive && <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center text-orange-400 font-bold"><AlertOctagon className="w-6 h-6 mr-2"/> Sensitive Content</div>}
                       </div>
+                      {errors.image && <p className="text-xs text-red-500">{errors.image}</p>}
                       <div className="bg-slate-50 p-4 rounded-xl border">
                          <div className="flex justify-between items-center mb-3"><span className="text-sm font-bold flex items-center gap-2 dark:text-white"><Shield className="w-4 h-4"/> Safety Check</span><button onClick={simulateAI} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{aiLoading ? '...' : 'AI Scan'}</button></div>
                          <label className="flex items-center gap-2 text-sm cursor-pointer dark:text-white"><input type="checkbox" checked={isSensitive} onChange={e => setIsSensitive(e.target.checked)} /> Markeer als gevoelig</label>
@@ -818,7 +863,7 @@ function UploadModal({ onClose, user, profile, users }) {
                       </div>
                    </div>
                    <div className="space-y-6">
-                      <Input label="Titel" value={title} onChange={e => setTitle(e.target.value)} />
+                      <Input label="Titel" value={title} onChange={e => { setTitle(e.target.value); setErrors(prev => ({ ...prev, title: undefined })); }} error={errors.title} />
                       <div><label className="text-sm font-normal block mb-2 dark:text-white">Bijschrift</label><textarea className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white" value={desc} onChange={e => setDesc(e.target.value)} /></div>
                       
                       {profile.roles.length > 1 && (
@@ -881,9 +926,13 @@ function UploadModal({ onClose, user, profile, users }) {
                       </div>
                       <div>
                      <label className="text-sm font-bold block mb-2 dark:text-white">Thema&apos;s</label>
-                         <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar">{THEMES.map(t => <button key={t} onClick={() => setSelectedStyles(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t])} className={`px-2 py-1 rounded text-xs border ${selectedStyles.includes(t) ? 'bg-blue-600 text-white' : ''} ${getThemeStyle(t)}`}>{t}</button>)}</div>
+                         <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar">{THEMES.map(t => <button key={t} onClick={() => toggleStyle(t)} className={`px-2 py-1 rounded text-xs border ${selectedStyles.includes(t) ? 'bg-blue-600 text-white' : ''} ${getThemeStyle(t)}`}>{t}</button>)}</div>
+                         {errors.styles && <p className="mt-2 text-xs text-red-500">{errors.styles}</p>}
                       </div>
-                      <Button onClick={handlePublish} className="w-full">Publiceren</Button>
+                      {publishError && <p className="text-sm text-red-500 text-center">{publishError}</p>}
+                      <Button onClick={handlePublish} className="w-full" disabled={publishing}>
+                        {publishing ? <><Loader2 className="w-4 h-4 animate-spin" /> Publiceren...</> : 'Publiceren'}
+                      </Button>
                    </div>
                 </div>
              )}

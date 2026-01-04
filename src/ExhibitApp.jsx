@@ -328,6 +328,9 @@ export default function ExhibitApp() {
       linkedCompanyName: profileData.linkedCompanyName,
     };
     const saved = await saveProfileApi(finalProfile);
+    if (authUser?.uid) {
+      await createProfile(authUser.uid, saved || finalProfile);
+    }
     setProfile(saved);
     setView('gallery');
     startTour();
@@ -473,6 +476,13 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
       }
     }, [accountCreated, step]);
 
+    useEffect(() => {
+      if (authUser && !accountCreated) {
+        setAccountCreated(true);
+        setStep(2);
+      }
+    }, [authUser, accountCreated]);
+
     if (step === 1) return (
       <div className="max-w-md mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
         <h2 className="text-sm font-bold text-blue-600 uppercase tracking-wide mb-1">Stap 1/4</h2>
@@ -487,15 +497,17 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
               try {
                 setPending(true);
                 setError(null);
-                await onSignup?.(email, password, profileData.displayName);
-                setAccountCreated(true);
+                if (!accountCreated) {
+                  await onSignup?.(email, password, profileData.displayName);
+                  setAccountCreated(true);
+                }
                 setStep(2);
               } catch (e) {
                 setError(e.message);
               } finally {
                 setPending(false);
               }
-          }} className="w-full" disabled={pending || !email || !password}> {pending ? 'Bezig...' : 'Account aanmaken'} </Button>
+          }} className="w-full" disabled={pending || (!accountCreated && (!email || !password))}> {pending ? 'Bezig...' : accountCreated ? 'Ga verder' : 'Account aanmaken'} </Button>
         </div>
       </div>
     );

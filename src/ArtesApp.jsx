@@ -185,7 +185,7 @@ const Input = ({ label, type = "text", placeholder, value, onChange }) => (
 
 // --- Main App ---
 
-export default function ExhibitApp() {
+export default function ArtesApp() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [view, setView] = useState('loading');
@@ -323,7 +323,7 @@ export default function ExhibitApp() {
       bio: profileData.bio,
       roles,
       themes: ['General'],
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.uid || 'exhibit'}`,
+      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.uid || 'artes'}`,
       linkedAgencyName: profileData.linkedAgencyName,
       linkedCompanyName: profileData.linkedCompanyName,
     };
@@ -439,8 +439,8 @@ function LoginScreen({ setView, onLogin, error, loading }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900">
        <div className="max-w-md w-full text-center">
-          <div className="w-20 h-20 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-bold text-4xl mb-6 shadow-xl shadow-blue-500/20 mx-auto">E</div>
-          <h1 className="text-4xl font-bold mb-2 dark:text-white">Exhibit</h1>
+          <div className="w-20 h-20 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-bold text-4xl mb-6 shadow-xl shadow-blue-500/20 mx-auto">A</div>
+          <h1 className="text-4xl font-bold mb-2 dark:text-white">Artes</h1>
           <p className="text-slate-500 dark:text-slate-400 mb-8 text-lg">Connect, Create, Inspire.</p>
           <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700">
              <div className="space-y-4">
@@ -488,7 +488,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
     if (step === 1) return (
       <div className="max-w-md mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
         <h2 className="text-sm font-bold text-blue-600 uppercase tracking-wide mb-1">Stap 1/4</h2>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">Welkom bij Exhibit</h1>
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">Welkom bij Artes</h1>
         <p className="text-slate-600 dark:text-slate-400 mb-8">Maak een account aan om te beginnen.</p>
         <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
           <Input label="E-mailadres" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -519,7 +519,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
         <h2 className="text-sm font-bold text-blue-600 uppercase mb-1">Stap 2/4</h2>
         <h1 className="text-3xl font-bold dark:text-white mb-6">Veiligheid & Waarden</h1>
         <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border dark:border-slate-700 space-y-6">
-           <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Exhibit staan respect en consent centraal.</p></div>
+           <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Artes staan respect en consent centraal.</p></div>
            <div className="flex gap-3"><CheckCircle className="text-green-500"/><p className="text-sm dark:text-slate-300">Identificatie via Didit is verplicht voor veiligheid.</p></div>
            <Button onClick={() => setStep(3)} className="w-full">Start Didit Verificatie</Button>
         </div>
@@ -688,7 +688,7 @@ function NavBar({ view, setView, profile, onOpenSettings }) {
    return (
       <>
         <div className="fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-30 flex items-center justify-between px-6">
-           <div className="font-bold text-xl dark:text-white cursor-pointer" onClick={() => setView('gallery')}>Exhibit</div>
+           <div className="font-bold text-xl dark:text-white cursor-pointer" onClick={() => setView('gallery')}>Artes</div>
            <div className="hidden md:flex gap-6">
               {['gallery', 'discover', 'community'].map(v => <button key={v} onClick={() => setView(v)} className={`capitalize font-medium ${view === v ? 'text-blue-600' : 'text-slate-500'}`}>{v === 'discover' ? 'Ontdekken' : v === 'gallery' ? 'Galerij' : v}</button>)}
               <button onClick={() => setView('profile')} className={`capitalize font-medium ${view === 'profile' ? 'text-blue-600' : 'text-slate-500'}`}>Mijn Portfolio</button>
@@ -1029,7 +1029,7 @@ function SettingsModal({ onClose }) {
 function WelcomeTour({ onClose, setView }) {
   const [step, setStep] = useState(0);
   const steps = [
-    { title: 'Welkom bij Exhibit!', desc: 'Dit is een demoversie. Feedback is welkom via Instagram @maraeliza.portfolio.', icon: Info, action: null },
+    { title: 'Welkom bij Artes!', desc: 'Dit is een demoversie. Feedback is welkom via Instagram @maraeliza.portfolio.', icon: Info, action: null },
     { title: 'De Galerij', desc: 'Hier vind je inspirerend werk van mensen die je volgt.', icon: ImageIcon, action: 'gallery' },
     { title: 'Ontdekken', desc: 'Zoek nieuwe makers, ideeën en connecties.', icon: Search, action: 'discover' },
     { title: 'Community', desc: 'Praat mee over veiligheid, techniek en samenwerkingen.', icon: Users, action: 'community' },
@@ -1059,7 +1059,7 @@ function WelcomeTour({ onClose, setView }) {
                    <Button variant="ghost" onClick={() => setStep(0)} className="flex-1">Herhaal Tour</Button>
                    <Button onClick={onClose} className="flex-1">Begrepen</Button>
                 </div>
-                <p className="text-xs text-slate-400 mt-2">Veel plezier met Exhibit!</p>
+                <p className="text-xs text-slate-400 mt-2">Veel plezier met Artes!</p>
              </div>
           )}
           

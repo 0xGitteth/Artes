@@ -21,46 +21,20 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 
-const parseJson = (value) => {
-  if (!value) return null;
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    console.warn('Invalid JSON for Firebase config, falling back to defaults.', error);
-    return null;
-  }
-};
-
-const firebaseConfig = (() => {
-  const env = typeof import.meta !== 'undefined' ? import.meta.env : {};
-  const fromJson = parseJson(env?.VITE_FIREBASE_CONFIG);
-  if (fromJson) return fromJson;
-
-  const envConfig = {
-    apiKey: env?.VITE_FIREBASE_API_KEY,
-    authDomain: env?.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: env?.VITE_FIREBASE_PROJECT_ID,
-    messagingSenderId: env?.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: env?.VITE_FIREBASE_APP_ID,
-  };
-
-  const hasAllEnvValues = Object.values(envConfig).every(Boolean);
-  if (hasAllEnvValues) return envConfig;
-
-  console.warn('Using fallback Firebase config – production env vars missing.');
-  return {
-    apiKey: 'demo-api-key',
-    authDomain: 'demo.firebaseapp.com',
-    projectId: 'demo-project',
-    messagingSenderId: '000000000000',
-    appId: '0:000000000000:web:demo',
-  };
-})();
+const firebaseConfig = typeof __firebase_config !== 'undefined'
+  ? JSON.parse(__firebase_config)
+  : {
+      apiKey: 'demo-api-key',
+      authDomain: 'demo.firebaseapp.com',
+      projectId: 'demo-project',
+      messagingSenderId: '000000000000',
+      appId: '0:000000000000:web:demo',
+    };
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_ID) || 'default-app-id';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 const artifactsPath = ['artifacts', appId];
 

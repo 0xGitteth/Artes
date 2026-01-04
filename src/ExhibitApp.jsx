@@ -174,12 +174,6 @@ export default function ExhibitApp() {
   const [view, setView] = useState('loading');
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
-  const [routePath, setRoutePath] = useState(
-    typeof window !== 'undefined' ? window.location.pathname : '/'
-  );
-
-  const env = typeof import.meta !== 'undefined' ? import.meta.env : {};
-  const initialAuthToken = env?.VITE_INITIAL_AUTH_TOKEN;
   
   // Modals & States
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -207,7 +201,8 @@ export default function ExhibitApp() {
   // Auth & Profile Listener
   useEffect(() => {
     let unsubscribeProfile = null;
-    ensureUserSignedIn(initialAuthToken).catch((error) => console.error('Auth init error', error));
+    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : undefined;
+    ensureUserSignedIn(token).catch((error) => console.error('Auth init error', error));
 
     const unsubscribe = subscribeToAuth(async (u) => {
        setUser(u);
@@ -232,30 +227,7 @@ export default function ExhibitApp() {
       if (unsubscribeProfile) unsubscribeProfile();
       unsubscribe();
     };
-  }, [initialAuthToken]);
-
-  useEffect(() => {
-    const handleRouteChange = () => {
-      setRoutePath(typeof window !== 'undefined' ? window.location.pathname : '/');
-    };
-
-    window.addEventListener('popstate', handleRouteChange);
-    return () => window.removeEventListener('popstate', handleRouteChange);
   }, []);
-
-  useEffect(() => {
-    if (routePath === '/login') {
-      setView('login');
-    }
-  }, [routePath]);
-
-  useEffect(() => {
-    if (view === 'login') {
-      window.history.replaceState(null, '', '/login');
-    } else if (view !== 'loading') {
-      window.history.replaceState(null, '', '/');
-    }
-  }, [view]);
 
   // Data Listeners
   useEffect(() => {
@@ -274,35 +246,10 @@ export default function ExhibitApp() {
     if(typeof targetView === 'string') setView(targetView);
   };
 
-  const showLoader = view === 'loading';
-  const shouldShowLogin = view === 'login' || !profile;
-
-  if (showLoader) {
-    return (
-      <div className="h-screen w-full flex items-center justify-center bg-[#F0F4F8] dark:bg-slate-900">
-        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
-  if (shouldShowLogin) {
-    return (
-      <div className={`${darkMode ? 'dark' : ''} h-screen w-full flex flex-col transition-colors duration-300`}>
-        <div className="flex-1 bg-[#F0F4F8] dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden relative font-sans">
-          <style dangerouslySetInnerHTML={{__html: `
-             .no-scrollbar::-webkit-scrollbar { display: none; }
-             .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-          `}} />
-          <LoginScreen setView={setView} />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={`${darkMode ? 'dark' : ''} h-screen w-full flex flex-col transition-colors duration-300`}>
       <div className="flex-1 bg-[#F0F4F8] dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden relative font-sans">
-
+        
         {/* Style tag to hide scrollbars */}
         <style dangerouslySetInnerHTML={{__html: `
            .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -311,22 +258,26 @@ export default function ExhibitApp() {
 
         {/* Nav visible if profile loaded */}
         {profile && (
-          <NavBar
-             view={view}
-             setView={setView}
-             profile={profile}
-             toggleTheme={toggleTheme}
-             darkMode={darkMode}
+          <NavBar 
+             view={view} 
+             setView={setView} 
+             profile={profile} 
+             toggleTheme={toggleTheme} 
+             darkMode={darkMode} 
              onOpenSettings={() => setShowSettingsModal(true)}
           />
         )}
 
         <main className="h-full overflow-y-auto pb-24 pt-16 scroll-smooth">
+          {view === 'loading' && <div className="h-full flex items-center justify-center"><div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}
+          
+          {view === 'login' && <LoginScreen setView={setView} />}
+          
           {view === 'onboarding' && <Onboarding user={user} setProfile={setProfile} setView={setView} users={users} startTour={() => setShowTour(true)} />}
-
+          
           {view === 'gallery' && (
-            <Gallery
-              posts={posts}
+            <Gallery 
+              posts={posts} 
               onUserClick={setQuickProfileId}
               onShadowClick={setShadowProfileName}
               onPostClick={setSelectedPost}
@@ -336,27 +287,27 @@ export default function ExhibitApp() {
           )}
 
           {view === 'discover' && <Discover users={users} posts={posts} onUserClick={setQuickProfileId} onPostClick={setSelectedPost} setView={setView} />}
-
+          
           {view === 'community' && <CommunityList setView={setView} />}
           {view === 'challenge_detail' && <ChallengeDetail setView={setView} posts={posts.filter(p => p.isChallenge)} onPostClick={setSelectedPost} />}
-
+          
           {view.startsWith('community_') && <CommunityDetail id={view.split('_')[1]} setView={setView} />}
 
           {/* Wrapper logic for viewing profiles */}
           {view === 'profile' && (
-            <ImmersiveProfile
-              profile={profile}
-              isOwn={true}
+            <ImmersiveProfile 
+              profile={profile} 
+              isOwn={true} 
               posts={posts.filter(p => p.authorId === user?.uid)}
               onOpenSettings={() => setShowEditProfile(true)}
               onPostClick={setSelectedPost}
               allUsers={users}
             />
           )}
-
+          
           {view.startsWith('profile_') && (
-            <FetchedProfile
-               userId={view.split('_')[1]}
+            <FetchedProfile 
+               userId={view.split('_')[1]} 
                posts={posts}
                onPostClick={setSelectedPost}
                allUsers={users}
@@ -378,7 +329,7 @@ export default function ExhibitApp() {
         {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await logout(); setProfile(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
-
+        
         {quickProfileId && <UserPreviewModal userId={quickProfileId} onClose={() => setQuickProfileId(null)} onFullProfile={() => { setView(`profile_${quickProfileId}`); setQuickProfileId(null); }} />}
         {selectedPost && <PhotoDetailModal post={selectedPost} allPosts={posts} onClose={() => setSelectedPost(null)} onUserClick={setQuickProfileId} />}
         {shadowProfileName && <ShadowProfileModal name={shadowProfileName} posts={posts} onClose={() => setShadowProfileName(null)} onPostClick={setSelectedPost} />}

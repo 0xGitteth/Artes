@@ -739,18 +739,21 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }
 }
 
 function UploadModal({ onClose, user, profile, users }) {
+  const defaultRole = profile.roles?.[0] || 'photographer';
+  const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true };
+
   const [step, setStep] = useState(1);
   const [image, setImage] = useState(null);
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [selectedStyles, setSelectedStyles] = useState([]);
-  const [credits, setCredits] = useState([]);
+  const [credits, setCredits] = useState([selfCredit]);
   const [newCredit, setNewCredit] = useState({ role: 'model', name: '', link: '' });
   const [showInvite, setShowInvite] = useState(false);
   const [isSensitive, setIsSensitive] = useState(false);
   const [activeTriggers, setActiveTriggers] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
-  const [uploaderRole, setUploaderRole] = useState(profile.roles[0]);
+  const [uploaderRole, setUploaderRole] = useState(defaultRole);
   const [errors, setErrors] = useState({});
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState('');
@@ -794,6 +797,18 @@ function UploadModal({ onClose, user, profile, users }) {
      }
   };
 
+  useEffect(() => {
+    setCredits((prev) => {
+      const existingSelf = prev.find((c) => c.isSelf);
+      if (existingSelf && existingSelf.role === uploaderRole && existingSelf.name === profile.displayName && existingSelf.uid === profile.uid) {
+        const others = prev.filter((c) => !c.isSelf);
+        return [existingSelf, ...others];
+      }
+      const others = prev.filter((c) => !c.isSelf);
+      return [{ role: uploaderRole, name: profile.displayName, uid: profile.uid, isSelf: true }, ...others];
+    });
+  }, [uploaderRole, profile.displayName, profile.uid]);
+
   const toggleStyle = (theme) => {
     setSelectedStyles((prev) => prev.includes(theme) ? prev.filter(x => x !== theme) : [...prev, theme]);
     setErrors(prev => ({ ...prev, styles: undefined }));
@@ -826,13 +841,13 @@ function UploadModal({ onClose, user, profile, users }) {
       setTitle('');
       setDesc('');
       setSelectedStyles([]);
-      setCredits([]);
+      setCredits([{ role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true }]);
       setNewCredit({ role: 'model', name: '', link: '' });
       setShowInvite(false);
       setIsSensitive(false);
       setActiveTriggers([]);
       setAiLoading(false);
-      setUploaderRole(profile.roles[0]);
+      setUploaderRole(defaultRole);
       setStep(1);
       setPublishing(false);
       onClose();
@@ -866,15 +881,35 @@ function UploadModal({ onClose, user, profile, users }) {
                       <Input label="Titel" value={title} onChange={e => { setTitle(e.target.value); setErrors(prev => ({ ...prev, title: undefined })); }} error={errors.title} />
                       <div><label className="text-sm font-normal block mb-2 dark:text-white">Bijschrift</label><textarea className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white" value={desc} onChange={e => setDesc(e.target.value)} /></div>
                       
-                      {profile.roles.length > 1 && (
-                         <div>
-                            <label className="text-sm font-bold block mb-2 dark:text-white">Jouw Rol</label>
-                            <div className="flex gap-2">{profile.roles.map(r => <button key={r} onClick={() => setUploaderRole(r)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${uploaderRole === r ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 dark:text-white'}`}>{ROLES.find(x => x.id === r)?.label}</button>)}</div>
-                         </div>
-                      )}
-
                       <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border">
-                         <label className="text-sm font-bold block mb-2 dark:text-white">Bijdragers</label>
+                         <div className="flex items-center justify-between mb-2">
+                            <label className="text-sm font-bold block dark:text-white">Bijdragers</label>
+                            {profile.roles.length === 1 && <span className="text-[11px] uppercase text-slate-500">{ROLES.find(x => x.id === uploaderRole)?.label}</span>}
+                         </div>
+
+                         {profile.roles.length > 1 && (
+                            <div className="mb-4">
+                               <p className="text-xs font-semibold text-slate-500 mb-1">Jouw rol in deze publicatie</p>
+                               <div className="flex gap-2 flex-wrap">{profile.roles.map(r => <button key={r} onClick={() => setUploaderRole(r)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${uploaderRole === r ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white'}`}>{ROLES.find(x => x.id === r)?.label}</button>)}</div>
+                               <p className="text-[11px] text-slate-500 mt-1">Wordt toegevoegd als jouw eigen credit.</p>
+                            </div>
+                         )}
+
+                         <div className="space-y-2 mb-3">
+                            {credits.map((c, i) => (
+                               <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-700 p-2 rounded border dark:border-slate-600">
+                                  <div className="flex items-center gap-2 dark:text-white">
+                                     {c.isSelf && <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">Jij</span>}
+                                     <span><span className="font-bold capitalize">{ROLES.find(r => r.id === c.role)?.label}:</span> {c.name}</span>
+                                  </div>
+                                  <div className="flex gap-2 items-center">
+                                     {c.isExternal && <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">Extern</span>}
+                                     {!c.isSelf && <button onClick={() => setCredits(credits.filter((_, idx) => idx !== i))}><Trash2 className="w-3 h-3 text-red-500"/></button>}
+                                  </div>
+                               </div>
+                            ))}
+                         </div>
+
                          <div className="flex gap-2 mb-2">
                             <select className="p-2 border rounded text-sm w-1/3" value={newCredit.role} onChange={e => setNewCredit({...newCredit, role: e.target.value})}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
                             <div className="relative flex-1">
@@ -913,15 +948,6 @@ function UploadModal({ onClose, user, profile, users }) {
                          )}
 
                          <div className="space-y-1">
-                            {credits.map((c, i) => (
-                               <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-700 p-2 rounded border dark:border-slate-600">
-                                  <span className="dark:text-white"><span className="font-bold capitalize">{ROLES.find(r => r.id === c.role)?.label}:</span> {c.name}</span>
-                                  <div className="flex gap-2 items-center">
-                                     {c.isExternal && <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">Extern</span>}
-                                     <button onClick={() => setCredits(credits.filter((_, idx) => idx !== i))}><Trash2 className="w-3 h-3 text-red-500"/></button>
-                                  </div>
-                               </div>
-                            ))}
                          </div>
                       </div>
                       <div>

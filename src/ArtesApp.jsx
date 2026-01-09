@@ -109,6 +109,29 @@ const TRIGGERS = [
   'Wapens', 'Geweld', 'Eetstoornissen', 'Zelfbeschadiging', 'Flitsende beelden'
 ];
 
+const buildDefaultAvatar = (seed) =>
+  `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(seed || 'artes')}`;
+
+const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
+  const seed = profileData?.uid || profileData?.displayName || fallbackSeed;
+  const roles = Array.isArray(profileData?.roles) && profileData.roles.length ? profileData.roles : ['fan'];
+  const themes = Array.isArray(profileData?.themes) && profileData.themes.length ? profileData.themes : ['General'];
+
+  return {
+    ...profileData,
+    uid: profileData?.uid ?? null,
+    displayName: profileData?.displayName || 'Onbekende maker',
+    bio: profileData?.bio || 'Nog geen bio toegevoegd.',
+    roles,
+    themes,
+    avatar: profileData?.avatar || buildDefaultAvatar(seed),
+    linkedAgencyName: profileData?.linkedAgencyName ?? null,
+    linkedCompanyName: profileData?.linkedCompanyName ?? null,
+    linkedAgencyLink: profileData?.linkedAgencyLink ?? '',
+    linkedCompanyLink: profileData?.linkedCompanyLink ?? '',
+  };
+};
+
 const loadStoredUser = () => {
   try {
     const raw = localStorage.getItem('auth_user');
@@ -242,7 +265,7 @@ export default function ArtesApp() {
           setAuthUser(storedUser);
           const prof = await fetchProfileApi();
           if (prof) {
-            setProfile(prof);
+            setProfile(normalizeProfileData(prof, storedUser?.uid));
             setView('gallery');
           } else {
             setView('onboarding');
@@ -268,6 +291,21 @@ export default function ArtesApp() {
      return () => { unsubPosts(); unsubUsers(); };
   }, [user]);
 
+  useEffect(() => {
+    if (view !== 'profile') return;
+    let active = true;
+    fetchProfileApi()
+      .then((prof) => {
+        if (active && prof) {
+          setProfile(normalizeProfileData(prof, authUser?.uid));
+        }
+      })
+      .catch((error) => console.error('Failed to refresh profile', error));
+    return () => {
+      active = false;
+    };
+  }, [view, authUser?.uid]);
+
   const toggleTheme = () => setDarkMode(!darkMode);
 
   const canUpload = profile && (!profile.roles.includes('fan') || profile.roles.length > 1);
@@ -288,7 +326,7 @@ export default function ArtesApp() {
       persistUser(loggedInUser);
       const prof = await fetchProfileApi();
       if (prof) {
-        setProfile(prof);
+        setProfile(normalizeProfileData(prof, loggedInUser?.uid));
         setView('gallery');
       } else {
         setView('onboarding');
@@ -334,7 +372,7 @@ export default function ArtesApp() {
           console.error('Failed to sync profile to Firestore', error);
         });
       }
-    setProfile(saved);
+    setProfile(normalizeProfileData(saved || finalProfile, authUser?.uid));
     setView('gallery');
     setShowTour(true);
   };
@@ -708,23 +746,74 @@ function NavBar({ view, setView, profile, onOpenSettings }) {
 
 function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }) {
   if (!profile) return null;
+  const normalizedProfile = normalizeProfileData(profile);
+  const roles = normalizedProfile.roles;
+  const themes = normalizedProfile.themes;
+  const bio = normalizedProfile.bio;
+  const showBio = Boolean(bio && bio !== 'Nog geen bio toegevoegd.');
+  const agencyName = normalizedProfile.linkedAgencyName || '';
+  const companyName = normalizedProfile.linkedCompanyName || '';
+  const agencyLink = normalizedProfile.linkedAgencyLink || '';
+  const companyLink = normalizedProfile.linkedCompanyLink || '';
+  const hasAgency = Boolean(agencyName);
+  const hasCompany = Boolean(companyName);
+  const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
+
   return (
      <div className="min-h-screen bg-white dark:bg-slate-900 pb-20">
-        <div className="relative h-[500px] w-full overflow-hidden">
-           <img src={profile.avatar} className="w-full h-full object-cover" />
-           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/20 to-black/90" />
+        <div className="relative h-[520px] w-full overflow-hidden">
+           <img src={normalizedProfile.avatar} className="w-full h-full object-cover scale-105" />
+           <div className="absolute inset-0 bg-white/40 dark:bg-black/55" />
+           <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white dark:from-slate-900 to-transparent z-10" /> 
            
            {isOwn && <div className="absolute top-4 right-4 z-20"><Button onClick={onOpenSettings} className="bg-black/50 text-white hover:bg-black/70 border-none backdrop-blur-md"><Edit3 className="w-4 h-4 mr-2"/> Profiel Bewerken</Button></div>}
            
-           <div className="relative z-20 h-full flex flex-col justify-end items-center pb-12 px-6 text-center">
-              <h1 className="text-5xl font-bold text-white mb-2">{profile.displayName}</h1>
+           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center">
+              <h1 className="text-5xl font-bold text-blue-700 dark:text-white mb-3">{normalizedProfile.displayName}</h1>
               <div className="flex flex-wrap justify-center gap-2 mb-4">
-                 {profile.roles?.map(r => <span key={r} className="text-xs font-bold uppercase tracking-widest text-white/80 bg-white/10 px-3 py-1 rounded backdrop-blur">{ROLES.find(x => x.id === r)?.label}</span>)}
-                 {profile.linkedAgencyName && <span className="text-xs text-white/80 border-l border-white/30 pl-2 ml-2">Agency: {profile.linkedAgencyName}</span>}
-                 {profile.linkedCompanyName && <span className="text-xs text-white/80 border-l border-white/30 pl-2 ml-2">Work: {profile.linkedCompanyName}</span>}
+                 {roles.map(r => (
+                   <span key={r} className="text-xs font-bold uppercase tracking-widest text-blue-900 dark:text-white bg-white/80 dark:bg-white/10 px-3 py-1 rounded-full backdrop-blur border border-blue-200/60 dark:border-white/20 shadow-sm">
+                     {roleLabel(r)}
+                   </span>
+                 ))}
               </div>
-              <p className="text-slate-200 max-w-xl text-lg">{profile.bio}</p>
+              {showBio && <p className="text-slate-700 dark:text-slate-200 max-w-xl text-base md:text-lg mb-5 leading-relaxed">{bio}</p>}
+              {(hasAgency || hasCompany) && (
+                <div className="flex flex-col sm:flex-row flex-wrap justify-center gap-2 sm:gap-6 text-xs text-slate-700/80 dark:text-white/80 mb-5">
+                  {hasAgency && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="uppercase tracking-widest text-[10px] font-semibold text-slate-500 dark:text-slate-300">Agency</span>
+                      {agencyLink ? (
+                        <a href={agencyLink} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors">
+                          {agencyName}
+                        </a>
+                      ) : (
+                        <span className="font-semibold text-slate-700 dark:text-white">{agencyName}</span>
+                      )}
+                    </span>
+                  )}
+                  {hasCompany && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="uppercase tracking-widest text-[10px] font-semibold text-slate-500 dark:text-slate-300">Bedrijf</span>
+                      {companyLink ? (
+                        <a href={companyLink} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors">
+                          {companyName}
+                        </a>
+                      ) : (
+                        <span className="font-semibold text-slate-700 dark:text-white">{companyName}</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-wrap justify-center gap-2 mt-1">
+                {themes.map((theme) => (
+                  <span key={theme} className={`px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
+                    {theme}
+                  </span>
+                ))}
+              </div>
            </div>
         </div>
         
@@ -1144,8 +1233,14 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers }) {
   const [fetchedUser, setFetchedUser] = useState(null);
   useEffect(() => {
     const existing = allUsers.find(u => u.uid === userId);
-    if(existing) setFetchedUser(existing);
-    else fetchUserIndex(userId).then((data) => { if (data) setFetchedUser(data); });
+    if (existing) {
+      setFetchedUser(normalizeProfileData(existing, userId));
+    }
+    fetchUserIndex(userId).then((data) => {
+      if (data) {
+        setFetchedUser(normalizeProfileData(data, userId));
+      }
+    });
   }, [userId, allUsers]);
   if (!fetchedUser) return <div>Loading...</div>;
   return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} />;

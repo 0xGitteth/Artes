@@ -461,7 +461,15 @@ export default function ArtesApp() {
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
         
-        {quickProfileId && <UserPreviewModal userId={quickProfileId} onClose={() => setQuickProfileId(null)} onFullProfile={() => { setView(`profile_${quickProfileId}`); setQuickProfileId(null); }} />}
+        {quickProfileId && (
+          <UserPreviewModal
+            userId={quickProfileId}
+            onClose={() => setQuickProfileId(null)}
+            onFullProfile={() => { setView(`profile_${quickProfileId}`); setQuickProfileId(null); }}
+            posts={posts}
+            allUsers={users}
+          />
+        )}
         {selectedPost && <PhotoDetailModal post={selectedPost} allPosts={posts} onClose={() => setSelectedPost(null)} onUserClick={setQuickProfileId} />}
         {shadowProfileName && <ShadowProfileModal name={shadowProfileName} posts={posts} onClose={() => setShadowProfileName(null)} onPostClick={setSelectedPost} />}
 
@@ -1246,7 +1254,119 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers }) {
   return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} />;
 }
 function PhotoDetailModal({ post, onClose }) { return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-10"><img src={post.imageUrl} className="max-h-full" /><button onClick={onClose} className="absolute top-4 right-4 text-white"><X/></button></div> }
-function UserPreviewModal({ userId, onClose, onFullProfile }) { return <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center"><div className="bg-white p-6 rounded-xl text-center"><h3>Quick Profile {userId}</h3><Button onClick={onFullProfile}>Bekijk Profiel</Button><Button onClick={onClose} variant="ghost">Sluiten</Button></div></div> }
+function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
+  const [userProfile, setUserProfile] = useState(null);
+
+  useEffect(() => {
+    const existing = allUsers.find((u) => u.uid === userId);
+    if (existing) {
+      setUserProfile(normalizeProfileData(existing, userId));
+    }
+    fetchUserIndex(userId).then((data) => {
+      if (data) {
+        setUserProfile(normalizeProfileData(data, userId));
+      }
+    });
+  }, [userId, allUsers]);
+
+  if (!userProfile) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 w-full max-w-md text-center shadow-2xl">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-slate-600 dark:text-slate-300">Profiel laden...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const roles = userProfile.roles || [];
+  const themes = userProfile.themes || [];
+  const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
+  const userPosts = posts.filter((post) => post.authorId === userId);
+  const previewPosts = userPosts.slice(0, 3);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+      <div className="bg-white dark:bg-slate-900 rounded-[32px] w-full max-w-4xl shadow-2xl overflow-hidden border border-white/10">
+        <div className="relative h-80 w-full">
+          <img src={userProfile.avatar} className="w-full h-full object-cover scale-105" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
+          <div className="absolute inset-x-0 bottom-0 p-8 text-white">
+            <h2 className="text-4xl font-bold mb-3">{userProfile.displayName}</h2>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {roles.map((role) => (
+                <span
+                  key={role}
+                  className="text-xs font-bold uppercase tracking-widest text-white bg-white/20 px-3 py-1 rounded-full border border-white/30 backdrop-blur"
+                >
+                  {roleLabel(role)}
+                </span>
+              ))}
+            </div>
+            {userProfile.bio && (
+              <p className="text-white/80 max-w-2xl text-sm md:text-base leading-relaxed">
+                {userProfile.bio}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="absolute top-6 right-6 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center backdrop-blur-md hover:bg-black/70 transition"
+            aria-label="Sluiten"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-8 space-y-6">
+          <div className="flex flex-wrap gap-2">
+            {themes.map((theme) => (
+              <span key={theme} className={`px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
+                {theme}
+              </span>
+            ))}
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Recente posts</h3>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{userPosts.length} totaal</span>
+            </div>
+            {previewPosts.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {previewPosts.map((post) => (
+                  <div key={post.id} className="bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden">
+                    <div className="aspect-[4/5]">
+                      <img src={post.imageUrl} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="p-3">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{post.title}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{post.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-300">
+                Nog geen posts om te tonen.
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button onClick={onFullProfile} className="flex-1">
+              Bekijk volledig profiel <ArrowRight className="w-4 h-4" />
+            </Button>
+            <Button onClick={() => {}} variant="secondary" className="flex-1">
+              Word fan
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 function ShadowProfileModal({ name, posts, onClose, onPostClick }) { 
     const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
     return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"><div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col"><div className="h-64 bg-indigo-900 flex items-center justify-center flex-col text-white"><div className="text-4xl font-bold mb-2">{name}</div><p>Tijdelijk Profiel. Claim dit profiel.</p><button onClick={onClose} className="absolute top-4 right-4"><X/></button></div><div className="flex-1 p-6 overflow-y-auto no-scrollbar"><div className="grid grid-cols-3 gap-2">{shadowPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div></div></div></div> 

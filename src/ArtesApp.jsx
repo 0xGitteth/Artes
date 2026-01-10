@@ -1012,6 +1012,8 @@ function UploadModal({ onClose, user, profile, users }) {
   const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true };
   const triggerLabelMap = useMemo(() => new Map(TRIGGERS.map((trigger) => [trigger.id, trigger.label])), []);
   const getTriggerLabel = (id) => triggerLabelMap.get(id) || id;
+  const MAX_UPLOAD_BYTES = 900 * 1024;
+  const MAX_DIMENSION = 1600;
 
   const [step, setStep] = useState(1);
   const [image, setImage] = useState(null);
@@ -1043,24 +1045,72 @@ function UploadModal({ onClose, user, profile, users }) {
     return users.filter(u => u.displayName.toLowerCase().includes(contributorSearch.toLowerCase()));
   }, [users, contributorSearch]);
 
-  const handleFile = (e) => {
-    if (e.target.files[0]) {
-      const r = new FileReader();
-      r.onload = ev => {
-        setImage(ev.target.result);
-        setStep(2);
-        setErrors(prev => ({ ...prev, image: undefined }));
-        setAiError('');
-        setMakerTags([]);
-        setAppliedTriggers([]);
-        setSuggestedTriggers([]);
-        setOutcome(null);
-        setForbiddenReasons([]);
-        setReviewCaseId(null);
-        setShowSuggestionUI(false);
-        setReviewRequested(false);
+  const toDataUrlSize = (dataUrl) => {
+    const commaIndex = dataUrl.indexOf(',');
+    if (commaIndex === -1) return dataUrl.length;
+    const base64 = dataUrl.slice(commaIndex + 1);
+    return Math.floor((base64.length * 3) / 4);
+  };
+
+  const compressImage = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Kon het bestand niet lezen.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Kon de afbeelding niet laden.'));
+      img.onload = () => {
+        const scale = Math.min(1, MAX_DIMENSION / img.width, MAX_DIMENSION / img.height);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        let quality = 0.9;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        while (toDataUrlSize(dataUrl) > MAX_UPLOAD_BYTES && quality > 0.5) {
+          quality -= 0.1;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+
+        if (toDataUrlSize(dataUrl) > MAX_UPLOAD_BYTES) {
+          const ratio = Math.sqrt(MAX_UPLOAD_BYTES / toDataUrlSize(dataUrl));
+          const resizedCanvas = document.createElement('canvas');
+          resizedCanvas.width = Math.max(1, Math.floor(canvas.width * ratio));
+          resizedCanvas.height = Math.max(1, Math.floor(canvas.height * ratio));
+          const resizedCtx = resizedCanvas.getContext('2d');
+          resizedCtx.drawImage(canvas, 0, 0, resizedCanvas.width, resizedCanvas.height);
+          dataUrl = resizedCanvas.toDataURL('image/jpeg', 0.7);
+        }
+
+        resolve(dataUrl);
       };
-      r.readAsDataURL(e.target.files[0]);
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const dataUrl = await compressImage(file);
+      setImage(dataUrl);
+      setStep(2);
+      setErrors(prev => ({ ...prev, image: undefined }));
+      setAiError('');
+      setMakerTags([]);
+      setAppliedTriggers([]);
+      setSuggestedTriggers([]);
+      setOutcome(null);
+      setForbiddenReasons([]);
+      setReviewCaseId(null);
+      setShowSuggestionUI(false);
+      setReviewRequested(false);
+    } catch (error) {
+      console.error('Image processing failed', error);
+      setErrors(prev => ({ ...prev, image: 'Afbeelding verwerken mislukt. Probeer een ander bestand.' }));
     }
   };
 

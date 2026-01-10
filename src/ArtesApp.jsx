@@ -105,8 +105,14 @@ const COMMUNITIES = [
 ];
 
 const TRIGGERS = [
-  'Naakt (Artistiek)', 'Naakt (Expliciet)', 'Bloed / Gore', 'Naalden', 'Spinnen / Insecten',
-  'Wapens', 'Geweld', 'Eetstoornissen', 'Zelfbeschadiging', 'Flitsende beelden'
+  { id: 'nudityErotic', label: 'Naakt (erotisch)' },
+  { id: 'explicit18', label: 'Expliciet 18+' },
+  { id: 'kinkBdsm', label: 'Kink / BDSM' },
+  { id: 'breathRestriction', label: 'Ademrestrictie' },
+  { id: 'bloodInjury', label: 'Bloed / verwonding' },
+  { id: 'horrorScare', label: 'Horror / schrik' },
+  { id: 'needlesInjections', label: 'Naalden / injecties' },
+  { id: 'spidersInsects', label: 'Spinnen / insecten' },
 ];
 
 const buildDefaultAvatar = (seed) =>
@@ -654,8 +660,9 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
 function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick }) {
   const [sensitiveRevealed, setSensitiveRevealed] = useState({});
   const preference = profile?.preferences?.sensitiveContent || 'cover';
+  const isSensitivePost = (post) => post.sensitive || (post.appliedTriggers || []).length > 0 || (post.makerTags || []).length > 0;
   const visiblePosts = posts.filter(p => {
-     if (!p.sensitive) return true;
+     if (!isSensitivePost(p)) return true;
      if (preference === 'block') return false; 
      return true;
   });
@@ -665,7 +672,7 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
       {visiblePosts.map(post => (
         <div key={post.id} className="relative group">
            <div className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`} onClick={() => onPostClick(post)}>
-             {(post.sensitive && !sensitiveRevealed[post.id] && preference === 'cover') ? (
+             {(isSensitivePost(post) && !sensitiveRevealed[post.id] && preference === 'cover') ? (
                 <div className="absolute inset-0 z-10 backdrop-blur-3xl bg-slate-900/80 flex flex-col items-center justify-center p-6 text-center" onClick={(e) => e.stopPropagation()}>
                    <AlertOctagon className="w-12 h-12 text-orange-500 mb-4" />
                    <h4 className="text-white font-bold text-lg mb-2">Gevoelige inhoud</h4>
@@ -864,6 +871,8 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }
 function UploadModal({ onClose, user, profile, users }) {
   const defaultRole = profile.roles?.[0] || 'photographer';
   const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true };
+  const triggerLabelMap = useMemo(() => new Map(TRIGGERS.map((trigger) => [trigger.id, trigger.label])), []);
+  const getTriggerLabel = (id) => triggerLabelMap.get(id) || id;
 
   const [step, setStep] = useState(1);
   const [image, setImage] = useState(null);
@@ -873,8 +882,14 @@ function UploadModal({ onClose, user, profile, users }) {
   const [credits, setCredits] = useState([selfCredit]);
   const [newCredit, setNewCredit] = useState({ role: 'model', name: '', link: '' });
   const [showInvite, setShowInvite] = useState(false);
-  const [isSensitive, setIsSensitive] = useState(false);
-  const [activeTriggers, setActiveTriggers] = useState([]);
+  const [makerTags, setMakerTags] = useState([]);
+  const [appliedTriggers, setAppliedTriggers] = useState([]);
+  const [suggestedTriggers, setSuggestedTriggers] = useState([]);
+  const [outcome, setOutcome] = useState(null);
+  const [forbiddenReasons, setForbiddenReasons] = useState([]);
+  const [reviewCaseId, setReviewCaseId] = useState(null);
+  const [showSuggestionUI, setShowSuggestionUI] = useState(false);
+  const [reviewRequested, setReviewRequested] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [uploaderRole, setUploaderRole] = useState(defaultRole);
@@ -897,8 +912,14 @@ function UploadModal({ onClose, user, profile, users }) {
         setStep(2);
         setErrors(prev => ({ ...prev, image: undefined }));
         setAiError('');
-        setIsSensitive(false);
-        setActiveTriggers([]);
+        setMakerTags([]);
+        setAppliedTriggers([]);
+        setSuggestedTriggers([]);
+        setOutcome(null);
+        setForbiddenReasons([]);
+        setReviewCaseId(null);
+        setShowSuggestionUI(false);
+        setReviewRequested(false);
       };
       r.readAsDataURL(e.target.files[0]);
     }
@@ -918,12 +939,13 @@ function UploadModal({ onClose, user, profile, users }) {
 
     setAiLoading(true);
     setAiError('');
+    setErrors((prev) => ({ ...prev, moderation: undefined }));
 
     try {
       const response = await fetch(moderationEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image, userId: user?.uid || null }),
+        body: JSON.stringify({ image, makerTags }),
       });
 
       if (!response.ok) {
@@ -931,39 +953,30 @@ function UploadModal({ onClose, user, profile, users }) {
       }
 
       const data = await response.json();
-      const labels = Array.isArray(data.labels) ? data.labels : [];
+      const nextAppliedTriggers = Array.isArray(data.appliedTriggers) ? data.appliedTriggers : [];
+      const nextSuggestedTriggers = Array.isArray(data.suggestedTriggers) ? data.suggestedTriggers : [];
+      const nextOutcome = data?.outcome ?? null;
+      const nextForbiddenReasons = Array.isArray(data.forbiddenReasons) ? data.forbiddenReasons : [];
+      const nextReviewCaseId = data?.reviewCaseId ?? null;
+      const shouldShowSuggestions = nextOutcome === 'allowed' && nextSuggestedTriggers.length > 0;
 
-      const normalizedTriggers = TRIGGERS.map((label) => ({
-        original: label,
-        normalized: label.toLowerCase(),
-      }));
-
-      const detectedTriggers = labels.reduce((acc, label) => {
-        const name = (label?.name || label?.label || '').toLowerCase();
-        const confidence = Number(label?.confidence ?? label?.score ?? 0);
-        const matched = normalizedTriggers.find(
-          (trigger) =>
-            name.includes(trigger.normalized) || trigger.normalized.includes(name)
-        );
-
-        if (matched && confidence >= 0.5 && !acc.includes(matched.original)) {
-          acc.push(matched.original);
-        }
-
-        return acc;
-      }, []);
-
-      const sensitiveFlag = typeof data.isSensitive === 'boolean'
-        ? data.isSensitive
-        : detectedTriggers.length > 0;
-
-      setIsSensitive(sensitiveFlag);
-      setActiveTriggers(detectedTriggers);
+      setAppliedTriggers(nextAppliedTriggers);
+      setSuggestedTriggers(nextSuggestedTriggers);
+      setOutcome(nextOutcome);
+      setForbiddenReasons(nextForbiddenReasons);
+      setReviewCaseId(nextReviewCaseId);
+      setShowSuggestionUI(shouldShowSuggestions);
+      setReviewRequested(false);
     } catch (error) {
       console.error('AI check failed', error);
       setAiError('AI-check mislukt. Probeer het opnieuw.');
-      setIsSensitive(false);
-      setActiveTriggers([]);
+      setAppliedTriggers([]);
+      setSuggestedTriggers([]);
+      setOutcome(null);
+      setForbiddenReasons([]);
+      setReviewCaseId(null);
+      setShowSuggestionUI(false);
+      setReviewRequested(false);
     } finally {
       setAiLoading(false);
     }
@@ -1001,17 +1014,24 @@ function UploadModal({ onClose, user, profile, users }) {
     setErrors(prev => ({ ...prev, styles: undefined }));
   };
 
-  const handlePublish = async () => {
+  const handlePublish = async ({ applySuggestions = false } = {}) => {
     const validationErrors = {};
 
     if (!image) validationErrors.image = 'Voeg een afbeelding toe.';
     if (!title.trim()) validationErrors.title = 'Titel is verplicht.';
     if (selectedStyles.length === 0) validationErrors.styles = 'Kies minstens één thema.';
+    if (outcome === 'forbidden') validationErrors.moderation = 'Deze publicatie is geblokkeerd door de safety check.';
 
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
+
+    const baseTriggers = appliedTriggers.length ? appliedTriggers : makerTags;
+    const finalAppliedTriggers = applySuggestions
+      ? Array.from(new Set([...baseTriggers, ...suggestedTriggers]))
+      : baseTriggers;
+    const triggerFlag = finalAppliedTriggers.length > 0;
 
     setPublishing(true);
     setPublishError('');
@@ -1019,7 +1039,15 @@ function UploadModal({ onClose, user, profile, users }) {
     try {
       await publishPost({
          title, description: desc, imageUrl: image, authorId: user.uid, authorName: profile.displayName, authorRole: uploaderRole,
-         styles: selectedStyles, sensitive: isSensitive, triggers: activeTriggers, credits,
+         styles: selectedStyles,
+         sensitive: triggerFlag,
+         triggers: finalAppliedTriggers.map(getTriggerLabel),
+         makerTags,
+         appliedTriggers: finalAppliedTriggers,
+         outcome: outcome || 'unchecked',
+         forbiddenReasons,
+         reviewCaseId,
+         credits,
          likes: 0
       });
 
@@ -1031,8 +1059,14 @@ function UploadModal({ onClose, user, profile, users }) {
       setCredits([{ role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true }]);
       setNewCredit({ role: 'model', name: '', link: '' });
       setShowInvite(false);
-      setIsSensitive(false);
-      setActiveTriggers([]);
+      setMakerTags([]);
+      setAppliedTriggers([]);
+      setSuggestedTriggers([]);
+      setOutcome(null);
+      setForbiddenReasons([]);
+      setReviewCaseId(null);
+      setShowSuggestionUI(false);
+      setReviewRequested(false);
       setAiLoading(false);
       setUploaderRole(defaultRole);
       setStep(1);
@@ -1055,7 +1089,11 @@ function UploadModal({ onClose, user, profile, users }) {
                    <div className="space-y-4">
                       <div className="aspect-[4/5] bg-slate-100 rounded-xl overflow-hidden relative">
                          <img src={image} className="w-full h-full object-cover"/>
-                         {isSensitive && <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center text-orange-400 font-bold"><AlertOctagon className="w-6 h-6 mr-2"/> Sensitive Content</div>}
+                         {outcome === 'forbidden' && (
+                           <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center text-orange-400 font-bold">
+                             <AlertOctagon className="w-6 h-6 mr-2"/> Publicatie geblokkeerd
+                           </div>
+                         )}
                       </div>
                       {errors.image && <p className="text-xs text-red-500">{errors.image}</p>}
                       <div className="bg-slate-50 p-4 rounded-xl border dark:bg-slate-800 dark:border-slate-700">
@@ -1069,9 +1107,92 @@ function UploadModal({ onClose, user, profile, users }) {
                               {aiLoading && <Loader2 className="w-3 h-3 animate-spin" />}AI Scan
                             </button>
                          </div>
-                         <label className="flex items-center gap-2 text-sm cursor-pointer dark:text-white"><input type="checkbox" checked={isSensitive} onChange={e => setIsSensitive(e.target.checked)} /> Markeer als gevoelig</label>
+                         <p className="text-xs text-slate-500 dark:text-slate-300 mb-2">Selecteer maker-tags om context mee te geven aan de AI-check.</p>
+                         <div className="flex flex-wrap gap-2">
+                           {TRIGGERS.map((trigger) => (
+                             <button
+                               key={trigger.id}
+                               type="button"
+                               onClick={() => {
+                                 setMakerTags((prev) => prev.includes(trigger.id)
+                                   ? prev.filter((item) => item !== trigger.id)
+                                   : [...prev, trigger.id]
+                                 );
+                                 setShowSuggestionUI(false);
+                               }}
+                               className={`text-[11px] px-2 py-1 rounded border ${makerTags.includes(trigger.id) ? 'bg-orange-100 text-orange-800 border-orange-200' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-200'}`}
+                             >
+                               {trigger.label}
+                             </button>
+                           ))}
+                         </div>
                          {aiError && <p className="text-xs text-red-500 mt-2">{aiError}</p>}
-                         {isSensitive && <div className="flex flex-wrap gap-2 mt-2">{TRIGGERS.map(t => <button key={t} onClick={() => setActiveTriggers(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t])} className={`text-[10px] px-2 py-1 rounded border ${activeTriggers.includes(t) ? 'bg-orange-100 text-orange-800' : ''}`}>{t}</button>)}</div>}
+                         {errors.moderation && <p className="text-xs text-red-500 mt-2">{errors.moderation}</p>}
+                         {outcome === 'forbidden' && (
+                           <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-900/30 dark:text-red-200">
+                             <p className="font-semibold">Deze publicatie is geblokkeerd.</p>
+                             {forbiddenReasons.length > 0 && (
+                               <ul className="list-disc list-inside mt-2 space-y-1">
+                                 {forbiddenReasons.map((reason) => (
+                                   <li key={reason}>{reason}</li>
+                                 ))}
+                               </ul>
+                             )}
+                             {reviewCaseId && <p className="mt-2">Case ID: <span className="font-semibold">{reviewCaseId}</span></p>}
+                             <div className="mt-3 flex flex-wrap gap-2">
+                               <button
+                                 type="button"
+                                 onClick={() => setReviewRequested(true)}
+                                 className="text-xs bg-red-600 text-white px-3 py-1 rounded"
+                               >
+                                 Vraag review aan
+                               </button>
+                               {reviewRequested && (
+                                 <span className="text-xs text-red-600 dark:text-red-300">Review aangevraagd. We nemen contact op.</span>
+                               )}
+                             </div>
+                           </div>
+                         )}
+                         {outcome === 'allowed' && !showSuggestionUI && (
+                           <p className="mt-3 text-xs text-emerald-600 dark:text-emerald-300">AI-check: toegestaan. Je kunt direct publiceren.</p>
+                         )}
+                         {showSuggestionUI && (
+                           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800/40 dark:bg-amber-900/30 dark:text-amber-200">
+                             <p className="font-semibold">AI-suggesties voor extra triggers</p>
+                             <div className="flex flex-wrap gap-2 mt-2">
+                               {suggestedTriggers.map((triggerId) => (
+                                 <span key={triggerId} className="px-2 py-1 rounded-full border border-amber-300 text-[11px]">
+                                   {getTriggerLabel(triggerId)}
+                                 </span>
+                               ))}
+                             </div>
+                             <div className="mt-3 flex flex-wrap gap-2">
+                               <button
+                                 type="button"
+                                 onClick={() => handlePublish({ applySuggestions: true })}
+                                 className="text-xs bg-amber-600 text-white px-3 py-1 rounded"
+                                 disabled={publishing}
+                               >
+                                 Voeg suggesties toe & publiceer
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => handlePublish({ applySuggestions: false })}
+                                 className="text-xs border border-amber-400 px-3 py-1 rounded"
+                                 disabled={publishing}
+                               >
+                                 Publiceer zonder suggesties
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => setShowSuggestionUI(false)}
+                                 className="text-xs text-amber-700 underline"
+                               >
+                                 Aanpassen
+                               </button>
+                             </div>
+                           </div>
+                         )}
                       </div>
                    </div>
                    <div className="space-y-6">
@@ -1153,7 +1274,8 @@ function UploadModal({ onClose, user, profile, users }) {
                          {errors.styles && <p className="mt-2 text-xs text-red-500">{errors.styles}</p>}
                       </div>
                       {publishError && <p className="text-sm text-red-500 text-center">{publishError}</p>}
-                      <Button onClick={handlePublish} className="w-full" disabled={publishing}>
+                      {showSuggestionUI && <p className="text-xs text-amber-700 text-center">Kies hoe je met de AI-suggesties wilt omgaan om te publiceren.</p>}
+                      <Button onClick={handlePublish} className="w-full" disabled={publishing || showSuggestionUI || outcome === 'forbidden'}>
                         {publishing ? <><Loader2 className="w-4 h-4 animate-spin" /> Publiceren...</> : 'Publiceren'}
                       </Button>
                    </div>

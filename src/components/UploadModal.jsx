@@ -8,8 +8,7 @@ export default function UploadModal({ onClose, onPublish, initialStyles = [] }) 
     description: '',
     imageUrl: '',
     styles: initialStyles,
-    sensitive: false,
-    triggers: [],
+    makerTags: [],
   });
   const [error, setError] = useState(null);
 
@@ -99,7 +98,16 @@ export default function UploadModal({ onClose, onPublish, initialStyles = [] }) 
       },
     },
   ];
-  const triggerOptions = ['Naakt (Artistiek)', 'Naakt (Expliciet)', 'Bloed / Gore', 'Geweld'];
+  const triggerOptions = [
+    { id: 'nudityErotic', label: 'Naakt (erotisch)' },
+    { id: 'explicit18', label: 'Expliciet 18+' },
+    { id: 'kinkBdsm', label: 'Kink / BDSM' },
+    { id: 'breathRestriction', label: 'Ademrestrictie' },
+    { id: 'bloodInjury', label: 'Bloed / verwonding' },
+    { id: 'horrorScare', label: 'Horror / schrik' },
+    { id: 'needlesInjections', label: 'Naalden / injecties' },
+    { id: 'spidersInsects', label: 'Spinnen / insecten' },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
@@ -149,35 +157,24 @@ export default function UploadModal({ onClose, onPublish, initialStyles = [] }) 
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
-                <Shield size={16} /> Triggers
+                <Shield size={16} /> Maker-tags
               </p>
               <div className="flex flex-wrap gap-2">
                 {triggerOptions.map((trigger) => (
                   <button
                     type="button"
-                    key={trigger}
-                    onClick={() => toggleArrayValue('triggers', trigger)}
-                    className={`px-3 py-2 rounded-full text-sm border ${form.triggers.includes(trigger) ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800' : 'border-slate-200 dark:border-slate-800 text-slate-500'}`}
+                    key={trigger.id}
+                    onClick={() => toggleArrayValue('makerTags', trigger.id)}
+                    className={`px-3 py-2 rounded-full text-sm border ${form.makerTags.includes(trigger.id) ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800' : 'border-slate-200 dark:border-slate-800 text-slate-500'}`}
                   >
-                    {trigger}
+                    {trigger.label}
                   </button>
                 ))}
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
-              <input
-                type="checkbox"
-                checked={form.sensitive}
-                onChange={(e) => setForm({ ...form, sensitive: e.target.checked })}
-                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              Markeer als gevoelig
-            </label>
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <UploadCloud size={14} /> Bewaar direct in Firestore
-            </div>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <UploadCloud size={14} /> Bewaar direct in Firestore
           </div>
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex items-center justify-end gap-3">
@@ -193,4 +190,3 @@ export default function UploadModal({ onClose, onPublish, initialStyles = [] }) 
     </div>
   );
 }
-

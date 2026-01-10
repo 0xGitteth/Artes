@@ -775,7 +775,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }
            <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white dark:from-slate-900 to-transparent z-10" /> 
            
-           {isOwn && <div className="absolute top-4 right-4 z-20"><Button onClick={onOpenSettings} className="bg-black/50 text-white hover:bg-black/70 border-none backdrop-blur-md"><Edit3 className="w-4 h-4 mr-2"/> Profiel Bewerken</Button></div>}
+           {isOwn && <div className="absolute top-4 right-4 z-30"><Button onClick={onOpenSettings} className="bg-black/50 text-white hover:bg-black/70 border-none backdrop-blur-md"><Edit3 className="w-4 h-4 mr-2"/> Profiel Bewerken</Button></div>}
            
            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center">
               <h1 className="text-5xl font-bold text-blue-700 dark:text-white mb-3">{normalizedProfile.displayName}</h1>

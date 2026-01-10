@@ -923,7 +923,7 @@ function UploadModal({ onClose, user, profile, users }) {
       const response = await fetch(moderationEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image }),
+        body: JSON.stringify({ image, userId: user?.uid || null }),
       });
 
       if (!response.ok) {

@@ -3,6 +3,17 @@ import { X, Heart, MessageSquare, Calendar, Shield } from 'lucide-react';
 import { addComment, subscribeToComments, subscribeToLikes, toggleLike } from '../firebase';
 import { Badge, Button, Input } from './ui';
 
+const TRIGGER_LABELS = {
+  nudityErotic: 'Naakt (erotisch)',
+  explicit18: 'Expliciet 18+',
+  kinkBdsm: 'Kink / BDSM',
+  breathRestriction: 'Ademrestrictie',
+  bloodInjury: 'Bloed / verwonding',
+  horrorScare: 'Horror / schrik',
+  needlesInjections: 'Naalden / injecties',
+  spidersInsects: 'Spinnen / insecten',
+};
+
 export default function PhotoDetailModal({ post, onClose, currentUser }) {
   const [comments, setComments] = useState([]);
   const [likesCount, setLikesCount] = useState(post.likes || 0);
@@ -46,6 +57,10 @@ export default function PhotoDetailModal({ post, onClose, currentUser }) {
     }
   };
 
+  const resolvedTriggers = Array.from(new Set([...(post.appliedTriggers || []), ...(post.makerTags || []), ...(post.triggers || [])]))
+    .map((trigger) => TRIGGER_LABELS[trigger] || trigger);
+  const sensitiveFlag = post.sensitive || (post.appliedTriggers || []).length > 0 || (post.makerTags || []).length > 0;
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-5xl w-full overflow-hidden">
@@ -64,7 +79,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser }) {
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Calendar size={16} />
               <span>{post.createdAt?.toDate ? post.createdAt.toDate().toLocaleDateString() : 'Nieuw'}</span>
-              {post.sensitive && (
+              {sensitiveFlag && (
                 <span className="flex items-center gap-1"><Shield size={14} /> Gevoelige content</span>
               )}
             </div>
@@ -75,7 +90,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser }) {
                   {style}
                 </Badge>
               ))}
-              {(post.triggers || []).map((trigger) => (
+              {resolvedTriggers.map((trigger) => (
                 <Badge key={trigger} colorClass="bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800">
                   {trigger}
                 </Badge>
@@ -119,4 +134,3 @@ export default function PhotoDetailModal({ post, onClose, currentUser }) {
     </div>
   );
 }
-

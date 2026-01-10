@@ -11,9 +11,22 @@ const THEME_STYLES = {
 };
 
 const getThemeStyle = (theme) => THEME_STYLES[theme] || 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800';
+const TRIGGER_LABELS = {
+  nudityErotic: 'Naakt (erotisch)',
+  explicit18: 'Expliciet 18+',
+  kinkBdsm: 'Kink / BDSM',
+  breathRestriction: 'Ademrestrictie',
+  bloodInjury: 'Bloed / verwonding',
+  horrorScare: 'Horror / schrik',
+  needlesInjections: 'Naalden / injecties',
+  spidersInsects: 'Spinnen / insecten',
+};
 
 export default function PostCard({ post, onClick, onToggleLike, liked }) {
-  const { title, imageUrl, authorName, styles = [], likes = 0, commentsCount = 0, sensitive, triggers = [] } = post;
+  const { title, imageUrl, authorName, styles = [], likes = 0, commentsCount = 0, triggers = [], appliedTriggers = [], makerTags = [] } = post;
+  const sensitiveFlag = post.sensitive || appliedTriggers.length > 0 || makerTags.length > 0;
+  const resolvedTriggers = Array.from(new Set([...appliedTriggers, ...makerTags, ...triggers]))
+    .map((trigger) => TRIGGER_LABELS[trigger] || trigger);
 
   return (
     <div
@@ -21,7 +34,7 @@ export default function PostCard({ post, onClick, onToggleLike, liked }) {
       className="group bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-xl shadow-slate-900/5 hover:-translate-y-1 transition-all cursor-pointer"
     >
       <div className="relative">
-        {sensitive && (
+        {sensitiveFlag && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-900/60 text-white">
             <p className="font-semibold">Gevoelige content</p>
             <p className="text-sm opacity-80">Klik om te bekijken</p>
@@ -56,7 +69,7 @@ export default function PostCard({ post, onClick, onToggleLike, liked }) {
               {style}
             </Badge>
           ))}
-          {triggers.map((trigger) => (
+          {resolvedTriggers.map((trigger) => (
             <Badge key={trigger} colorClass="bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800">
               {trigger}
             </Badge>
@@ -66,4 +79,3 @@ export default function PostCard({ post, onClick, onToggleLike, liked }) {
     </div>
   );
 }
-

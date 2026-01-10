@@ -142,6 +142,16 @@ const loadStoredUser = () => {
   }
 };
 
+const loadStoredProfile = () => {
+  try {
+    const raw = localStorage.getItem('auth_profile');
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    console.error('Failed to parse stored profile', e);
+    return null;
+  }
+};
+
 // --- SEED DATA ---
 const SEED_USERS = [
   { uid: 'user_jax', displayName: 'Jax Models', bio: 'International Model Agency based in Amsterdam.', roles: ['agency', 'company'], avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&q=80&w=200', themes: ['Fashion', 'Editorial'] },
@@ -219,6 +229,10 @@ export default function ArtesApp() {
   const [authPending, setAuthPending] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
+
+  const persistUser = (u) => localStorage.setItem('auth_user', JSON.stringify(u));
+  const persistProfile = (p) => localStorage.setItem('auth_profile', JSON.stringify(p));
+  const clearStoredProfile = () => localStorage.removeItem('auth_profile');
   
   // Modals & States
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -260,12 +274,18 @@ export default function ArtesApp() {
     const bootstrap = async () => {
       try {
         const storedUser = loadStoredUser();
+        const storedProfile = loadStoredProfile();
         const token = getStoredToken();
         if (storedUser && token) {
           setAuthUser(storedUser);
           const prof = await fetchProfileApi();
           if (prof) {
-            setProfile(normalizeProfileData(prof, storedUser?.uid));
+            const normalized = normalizeProfileData(prof, storedUser?.uid);
+            setProfile(normalized);
+            persistProfile(normalized);
+            setView('gallery');
+          } else if (storedProfile?.uid && storedProfile.uid === storedUser.uid) {
+            setProfile(normalizeProfileData(storedProfile, storedUser?.uid));
             setView('gallery');
           } else {
             setView('onboarding');
@@ -297,7 +317,9 @@ export default function ArtesApp() {
     fetchProfileApi()
       .then((prof) => {
         if (active && prof) {
-          setProfile(normalizeProfileData(prof, authUser?.uid));
+          const normalized = normalizeProfileData(prof, authUser?.uid);
+          setProfile(normalized);
+          persistProfile(normalized);
         }
       })
       .catch((error) => console.error('Failed to refresh profile', error));
@@ -315,8 +337,6 @@ export default function ArtesApp() {
     if(typeof targetView === 'string') setView(targetView);
   };
 
-  const persistUser = (u) => localStorage.setItem('auth_user', JSON.stringify(u));
-
   const handleLogin = async (email, password) => {
     try {
       setAuthError(null);
@@ -326,9 +346,12 @@ export default function ArtesApp() {
       persistUser(loggedInUser);
       const prof = await fetchProfileApi();
       if (prof) {
-        setProfile(normalizeProfileData(prof, loggedInUser?.uid));
+        const normalized = normalizeProfileData(prof, loggedInUser?.uid);
+        setProfile(normalized);
+        persistProfile(normalized);
         setView('gallery');
       } else {
+        clearStoredProfile();
         setView('onboarding');
       }
     } catch (e) {
@@ -346,6 +369,7 @@ export default function ArtesApp() {
       const { user: newUser } = await apiSignup({ email, password, displayName });
       setAuthUser(newUser);
       persistUser(newUser);
+      clearStoredProfile();
       setView('onboarding');
     } catch (e) {
       setAuthError(e.message);
@@ -372,7 +396,9 @@ export default function ArtesApp() {
           console.error('Failed to sync profile to Firestore', error);
         });
       }
-    setProfile(normalizeProfileData(saved || finalProfile, authUser?.uid));
+    const normalized = normalizeProfileData(saved || finalProfile, authUser?.uid);
+    setProfile(normalized);
+    persistProfile(normalized);
     setView('gallery');
     setShowTour(true);
   };
@@ -457,7 +483,7 @@ export default function ArtesApp() {
 
         {/* Modals */}
         {showUploadModal && <UploadModal onClose={() => setShowUploadModal(false)} user={user} profile={profile} users={users} />}
-        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await firebaseLogout(); apiLogout(); localStorage.removeItem('auth_user'); setProfile(null); setAuthUser(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
+        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await firebaseLogout(); apiLogout(); localStorage.removeItem('auth_user'); clearStoredProfile(); setProfile(null); setAuthUser(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
         

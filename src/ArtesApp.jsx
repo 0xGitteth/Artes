@@ -23,7 +23,9 @@ import {
   loginWithEmail,
   logout as firebaseLogout,
   observeAuth,
+  reloadCurrentUser,
   registerWithEmail,
+  resendVerificationEmail,
   signInWithApple,
   signInWithGoogle,
   updateUserProfile,
@@ -259,6 +261,8 @@ export default function ArtesApp() {
   const [authPending, setAuthPending] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
+  const [verificationNote, setVerificationNote] = useState(null);
+  const [verificationPending, setVerificationPending] = useState(false);
   
   // Modals & States
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -347,6 +351,11 @@ export default function ArtesApp() {
   const toggleTheme = () => setDarkMode(!darkMode);
 
   const canUpload = profile && (!profile.roles.includes('fan') || profile.roles.length > 1);
+  const requiresEmailVerification = useMemo(() => {
+    if (!authUser) return false;
+    const usesPasswordProvider = authUser?.providerData?.some((provider) => provider?.providerId === 'password');
+    return usesPasswordProvider && !authUser.emailVerified;
+  }, [authUser]);
 
   const handleTourComplete = (targetView) => {
     setShowTour(false);
@@ -408,6 +417,94 @@ export default function ArtesApp() {
     setView('gallery');
     setShowTour(true);
   };
+
+  const handleResendVerification = async () => {
+    try {
+      setVerificationPending(true);
+      setVerificationNote(null);
+      await resendVerificationEmail();
+      setVerificationNote('Verificatiemail opnieuw verstuurd.');
+    } catch (error) {
+      console.error('Failed to resend verification email', error);
+      setVerificationNote('Er ging iets mis, probeer het opnieuw.');
+    } finally {
+      setVerificationPending(false);
+    }
+  };
+
+  const handleRefreshVerification = async () => {
+    try {
+      setVerificationPending(true);
+      setVerificationNote(null);
+      const refreshed = await reloadCurrentUser();
+      setAuthUser(refreshed);
+      setUser(refreshed);
+      if (!refreshed?.emailVerified) {
+        setVerificationNote('Je email is nog niet geverifieerd.');
+      }
+    } catch (error) {
+      console.error('Failed to refresh verification state', error);
+      setVerificationNote('Er ging iets mis, probeer het opnieuw.');
+    } finally {
+      setVerificationPending(false);
+    }
+  };
+
+  const handleVerificationLogout = async () => {
+    await firebaseLogout();
+    setProfile(null);
+    setAuthUser(null);
+    setUser(null);
+    setView('login');
+  };
+
+  if (requiresEmailVerification) {
+    return (
+      <div className={`${darkMode ? 'dark' : ''} h-screen w-full flex flex-col transition-colors duration-300`}>
+        <div className="flex-1 bg-[#F0F4F8] dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex items-center justify-center p-6">
+          <div className="max-w-xl w-full bg-white dark:bg-slate-800 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-700 p-10 text-center space-y-6">
+            <div className="w-16 h-16 bg-blue-600/10 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
+              <Mail className="w-8 h-8" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold mb-2">Email verificatie nodig</h1>
+              <p className="text-slate-600 dark:text-slate-300">
+                We hebben een verificatiemail gestuurd. Check je inbox en spam.
+              </p>
+            </div>
+            {verificationNote && (
+              <p className="text-sm text-blue-600 dark:text-blue-300">{verificationNote}</p>
+            )}
+            <div className="space-y-3">
+              <Button
+                className="w-full"
+                onClick={handleResendVerification}
+                disabled={verificationPending}
+              >
+                Opnieuw verificatiemail sturen
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={handleRefreshVerification}
+                disabled={verificationPending}
+              >
+                Ik heb geverifieerd
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={handleVerificationLogout}
+                disabled={verificationPending}
+              >
+                Uitloggen
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`${darkMode ? 'dark' : ''} h-screen w-full flex flex-col transition-colors duration-300`}>

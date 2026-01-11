@@ -8,24 +8,26 @@ import {
 } from 'lucide-react';
 import {
   createProfile,
-  ensureUserSignedIn,
   fetchUserIndex,
-  logout as firebaseLogout,
   publishPost,
   seedDemoContent,
-  subscribeToAuth,
   subscribeToPosts,
   subscribeToUsers,
   updateProfile as updateProfileData,
 } from './services/firebaseClient';
 import {
-  fetchProfile as fetchProfileApi,
-  getStoredToken,
-  login as apiLogin,
-  logout as apiLogout,
-  saveProfile as saveProfileApi,
-  signup as apiSignup,
-} from './services/apiClient';
+  ensureUserProfile,
+  fetchUserProfile,
+  handleAuthRedirectResult,
+  initAuth,
+  loginWithEmail,
+  logout as firebaseLogout,
+  observeAuth,
+  registerWithEmail,
+  signInWithApple,
+  signInWithGoogle,
+  updateUserProfile,
+} from './firebase';
 
 // --- Constants & Styling ---
 
@@ -180,25 +182,6 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
   };
 };
 
-const loadStoredUser = () => {
-  try {
-    const raw = localStorage.getItem('auth_user');
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    console.error('Failed to parse stored user', e);
-    return null;
-  }
-};
-
-const loadStoredProfile = () => {
-  try {
-    const raw = localStorage.getItem('auth_profile');
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    console.error('Failed to parse stored profile', e);
-    return null;
-  }
-};
 
 // --- SEED DATA ---
 const SEED_USERS = [
@@ -271,16 +254,11 @@ export default function ArtesApp() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [view, setView] = useState('loading');
-  const [authUser, setAuthUser] = useState(loadStoredUser());
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authUser, setAuthUser] = useState(null);
   const [authError, setAuthError] = useState(null);
   const [authPending, setAuthPending] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
-
-  const persistUser = (u) => localStorage.setItem('auth_user', JSON.stringify(u));
-  const persistProfile = (p) => localStorage.setItem('auth_profile', JSON.stringify(p));
-  const clearStoredProfile = () => localStorage.removeItem('auth_profile');
   
   // Modals & States
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -307,48 +285,35 @@ export default function ArtesApp() {
 
   // Auth & Profile Listener
   useEffect(() => {
-    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : undefined;
-    ensureUserSignedIn(token).catch((error) => console.error('Auth init error', error));
+    let active = true;
+    initAuth().catch((error) => console.error('Auth init error', error));
+    handleAuthRedirectResult().catch((error) => console.error('Auth redirect error', error));
 
-    const unsubscribe = subscribeToAuth(async (u) => {
-       setUser(u);
+    const unsubscribe = observeAuth(async (u) => {
+      if (!active) return;
+      setUser(u);
+      setAuthUser(u);
+      if (!u) {
+        setProfile(null);
+        setView('login');
+        return;
+      }
+      try {
+        const snapshot = await fetchUserProfile(u.uid);
+        const profileData = snapshot?.exists() ? snapshot.data() : await ensureUserProfile(u);
+        const normalized = normalizeProfileData(profileData, u.uid);
+        setProfile(normalized);
+        const hasRoles = Array.isArray(profileData?.roles) && profileData.roles.length > 0;
+        setView(hasRoles ? 'gallery' : 'onboarding');
+      } catch (e) {
+        console.error('Failed to load profile', e);
+        setView('onboarding');
+      }
     });
     return () => {
+      active = false;
       unsubscribe();
     };
-  }, []);
-
-  useEffect(() => {
-    const bootstrap = async () => {
-      try {
-        const storedUser = loadStoredUser();
-        const storedProfile = loadStoredProfile();
-        const token = getStoredToken();
-        if (storedUser && token) {
-          setAuthUser(storedUser);
-          const prof = await fetchProfileApi();
-          if (prof) {
-            const normalized = normalizeProfileData(prof, storedUser?.uid);
-            setProfile(normalized);
-            persistProfile(normalized);
-            setView('gallery');
-          } else if (storedProfile?.uid && storedProfile.uid === storedUser.uid) {
-            setProfile(normalizeProfileData(storedProfile, storedUser?.uid));
-            setView('gallery');
-          } else {
-            setView('onboarding');
-          }
-        } else {
-          setView('login');
-        }
-      } catch (e) {
-        console.error('Failed to bootstrap session', e);
-        setView('login');
-      } finally {
-        setAuthLoading(false);
-      }
-    };
-    bootstrap();
   }, []);
 
   useEffect(() => {
@@ -365,15 +330,13 @@ export default function ArtesApp() {
   }, [user]);
 
   useEffect(() => {
-    if (view !== 'profile') return;
+    if (view !== 'profile' || !authUser?.uid) return;
     let active = true;
-    fetchProfileApi()
-      .then((prof) => {
-        if (active && prof) {
-          const normalized = normalizeProfileData(prof, authUser?.uid);
-          setProfile(normalized);
-          persistProfile(normalized);
-        }
+    fetchUserProfile(authUser?.uid)
+      .then((snapshot) => {
+        if (!active || !snapshot?.exists()) return;
+        const normalized = normalizeProfileData(snapshot.data(), authUser?.uid);
+        setProfile(normalized);
       })
       .catch((error) => console.error('Failed to refresh profile', error));
     return () => {
@@ -394,22 +357,10 @@ export default function ArtesApp() {
     try {
       setAuthError(null);
       setAuthPending(true);
-      const { user: loggedInUser } = await apiLogin({ email, password });
-      setAuthUser(loggedInUser);
-      persistUser(loggedInUser);
-      const prof = await fetchProfileApi();
-      if (prof) {
-        const normalized = normalizeProfileData(prof, loggedInUser?.uid);
-        setProfile(normalized);
-        persistProfile(normalized);
-        setView('gallery');
-      } else {
-        clearStoredProfile();
-        setView('onboarding');
-      }
+      const cred = await loginWithEmail(email, password);
+      await ensureUserProfile(cred.user);
     } catch (e) {
       setAuthError(e.message);
-      setView('login');
     } finally {
       setAuthPending(false);
     }
@@ -419,11 +370,8 @@ export default function ArtesApp() {
     try {
       setAuthError(null);
       setAuthPending(true);
-      const { user: newUser } = await apiSignup({ email, password, displayName });
-      setAuthUser(newUser);
-      persistUser(newUser);
-      clearStoredProfile();
-      setView('onboarding');
+      const user = await registerWithEmail(email, password, displayName);
+      await ensureUserProfile(user);
     } catch (e) {
       setAuthError(e.message);
       throw e;
@@ -448,16 +396,15 @@ export default function ArtesApp() {
         theme: profileData.preferences?.theme || 'light',
       },
     };
-      const saved = await saveProfileApi(finalProfile);
       if (authUser?.uid) {
-        createProfile(authUser.uid, saved || finalProfile).catch((error) => {
+        await updateUserProfile(authUser.uid, finalProfile);
+        createProfile(authUser.uid, finalProfile).catch((error) => {
           console.error('Failed to sync profile to Firestore', error);
         });
       }
-    const normalized = normalizeProfileData(saved || finalProfile, authUser?.uid);
+    const normalized = normalizeProfileData(finalProfile, authUser?.uid);
     setProfile(normalized);
-    persistProfile(normalized);
-    setDarkMode((saved || finalProfile)?.preferences?.theme === 'dark');
+    setDarkMode(finalProfile?.preferences?.theme === 'dark');
     setView('gallery');
     setShowTour(true);
   };
@@ -542,7 +489,7 @@ export default function ArtesApp() {
 
         {/* Modals */}
         {showUploadModal && <UploadModal onClose={() => setShowUploadModal(false)} user={user} profile={profile} users={users} />}
-        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await firebaseLogout(); apiLogout(); localStorage.removeItem('auth_user'); clearStoredProfile(); setProfile(null); setAuthUser(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
+        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await firebaseLogout(); setProfile(null); setAuthUser(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
         
@@ -568,6 +515,10 @@ export default function ArtesApp() {
 function LoginScreen({ setView, onLogin, error, loading }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [localError, setLocalError] = useState(null);
+  const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
+  const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
+  const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900">
        <div className="max-w-md w-full text-center">
@@ -578,8 +529,62 @@ function LoginScreen({ setView, onLogin, error, loading }) {
              <div className="space-y-4">
                <Input label="E-mailadres" placeholder="naam@voorbeeld.nl" value={email} onChange={(e) => setEmail(e.target.value)} />
                <Input label="Wachtwoord" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
-               {error && <p className="text-sm text-red-500 text-left">{error}</p>}
-               <Button className="w-full" disabled={loading} onClick={() => onLogin?.(email, password)}>{loading ? 'Bezig met inloggen...' : 'Inloggen'}</Button>
+               {(localError || error) && <p className="text-sm text-red-500 text-left">{localError || error}</p>}
+               <Button className="w-full" disabled={loading || !enableEmail} onClick={() => {
+                 if (!enableEmail) {
+                   setLocalError('Email login staat nog uit.');
+                   return;
+                 }
+                 onLogin?.(email, password);
+               }}>{loading ? 'Bezig met inloggen...' : 'Inloggen'}</Button>
+             </div>
+             <div className="mt-5 space-y-3">
+               {enableGoogle && (
+                 <button
+                   type="button"
+                   onClick={async () => {
+                     try {
+                       setLocalError(null);
+                       const user = await signInWithGoogle();
+                       if (user) {
+                         await ensureUserProfile(user);
+                       }
+                     } catch (err) {
+                       setLocalError(err?.message || 'Google login mislukt.');
+                     }
+                   }}
+                   className="w-full border border-slate-200 dark:border-slate-700 rounded-xl py-3 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                 >
+                   Continue with Google
+                 </button>
+               )}
+               <button
+                 type="button"
+                 disabled={!enableApple}
+                 onClick={async () => {
+                   if (!enableApple) {
+                     setLocalError('Apple login staat nog uit. Komt later.');
+                     return;
+                   }
+                   try {
+                     setLocalError(null);
+                     const user = await signInWithApple();
+                     if (user) {
+                       await ensureUserProfile(user);
+                     }
+                   } catch (e) {
+                     const msg = e?.code === 'auth/operation-not-allowed'
+                       ? 'Apple login is nog niet geactiveerd in Firebase.'
+                       : e?.code === 'auth/unauthorized-domain'
+                         ? 'Dit domein is nog niet toegestaan in Firebase Auth.'
+                         : 'Apple login mislukt.';
+                     setLocalError(msg);
+                   }
+                 }}
+                 className={`w-full border border-slate-200 dark:border-slate-700 rounded-xl py-3 text-sm font-semibold transition ${enableApple ? 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700' : 'text-slate-400 dark:text-slate-500 cursor-not-allowed bg-slate-50 dark:bg-slate-800/40'}`}
+               >
+                 Continue with Apple {enableApple ? '' : '(soon)'}
+               </button>
              </div>
              <div className="relative my-8">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200 dark:border-slate-700"></div></div>

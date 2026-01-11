@@ -8,6 +8,11 @@ import {
   setPersistence,
   browserLocalPersistence,
   updateProfile as updateAuthProfile,
+  GoogleAuthProvider,
+  OAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -65,7 +70,10 @@ export const registerWithEmail = async (email, password, displayName) => {
 export const loginWithEmail = (email, password) =>
   signInWithEmailAndPassword(getFirebaseAuth(), email, password);
 
-export const logout = () => signOut(getFirebaseAuth());
+export const logout = async () => {
+  await signOut(getFirebaseAuth());
+  localStorage.removeItem('auth_token');
+};
 
 export const createUserProfile = async (uid, profile) => {
   const payload = {
@@ -83,6 +91,69 @@ export const updateUserProfile = async (uid, data) => {
 export const fetchUserProfile = (uid) => getDoc(doc(getFirebaseDb(), 'users', uid));
 
 export const subscribeToProfile = (uid, cb) => onSnapshot(doc(getFirebaseDb(), 'users', uid), cb);
+
+const resolveDisplayName = (user) => {
+  if (user?.displayName) return user.displayName;
+  if (user?.email) return user.email.split('@')[0];
+  return 'Artes gebruiker';
+};
+
+export const ensureUserProfile = async (user) => {
+  if (!user?.uid) return null;
+  const snapshot = await fetchUserProfile(user.uid);
+  if (snapshot.exists()) return snapshot.data();
+  const profile = {
+    uid: user.uid,
+    displayName: resolveDisplayName(user),
+    photoURL: user.photoURL ?? null,
+    email: user.email ?? null,
+    provider: user.providerData?.[0]?.providerId ?? null,
+  };
+  await createUserProfile(user.uid, profile);
+  return profile;
+};
+
+const shouldRedirect = (error) =>
+  ['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(error?.code);
+
+export const signInWithGoogle = async () => {
+  const auth = getFirebaseAuth();
+  const provider = new GoogleAuthProvider();
+  try {
+    const result = await signInWithPopup(auth, provider);
+    return result.user;
+  } catch (error) {
+    if (shouldRedirect(error)) {
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+    throw error;
+  }
+};
+
+export const signInWithApple = async () => {
+  const auth = getFirebaseAuth();
+  const provider = new OAuthProvider('apple.com');
+  try {
+    const result = await signInWithPopup(auth, provider);
+    return result.user;
+  } catch (error) {
+    if (shouldRedirect(error)) {
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+    throw error;
+  }
+};
+
+export const handleAuthRedirectResult = async () => {
+  const result = await getRedirectResult(getFirebaseAuth());
+  if (result?.user) {
+    await ensureUserProfile(result.user);
+    return result.user;
+  }
+  return null;
+};
 
 export const addPost = async (post) => {
   const payload = { ...post, createdAt: serverTimestamp() };
@@ -114,4 +185,3 @@ export const toggleLike = async (postId, uid) => {
 
 export const subscribeToLikes = (postId, cb) =>
   onSnapshot(collection(getFirebaseDb(), 'posts', postId, 'likes'), cb);
-

@@ -1,21 +1,38 @@
 import React, { useState } from 'react';
 import { Mail, Lock, UserPlus } from 'lucide-react';
 import { Button, Input } from './ui';
+import {
+  ensureUserProfile,
+  loginWithEmail,
+  registerWithEmail,
+  signInWithApple,
+  signInWithGoogle,
+} from '../firebase';
 
-export default function AuthPanel({ onLogin, onRegister, error }) {
+export default function AuthPanel({ onAuthSuccess, error }) {
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({ email: '', password: '', displayName: '' });
   const [localError, setLocalError] = useState(null);
+  const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
+  const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
+  const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLocalError(null);
+    if (!enableEmail) {
+      setLocalError('Email login staat nog uit.');
+      return;
+    }
     try {
       if (mode === 'login') {
-        await onLogin(form.email, form.password);
+        const cred = await loginWithEmail(form.email, form.password);
+        await ensureUserProfile(cred.user);
       } else {
-        await onRegister(form.email, form.password, form.displayName);
+        const user = await registerWithEmail(form.email, form.password, form.displayName);
+        await ensureUserProfile(user);
       }
+      onAuthSuccess?.();
     } catch (err) {
       setLocalError(err.message);
     }
@@ -68,7 +85,57 @@ export default function AuthPanel({ onLogin, onRegister, error }) {
             onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
           />
           {(localError || error) && <p className="text-red-500 text-sm mb-3">{localError || error}</p>}
-          <Button type="submit" className="w-full justify-center">{mode === 'login' ? 'Log in' : 'Maak account'}</Button>
+          <Button type="submit" className="w-full justify-center" disabled={!enableEmail}>
+            {mode === 'login' ? 'Log in' : 'Maak account'}
+          </Button>
+          <div className="mt-6 space-y-3">
+            {enableGoogle && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const user = await signInWithGoogle();
+                    if (user) {
+                      await ensureUserProfile(user);
+                    }
+                    onAuthSuccess?.();
+                  } catch (err) {
+                    setLocalError(err?.message || 'Google login mislukt.');
+                  }
+                }}
+                className="w-full border border-slate-200 dark:border-slate-700 rounded-xl py-3 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+              >
+                Continue with Google
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={!enableApple}
+              onClick={async () => {
+                if (!enableApple) {
+                  setLocalError('Apple login staat nog uit. Komt later.');
+                  return;
+                }
+                try {
+                  const user = await signInWithApple();
+                  if (user) {
+                    await ensureUserProfile(user);
+                  }
+                  onAuthSuccess?.();
+                } catch (e) {
+                  const msg = e?.code === 'auth/operation-not-allowed'
+                    ? 'Apple login is nog niet geactiveerd in Firebase.'
+                    : e?.code === 'auth/unauthorized-domain'
+                      ? 'Dit domein is nog niet toegestaan in Firebase Auth.'
+                      : 'Apple login mislukt.';
+                  setLocalError(msg);
+                }
+              }}
+              className={`w-full border border-slate-200 dark:border-slate-700 rounded-xl py-3 text-sm font-semibold transition ${enableApple ? 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800' : 'text-slate-400 dark:text-slate-500 cursor-not-allowed bg-slate-50 dark:bg-slate-800/40'}`}
+            >
+              Continue with Apple {enableApple ? '' : '(soon)'}
+            </button>
+          </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-4 text-center">
             Door verder te gaan accepteer je onze community richtlijnen.
           </p>
@@ -77,4 +144,3 @@ export default function AuthPanel({ onLogin, onRegister, error }) {
     </div>
   );
 }
-

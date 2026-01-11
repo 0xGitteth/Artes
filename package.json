@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
+    "purge-legacy-users": "node scripts/purgeLegacyUsers.js",
     "start": "node server/index.js"
   },
   "dependencies": {

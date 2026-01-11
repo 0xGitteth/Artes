@@ -2191,9 +2191,17 @@ function UploadModal({ onClose, user, profile, users }) {
     setErrors((prev) => ({ ...prev, moderation: undefined }));
 
     try {
+      if (!user) {
+        setAiError('Je moet ingelogd zijn om de AI-check uit te voeren.');
+        return;
+      }
+      const token = await user.getIdToken();
       const response = await fetch(moderationEndpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ image, makerTags }),
       });
 
@@ -2718,8 +2726,6 @@ function PhotoDetailModal({ post, onClose, authUser, moderationApiBase }) {
     if (!shouldReport) return;
     setReportState({ status: 'pending', error: null });
     try {
-      const appId = getAppId();
-      const postPath = appId ? `artifacts/${appId}/public/data/posts/${post.id}` : null;
       const contributorUids = Array.isArray(post.credits)
         ? post.credits.map((credit) => credit?.uid).filter(Boolean)
         : [];
@@ -2737,7 +2743,6 @@ function PhotoDetailModal({ post, onClose, authUser, moderationApiBase }) {
           title: post.title || null,
           authorId: post.authorId || null,
           authorName: post.authorName || null,
-          postPath,
           contributorUids: Array.from(reviewerTargets),
         }),
       });

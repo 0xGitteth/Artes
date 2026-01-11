@@ -401,13 +401,23 @@ export const moderateImage = onRequest({ cors: true }, async (req, res) => {
     return;
   }
 
+  let decoded = null;
+  try {
+    decoded = await verifyToken(req);
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to verify token' });
+    return;
+  }
+
   const body = ensureJsonBody(req);
   if (!body) {
     res.status(400).json({ error: 'Ongeldige JSON body.' });
     return;
   }
 
-  const { image, makerTags, userId } = body;
+  const { image, makerTags } = body;
+  const userId = decoded.uid;
   const parsed = parseImageDataUrl(image);
   if (parsed.error) {
     res.status(400).json({ error: parsed.error });
@@ -426,13 +436,11 @@ export const moderateImage = onRequest({ cors: true }, async (req, res) => {
   let matchedUpload = null;
   let userModeration = null;
   let blockedByReport = false;
-  if (userId) {
-    try {
-      userModeration = await getUserModeration(userId);
-      blockedByReport = isFingerprintBlocked(fingerprints, userModeration?.data?.blockedFingerprints);
-    } catch (error) {
-      logger.error('User moderation ophalen mislukt.', error);
-    }
+  try {
+    userModeration = await getUserModeration(userId);
+    blockedByReport = isFingerprintBlocked(fingerprints, userModeration?.data?.blockedFingerprints);
+  } catch (error) {
+    logger.error('User moderation ophalen mislukt.', error);
   }
 
   if (blockedByReport) {
@@ -759,7 +767,6 @@ export const reportPost = onRequest({ cors: true }, async (req, res) => {
       title = null,
       authorId = null,
       authorName = null,
-      postPath = null,
       contributorUids = [],
     } = body || {};
     if (!postId || !imageUrl) {
@@ -788,7 +795,6 @@ export const reportPost = onRequest({ cors: true }, async (req, res) => {
         authorId: authorId || null,
         authorName: authorName || null,
       },
-      postPath: typeof postPath === 'string' ? postPath : null,
       contributorUids: normalizedContributors,
       reportedFingerprints,
       reportedByUid: decoded.uid,
@@ -1027,10 +1033,9 @@ export const moderatorDecide = onRequest({ cors: true }, async (req, res) => {
       transaction.update(reviewRef, reviewUpdate);
     });
 
-    const postPath = reviewSnapshotData?.postPath;
-    if (caseType === 'report' && decision === 'approved' && postPath) {
+    if (caseType === 'report' && decision === 'approved' && reportPostId) {
       try {
-        await db.doc(postPath).delete();
+        await db.collection('posts').doc(reportPostId).delete();
       } catch (error) {
         logger.error('Reported post delete mislukt.', error);
       }

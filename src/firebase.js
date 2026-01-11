@@ -8,6 +8,8 @@ import {
   setPersistence,
   browserLocalPersistence,
   updateProfile as updateAuthProfile,
+  sendPasswordResetEmail,
+  sendEmailVerification,
   GoogleAuthProvider,
   OAuthProvider,
   signInWithPopup,
@@ -64,6 +66,7 @@ export const registerWithEmail = async (email, password, displayName) => {
   if (displayName) {
     await updateAuthProfile(cred.user, { displayName });
   }
+  await sendEmailVerification(cred.user);
   return cred.user;
 };
 
@@ -73,6 +76,22 @@ export const loginWithEmail = (email, password) =>
 export const logout = async () => {
   await signOut(getFirebaseAuth());
   localStorage.removeItem('auth_token');
+};
+
+export const sendResetPassword = (email) => sendPasswordResetEmail(getFirebaseAuth(), email);
+
+export const resendVerificationEmail = async () => {
+  const auth = getFirebaseAuth();
+  if (!auth.currentUser) return null;
+  await sendEmailVerification(auth.currentUser);
+  return auth.currentUser;
+};
+
+export const reloadCurrentUser = async () => {
+  const auth = getFirebaseAuth();
+  if (!auth.currentUser) return null;
+  await auth.currentUser.reload();
+  return auth.currentUser;
 };
 
 export const createUserProfile = async (uid, profile) => {

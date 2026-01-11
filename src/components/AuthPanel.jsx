@@ -5,6 +5,7 @@ import {
   ensureUserProfile,
   loginWithEmail,
   registerWithEmail,
+  sendResetPassword,
   signInWithApple,
   signInWithGoogle,
 } from '../firebase';
@@ -13,6 +14,8 @@ export default function AuthPanel({ onAuthSuccess, error }) {
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({ email: '', password: '', displayName: '' });
   const [localError, setLocalError] = useState(null);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetNotice, setResetNotice] = useState(null);
   const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
   const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
@@ -20,11 +23,17 @@ export default function AuthPanel({ onAuthSuccess, error }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLocalError(null);
+    setResetNotice(null);
     if (!enableEmail) {
       setLocalError('Email login staat nog uit.');
       return;
     }
     try {
+      if (mode === 'reset') {
+        await sendResetPassword(resetEmail);
+        setResetNotice('Als dit emailadres bestaat, sturen we een resetlink.');
+        return;
+      }
       if (mode === 'login') {
         const cred = await loginWithEmail(form.email, form.password);
         await ensureUserProfile(cred.user);
@@ -34,6 +43,18 @@ export default function AuthPanel({ onAuthSuccess, error }) {
       }
       onAuthSuccess?.();
     } catch (err) {
+      if (mode === 'reset') {
+        if (err?.code === 'auth/invalid-email') {
+          setLocalError('Ongeldig e-mailadres');
+          return;
+        }
+        if (err?.code === 'auth/user-not-found') {
+          setResetNotice('Als dit emailadres bestaat, sturen we een resetlink.');
+          return;
+        }
+        setLocalError('Er ging iets mis, probeer het opnieuw');
+        return;
+      }
       setLocalError(err.message);
     }
   };
@@ -62,32 +83,80 @@ export default function AuthPanel({ onAuthSuccess, error }) {
               Registreren
             </button>
           </div>
-          {mode === 'register' && (
-            <Input
-              label="Naam"
-              placeholder="Je naam"
-              value={form.displayName}
-              onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
-            />
+          {mode === 'reset' ? (
+            <>
+              <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-2">Wachtwoord resetten</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                Vul je e-mailadres in, dan sturen we een resetlink.
+              </p>
+              <Input
+                label="Email"
+                type="email"
+                placeholder="studio@artes.app"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+              />
+              {(localError || error) && <p className="text-red-500 text-sm mb-3">{localError || error}</p>}
+              {resetNotice && <p className="text-green-600 text-sm mb-3">{resetNotice}</p>}
+              <Button type="submit" className="w-full justify-center" disabled={!enableEmail}>
+                Stuur resetlink
+              </Button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setLocalError(null);
+                  setResetNotice(null);
+                }}
+                className="mt-4 text-sm text-blue-600 hover:text-blue-700 w-full text-center"
+              >
+                Terug naar inloggen
+              </button>
+            </>
+          ) : (
+            <>
+              {mode === 'register' && (
+                <Input
+                  label="Naam"
+                  placeholder="Je naam"
+                  value={form.displayName}
+                  onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
+                />
+              )}
+              <Input
+                label="Email"
+                type="email"
+                placeholder="studio@artes.app"
+                value={form.email}
+                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              />
+              <Input
+                label="Wachtwoord"
+                type="password"
+                placeholder="Minimaal 6 tekens"
+                value={form.password}
+                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+              />
+              {(localError || error) && <p className="text-red-500 text-sm mb-3">{localError || error}</p>}
+              <Button type="submit" className="w-full justify-center" disabled={!enableEmail}>
+                {mode === 'login' ? 'Log in' : 'Maak account'}
+              </Button>
+              {mode === 'login' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('reset');
+                    setLocalError(null);
+                    setResetNotice(null);
+                    setResetEmail(form.email);
+                  }}
+                  className="mt-4 text-sm text-blue-600 hover:text-blue-700 w-full text-center"
+                >
+                  Wachtwoord vergeten
+                </button>
+              )}
+            </>
           )}
-          <Input
-            label="Email"
-            type="email"
-            placeholder="studio@artes.app"
-            value={form.email}
-            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-          />
-          <Input
-            label="Wachtwoord"
-            type="password"
-            placeholder="Minimaal 6 tekens"
-            value={form.password}
-            onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-          />
-          {(localError || error) && <p className="text-red-500 text-sm mb-3">{localError || error}</p>}
-          <Button type="submit" className="w-full justify-center" disabled={!enableEmail}>
-            {mode === 'login' ? 'Log in' : 'Maak account'}
-          </Button>
           <div className="mt-6 space-y-3">
             {enableGoogle && (
               <button

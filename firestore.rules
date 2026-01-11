@@ -1,25 +1,29 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isVerifiedUser() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow write: if isVerifiedUser() && request.auth.uid == userId;
     }
 
     match /posts/{postId} {
       allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && request.resource.data.authorId == request.auth.uid;
+      allow create: if isVerifiedUser();
+      allow update, delete: if isVerifiedUser() && request.resource.data.authorId == request.auth.uid;
 
       match /comments/{commentId} {
         allow read: if true;
-        allow create: if request.auth != null;
-        allow update, delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+        allow create: if isVerifiedUser();
+        allow update, delete: if isVerifiedUser() && request.auth.uid == resource.data.authorId;
       }
 
       match /likes/{userId} {
         allow read: if true;
-        allow create, delete: if request.auth != null && request.auth.uid == userId;
+        allow create, delete: if isVerifiedUser() && request.auth.uid == userId;
       }
     }
   }

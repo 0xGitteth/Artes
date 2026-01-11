@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Mail, Lock, UserPlus } from 'lucide-react';
 import { Button, Input } from './ui';
 import {
@@ -19,6 +19,12 @@ export default function AuthPanel({ onAuthSuccess, error }) {
   const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
   const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
+
+  useEffect(() => {
+    if (!enableEmail && mode === 'register') {
+      setMode('login');
+    }
+  }, [enableEmail, mode]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -79,7 +85,18 @@ export default function AuthPanel({ onAuthSuccess, error }) {
             <button type="button" onClick={() => setMode('login')} className={`flex-1 py-3 rounded-xl text-sm font-semibold border ${mode === 'login' ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-800' : 'border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400'}`}>
               Log in
             </button>
-            <button type="button" onClick={() => setMode('register')} className={`flex-1 py-3 rounded-xl text-sm font-semibold border ${mode === 'register' ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-800' : 'border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400'}`}>
+            <button
+              type="button"
+              disabled={!enableEmail}
+              onClick={() => {
+                if (!enableEmail) {
+                  setLocalError('Email signup staat nog uit.');
+                  return;
+                }
+                setMode('register');
+              }}
+              className={`flex-1 py-3 rounded-xl text-sm font-semibold border ${mode === 'register' ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-800' : 'border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400'} ${!enableEmail ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
               Registreren
             </button>
           </div>

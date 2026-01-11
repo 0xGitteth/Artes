@@ -259,6 +259,7 @@ export default function ArtesApp() {
   const [authUser, setAuthUser] = useState(null);
   const [authError, setAuthError] = useState(null);
   const [authPending, setAuthPending] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
   const [verificationNote, setVerificationNote] = useState(null);
@@ -295,23 +296,27 @@ export default function ArtesApp() {
 
     const unsubscribe = observeAuth(async (u) => {
       if (!active) return;
+      setProfileLoading(true);
+      setView('loading');
       setUser(u);
       setAuthUser(u);
       if (!u) {
         setProfile(null);
         setView('login');
+        setProfileLoading(false);
         return;
       }
       try {
-        const snapshot = await fetchUserProfile(u.uid);
-        const profileData = snapshot?.exists() ? snapshot.data() : await ensureUserProfile(u);
+        const profileData = await ensureUserProfile(u);
         const normalized = normalizeProfileData(profileData, u.uid);
         setProfile(normalized);
-        const hasRoles = Array.isArray(profileData?.roles) && profileData.roles.length > 0;
-        setView(hasRoles ? 'gallery' : 'onboarding');
+        const onboardingComplete = profileData?.onboardingComplete === true;
+        setView(onboardingComplete ? 'gallery' : 'onboarding');
       } catch (e) {
         console.error('Failed to load profile', e);
         setView('onboarding');
+      } finally {
+        setProfileLoading(false);
       }
     });
     return () => {
@@ -379,8 +384,12 @@ export default function ArtesApp() {
     try {
       setAuthError(null);
       setAuthPending(true);
+      if (import.meta.env.VITE_ENABLE_EMAIL_SIGNIN === 'false') {
+        throw new Error('Email signup staat uitgeschakeld.');
+      }
       const user = await registerWithEmail(email, password, displayName);
       await ensureUserProfile(user);
+      return user;
     } catch (e) {
       setAuthError(e.message);
       throw e;
@@ -399,6 +408,8 @@ export default function ArtesApp() {
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.uid || 'artes'}`,
       linkedAgencyName: profileData.linkedAgencyName,
       linkedCompanyName: profileData.linkedCompanyName,
+      onboardingComplete: true,
+      onboardingStep: 5,
       preferences: {
         ...profileData.preferences,
         triggerVisibility: normalizeTriggerPreferences(profileData.preferences?.triggerVisibility),
@@ -529,13 +540,29 @@ export default function ArtesApp() {
         )}
 
         <main className="h-full overflow-y-auto pb-24 pt-16 scroll-smooth">
-          {view === 'loading' && <div className="h-full flex items-center justify-center"><div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>}
+          {(view === 'loading' || profileLoading) && (
+            <div className="h-full flex items-center justify-center">
+              <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+          )}
           
-          {view === 'login' && <LoginScreen setView={setView} onLogin={handleLogin} error={authError} loading={authPending} />}
+          {!profileLoading && view === 'login' && (
+            <LoginScreen setView={setView} onLogin={handleLogin} error={authError} loading={authPending} />
+          )}
 
-          {view === 'onboarding' && <Onboarding setView={setView} users={users} onSignup={handleSignup} onCompleteProfile={handleCompleteProfile} authUser={authUser} authError={authError} />}
+          {!profileLoading && view === 'onboarding' && (
+            <Onboarding
+              setView={setView}
+              users={users}
+              onSignup={handleSignup}
+              onCompleteProfile={handleCompleteProfile}
+              authUser={authUser}
+              authError={authError}
+              profile={profile}
+            />
+          )}
           
-          {view === 'gallery' && (
+          {!profileLoading && view === 'gallery' && (
             <Gallery 
               posts={posts} 
               onUserClick={setQuickProfileId}
@@ -546,15 +573,21 @@ export default function ArtesApp() {
             />
           )}
 
-          {view === 'discover' && <Discover users={users} posts={posts} onUserClick={setQuickProfileId} onPostClick={setSelectedPost} setView={setView} />}
+          {!profileLoading && view === 'discover' && (
+            <Discover users={users} posts={posts} onUserClick={setQuickProfileId} onPostClick={setSelectedPost} setView={setView} />
+          )}
           
-          {view === 'community' && <CommunityList setView={setView} />}
-          {view === 'challenge_detail' && <ChallengeDetail setView={setView} posts={posts.filter(p => p.isChallenge)} onPostClick={setSelectedPost} />}
+          {!profileLoading && view === 'community' && <CommunityList setView={setView} />}
+          {!profileLoading && view === 'challenge_detail' && (
+            <ChallengeDetail setView={setView} posts={posts.filter(p => p.isChallenge)} onPostClick={setSelectedPost} />
+          )}
           
-          {view.startsWith('community_') && <CommunityDetail id={view.split('_')[1]} setView={setView} />}
+          {!profileLoading && view.startsWith('community_') && (
+            <CommunityDetail id={view.split('_')[1]} setView={setView} />
+          )}
 
           {/* Wrapper logic for viewing profiles */}
-          {view === 'profile' && (
+          {!profileLoading && view === 'profile' && (
             <ImmersiveProfile 
               profile={profile} 
               isOwn={true} 
@@ -565,7 +598,7 @@ export default function ArtesApp() {
             />
           )}
           
-          {view.startsWith('profile_') && (
+          {!profileLoading && view.startsWith('profile_') && (
             <FetchedProfile 
                userId={view.split('_')[1]} 
                posts={posts}
@@ -687,15 +720,28 @@ function LoginScreen({ setView, onLogin, error, loading }) {
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200 dark:border-slate-700"></div></div>
                 <div className="relative flex justify-center text-sm"><span className="px-4 bg-white dark:bg-slate-800 text-slate-500">Nieuw hier?</span></div>
              </div>
-             <Button variant="secondary" className="w-full" onClick={() => setView('onboarding')}>Account aanmaken</Button>
+             <Button
+               variant="secondary"
+               className="w-full"
+               disabled={!enableEmail}
+               onClick={() => {
+                 if (!enableEmail) {
+                   setLocalError('Email signup staat nog uit.');
+                   return;
+                 }
+                 setView('onboarding');
+               }}
+             >
+               Account aanmaken
+             </Button>
           </div>
        </div>
     </div>
   );
 }
 
-function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, authError }) {
-    const [step, setStep] = useState(1);
+function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, authError, profile }) {
+    const [step, setStep] = useState(() => Math.max(1, profile?.onboardingStep ?? 1));
     const [roles, setRoles] = useState([]);
     const [profileData, setProfileData] = useState({
        displayName: '', bio: '', insta: '', linkedAgencyName: '', linkedCompanyName: '', preferences: {
@@ -708,6 +754,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
     const [accountCreated, setAccountCreated] = useState(!!authUser);
     const [pending, setPending] = useState(false);
     const [error, setError] = useState(null);
+    const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
+    const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
+    const isGoogleUser = authUser?.providerData?.some((provider) => provider?.providerId === 'google.com')
+      || profile?.authProvider === 'google.com';
 
     useEffect(() => {
       if (!accountCreated && step > 1) {
@@ -721,6 +771,55 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
         setStep(2);
       }
     }, [authUser, accountCreated]);
+
+    useEffect(() => {
+      if (profile?.onboardingStep && profile.onboardingStep > step) {
+        setStep(profile.onboardingStep);
+      }
+    }, [profile?.onboardingStep, step]);
+
+    useEffect(() => {
+      if (!authUser) return;
+      setEmail(authUser.email || '');
+      if (authUser.displayName) {
+        setProfileData((prev) => ({ ...prev, displayName: authUser.displayName }));
+      }
+    }, [authUser]);
+
+    useEffect(() => {
+      if (!isGoogleUser || !authUser?.uid || syncedGoogleProfile) return;
+      setAccountCreated(true);
+      setStep((prev) => (prev < 2 ? 2 : prev));
+      updateUserProfile(authUser.uid, {
+        onboardingStep: 2,
+        onboardingComplete: false,
+        displayName: authUser.displayName || profileData.displayName || 'Artes gebruiker',
+        email: authUser.email ?? null,
+        authProvider: 'google.com',
+      }).catch((e) => console.error('Failed to sync Google profile', e));
+      setSyncedGoogleProfile(true);
+    }, [isGoogleUser, authUser?.uid, authUser?.displayName, authUser?.email, profileData.displayName, syncedGoogleProfile]);
+
+    if (!enableEmail && !authUser) {
+      return (
+        <div className="max-w-md mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
+          <h2 className="text-sm font-bold text-blue-600 uppercase tracking-wide mb-1">Signup uitgeschakeld</h2>
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">Email accounts zijn niet beschikbaar</h1>
+          <p className="text-slate-600 dark:text-slate-400 mb-8">
+            Email signup staat op dit moment uit. Log in met een sociale provider of probeer het later opnieuw.
+          </p>
+          <Button className="w-full" onClick={() => setView('login')}>Terug naar inloggen</Button>
+        </div>
+      );
+    }
+
+    if (step === 1 && isGoogleUser) {
+      return (
+        <div className="max-w-md mx-auto py-12 px-4 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        </div>
+      );
+    }
 
     if (step === 1) return (
       <div className="max-w-md mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
@@ -736,9 +835,23 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
               try {
                 setPending(true);
                 setError(null);
+                if (!enableEmail && !accountCreated) {
+                  throw new Error('Email signup staat uitgeschakeld.');
+                }
+                let createdUser = authUser;
                 if (!accountCreated) {
-                  await onSignup?.(email, password, profileData.displayName);
+                  createdUser = await onSignup?.(email, password, profileData.displayName);
                   setAccountCreated(true);
+                }
+                const uid = createdUser?.uid || authUser?.uid;
+                if (uid) {
+                  await updateUserProfile(uid, {
+                    onboardingStep: 2,
+                    onboardingComplete: false,
+                    displayName: profileData.displayName || createdUser?.displayName || 'Nieuwe Maker',
+                    email: createdUser?.email || email,
+                    authProvider: 'password',
+                  });
                 }
                 setStep(2);
               } catch (e) {

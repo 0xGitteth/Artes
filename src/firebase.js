@@ -117,16 +117,44 @@ const resolveDisplayName = (user) => {
   return 'Artes gebruiker';
 };
 
+const resolveAuthProvider = (user) => {
+  if (user?.providerData?.some((provider) => provider?.providerId === 'google.com')) {
+    return 'google.com';
+  }
+  return user?.providerData?.[0]?.providerId ?? null;
+};
+
 export const ensureUserProfile = async (user) => {
   if (!user?.uid) return null;
+  const providerId = resolveAuthProvider(user);
+  const defaultOnboardingStep = providerId === 'google.com' ? 2 : 1;
+  const resolvedDisplayName = resolveDisplayName(user);
+  const resolvedEmail = user.email ?? null;
   const snapshot = await fetchUserProfile(user.uid);
-  if (snapshot.exists()) return snapshot.data();
+  if (snapshot.exists()) {
+    const data = snapshot.data();
+    const updates = {};
+    if (!data.displayName && resolvedDisplayName) updates.displayName = resolvedDisplayName;
+    if (!data.email && resolvedEmail) updates.email = resolvedEmail;
+    if (!data.authProvider && providerId) updates.authProvider = providerId;
+    if (data.onboardingStep == null) updates.onboardingStep = defaultOnboardingStep;
+    if (data.onboardingComplete == null) {
+      const hasRoles = Array.isArray(data.roles) && data.roles.length > 0;
+      updates.onboardingComplete = hasRoles;
+    }
+    if (Object.keys(updates).length) {
+      await updateUserProfile(user.uid, updates);
+    }
+    return { ...data, ...updates };
+  }
   const profile = {
     uid: user.uid,
-    displayName: resolveDisplayName(user),
+    displayName: resolvedDisplayName,
     photoURL: user.photoURL ?? null,
-    email: user.email ?? null,
-    provider: user.providerData?.[0]?.providerId ?? null,
+    email: resolvedEmail,
+    authProvider: providerId,
+    onboardingStep: defaultOnboardingStep,
+    onboardingComplete: false,
   };
   await createUserProfile(user.uid, profile);
   return profile;

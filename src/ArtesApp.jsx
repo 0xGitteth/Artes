@@ -2250,8 +2250,12 @@ function UploadModal({ onClose, user, profile, users }) {
       return;
     }
 
-    const effectiveAppliedTriggers = moderationData?.appliedTriggers ?? appliedTriggers;
-    const effectiveForbiddenReasons = moderationData?.forbiddenReasons ?? forbiddenReasons;
+    const effectiveAppliedTriggers = moderationData
+      ? (Array.isArray(moderationData.appliedTriggers) ? moderationData.appliedTriggers : [])
+      : appliedTriggers;
+    const effectiveForbiddenReasons = moderationData
+      ? (Array.isArray(moderationData.forbiddenReasons) ? moderationData.forbiddenReasons : [])
+      : forbiddenReasons;
     const effectiveReviewCaseId = moderationData?.reviewCaseId ?? reviewCaseId;
     const baseTriggers = effectiveAppliedTriggers.length ? effectiveAppliedTriggers : makerTags;
     const finalAppliedTriggers = applySuggestions

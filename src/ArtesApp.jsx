@@ -41,9 +41,9 @@ import {
   onSnapshot,
   orderBy,
   query,
-  updateDoc,
   where,
 } from 'firebase/firestore';
+import ChatPanel from './components/ChatPanel';
 
 // --- Constants & Styling ---
 
@@ -366,8 +366,8 @@ export default function ArtesApp() {
         const path = window.location.pathname || '/';
         const routedView = path.startsWith('/moderation')
           ? 'moderation'
-          : path.startsWith('/messages')
-            ? 'messages'
+          : path.startsWith('/chat')
+            ? 'chat'
             : baseView;
         setView(routedView);
       } catch (e) {
@@ -393,9 +393,9 @@ export default function ArtesApp() {
       const path = window.location.pathname || '/';
       if (path.startsWith('/moderation')) {
         setView('moderation');
-      } else if (path.startsWith('/messages')) {
-        setView('messages');
-      } else if (view === 'moderation' || view === 'messages') {
+      } else if (path.startsWith('/chat')) {
+        setView('chat');
+      } else if (view === 'moderation' || view === 'chat') {
         setView('gallery');
       }
     };
@@ -406,9 +406,9 @@ export default function ArtesApp() {
   useEffect(() => {
     if (view === 'moderation') {
       window.history.pushState({}, '', '/moderation');
-    } else if (view === 'messages') {
-      window.history.pushState({}, '', '/messages');
-    } else if (window.location.pathname === '/moderation' || window.location.pathname === '/messages') {
+    } else if (view === 'chat') {
+      window.history.pushState({}, '', '/chat');
+    } else if (window.location.pathname === '/moderation' || window.location.pathname === '/chat') {
       window.history.pushState({}, '', '/');
     }
   }, [view]);
@@ -437,7 +437,8 @@ export default function ArtesApp() {
   useEffect(() => {
     if (!authUser?.uid) return;
     const db = getFirebaseDbInstance();
-    const messagesRef = collection(db, 'users', authUser.uid, 'threads', 'moderation', 'messages');
+    const threadId = `moderation_${authUser.uid}`;
+    const messagesRef = collection(db, 'threads', threadId, 'messages');
     const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
     return onSnapshot(q, (snapshot) => {
       if (snapshot.empty) return;
@@ -466,6 +467,22 @@ export default function ArtesApp() {
       .catch(() => {
         if (!active) return;
         setModeratorAccess(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authUser, moderationApiBase]);
+
+  useEffect(() => {
+    if (!authUser || !moderationApiBase) return;
+    let active = true;
+    authUser.getIdToken()
+      .then((token) => fetch(`${moderationApiBase}/ensureModerationThread`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }))
+      .catch(() => {
+        if (!active) return;
       });
     return () => {
       active = false;
@@ -613,6 +630,8 @@ export default function ArtesApp() {
     if (!moderationModal || !authUser || !moderationApiBase) return;
     setModerationActionPending(true);
     try {
+      const uploadId = moderationModal?.metadata?.uploadId || moderationModal?.uploadId;
+      if (!uploadId) throw new Error('Geen upload gevonden.');
       const token = await authUser.getIdToken();
       const response = await fetch(`${moderationApiBase}/userModerationAction`, {
         method: 'POST',
@@ -622,7 +641,7 @@ export default function ArtesApp() {
         },
         body: JSON.stringify({
           messageId: moderationModal.id,
-          uploadId: moderationModal.uploadId,
+          uploadId,
           action,
         }),
       });
@@ -700,10 +719,6 @@ export default function ArtesApp() {
           <NavBar 
              view={view} 
              setView={setView} 
-             profile={profile} 
-             moderatorAccess={moderatorAccess}
-             toggleTheme={toggleTheme} 
-             darkMode={darkMode} 
              onOpenSettings={() => setShowSettingsModal(true)}
           />
         )}
@@ -759,8 +774,8 @@ export default function ArtesApp() {
             <CommunityDetail id={view.split('_')[1]} setView={setView} />
           )}
 
-          {!profileLoading && view === 'messages' && authUser?.uid && (
-            <MessagesPanel authUser={authUser} />
+          {!profileLoading && view === 'chat' && authUser?.uid && (
+            <ChatPanel authUser={authUser} functionsBase={moderationApiBase} />
           )}
 
           {/* Wrapper logic for viewing profiles */}
@@ -773,7 +788,7 @@ export default function ArtesApp() {
               onPostClick={setSelectedPost}
               allUsers={users}
               uploads={uploads}
-              onOpenMessages={() => setView('messages')}
+              onOpenMessages={() => setView('chat')}
             />
           )}
           
@@ -798,7 +813,16 @@ export default function ArtesApp() {
 
         {/* Modals */}
         {showUploadModal && <UploadModal onClose={() => setShowUploadModal(false)} user={user} profile={profile} users={users} />}
-        {showSettingsModal && <SettingsModal onClose={() => setShowSettingsModal(false)} profile={profile} onLogout={async() => {await firebaseLogout(); setProfile(null); setAuthUser(null); setView('login');}} darkMode={darkMode} toggleTheme={toggleTheme} />}
+        {showSettingsModal && (
+          <SettingsModal
+            onClose={() => setShowSettingsModal(false)}
+            moderatorAccess={moderatorAccess}
+            onOpenModeration={() => {
+              setShowSettingsModal(false);
+              setView('moderation');
+            }}
+          />
+        )}
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
         {moderationModal && (
@@ -1314,7 +1338,7 @@ function Discover({ users, posts, onUserClick, onPostClick, setView }) {
   );
 }
 
-function NavBar({ view, setView, profile, moderatorAccess, onOpenSettings }) {
+function NavBar({ view, setView, onOpenSettings }) {
    return (
       <>
         <div className="fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-30 flex items-center justify-between px-6">
@@ -1322,10 +1346,6 @@ function NavBar({ view, setView, profile, moderatorAccess, onOpenSettings }) {
            <div className="hidden md:flex gap-6">
               {['gallery', 'discover', 'community'].map(v => <button key={v} onClick={() => setView(v)} className={`capitalize font-medium ${view === v ? 'text-blue-600' : 'text-slate-500'}`}>{v === 'discover' ? 'Ontdekken' : v === 'gallery' ? 'Galerij' : v}</button>)}
               <button onClick={() => setView('profile')} className={`capitalize font-medium ${view === 'profile' ? 'text-blue-600' : 'text-slate-500'}`}>Mijn Portfolio</button>
-              <button onClick={() => setView('messages')} className={`capitalize font-medium ${view === 'messages' ? 'text-blue-600' : 'text-slate-500'}`}>Berichten</button>
-              {moderatorAccess && (
-                <button onClick={() => setView('moderation')} className={`capitalize font-medium ${view === 'moderation' ? 'text-blue-600' : 'text-slate-500'}`}>Moderatie</button>
-              )}
            </div>
            <button onClick={onOpenSettings}><Settings className="w-5 h-5 text-slate-500"/></button>
         </div>
@@ -1333,11 +1353,7 @@ function NavBar({ view, setView, profile, moderatorAccess, onOpenSettings }) {
            <button onClick={() => setView('gallery')} className={view === 'gallery' ? 'text-blue-600' : 'text-slate-400'}><ImageIcon/></button>
            <button onClick={() => setView('discover')} className={view === 'discover' ? 'text-blue-600' : 'text-slate-400'}><Search/></button>
            <button onClick={() => setView('community')} className={view === 'community' ? 'text-blue-600' : 'text-slate-400'}><Users/></button>
-           <button onClick={() => setView('messages')} className={view === 'messages' ? 'text-blue-600' : 'text-slate-400'}><Bell/></button>
            <button onClick={() => setView('profile')} className={view === 'profile' ? 'text-blue-600' : 'text-slate-400'}><User/></button>
-           {moderatorAccess && (
-             <button onClick={() => setView('moderation')} className={view === 'moderation' ? 'text-blue-600' : 'text-slate-400'}><Shield/></button>
-           )}
         </div>
       </>
    );
@@ -1494,19 +1510,24 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
 
 function ModerationDecisionModal({ message, onClose, onAction, pending }) {
   if (!message) return null;
-  const isApproved = message.decision === 'approved';
+  const decision = message?.metadata?.decision;
+  const reasons = message?.metadata?.reasons || [];
+  const isApproved = decision === 'approved';
+  const isReport = message?.metadata?.caseType === 'report';
+  const canTakeAction = isApproved && !isReport && message?.metadata?.uploadId;
+  const title = decision ? (isApproved ? 'Je foto is goedgekeurd' : 'Je foto is niet goedgekeurd') : 'Moderatie-update';
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl overflow-hidden shadow-xl">
         <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-          <h3 className="font-bold text-lg dark:text-white">{message.title}</h3>
+          <h3 className="font-bold text-lg dark:text-white">{title}</h3>
           <button onClick={onClose} disabled={pending}><X /></button>
         </div>
         <div className="p-6 space-y-4">
-          <p className="text-sm text-slate-700 dark:text-slate-200">{message.message}</p>
-          {Array.isArray(message.reasons) && message.reasons.length > 0 && (
+          <p className="text-sm text-slate-700 dark:text-slate-200">{message.text || message.message}</p>
+          {Array.isArray(reasons) && reasons.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {message.reasons.map((reason) => {
+              {reasons.map((reason) => {
                 const label = MODERATION_REASON_PRESETS.find((preset) => preset.id === reason)?.label || reason;
                 return (
                   <span key={reason} className="text-[11px] px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200">
@@ -1521,7 +1542,7 @@ function ModerationDecisionModal({ message, onClose, onAction, pending }) {
           </p>
         </div>
         <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex flex-wrap gap-3 justify-end">
-          {isApproved ? (
+          {canTakeAction ? (
             <>
               <Button variant="secondary" onClick={() => onAction('saveDraft')} disabled={pending}>
                 Later plaatsen
@@ -1536,85 +1557,6 @@ function ModerationDecisionModal({ message, onClose, onAction, pending }) {
             </Button>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function MessagesPanel({ authUser }) {
-  const [messages, setMessages] = useState([]);
-
-  useEffect(() => {
-    if (!authUser?.uid) return;
-    const db = getFirebaseDbInstance();
-    const messagesRef = collection(db, 'users', authUser.uid, 'threads', 'moderation', 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'desc'));
-    return onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
-    });
-  }, [authUser?.uid]);
-
-  useEffect(() => {
-    if (!authUser?.uid || messages.length === 0) return;
-    const db = getFirebaseDbInstance();
-    const updates = messages.filter((message) => message.unread);
-    if (updates.length === 0) return;
-    updates.forEach((message) => {
-      const messageRef = doc(db, 'users', authUser.uid, 'threads', 'moderation', 'messages', message.id);
-      updateDoc(messageRef, { unread: false }).catch(() => {});
-    });
-  }, [authUser?.uid, messages]);
-
-  return (
-    <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold dark:text-white">Artes Moderatie</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Vastgezet gesprek met moderatie-updates.</p>
-          </div>
-          <span className="text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700">Vastgezet</span>
-        </div>
-      </div>
-      <div className="space-y-4">
-        {messages.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-6 text-sm text-slate-500 dark:text-slate-400">
-            Nog geen moderatieberichten.
-          </div>
-        ) : (
-          messages.map((message) => (
-            <div key={message.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="font-semibold dark:text-white">{message.title}</p>
-                <span className={`text-xs px-2 py-1 rounded-full ${
-                  message.decision === 'approved'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-red-100 text-red-700'
-                }`}>
-                  {message.decision === 'approved' ? 'Goedgekeurd' : 'Afgekeurd'}
-                </span>
-              </div>
-              <p className="text-sm text-slate-700 dark:text-slate-200">{message.message}</p>
-              {Array.isArray(message.reasons) && message.reasons.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {message.reasons.map((reason) => {
-                    const label = MODERATION_REASON_PRESETS.find((preset) => preset.id === reason)?.label || reason;
-                    return (
-                      <span key={reason} className="text-[11px] px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200">
-                        {label}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              {message.actions && (
-                <div className="text-xs text-slate-500 dark:text-slate-400">
-                  Acties beschikbaar: {message.actions.canPublishNow ? 'Nu plaatsen' : 'Geen'} · {message.actions.canSaveDraft ? 'Later plaatsen' : 'Geen'}
-                </div>
-              )}
-            </div>
-          ))
-        )}
       </div>
     </div>
   );
@@ -2657,7 +2599,7 @@ function CommunityList({ setView }) {
     <div className="max-w-2xl mx-auto px-4 py-6">
       <div className="flex justify-between items-center mb-6">
         <div><h2 className="text-2xl font-bold dark:text-white">Community</h2></div>
-        <Button variant="secondary" className="px-4 py-2 text-sm h-10">Chat</Button>
+        <Button variant="secondary" className="px-4 py-2 text-sm h-10" onClick={() => setView('chat')}>Chat</Button>
       </div>
 
       <div className="mb-8 cursor-pointer" onClick={() => setView('challenge_detail')}>
@@ -2897,7 +2839,7 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
     return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"><div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col"><div className="h-64 bg-indigo-900 flex items-center justify-center flex-col text-white"><div className="text-4xl font-bold mb-2">{name}</div><p>Tijdelijk Profiel. Claim dit profiel.</p><button onClick={onClose} className="absolute top-4 right-4"><X/></button></div><div className="flex-1 p-6 overflow-y-auto no-scrollbar"><div className="grid grid-cols-3 gap-2">{shadowPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div></div></div></div> 
 }
-function SettingsModal({ onClose }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white w-80 h-full p-6 flex flex-col gap-6">
@@ -2910,6 +2852,16 @@ function SettingsModal({ onClose }) {
                     <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Dark Mode</span><Moon className="w-4 h-4"/></div>
                     <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Taal</span><Globe className="w-4 h-4"/></div>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Overig</h4>
+                    {moderatorAccess && (
+                      <button
+                        type="button"
+                        onClick={onOpenModeration}
+                        className="w-full p-3 bg-slate-50 rounded flex justify-between items-center text-left"
+                      >
+                        <span>Moderatie</span>
+                        <Shield className="w-4 h-4"/>
+                      </button>
+                    )}
                     <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Support</span><HelpCircle className="w-4 h-4"/></div>
                 </div>
             </div>

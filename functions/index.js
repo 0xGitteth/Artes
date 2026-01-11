@@ -96,6 +96,45 @@ const ensureModerator = async (decoded) => {
   return { email };
 };
 
+const fetchPublicUser = async (uid) => {
+  if (!uid) return null;
+  const snap = await db.collection('publicUsers').doc(uid).get();
+  return snap.exists ? snap.data() : null;
+};
+
+const resolveDisplayTitle = (publicUser) => publicUser?.displayName || publicUser?.username || 'Chat';
+
+const ensureModerationThreadForUser = async (uid) => {
+  if (!uid) return null;
+  const threadId = `moderation_${uid}`;
+  const threadRef = db.collection('threads').doc(threadId);
+  const threadIndexRef = db.collection('users').doc(uid).collection('threadIndex').doc(threadId);
+  await Promise.all([
+    threadRef.set(
+      {
+        type: 'system',
+        title: 'Artes Moderatie',
+        participantUids: [uid],
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        lastMessageAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    ),
+    threadIndexRef.set(
+      {
+        threadId,
+        pinned: true,
+        hidden: false,
+        displayTitle: 'Artes Moderatie',
+        lastMessageAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    ),
+  ]);
+  return threadId;
+};
+
 const parseJsonBody = (req) => {
   if (req.body && typeof req.body === 'object') return req.body;
   if (typeof req.body === 'string') {
@@ -113,25 +152,23 @@ const createDecisionMessage = ({
   decisionMessagePublic,
   decisionReasons = [],
   caseType = 'upload',
-}) => {
-  const isApproved = decision === 'approved';
-  const isReport = caseType === 'report';
-  return {
-    type: isReport ? 'report_decision' : 'moderation_decision',
+  uploadId = null,
+  reviewCaseId = null,
+  reportedPostId = null,
+}) => ({
+  senderUid: 'system',
+  text: decisionMessagePublic,
+  type: 'moderation_decision',
+  unread: true,
+  metadata: {
     decision,
-    title: isReport
-      ? 'Moderatie-update over je foto'
-      : (isApproved ? 'Je foto is goedgekeurd' : 'Je foto is niet goedgekeurd'),
-    message: decisionMessagePublic,
     reasons: decisionReasons,
-    unread: true,
-    resolved: false,
-    actions: {
-      canPublishNow: !isReport && isApproved,
-      canSaveDraft: !isReport && isApproved,
-    },
-  };
-};
+    caseType,
+    uploadId,
+    reviewCaseId,
+    reportedPostId,
+  },
+});
 
 const buildReportRemovalMessage = (baseMessage) => {
   const prefix = 'Deze foto is handmatig gerapporteerd. Na controle is de moderatie het eens met de melding en is de foto verwijderd.';
@@ -752,6 +789,172 @@ export const isModerator = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
+export const ensureModerationThread = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const threadId = await ensureModerationThreadForUser(decoded.uid);
+    res.status(200).json({ ok: true, threadId });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to ensure moderation thread' });
+  }
+});
+
+export const createDmThread = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const body = parseJsonBody(req);
+    const recipientUid = body?.recipientUid;
+    if (!recipientUid || recipientUid === decoded.uid) {
+      res.status(400).json({ error: 'Invalid recipientUid' });
+      return;
+    }
+
+    const dmKey = [decoded.uid, recipientUid].sort().join('_');
+    const existingSnap = await db.collection('threads')
+      .where('dmKey', '==', dmKey)
+      .where('type', '==', 'dm')
+      .limit(1)
+      .get();
+    if (!existingSnap.empty) {
+      res.status(200).json({ threadId: existingSnap.docs[0].id });
+      return;
+    }
+
+    const [senderPublic, recipientPublic] = await Promise.all([
+      fetchPublicUser(decoded.uid),
+      fetchPublicUser(recipientUid),
+    ]);
+    const senderTitle = resolveDisplayTitle(recipientPublic);
+    const recipientTitle = resolveDisplayTitle(senderPublic);
+    const threadRef = await db.collection('threads').add({
+      type: 'dm',
+      participantUids: [decoded.uid, recipientUid],
+      dmKey,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      lastMessageAt: FieldValue.serverTimestamp(),
+      lastMessageText: '',
+      lastSenderUid: decoded.uid,
+    });
+
+    await Promise.all([
+      db.collection('users').doc(decoded.uid).collection('threadIndex').doc(threadRef.id).set(
+        {
+          threadId: threadRef.id,
+          pinned: false,
+          hidden: false,
+          displayTitle: senderTitle,
+          lastMessageAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      ),
+      db.collection('users').doc(recipientUid).collection('threadIndex').doc(threadRef.id).set(
+        {
+          threadId: threadRef.id,
+          pinned: false,
+          hidden: false,
+          displayTitle: recipientTitle,
+          lastMessageAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      ),
+    ]);
+
+    res.status(200).json({ threadId: threadRef.id });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to create dm thread' });
+  }
+});
+
+export const sendDmMessage = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const body = parseJsonBody(req);
+    const threadId = body?.threadId;
+    const text = String(body?.text || '').trim();
+    if (!threadId || !text) {
+      res.status(400).json({ error: 'threadId and text are required' });
+      return;
+    }
+    if (text.length > 2000) {
+      res.status(400).json({ error: 'Message too long' });
+      return;
+    }
+
+    const threadRef = db.collection('threads').doc(threadId);
+    const threadSnap = await threadRef.get();
+    if (!threadSnap.exists) {
+      res.status(404).json({ error: 'Thread not found' });
+      return;
+    }
+    const threadData = threadSnap.data();
+    if (threadData?.type !== 'dm') {
+      res.status(403).json({ error: 'Cannot send message to system thread' });
+      return;
+    }
+    const participants = Array.isArray(threadData?.participantUids) ? threadData.participantUids : [];
+    if (!participants.includes(decoded.uid)) {
+      res.status(403).json({ error: 'Not a participant' });
+      return;
+    }
+
+    const publicUsers = await Promise.all(participants.map((uid) => fetchPublicUser(uid)));
+    const messageRef = threadRef.collection('messages').doc();
+    const now = FieldValue.serverTimestamp();
+
+    await Promise.all([
+      messageRef.set({
+        senderUid: decoded.uid,
+        text,
+        type: 'text',
+        createdAt: now,
+      }),
+      threadRef.set(
+        {
+          updatedAt: now,
+          lastMessageAt: now,
+          lastMessageText: text,
+          lastSenderUid: decoded.uid,
+        },
+        { merge: true }
+      ),
+      ...participants.map((uid, index) => {
+        const otherIndex = participants[0] === uid ? 1 : 0;
+        const otherPublic = publicUsers[otherIndex] || null;
+        return db.collection('users').doc(uid).collection('threadIndex').doc(threadId).set(
+          {
+            threadId,
+            pinned: false,
+            hidden: false,
+            displayTitle: resolveDisplayTitle(otherPublic),
+            lastMessageAt: now,
+          },
+          { merge: true }
+        );
+      }),
+    ]);
+
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to send message' });
+  }
+});
+
 export const reportPost = onRequest({ cors: true }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -1072,29 +1275,35 @@ export const moderatorDecide = onRequest({ cors: true }, async (req, res) => {
         decisionMessagePublic: finalDecisionMessage,
         decisionReasons,
         caseType,
+        uploadId,
+        reviewCaseId,
+        reportedPostId: reportPostId,
       });
       await Promise.all(
         recipientUids.map(async (recipientUid) => {
-          const threadRef = db.collection('users').doc(recipientUid).collection('threads').doc('moderation');
+          const threadId = await ensureModerationThreadForUser(recipientUid);
+          const threadRef = db.collection('threads').doc(threadId);
           const messageRef = threadRef.collection('messages').doc();
           await Promise.all([
             threadRef.set(
               {
-                title: 'Artes Moderatie',
-                pinned: true,
-                createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
                 lastMessageAt: FieldValue.serverTimestamp(),
+                lastMessageText: finalDecisionMessage,
+                lastSenderUid: 'system',
               },
               { merge: true }
             ),
             messageRef.set({
               ...decisionMessage,
-              uploadId: uploadId || null,
-              reportedPostId: reportPostId || null,
-              reviewCaseId,
               createdAt: FieldValue.serverTimestamp(),
             }),
+            db.collection('users').doc(recipientUid).collection('threadIndex').doc(threadId).set(
+              {
+                lastMessageAt: FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            ),
           ]);
         })
       );
@@ -1126,7 +1335,8 @@ export const userModerationAction = onRequest({ cors: true }, async (req, res) =
       return;
     }
     const userId = decoded.uid;
-    const threadRef = db.collection('users').doc(userId).collection('threads').doc('moderation');
+    const threadId = `moderation_${userId}`;
+    const threadRef = db.collection('threads').doc(threadId);
     const messageRef = threadRef.collection('messages').doc(messageId);
     const uploadRef = db.collection('uploads').doc(uploadId);
 
@@ -1137,7 +1347,7 @@ export const userModerationAction = onRequest({ cors: true }, async (req, res) =
     }
     const message = messageSnap.data();
     const upload = uploadSnap.data();
-    if (message?.uploadId !== uploadId || upload?.userId !== userId) {
+    if (message?.metadata?.uploadId !== uploadId || upload?.userId !== userId) {
       res.status(403).json({ error: 'Not authorized for this action' });
       return;
     }

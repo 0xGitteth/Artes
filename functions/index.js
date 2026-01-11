@@ -108,21 +108,39 @@ const parseJsonBody = (req) => {
   return null;
 };
 
-const createDecisionMessage = ({ decision, decisionMessagePublic, decisionReasons = [] }) => {
+const createDecisionMessage = ({
+  decision,
+  decisionMessagePublic,
+  decisionReasons = [],
+  caseType = 'upload',
+}) => {
   const isApproved = decision === 'approved';
+  const isReport = caseType === 'report';
   return {
-    type: 'moderation_decision',
+    type: isReport ? 'report_decision' : 'moderation_decision',
     decision,
-    title: isApproved ? 'Je foto is goedgekeurd' : 'Je foto is niet goedgekeurd',
+    title: isReport
+      ? 'Moderatie-update over je foto'
+      : (isApproved ? 'Je foto is goedgekeurd' : 'Je foto is niet goedgekeurd'),
     message: decisionMessagePublic,
     reasons: decisionReasons,
     unread: true,
     resolved: false,
     actions: {
-      canPublishNow: isApproved,
-      canSaveDraft: isApproved,
+      canPublishNow: !isReport && isApproved,
+      canSaveDraft: !isReport && isApproved,
     },
   };
+};
+
+const buildReportRemovalMessage = (baseMessage) => {
+  const prefix = 'Deze foto is handmatig gerapporteerd. Na controle is de moderatie het eens met de melding en is de foto verwijderd.';
+  const trimmed = String(baseMessage || '').trim();
+  if (!trimmed) return prefix;
+  const available = 280 - prefix.length - 1;
+  if (available <= 0) return prefix;
+  const suffix = trimmed.slice(0, available);
+  return `${prefix} ${suffix}`;
 };
 
 const normalizeMakerTags = (makerTags) => {
@@ -211,6 +229,19 @@ const buildFingerprint = async (buffer) => {
   };
 };
 
+const buildFingerprintFromUrl = async (imageUrl) => {
+  if (!imageUrl) return null;
+  const response = await fetch(imageUrl);
+  if (!response.ok) {
+    const error = new Error('Kon afbeelding niet ophalen.');
+    error.status = response.status;
+    throw error;
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  return buildFingerprint(buffer);
+};
+
 const resolveTimestamp = (value) => {
   if (!value) return null;
   if (typeof value.toDate === 'function') {
@@ -276,6 +307,23 @@ const findNearDuplicateUpload = async ({ dhash, dhashPrefix }) => {
     }
   });
   return best;
+};
+
+const isFingerprintBlocked = (fingerprints, blockedFingerprints = []) => {
+  if (!fingerprints || !Array.isArray(blockedFingerprints)) return false;
+  if (blockedFingerprints.some((item) => item?.sha256 && item.sha256 === fingerprints.sha256)) {
+    return true;
+  }
+  if (!fingerprints.dhash || !fingerprints.dhashPrefix) return false;
+  const candidates = blockedFingerprints.filter((item) => item?.dhashPrefix === fingerprints.dhashPrefix);
+  for (const candidate of candidates) {
+    if (!candidate?.dhash) continue;
+    const distance = hammingDistance(fingerprints.dhash, candidate.dhash);
+    if (distance <= dhashThreshold) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const extractLabelScore = (labels, keywords) => {
@@ -376,6 +424,34 @@ export const moderateImage = onRequest({ cors: true }, async (req, res) => {
   }
 
   let matchedUpload = null;
+  let userModeration = null;
+  let blockedByReport = false;
+  if (userId) {
+    try {
+      userModeration = await getUserModeration(userId);
+      blockedByReport = isFingerprintBlocked(fingerprints, userModeration?.data?.blockedFingerprints);
+    } catch (error) {
+      logger.error('User moderation ophalen mislukt.', error);
+    }
+  }
+
+  if (blockedByReport) {
+    res.status(200).json({
+      outcome: 'forbidden',
+      appliedTriggers: [buildTriggerRecord('reportedContent', 1, 'manualReport')],
+      suggestedTriggers: [],
+      forbiddenReasons: [{ trigger: 'reportedContent', reason: 'Manual report removal', score: 1 }],
+      showSuggestionUI: false,
+      canRequestReview: false,
+      reviewCaseId: null,
+      fingerprints,
+      legacy: {
+        labels: [],
+        isSensitive: true,
+      },
+    });
+    return;
+  }
   try {
     matchedUpload = await findExactUpload(fingerprints.sha256);
     if (!matchedUpload) {
@@ -668,6 +744,67 @@ export const isModerator = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
+export const reportPost = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    requireVerifiedPasswordUser(decoded);
+    const body = parseJsonBody(req);
+    const {
+      postId,
+      imageUrl,
+      title = null,
+      authorId = null,
+      authorName = null,
+      postPath = null,
+      contributorUids = [],
+    } = body || {};
+    if (!postId || !imageUrl) {
+      res.status(400).json({ error: 'postId and imageUrl are required' });
+      return;
+    }
+    const normalizedContributors = Array.isArray(contributorUids)
+      ? [...new Set(contributorUids.filter(Boolean))]
+      : [];
+    let reportedFingerprints = null;
+    try {
+      reportedFingerprints = await buildFingerprintFromUrl(imageUrl);
+    } catch (error) {
+      logger.error('Reported image fingerprint mislukt.', error);
+    }
+
+    const reviewRef = await db.collection('reviewCases').add({
+      caseType: 'report',
+      status: 'inReview',
+      decision: null,
+      userId: authorId || null,
+      reportedPost: {
+        id: postId,
+        imageUrl,
+        title,
+        authorId: authorId || null,
+        authorName: authorName || null,
+      },
+      postPath: typeof postPath === 'string' ? postPath : null,
+      contributorUids: normalizedContributors,
+      reportedFingerprints,
+      reportedByUid: decoded.uid,
+      reportedByEmail: decoded.email || null,
+      reportedByName: decoded.name || null,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).json({ ok: true, reviewCaseId: reviewRef.id });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to report post' });
+  }
+});
+
 export const moderatorClaim = onRequest({ cors: true }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -801,6 +938,9 @@ export const moderatorDecide = onRequest({ cors: true }, async (req, res) => {
     const reviewRef = db.collection('reviewCases').doc(reviewCaseId);
     let uploadId = null;
     let userId = null;
+    let reportPostId = null;
+    let caseType = 'upload';
+    let finalDecisionMessage = trimmedMessage;
     let reviewSnapshotData = null;
 
     await db.runTransaction(async (transaction) => {
@@ -812,6 +952,12 @@ export const moderatorDecide = onRequest({ cors: true }, async (req, res) => {
       }
       const data = snapshot.data();
       reviewSnapshotData = data;
+      caseType = data?.caseType || 'upload';
+      const reportedPost = data?.reportedPost || null;
+      reportPostId = reportedPost?.id || data?.reportedPostId || null;
+      if (caseType === 'report' && decision === 'approved') {
+        finalDecisionMessage = buildReportRemovalMessage(trimmedMessage);
+      }
       if (data?.status !== 'inReview') {
         const error = new Error('Review case already decided');
         error.status = 409;
@@ -836,68 +982,118 @@ export const moderatorDecide = onRequest({ cors: true }, async (req, res) => {
       });
 
       uploadId = data?.uploadId || (Array.isArray(data?.linkedUploadIds) ? data.linkedUploadIds[0] : null);
-      userId = data?.userId || null;
-      if (!uploadId || !userId) {
-        const error = new Error('Review case missing uploadId or userId');
+      userId = data?.userId || reportedPost?.authorId || null;
+      if (!uploadId && caseType !== 'report') {
+        const error = new Error('Review case missing uploadId');
+        error.status = 400;
+        throw error;
+      }
+      if (caseType === 'report' && !reportPostId) {
+        const error = new Error('Review case missing reported post');
         error.status = 400;
         throw error;
       }
 
-      const uploadRef = db.collection('uploads').doc(uploadId);
-      const isApproved = decision === 'approved';
-      transaction.update(uploadRef, {
-        reviewStatus: decision,
-        reviewDecisionMessagePublic: trimmedMessage,
-        reviewDecisionReasons: decisionReasons,
-        reviewDecisionAt: FieldValue.serverTimestamp(),
-        publicationStatus: isApproved ? 'pending' : 'blocked',
-        approvedAt: isApproved ? FieldValue.serverTimestamp() : FieldValue.delete(),
-        reviewCaseId,
-      });
+      if (uploadId) {
+        const uploadRef = db.collection('uploads').doc(uploadId);
+        const isApproved = decision === 'approved';
+        transaction.update(uploadRef, {
+          reviewStatus: decision,
+          reviewDecisionMessagePublic: finalDecisionMessage,
+          reviewDecisionReasons: decisionReasons,
+          reviewDecisionAt: FieldValue.serverTimestamp(),
+          publicationStatus: isApproved ? 'pending' : 'blocked',
+          approvedAt: isApproved ? FieldValue.serverTimestamp() : FieldValue.delete(),
+          reviewCaseId,
+        });
+      }
 
-      transaction.update(reviewRef, {
+      const reviewUpdate = {
         status: decision,
-        decisionMessagePublic: trimmedMessage,
+        decisionMessagePublic: finalDecisionMessage,
         decisionReasons,
         moderatorNoteInternal: moderatorNoteInternal || null,
         decidedAt: FieldValue.serverTimestamp(),
         decidedByUid: decoded.uid,
         decidedByEmail: email,
-        uploadId,
         lock: FieldValue.delete(),
-      });
+      };
+      if (uploadId) {
+        reviewUpdate.uploadId = uploadId;
+      }
+      if (reportPostId) {
+        reviewUpdate.reportedPostId = reportPostId;
+      }
+      transaction.update(reviewRef, reviewUpdate);
     });
 
-    if (!uploadId || !userId) {
-      res.status(500).json({ error: 'Failed to update decision' });
-      return;
+    const postPath = reviewSnapshotData?.postPath;
+    if (caseType === 'report' && decision === 'approved' && postPath) {
+      try {
+        await db.doc(postPath).delete();
+      } catch (error) {
+        logger.error('Reported post delete mislukt.', error);
+      }
     }
 
-    const threadRef = db.collection('users').doc(userId).collection('threads').doc('moderation');
-    const messageRef = threadRef.collection('messages').doc();
-    const decisionMessage = createDecisionMessage({
-      decision,
-      decisionMessagePublic: trimmedMessage,
-      decisionReasons,
-    });
-    await Promise.all([
-      threadRef.set(
-        {
-          title: 'Artes Moderatie',
-          pinned: true,
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-          lastMessageAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      ),
-      messageRef.set({
-        ...decisionMessage,
-        uploadId,
-        reviewCaseId,
-        createdAt: FieldValue.serverTimestamp(),
-      }),
-    ]);
+    if (caseType === 'report' && decision === 'approved' && userId && reviewSnapshotData?.reportedFingerprints) {
+      try {
+        const moderation = await getUserModeration(userId);
+        if (moderation) {
+          await moderation.ref.set(
+            {
+              blockedFingerprints: FieldValue.arrayUnion({
+                ...reviewSnapshotData.reportedFingerprints,
+                reportedAt: FieldValue.serverTimestamp(),
+                reviewCaseId,
+              }),
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+      } catch (error) {
+        logger.error('Blocked fingerprint opslaan mislukt.', error);
+      }
+    }
+
+    const contributorUids = Array.isArray(reviewSnapshotData?.contributorUids)
+      ? reviewSnapshotData.contributorUids
+      : [];
+    const recipientUids = [...new Set([userId, ...contributorUids].filter(Boolean))];
+    if (recipientUids.length > 0) {
+      const decisionMessage = createDecisionMessage({
+        decision,
+        decisionMessagePublic: finalDecisionMessage,
+        decisionReasons,
+        caseType,
+      });
+      await Promise.all(
+        recipientUids.map(async (recipientUid) => {
+          const threadRef = db.collection('users').doc(recipientUid).collection('threads').doc('moderation');
+          const messageRef = threadRef.collection('messages').doc();
+          await Promise.all([
+            threadRef.set(
+              {
+                title: 'Artes Moderatie',
+                pinned: true,
+                createdAt: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
+                lastMessageAt: FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            ),
+            messageRef.set({
+              ...decisionMessage,
+              uploadId: uploadId || null,
+              reportedPostId: reportPostId || null,
+              reviewCaseId,
+              createdAt: FieldValue.serverTimestamp(),
+            }),
+          ]);
+        })
+      );
+    }
 
     res.status(200).json({ ok: true, reviewCaseId, uploadId, userId, reviewCase: reviewSnapshotData });
   } catch (error) {

@@ -9,6 +9,7 @@ import {
 import {
   createProfile,
   fetchUserIndex,
+  getAppId,
   publishPost,
   seedDemoContent,
   subscribeToPosts,
@@ -818,7 +819,16 @@ export default function ArtesApp() {
             allUsers={users}
           />
         )}
-        {selectedPost && <PhotoDetailModal post={selectedPost} allPosts={posts} onClose={() => setSelectedPost(null)} onUserClick={setQuickProfileId} />}
+        {selectedPost && (
+          <PhotoDetailModal
+            post={selectedPost}
+            allPosts={posts}
+            onClose={() => setSelectedPost(null)}
+            onUserClick={setQuickProfileId}
+            authUser={authUser}
+            moderationApiBase={moderationApiBase}
+          />
+        )}
         {shadowProfileName && <ShadowProfileModal name={shadowProfileName} posts={posts} onClose={() => setShadowProfileName(null)} onPostClick={setSelectedPost} />}
 
       </div>
@@ -1887,7 +1897,9 @@ function ModerationPanel({ moderationApiBase, authUser }) {
   }
 
   const isLockedByOther = selectedCaseId && !claimState.claimed;
-  const uploadPreviewUrl = selectedUpload?.previewUrl || selectedUpload?.imageUrl || selectedUpload?.image || null;
+  const isReportCase = selectedCase?.caseType === 'report';
+  const reportedPost = selectedCase?.reportedPost || null;
+  const uploadPreviewUrl = selectedUpload?.previewUrl || selectedUpload?.imageUrl || selectedUpload?.image || reportedPost?.imageUrl || null;
   const tags = selectedUpload?.appliedTriggers || selectedUpload?.makerTags || [];
 
   return (
@@ -1911,8 +1923,13 @@ function ModerationPanel({ moderationApiBase, authUser }) {
                   : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
               }`}
             >
-              <p className="text-sm font-semibold dark:text-white">Case {item.id.slice(0, 6)}</p>
-              <p className="text-xs text-slate-500">Uploader: {item.userId || 'Onbekend'}</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold dark:text-white">Case {item.id.slice(0, 6)}</p>
+                <span className="text-[10px] uppercase tracking-wide text-slate-400">
+                  {item.caseType === 'report' ? 'Melding' : 'Upload'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">Uploader: {item.userId || item.reportedPost?.authorId || 'Onbekend'}</p>
             </button>
           ))}
           {cases.length === 0 && (
@@ -1950,6 +1967,14 @@ function ModerationPanel({ moderationApiBase, authUser }) {
                       <span className="text-xs text-slate-400">Geen preview</span>
                     )}
                   </div>
+                  {reportedPost && (
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-xs text-slate-500 dark:text-slate-300 space-y-1">
+                      <p className="font-semibold text-slate-600 dark:text-slate-200">Gemelde post</p>
+                      {reportedPost.title && <p className="text-slate-500">Titel: {reportedPost.title}</p>}
+                      <p className="text-slate-500">Post ID: {reportedPost.id}</p>
+                      {reportedPost.authorName && <p className="text-slate-500">Maker: {reportedPost.authorName}</p>}
+                    </div>
+                  )}
                   <div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">Uploader tags</p>
                     <div className="flex flex-wrap gap-2 mt-2">
@@ -1958,7 +1983,7 @@ function ModerationPanel({ moderationApiBase, authUser }) {
                           {tag}
                         </span>
                       )) : (
-                        <span className="text-xs text-slate-400">Geen tags</span>
+                        <span className="text-xs text-slate-400">{isReportCase ? 'Geen tags beschikbaar' : 'Geen tags'}</span>
                       )}
                     </div>
                   </div>
@@ -2683,7 +2708,73 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers }) {
   if (!fetchedUser) return <div>Loading...</div>;
   return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} />;
 }
-function PhotoDetailModal({ post, onClose }) { return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-10"><img src={post.imageUrl} className="max-h-full" /><button onClick={onClose} className="absolute top-4 right-4 text-white"><X/></button></div> }
+function PhotoDetailModal({ post, onClose, authUser, moderationApiBase }) {
+  const [reportState, setReportState] = useState({ status: 'idle', error: null });
+  const canReport = Boolean(authUser && moderationApiBase);
+
+  const handleReport = async () => {
+    if (!canReport || reportState.status === 'pending' || reportState.status === 'sent') return;
+    const shouldReport = window.confirm('Weet je zeker dat je deze foto wilt rapporteren?');
+    if (!shouldReport) return;
+    setReportState({ status: 'pending', error: null });
+    try {
+      const appId = getAppId();
+      const postPath = appId ? `artifacts/${appId}/public/data/posts/${post.id}` : null;
+      const contributorUids = Array.isArray(post.credits)
+        ? post.credits.map((credit) => credit?.uid).filter(Boolean)
+        : [];
+      const reviewerTargets = new Set([post.authorId, ...contributorUids].filter(Boolean));
+      const token = await authUser.getIdToken();
+      const response = await fetch(`${moderationApiBase}/reportPost`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          postId: post.id,
+          imageUrl: post.imageUrl,
+          title: post.title || null,
+          authorId: post.authorId || null,
+          authorName: post.authorName || null,
+          postPath,
+          contributorUids: Array.from(reviewerTargets),
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload?.error || 'Rapporteren mislukt.');
+      }
+      setReportState({ status: 'sent', error: null });
+    } catch (error) {
+      setReportState({ status: 'idle', error: error.message || 'Rapporteren mislukt.' });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-10">
+      <img src={post.imageUrl} className="max-h-full" />
+      <div className="absolute top-4 left-4 flex items-center gap-3 text-xs text-white/70">
+        <button
+          type="button"
+          onClick={handleReport}
+          disabled={!canReport || reportState.status === 'pending'}
+          className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 hover:bg-white/20 disabled:opacity-60"
+        >
+          <AlertTriangle className="w-4 h-4" />
+          Rapporteer foto
+        </button>
+        {reportState.status === 'sent' && (
+          <span className="text-emerald-200">Melding verstuurd.</span>
+        )}
+        {reportState.error && (
+          <span className="text-red-200">{reportState.error}</span>
+        )}
+      </div>
+      <button onClick={onClose} className="absolute top-4 right-4 text-white"><X/></button>
+    </div>
+  );
+}
 function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
   const [userProfile, setUserProfile] = useState(null);
 

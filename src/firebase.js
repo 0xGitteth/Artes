@@ -96,6 +96,40 @@ export const reloadCurrentUser = async () => {
   return auth.currentUser;
 };
 
+const resolveDisplayName = (user) => {
+  if (user?.displayName) return user.displayName;
+  if (user?.email) return user.email.split('@')[0];
+  return 'Artes gebruiker';
+};
+
+const normalizeUsername = (value) => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '')
+  .slice(0, 20);
+
+const generateUsername = (displayName, uid) => {
+  const base = normalizeUsername(displayName) || 'artes';
+  const suffix = uid ? uid.slice(0, 4).toLowerCase() : Math.random().toString(36).slice(2, 6);
+  const maxBaseLength = Math.max(0, 20 - suffix.length);
+  return `${base.slice(0, maxBaseLength)}${suffix}`;
+};
+
+const upsertPublicUserProfile = async (uid, payload) => {
+  if (!uid) return;
+  await setDoc(
+    doc(getFirebaseDb(), 'publicUsers', uid),
+    {
+      uid,
+      username: payload.username,
+      displayName: payload.displayName,
+      displayNameLower: payload.displayNameLower,
+      photoURL: payload.photoURL ?? null,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+};
+
 export const createUserProfile = async (uid, profile) => {
   const payload = {
     ...profile,
@@ -111,17 +145,35 @@ export const updateUserProfile = async (uid, data) => {
     { ...data, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  const publicUpdates = {};
+  if (data.displayName) {
+    publicUpdates.displayName = data.displayName;
+    publicUpdates.displayNameLower = String(data.displayName || '').toLowerCase();
+  }
+  if (data.username) {
+    publicUpdates.username = normalizeUsername(data.username);
+  }
+  if (data.photoURL || data.avatar) {
+    publicUpdates.photoURL = data.photoURL ?? data.avatar ?? null;
+  }
+  if (Object.keys(publicUpdates).length > 0) {
+    const publicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', uid));
+    const existing = publicSnap.exists() ? publicSnap.data() : {};
+    const displayName = publicUpdates.displayName || existing.displayName || 'Artes gebruiker';
+    const displayNameLower = publicUpdates.displayNameLower || existing.displayNameLower || displayName.toLowerCase();
+    const username = publicUpdates.username || existing.username || generateUsername(displayName, uid);
+    await upsertPublicUserProfile(uid, {
+      username,
+      displayName,
+      displayNameLower,
+      photoURL: publicUpdates.photoURL ?? existing.photoURL ?? null,
+    });
+  }
 };
 
 export const fetchUserProfile = (uid) => getDoc(doc(getFirebaseDb(), 'users', uid));
 
 export const subscribeToProfile = (uid, cb) => onSnapshot(doc(getFirebaseDb(), 'users', uid), cb);
-
-const resolveDisplayName = (user) => {
-  if (user?.displayName) return user.displayName;
-  if (user?.email) return user.email.split('@')[0];
-  return 'Artes gebruiker';
-};
 
 const resolveAuthProvider = (user) => {
   if (user?.providerData?.some((provider) => provider?.providerId === 'google.com')) {
@@ -151,6 +203,15 @@ export const ensureUserProfile = async (user) => {
     if (Object.keys(updates).length) {
       await updateUserProfile(user.uid, updates);
     }
+    const displayName = updates.displayName || data.displayName || resolvedDisplayName;
+    const displayNameLower = String(displayName || '').toLowerCase();
+    const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
+    await upsertPublicUserProfile(user.uid, {
+      username,
+      displayName,
+      displayNameLower,
+      photoURL: data.photoURL ?? user.photoURL ?? null,
+    });
     return { ...data, ...updates };
   }
   const profile = {
@@ -163,6 +224,14 @@ export const ensureUserProfile = async (user) => {
     onboardingComplete: false,
   };
   await createUserProfile(user.uid, profile);
+  const displayNameLower = String(resolvedDisplayName || '').toLowerCase();
+  const username = generateUsername(resolvedDisplayName, user.uid);
+  await upsertPublicUserProfile(user.uid, {
+    username,
+    displayName: resolvedDisplayName,
+    displayNameLower,
+    photoURL: user.photoURL ?? null,
+  });
   return profile;
 };
 

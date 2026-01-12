@@ -4,7 +4,7 @@ import {
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
-  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2
+  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle
 } from 'lucide-react';
 import {
   createProfile,
@@ -788,7 +788,6 @@ export default function ArtesApp() {
               onPostClick={setSelectedPost}
               allUsers={users}
               uploads={uploads}
-              onOpenMessages={() => setView('chat')}
             />
           )}
           
@@ -820,6 +819,10 @@ export default function ArtesApp() {
             onOpenModeration={() => {
               setShowSettingsModal(false);
               setView('moderation');
+            }}
+            onOpenModerationChat={() => {
+              setShowSettingsModal(false);
+              setView('chat');
             }}
           />
         )}
@@ -1359,7 +1362,7 @@ function NavBar({ view, setView, onOpenSettings }) {
    );
 }
 
-function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, uploads = [], onOpenMessages }) {
+function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, uploads = [] }) {
   if (!profile) return null;
   const normalizedProfile = normalizeProfileData(profile);
   const roles = normalizedProfile.roles;
@@ -1443,17 +1446,8 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
                <div className="flex items-center justify-between mb-4">
                  <div>
                    <h2 className="text-xl font-semibold dark:text-white">Upload status</h2>
-                   <p className="text-sm text-slate-500 dark:text-slate-400">Moderatie updates vind je ook in de chat “Artes Moderatie”.</p>
+                   <p className="text-sm text-slate-500 dark:text-slate-400">Moderatie updates verschijnen hier zodra ze beschikbaar zijn.</p>
                  </div>
-                 {onOpenMessages && (
-                   <button
-                     type="button"
-                     onClick={onOpenMessages}
-                     className="text-sm font-semibold text-blue-600 hover:text-blue-700"
-                   >
-                     Open chat
-                   </button>
-                 )}
                </div>
                {uploads.length === 0 ? (
                  <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-6 text-sm text-slate-500 dark:text-slate-400">
@@ -2875,7 +2869,7 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
     return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"><div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col"><div className="h-64 bg-indigo-900 flex items-center justify-center flex-col text-white"><div className="text-4xl font-bold mb-2">{name}</div><p>Tijdelijk Profiel. Claim dit profiel.</p><button onClick={onClose} className="absolute top-4 right-4"><X/></button></div><div className="flex-1 p-6 overflow-y-auto no-scrollbar"><div className="grid grid-cols-3 gap-2">{shadowPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div></div></div></div> 
 }
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenModerationChat }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white w-80 h-full p-6 flex flex-col gap-6">
@@ -2887,17 +2881,31 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration }) {
                     <h4 className="text-xs uppercase font-bold text-slate-400">Weergave</h4>
                     <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Dark Mode</span><Moon className="w-4 h-4"/></div>
                     <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Taal</span><Globe className="w-4 h-4"/></div>
-                    <h4 className="text-xs uppercase font-bold text-slate-400">Overig</h4>
                     {moderatorAccess && (
-                      <button
-                        type="button"
-                        onClick={onOpenModeration}
-                        className="w-full p-3 bg-slate-50 rounded flex justify-between items-center text-left"
-                      >
-                        <span>Moderatie</span>
-                        <Shield className="w-4 h-4"/>
-                      </button>
+                      <>
+                        <h4 className="text-xs uppercase font-bold text-slate-400">Moderatie</h4>
+                        <button
+                          type="button"
+                          onClick={onOpenModeration}
+                          className="w-full p-3 bg-slate-50 rounded flex justify-between items-center text-left"
+                        >
+                          <span>Moderatieportaal</span>
+                          <Shield className="w-4 h-4"/>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onOpenModerationChat}
+                          className="w-full p-3 bg-slate-50 rounded flex justify-between items-center text-left"
+                        >
+                          <span>Moderatiechat</span>
+                          <MessageCircle className="w-4 h-4"/>
+                        </button>
+                        <p className="text-xs text-slate-500">
+                          Beoordeel foto’s en chat met moderators vanuit het portaal.
+                        </p>
+                      </>
                     )}
+                    <h4 className="text-xs uppercase font-bold text-slate-400">Overig</h4>
                     <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Support</span><HelpCircle className="w-4 h-4"/></div>
                 </div>
             </div>

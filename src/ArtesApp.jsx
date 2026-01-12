@@ -313,7 +313,8 @@ export default function ArtesApp() {
   const [uploads, setUploads] = useState([]);
   const [moderationModal, setModerationModal] = useState(null);
   const [moderationActionPending, setModerationActionPending] = useState(false);
-  const [moderatorAccess, setModeratorAccess] = useState(false);
+  const [moderatorAccess, setModeratorAccess] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
 
   // Data
   const [posts, setPosts] = useState([]);
@@ -366,9 +367,7 @@ export default function ArtesApp() {
         const path = window.location.pathname || '/';
         const routedView = path.startsWith('/moderation')
           ? 'moderation'
-          : path.startsWith('/chat')
-            ? 'chat'
-            : baseView;
+          : baseView;
         setView(routedView);
       } catch (e) {
         console.error('Failed to load profile', e);
@@ -394,8 +393,8 @@ export default function ArtesApp() {
       if (path.startsWith('/moderation')) {
         setView('moderation');
       } else if (path.startsWith('/chat')) {
-        setView('chat');
-      } else if (view === 'moderation' || view === 'chat') {
+        setView('gallery');
+      } else if (view === 'moderation') {
         setView('gallery');
       }
     };
@@ -406,8 +405,6 @@ export default function ArtesApp() {
   useEffect(() => {
     if (view === 'moderation') {
       window.history.pushState({}, '', '/moderation');
-    } else if (view === 'chat') {
-      window.history.pushState({}, '', '/chat');
     } else if (window.location.pathname === '/moderation' || window.location.pathname === '/chat') {
       window.history.pushState({}, '', '/');
     }
@@ -454,6 +451,7 @@ export default function ArtesApp() {
       return;
     }
     let active = true;
+    setModeratorAccess(null);
     authUser.getIdToken()
       .then((token) => fetch(`${moderationApiBase}/isModerator`, {
         method: 'GET',
@@ -472,6 +470,20 @@ export default function ArtesApp() {
       active = false;
     };
   }, [authUser, moderationApiBase]);
+
+  useEffect(() => {
+    if (view !== 'moderation' || profileLoading) return;
+    if (moderatorAccess === false) {
+      setView('gallery');
+      setToastMessage('No access');
+    }
+  }, [view, profileLoading, moderatorAccess]);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = setTimeout(() => setToastMessage(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toastMessage]);
 
   useEffect(() => {
     if (!authUser || !moderationApiBase) return;
@@ -758,7 +770,16 @@ export default function ArtesApp() {
           )}
 
           {!profileLoading && view === 'moderation' && (
-            <ModerationPanel moderationApiBase={moderationApiBase} authUser={authUser} />
+            <ModerationPortal
+              moderationApiBase={moderationApiBase}
+              authUser={authUser}
+              isModerator={moderatorAccess}
+              uploads={uploads}
+              moderationModal={moderationModal}
+              moderationActionPending={moderationActionPending}
+              onModerationAction={handleModerationAction}
+              onCloseModerationModal={() => handleModerationAction('dismiss')}
+            />
           )}
 
           {!profileLoading && view === 'discover' && (
@@ -774,10 +795,6 @@ export default function ArtesApp() {
             <CommunityDetail id={view.split('_')[1]} setView={setView} />
           )}
 
-          {!profileLoading && view === 'chat' && authUser?.uid && (
-            <ChatPanel authUser={authUser} functionsBase={moderationApiBase} />
-          )}
-
           {/* Wrapper logic for viewing profiles */}
           {!profileLoading && view === 'profile' && (
             <ImmersiveProfile 
@@ -787,7 +804,6 @@ export default function ArtesApp() {
               onOpenSettings={() => setShowEditProfile(true)}
               onPostClick={setSelectedPost}
               allUsers={users}
-              uploads={uploads}
             />
           )}
           
@@ -820,21 +836,14 @@ export default function ArtesApp() {
               setShowSettingsModal(false);
               setView('moderation');
             }}
-            onOpenModerationChat={() => {
-              setShowSettingsModal(false);
-              setView('chat');
-            }}
           />
         )}
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
-        {moderationModal && (
-          <ModerationDecisionModal
-            message={moderationModal}
-            onClose={() => handleModerationAction('dismiss')}
-            onAction={handleModerationAction}
-            pending={moderationActionPending}
-          />
+        {toastMessage && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-slate-900 text-white text-sm px-4 py-2 rounded-full shadow-lg">
+            {toastMessage}
+          </div>
         )}
         
         {quickProfileId && (
@@ -1362,7 +1371,7 @@ function NavBar({ view, setView, onOpenSettings }) {
    );
 }
 
-function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, uploads = [] }) {
+function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }) {
   if (!profile) return null;
   const normalizedProfile = normalizeProfileData(profile);
   const roles = normalizedProfile.roles;
@@ -1376,12 +1385,6 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
   const hasAgency = Boolean(agencyName);
   const hasCompany = Boolean(companyName);
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
-  const renderReviewStatus = (upload) => {
-    if (upload.reviewStatus === 'approved') return 'Goedgekeurd';
-    if (upload.reviewStatus === 'rejected') return 'Afgekeurd';
-    return 'In review';
-  };
-
   return (
      <div className="min-h-screen bg-white dark:bg-slate-900 pb-20">
         <div className="relative h-[520px] w-full overflow-hidden">
@@ -1441,58 +1444,6 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
         </div>
         
         <div className="max-w-6xl mx-auto px-6 py-8 relative z-20">
-           {isOwn && (
-             <div className="mb-10">
-               <div className="flex items-center justify-between mb-4">
-                 <div>
-                   <h2 className="text-xl font-semibold dark:text-white">Upload status</h2>
-                   <p className="text-sm text-slate-500 dark:text-slate-400">Moderatie updates verschijnen hier zodra ze beschikbaar zijn.</p>
-                 </div>
-               </div>
-               {uploads.length === 0 ? (
-                 <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-6 text-sm text-slate-500 dark:text-slate-400">
-                   Nog geen uploads in moderatie.
-                 </div>
-               ) : (
-                 <div className="space-y-4">
-                   {uploads.map((upload) => (
-                     <div key={upload.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 space-y-3">
-                       <div className="flex flex-wrap items-center justify-between gap-2">
-                         <div>
-                           <p className="text-sm font-semibold dark:text-white">Upload {upload.id.slice(0, 6)}</p>
-                           <p className="text-xs text-slate-500">{renderReviewStatus(upload)}</p>
-                         </div>
-                         <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                           upload.reviewStatus === 'approved'
-                             ? 'bg-emerald-100 text-emerald-700'
-                             : upload.reviewStatus === 'rejected'
-                               ? 'bg-red-100 text-red-700'
-                               : 'bg-slate-100 text-slate-600'
-                         }`}>
-                           {renderReviewStatus(upload)}
-                         </span>
-                       </div>
-                       {upload.reviewDecisionMessagePublic && (
-                         <p className="text-sm text-slate-700 dark:text-slate-200">{upload.reviewDecisionMessagePublic}</p>
-                       )}
-                       {Array.isArray(upload.reviewDecisionReasons) && upload.reviewDecisionReasons.length > 0 && (
-                         <div className="flex flex-wrap gap-2">
-                           {upload.reviewDecisionReasons.map((reason) => {
-                             const label = MODERATION_REASON_PRESETS.find((preset) => preset.id === reason)?.label || reason;
-                             return (
-                               <span key={reason} className="text-[11px] px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200">
-                                 {label}
-                               </span>
-                             );
-                           })}
-                         </div>
-                       )}
-                     </div>
-                   ))}
-                 </div>
-               )}
-             </div>
-           )}
            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {posts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-[4/5] bg-slate-200 rounded-sm overflow-hidden cursor-pointer"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}
            </div>
@@ -1556,8 +1507,66 @@ function ModerationDecisionModal({ message, onClose, onAction, pending }) {
   );
 }
 
-function ModerationPanel({ moderationApiBase, authUser }) {
-  const [isModerator, setIsModerator] = useState(null);
+function UploadStatusPanel({ uploads = [] }) {
+  const renderReviewStatus = (upload) => {
+    if (upload.reviewStatus === 'approved') return 'Goedgekeurd';
+    if (upload.reviewStatus === 'rejected') return 'Afgekeurd';
+    return 'In review';
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold dark:text-white">Upload status</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Moderatie updates verschijnen hier zodra ze beschikbaar zijn.</p>
+      </div>
+      {uploads.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-6 text-sm text-slate-500 dark:text-slate-400">
+          Nog geen uploads in moderatie.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {uploads.map((upload) => (
+            <div key={upload.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold dark:text-white">Upload {upload.id.slice(0, 6)}</p>
+                  <p className="text-xs text-slate-500">{renderReviewStatus(upload)}</p>
+                </div>
+                <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
+                  upload.reviewStatus === 'approved'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : upload.reviewStatus === 'rejected'
+                      ? 'bg-red-100 text-red-700'
+                      : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {renderReviewStatus(upload)}
+                </span>
+              </div>
+              {upload.reviewDecisionMessagePublic && (
+                <p className="text-sm text-slate-700 dark:text-slate-200">{upload.reviewDecisionMessagePublic}</p>
+              )}
+              {Array.isArray(upload.reviewDecisionReasons) && upload.reviewDecisionReasons.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {upload.reviewDecisionReasons.map((reason) => {
+                    const label = MODERATION_REASON_PRESETS.find((preset) => preset.id === reason)?.label || reason;
+                    return (
+                      <span key={reason} className="text-[11px] px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200">
+                        {label}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter }) {
   const [cases, setCases] = useState([]);
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [selectedCase, setSelectedCase] = useState(null);
@@ -1572,28 +1581,6 @@ function ModerationPanel({ moderationApiBase, authUser }) {
   const [decisionError, setDecisionError] = useState(null);
 
   useEffect(() => {
-    if (!authUser || !moderationApiBase) return;
-    let active = true;
-    authUser.getIdToken()
-      .then((token) => fetch(`${moderationApiBase}/isModerator`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
-      }))
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!active) return;
-        setIsModerator(Boolean(data?.isModerator));
-      })
-      .catch(() => {
-        if (!active) return;
-        setIsModerator(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [authUser, moderationApiBase]);
-
-  useEffect(() => {
     if (!isModerator) return;
     const db = getFirebaseDbInstance();
     const q = query(collection(db, 'reviewCases'), where('status', '==', 'inReview'), orderBy('createdAt', 'desc'));
@@ -1602,15 +1589,28 @@ function ModerationPanel({ moderationApiBase, authUser }) {
     });
   }, [isModerator]);
 
+  const filteredCases = useMemo(() => {
+    if (caseTypeFilter === 'report') {
+      return cases.filter((item) => item.caseType === 'report');
+    }
+    if (caseTypeFilter === 'upload') {
+      return cases.filter((item) => item.caseType !== 'report');
+    }
+    return cases;
+  }, [cases, caseTypeFilter]);
+
   useEffect(() => {
     if (!selectedCaseId) {
       setSelectedCase(null);
       setSelectedUpload(null);
       return;
     }
-    const found = cases.find((item) => item.id === selectedCaseId) || null;
+    const found = filteredCases.find((item) => item.id === selectedCaseId) || null;
     setSelectedCase(found);
-  }, [selectedCaseId, cases]);
+    if (!found) {
+      setSelectedCaseId(null);
+    }
+  }, [selectedCaseId, filteredCases]);
 
   useEffect(() => {
     if (!selectedCase) {
@@ -1734,15 +1734,15 @@ function ModerationPanel({ moderationApiBase, authUser }) {
         setMessageTouched(false);
       }
       if (event.key.toLowerCase() === 'j') {
-        const index = cases.findIndex((item) => item.id === selectedCaseId);
-        if (index < cases.length - 1) {
-          setSelectedCaseId(cases[index + 1].id);
+        const index = filteredCases.findIndex((item) => item.id === selectedCaseId);
+        if (index < filteredCases.length - 1) {
+          setSelectedCaseId(filteredCases[index + 1].id);
         }
       }
       if (event.key.toLowerCase() === 'k') {
-        const index = cases.findIndex((item) => item.id === selectedCaseId);
+        const index = filteredCases.findIndex((item) => item.id === selectedCaseId);
         if (index > 0) {
-          setSelectedCaseId(cases[index - 1].id);
+          setSelectedCaseId(filteredCases[index - 1].id);
         }
       }
       if (event.key.toLowerCase() === 'n') {
@@ -1755,7 +1755,7 @@ function ModerationPanel({ moderationApiBase, authUser }) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [cases, selectedCaseId, isModerator]);
+  }, [filteredCases, selectedCaseId, isModerator]);
 
   const toggleReason = (reasonId) => {
     setMessageTouched(false);
@@ -1837,19 +1837,20 @@ function ModerationPanel({ moderationApiBase, authUser }) {
   const reportedPost = selectedCase?.reportedPost || null;
   const uploadPreviewUrl = selectedUpload?.previewUrl || selectedUpload?.imageUrl || selectedUpload?.image || reportedPost?.imageUrl || null;
   const tags = selectedUpload?.appliedTriggers || selectedUpload?.makerTags || [];
+  const queueTitle = caseTypeFilter === 'report' ? 'Reported photos' : 'Photos in review';
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
       <div className="space-y-4">
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 flex items-center justify-between">
           <div>
-            <h2 className="font-semibold dark:text-white">Moderatie queue</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{cases.length} in review</p>
+            <h2 className="font-semibold dark:text-white">{queueTitle}</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{filteredCases.length} in review</p>
           </div>
           <div className="text-xs text-slate-400">J/K</div>
         </div>
         <div className="space-y-3 max-h-[70vh] overflow-y-auto no-scrollbar">
-          {cases.map((item) => (
+          {filteredCases.map((item) => (
             <button
               key={item.id}
               onClick={() => setSelectedCaseId(item.id)}
@@ -1868,7 +1869,7 @@ function ModerationPanel({ moderationApiBase, authUser }) {
               <p className="text-xs text-slate-500">Uploader: {item.userId || item.reportedPost?.authorId || 'Onbekend'}</p>
             </button>
           ))}
-          {cases.length === 0 && (
+          {filteredCases.length === 0 && (
             <div className="text-xs text-slate-500 dark:text-slate-400">Geen open cases.</div>
           )}
         </div>
@@ -1999,6 +2000,118 @@ function ModerationPanel({ moderationApiBase, authUser }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function ModerationPortal({
+  moderationApiBase,
+  authUser,
+  isModerator,
+  uploads,
+  moderationModal,
+  moderationActionPending,
+  onModerationAction,
+  onCloseModerationModal,
+}) {
+  const [activeTab, setActiveTab] = useState('review');
+
+  if (isModerator === null) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
+
+  if (isModerator === false) {
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-10 text-center">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-10">
+          <Shield className="w-10 h-10 text-slate-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold dark:text-white">Geen toegang</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Je hebt geen toegang tot moderatie.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const tabs = [
+    { id: 'chat', label: 'Moderation chat', icon: MessageCircle },
+    { id: 'review', label: 'Photos in review', icon: ImageIcon },
+    { id: 'reports', label: 'Reported photos', icon: AlertTriangle },
+  ];
+
+  return (
+    <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold dark:text-white">Artes Moderation</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Beheer moderatiecases, uploads en chat.</p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold border transition ${
+                isActive
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === 'chat' && (
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900 min-h-[60vh]">
+          {authUser ? (
+            <ChatPanel authUser={authUser} functionsBase={moderationApiBase} />
+          ) : (
+            <div className="p-6 text-sm text-slate-500 dark:text-slate-400">Log in om de chat te openen.</div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'review' && (
+        <div className="space-y-6">
+          <UploadStatusPanel uploads={uploads} />
+          <ModerationPanel
+            moderationApiBase={moderationApiBase}
+            authUser={authUser}
+            isModerator={isModerator}
+            caseTypeFilter="upload"
+          />
+        </div>
+      )}
+
+      {activeTab === 'reports' && (
+        <ModerationPanel
+          moderationApiBase={moderationApiBase}
+          authUser={authUser}
+          isModerator={isModerator}
+          caseTypeFilter="report"
+        />
+      )}
+
+      {moderationModal && (
+        <ModerationDecisionModal
+          message={moderationModal}
+          onClose={onCloseModerationModal}
+          onAction={onModerationAction}
+          pending={moderationActionPending}
+        />
+      )}
     </div>
   );
 }
@@ -2629,7 +2742,6 @@ function CommunityList({ setView }) {
     <div className="max-w-2xl mx-auto px-4 py-6">
       <div className="flex justify-between items-center mb-6">
         <div><h2 className="text-2xl font-bold dark:text-white">Community</h2></div>
-        <Button variant="secondary" className="px-4 py-2 text-sm h-10" onClick={() => setView('chat')}>Chat</Button>
       </div>
 
       <div className="mb-8 cursor-pointer" onClick={() => setView('challenge_detail')}>
@@ -2869,7 +2981,7 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
     return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"><div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col"><div className="h-64 bg-indigo-900 flex items-center justify-center flex-col text-white"><div className="text-4xl font-bold mb-2">{name}</div><p>Tijdelijk Profiel. Claim dit profiel.</p><button onClick={onClose} className="absolute top-4 right-4"><X/></button></div><div className="flex-1 p-6 overflow-y-auto no-scrollbar"><div className="grid grid-cols-3 gap-2">{shadowPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div></div></div></div> 
 }
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenModerationChat }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white w-80 h-full p-6 flex flex-col gap-6">
@@ -2881,7 +2993,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenModer
                     <h4 className="text-xs uppercase font-bold text-slate-400">Weergave</h4>
                     <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Dark Mode</span><Moon className="w-4 h-4"/></div>
                     <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Taal</span><Globe className="w-4 h-4"/></div>
-                    {moderatorAccess && (
+                    {moderatorAccess === true && (
                       <>
                         <h4 className="text-xs uppercase font-bold text-slate-400">Moderatie</h4>
                         <button
@@ -2889,16 +3001,8 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenModer
                           onClick={onOpenModeration}
                           className="w-full p-3 bg-slate-50 rounded flex justify-between items-center text-left"
                         >
-                          <span>Moderatieportaal</span>
+                          <span>Moderation portal</span>
                           <Shield className="w-4 h-4"/>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={onOpenModerationChat}
-                          className="w-full p-3 bg-slate-50 rounded flex justify-between items-center text-left"
-                        >
-                          <span>Moderatiechat</span>
-                          <MessageCircle className="w-4 h-4"/>
                         </button>
                         <p className="text-xs text-slate-500">
                           Beoordeel foto’s en chat met moderators vanuit het portaal.

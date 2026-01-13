@@ -516,7 +516,25 @@ export default function ArtesApp() {
     };
   }, [view, authUser?.uid]);
 
-  const toggleTheme = () => setDarkMode(!darkMode);
+  const handleToggleDarkMode = async () => {
+    const nextTheme = darkMode ? 'light' : 'dark';
+    setDarkMode(nextTheme === 'dark');
+    const nextPreferences = {
+      ...profile?.preferences,
+      triggerVisibility: normalizeTriggerPreferences(profile?.preferences?.triggerVisibility),
+      theme: nextTheme,
+    };
+    setProfile((prev) => (prev ? { ...prev, preferences: nextPreferences } : prev));
+    setToastMessage(`Thema ingesteld op ${nextTheme === 'dark' ? 'donker' : 'licht'}.`);
+
+    if (!authUser?.uid) return;
+    try {
+      await updateUserProfile(authUser.uid, { preferences: nextPreferences });
+    } catch (error) {
+      console.error('Failed to update theme preference', error);
+      setToastMessage('Opslaan van het thema is mislukt. Probeer het opnieuw.');
+    }
+  };
 
   const canUpload = profile && (!profile.roles.includes('fan') || profile.roles.length > 1);
   const requiresEmailVerification = useMemo(() => {
@@ -836,6 +854,8 @@ export default function ArtesApp() {
               setShowSettingsModal(false);
               setView('moderation');
             }}
+            darkMode={darkMode}
+            onToggleDark={handleToggleDarkMode}
           />
         )}
         {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
@@ -2981,36 +3001,48 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
     return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"><div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col"><div className="h-64 bg-indigo-900 flex items-center justify-center flex-col text-white"><div className="text-4xl font-bold mb-2">{name}</div><p>Tijdelijk Profiel. Claim dit profiel.</p><button onClick={onClose} className="absolute top-4 right-4"><X/></button></div><div className="flex-1 p-6 overflow-y-auto no-scrollbar"><div className="grid grid-cols-3 gap-2">{shadowPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div></div></div></div> 
 }
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, darkMode, onToggleDark }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
-            <div className="bg-white w-80 h-full p-6 flex flex-col gap-6">
-                <div className="flex justify-between items-center"><h3 className="font-bold text-xl">Instellingen</h3><button onClick={onClose}><X/></button></div>
+            <div className="bg-white dark:bg-slate-900 w-80 h-full p-6 flex flex-col gap-6 text-slate-900 dark:text-slate-100">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-bold text-xl">Instellingen</h3>
+                  <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"><X/></button>
+                </div>
                 <div className="space-y-4">
                     <h4 className="text-xs uppercase font-bold text-slate-400">Account</h4>
-                    <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Meldingen</span><Bell className="w-4 h-4"/></div>
-                    <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Privacy</span><Lock className="w-4 h-4"/></div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Meldingen</span><Bell className="w-4 h-4"/></div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Privacy</span><Lock className="w-4 h-4"/></div>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Weergave</h4>
-                    <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Dark Mode</span><Moon className="w-4 h-4"/></div>
-                    <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Taal</span><Globe className="w-4 h-4"/></div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={onToggleDark}
+                        className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                      >
+                        {darkMode ? 'Light mode' : 'Dark mode'}
+                      </button>
+                      {darkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-slate-500" />}
+                    </div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Taal</span><Globe className="w-4 h-4"/></div>
                     {moderatorAccess === true && (
                       <>
                         <h4 className="text-xs uppercase font-bold text-slate-400">Moderatie</h4>
                         <button
                           type="button"
                           onClick={onOpenModeration}
-                          className="w-full p-3 bg-slate-50 rounded flex justify-between items-center text-left"
+                          className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
                         >
                           <span>Moderation portal</span>
                           <Shield className="w-4 h-4"/>
                         </button>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-slate-500 dark:text-slate-300">
                           Beoordeel foto’s en chat met moderators vanuit het portaal.
                         </p>
                       </>
                     )}
                     <h4 className="text-xs uppercase font-bold text-slate-400">Overig</h4>
-                    <div className="p-3 bg-slate-50 rounded flex justify-between"><span>Support</span><HelpCircle className="w-4 h-4"/></div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Support</span><HelpCircle className="w-4 h-4"/></div>
                 </div>
             </div>
         </div>

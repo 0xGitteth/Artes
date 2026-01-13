@@ -173,6 +173,50 @@ export const updateUserProfile = async (uid, data) => {
 
 export const fetchUserProfile = (uid) => getDoc(doc(getFirebaseDb(), 'users', uid));
 
+let moderationConfigCache = {
+  fetchedAt: 0,
+  data: null,
+  promise: null,
+};
+
+const MODERATION_CACHE_TTL = 5 * 60 * 1000;
+
+export const getModerationConfig = async () => {
+  const now = Date.now();
+  if (moderationConfigCache.data && now - moderationConfigCache.fetchedAt < MODERATION_CACHE_TTL) {
+    return moderationConfigCache.data;
+  }
+  if (moderationConfigCache.promise) {
+    return moderationConfigCache.promise;
+  }
+  moderationConfigCache.promise = getDoc(doc(getFirebaseDb(), 'config', 'moderation'))
+    .then((snapshot) => {
+      const data = snapshot.exists() ? snapshot.data() : null;
+      moderationConfigCache = {
+        fetchedAt: Date.now(),
+        data,
+        promise: null,
+      };
+      return data;
+    })
+    .catch((error) => {
+      moderationConfigCache.promise = null;
+      throw error;
+    });
+  return moderationConfigCache.promise;
+};
+
+export const isModerator = async (user) => {
+  if (!user?.email) return false;
+  try {
+    const config = await getModerationConfig();
+    const allowlist = Array.isArray(config?.moderatorEmails) ? config.moderatorEmails : [];
+    return allowlist.includes(user.email);
+  } catch (error) {
+    return false;
+  }
+};
+
 export const subscribeToProfile = (uid, cb) => onSnapshot(doc(getFirebaseDb(), 'users', uid), cb);
 
 const resolveAuthProvider = (user) => {

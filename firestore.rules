@@ -49,26 +49,94 @@ service cloud.firestore {
     }
 
     match /threads/{threadId} {
-      allow read: if request.auth != null && request.auth.uid in resource.data.participantUids;
+      allow read: if request.auth != null
+        && (
+          (resource.data.type == 'dm' && request.auth.uid in resource.data.participantUids)
+          || (resource.data.type == 'support' && (isModerator() || request.auth.uid == resource.data.userUid))
+        );
       allow create: if request.auth != null
-        && request.resource.data.type == 'dm'
-        && request.auth.uid in request.resource.data.participantUids
-        && request.resource.data.participantUids.size() == 2
-        && request.resource.data.dmKey is string
-        && request.resource.data.dmKey.size() > 0;
+        && (
+          (request.resource.data.type == 'dm'
+            && request.auth.uid in request.resource.data.participantUids
+            && request.resource.data.participantUids.size() == 2
+            && request.resource.data.dmKey is string
+            && request.resource.data.dmKey.size() > 0)
+          || (request.resource.data.type == 'support'
+            && request.auth.uid == request.resource.data.userUid
+            && request.resource.data.threadKey is string
+            && request.resource.data.threadKey.matches('^support_.*')
+            && request.resource.data.threadKey == threadId
+            && request.resource.data.userMessageAllowance is int
+            && request.resource.data.userMessageAllowance >= 0
+            && request.resource.data.userMessageAllowance <= 1)
+        );
       allow update: if request.auth != null
-        && request.auth.uid in resource.data.participantUids
-        && resource.data.type == 'dm'
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['updatedAt', 'lastMessageAt', 'lastMessageText', 'lastSenderUid']);
+        && (
+          (resource.data.type == 'dm'
+            && request.auth.uid in resource.data.participantUids
+            && request.resource.data.diff(resource.data).changedKeys().hasOnly(['updatedAt', 'lastMessageAt', 'lastMessageText', 'lastSenderUid']))
+          || (resource.data.type == 'support'
+            && (
+              (request.auth.uid == resource.data.userUid
+                && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                  'updatedAt',
+                  'lastMessageAt',
+                  'lastMessagePreview',
+                  'userMessageAllowance',
+                  'userCanSend',
+                  'unreadForModerator',
+                  'unreadForUser',
+                  'userDisplayName',
+                  'userDisplayNameLower',
+                  'userPhotoURL',
+                  'userUsername'
+                ])
+                && request.resource.data.userMessageAllowance is int
+                && request.resource.data.userMessageAllowance >= 0
+                && request.resource.data.userMessageAllowance <= 1)
+              || (isModerator()
+                && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                  'updatedAt',
+                  'lastMessageAt',
+                  'lastMessagePreview',
+                  'userMessageAllowance',
+                  'userCanSend',
+                  'unreadForModerator',
+                  'unreadForUser'
+                ])
+                && request.resource.data.userMessageAllowance is int
+                && request.resource.data.userMessageAllowance >= 0
+                && request.resource.data.userMessageAllowance <= 1)
+            ))
+        );
       allow delete: if false;
 
       match /messages/{messageId} {
         allow read: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participantUids;
+          && (
+            (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
+              && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participantUids)
+            || (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'support'
+              && (isModerator() || request.auth.uid == get(/databases/$(database)/documents/threads/$(threadId)).data.userUid))
+          );
         allow create: if request.auth != null
-          && get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
-          && request.resource.data.senderUid == request.auth.uid
-          && request.resource.data.type == 'text'
+          && (
+            (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
+              && request.resource.data.senderUid == request.auth.uid
+              && request.resource.data.type == 'text')
+            || (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'support'
+              && (
+                (isModerator()
+                  && request.resource.data.senderUid == request.auth.uid
+                  && request.resource.data.senderRole == 'moderator')
+                || (request.auth.uid == get(/databases/$(database)/documents/threads/$(threadId)).data.userUid
+                  && (get(/databases/$(database)/documents/threads/$(threadId)).data.userCanSend == true
+                    || get(/databases/$(database)/documents/threads/$(threadId)).data.userMessageAllowance > 0)
+                  && ((request.resource.data.senderRole == 'user' && request.resource.data.senderUid == request.auth.uid)
+                    || (request.resource.data.senderRole == 'system' && request.resource.data.senderUid == 'system')))
+              )
+            )
+          )
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 2000;
         allow update, delete: if false;

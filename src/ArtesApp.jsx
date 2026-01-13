@@ -31,6 +31,7 @@ import {
   signInWithGoogle,
   updateUserProfile,
   getFirebaseDbInstance,
+  isModerator,
 } from './firebase';
 import {
   collection,
@@ -43,7 +44,8 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import ChatPanel from './components/ChatPanel';
+import ModerationSupportChat from './components/ModerationSupportChat';
+import SupportChatPanel from './components/SupportChatPanel';
 
 // --- Constants & Styling ---
 
@@ -446,21 +448,16 @@ export default function ArtesApp() {
   }, [authUser?.uid, moderationModal?.id]);
 
   useEffect(() => {
-    if (!authUser || !moderationApiBase) {
+    if (!authUser) {
       setModeratorAccess(false);
       return;
     }
     let active = true;
     setModeratorAccess(null);
-    authUser.getIdToken()
-      .then((token) => fetch(`${moderationApiBase}/isModerator`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
-      }))
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
+    isModerator(authUser)
+      .then((result) => {
         if (!active) return;
-        setModeratorAccess(Boolean(data?.isModerator));
+        setModeratorAccess(result);
       })
       .catch(() => {
         if (!active) return;
@@ -469,13 +466,13 @@ export default function ArtesApp() {
     return () => {
       active = false;
     };
-  }, [authUser, moderationApiBase]);
+  }, [authUser?.uid, authUser?.email]);
 
   useEffect(() => {
     if (view !== 'moderation' || profileLoading) return;
     if (moderatorAccess === false) {
       setView('gallery');
-      setToastMessage('No access');
+      setToastMessage('Geen toegang');
     }
   }, [view, profileLoading, moderatorAccess]);
 
@@ -484,22 +481,6 @@ export default function ArtesApp() {
     const timer = setTimeout(() => setToastMessage(null), 3000);
     return () => clearTimeout(timer);
   }, [toastMessage]);
-
-  useEffect(() => {
-    if (!authUser || !moderationApiBase) return;
-    let active = true;
-    authUser.getIdToken()
-      .then((token) => fetch(`${moderationApiBase}/ensureModerationThread`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }))
-      .catch(() => {
-        if (!active) return;
-      });
-    return () => {
-      active = false;
-    };
-  }, [authUser, moderationApiBase]);
 
   useEffect(() => {
     if (view !== 'profile' || !authUser?.uid) return;
@@ -810,7 +791,7 @@ export default function ArtesApp() {
           )}
           
           {!profileLoading && view.startsWith('community_') && (
-            <CommunityDetail id={view.split('_')[1]} setView={setView} />
+            <CommunityDetail id={view.split('_')[1]} setView={setView} authUser={authUser} />
           )}
 
           {/* Wrapper logic for viewing profiles */}
@@ -1857,7 +1838,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const reportedPost = selectedCase?.reportedPost || null;
   const uploadPreviewUrl = selectedUpload?.previewUrl || selectedUpload?.imageUrl || selectedUpload?.image || reportedPost?.imageUrl || null;
   const tags = selectedUpload?.appliedTriggers || selectedUpload?.makerTags || [];
-  const queueTitle = caseTypeFilter === 'report' ? 'Reported photos' : 'Photos in review';
+  const queueTitle = caseTypeFilter === 'report' ? 'Gerapporteerde foto’s' : 'Foto’s in review';
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
@@ -2034,7 +2015,7 @@ function ModerationPortal({
   onModerationAction,
   onCloseModerationModal,
 }) {
-  const [activeTab, setActiveTab] = useState('review');
+  const [activeTab, setActiveTab] = useState('chat');
 
   if (isModerator === null) {
     return (
@@ -2057,17 +2038,17 @@ function ModerationPortal({
   }
 
   const tabs = [
-    { id: 'chat', label: 'Moderation chat', icon: MessageCircle },
-    { id: 'review', label: 'Photos in review', icon: ImageIcon },
-    { id: 'reports', label: 'Reported photos', icon: AlertTriangle },
+    { id: 'chat', label: 'Berichten', icon: MessageCircle },
+    { id: 'review', label: 'Review voor posten', icon: ImageIcon },
+    { id: 'reports', label: 'Rapportages', icon: AlertTriangle },
   ];
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold dark:text-white">Artes Moderation</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Beheer moderatiecases, uploads en chat.</p>
+          <h1 className="text-3xl font-bold dark:text-white">Artes Moderatie</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Beheer support chats, reviews en rapportages.</p>
         </div>
       </div>
 
@@ -2096,7 +2077,7 @@ function ModerationPortal({
       {activeTab === 'chat' && (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900 min-h-[60vh]">
           {authUser ? (
-            <ChatPanel authUser={authUser} functionsBase={moderationApiBase} />
+            <ModerationSupportChat authUser={authUser} isModerator={isModerator} />
           ) : (
             <div className="p-6 text-sm text-slate-500 dark:text-slate-400">Log in om de chat te openen.</div>
           )}
@@ -2789,7 +2770,28 @@ function CommunityList({ setView }) {
   );
 }
 
-function CommunityDetail({ id, setView }) { return <div className="p-6"><Button onClick={() => setView('community')}>Terug</Button> Community Detail voor {id}</div> }
+function CommunityDetail({ id, setView, authUser }) {
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+      <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 font-medium">
+        <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+      </button>
+      <div>
+        <h2 className="text-2xl font-bold dark:text-white">Community: {id}</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Praat mee of neem contact op met Artes Moderatie.</p>
+      </div>
+      <div className="min-h-[60vh]">
+        {authUser ? (
+          <SupportChatPanel authUser={authUser} />
+        ) : (
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
+            Log in om de support chat met moderatie te openen.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 function ChallengeDetail({ setView, posts, onPostClick }) {
    return (
       <div className="max-w-4xl mx-auto px-4 py-6">
@@ -3033,11 +3035,11 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, darkMode, o
                           onClick={onOpenModeration}
                           className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
                         >
-                          <span>Moderation portal</span>
+                          <span>Artes Moderatie</span>
                           <Shield className="w-4 h-4"/>
                         </button>
                         <p className="text-xs text-slate-500 dark:text-slate-300">
-                          Beoordeel foto’s en chat met moderators vanuit het portaal.
+                          Open het moderatieportaal om chats, reviews en rapportages te beheren.
                         </p>
                       </>
                     )}

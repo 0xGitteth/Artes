@@ -213,13 +213,19 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   );
 }
 
-export default function ChatPanel({ authUser, functionsBase }) {
+export default function ChatPanel({ authUser, functionsBase, initialThreadId }) {
   const [threads, setThreads] = useState([]);
   const [activeThreadId, setActiveThreadId] = useState(null);
   const [activeThread, setActiveThread] = useState(null);
   const [messages, setMessages] = useState([]);
   const [composerText, setComposerText] = useState('');
   const [showNewChat, setShowNewChat] = useState(false);
+  const [sendError, setSendError] = useState(null);
+
+  useEffect(() => {
+    if (!initialThreadId) return;
+    setActiveThreadId(initialThreadId);
+  }, [initialThreadId]);
 
   useEffect(() => {
     if (!authUser?.uid) return undefined;
@@ -268,12 +274,20 @@ export default function ChatPanel({ authUser, functionsBase }) {
     return threads.find((thread) => thread.threadId === activeThreadId || thread.id === activeThreadId) || null;
   }, [threads, activeThreadId]);
 
+  const canSendSupport = Boolean(activeThread?.userCanSend || activeThread?.userMessageAllowance > 0);
+
   const handleSendMessage = async () => {
-    if (!authUser?.uid || !activeThread || activeThread.type !== 'dm') return;
+    if (!authUser?.uid || !activeThread) return;
     const trimmed = composerText.trim();
     if (!trimmed || !functionsBase) return;
+    if (activeThread.type === 'support' && !canSendSupport) {
+      setSendError('Je hebt al een bericht gestuurd. Je kunt weer een nieuw bericht sturen zodra moderatie heeft gereageerd. We reageren binnen 3 werkdagen.');
+      return;
+    }
+    setSendError(null);
     const token = await authUser.getIdToken();
-    const response = await fetch(`${functionsBase}/sendDmMessage`, {
+    const endpoint = activeThread.type === 'support' ? 'sendSupportMessage' : 'sendDmMessage';
+    const response = await fetch(`${functionsBase}/${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -321,7 +335,14 @@ export default function ChatPanel({ authUser, functionsBase }) {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold text-sm dark:text-white">{thread.displayTitle || 'Chat'}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-sm dark:text-white">{thread.displayTitle || 'Chat'}</p>
+                    {thread.threadType === 'support' && (
+                      <span className="text-[10px] uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">
+                        Support
+                      </span>
+                    )}
+                  </div>
                   {thread.pinned && (
                     <span className="text-[10px] uppercase text-blue-600 font-semibold">Vastgezet</span>
                   )}
@@ -401,21 +422,23 @@ export default function ChatPanel({ authUser, functionsBase }) {
             </div>
 
             <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4">
-              {activeThread.type === 'dm' ? (
+              {activeThread.type === 'dm' || activeThread.type === 'support' ? (
                 <div className="flex gap-2">
                   <input
                     className="flex-1 rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm dark:bg-slate-800 dark:text-white"
-                    placeholder="Typ een bericht..."
+                    placeholder={activeThread.type === 'support' && !canSendSupport ? 'Wacht op reactie van moderatie...' : 'Typ een bericht...'}
                     value={composerText}
                     onChange={(event) => setComposerText(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') handleSendMessage();
                     }}
+                    disabled={activeThread.type === 'support' && !canSendSupport}
                   />
                   <button
                     type="button"
                     onClick={handleSendMessage}
-                    className="bg-blue-600 text-white rounded-full px-4 py-2 text-sm font-semibold"
+                    className="bg-blue-600 text-white rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                    disabled={activeThread.type === 'support' && !canSendSupport}
                   >
                     Verstuur
                   </button>
@@ -423,6 +446,17 @@ export default function ChatPanel({ authUser, functionsBase }) {
               ) : (
                 <div className="text-xs text-slate-500 flex items-center gap-2">
                   <MessageCircle className="w-4 h-4" /> Dit gesprek is alleen lezen.
+                </div>
+              )}
+              {activeThread.type === 'support' && !canSendSupport && (
+                <div className="mt-3 text-xs text-amber-600 flex items-center gap-2">
+                  <MessageCircle className="w-4 h-4" />
+                  Je hebt al een bericht gestuurd. Je kunt weer een nieuw bericht sturen zodra moderatie heeft gereageerd. We reageren binnen 3 werkdagen.
+                </div>
+              )}
+              {sendError && (
+                <div className="mt-3 text-xs text-amber-600 flex items-center gap-2">
+                  <MessageCircle className="w-4 h-4" /> {sendError}
                 </div>
               )}
             </div>

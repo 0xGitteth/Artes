@@ -64,7 +64,7 @@ service cloud.firestore {
           || (request.resource.data.type == 'support'
             && request.auth.uid == request.resource.data.userUid
             && request.resource.data.threadKey is string
-            && request.resource.data.threadKey.matches('^support_.*')
+            && request.resource.data.threadKey.matches('^(support|moderation)_.*')
             && request.resource.data.threadKey == threadId
             && request.resource.data.userMessageAllowance is int
             && request.resource.data.userMessageAllowance >= 0
@@ -82,8 +82,6 @@ service cloud.firestore {
                   'updatedAt',
                   'lastMessageAt',
                   'lastMessagePreview',
-                  'userMessageAllowance',
-                  'userCanSend',
                   'unreadForModerator',
                   'unreadForUser',
                   'userDisplayName',
@@ -91,9 +89,8 @@ service cloud.firestore {
                   'userPhotoURL',
                   'userUsername'
                 ])
-                && request.resource.data.userMessageAllowance is int
-                && request.resource.data.userMessageAllowance >= 0
-                && request.resource.data.userMessageAllowance <= 1)
+                && request.resource.data.userMessageAllowance == resource.data.userMessageAllowance
+                && request.resource.data.userCanSend == resource.data.userCanSend)
               || (isModerator()
                 && request.resource.data.diff(resource.data).changedKeys().hasOnly([
                   'updatedAt',

@@ -44,8 +44,9 @@ import {
   query,
   where,
 } from 'firebase/firestore';
+import ChatPanel from './components/ChatPanel';
 import ModerationSupportChat from './components/ModerationSupportChat';
-import SupportChatPanel from './components/SupportChatPanel';
+import SupportLanding from './components/SupportLanding';
 
 // --- Constants & Styling ---
 
@@ -317,12 +318,22 @@ export default function ArtesApp() {
   const [moderationActionPending, setModerationActionPending] = useState(false);
   const [moderatorAccess, setModeratorAccess] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
+  const [supportThreadId, setSupportThreadId] = useState(null);
 
   // Data
   const [posts, setPosts] = useState([]);
   const [users, setUsers] = useState([]);
   const moderationApiBase = useMemo(() => {
     const explicitBase = import.meta.env.VITE_MODERATION_API_BASE;
+    if (explicitBase) return explicitBase;
+    const moderationUrl = import.meta.env.VITE_MODERATION_FUNCTION_URL;
+    if (moderationUrl && moderationUrl.includes('/moderateImage')) {
+      return moderationUrl.replace('/moderateImage', '');
+    }
+    return moderationUrl || '';
+  }, []);
+  const functionsBase = useMemo(() => {
+    const explicitBase = import.meta.env.VITE_FUNCTIONS_BASE;
     if (explicitBase) return explicitBase;
     const moderationUrl = import.meta.env.VITE_MODERATION_FUNCTION_URL;
     if (moderationUrl && moderationUrl.includes('/moderateImage')) {
@@ -356,7 +367,8 @@ export default function ArtesApp() {
       setAuthUser(u);
       if (!u) {
         setProfile(null);
-        setView('login');
+        const path = window.location.pathname || '/';
+        setView(path.startsWith('/support') ? 'support' : 'login');
         setProfileLoading(false);
         return;
       }
@@ -369,7 +381,11 @@ export default function ArtesApp() {
         const path = window.location.pathname || '/';
         const routedView = path.startsWith('/moderation')
           ? 'moderation'
-          : baseView;
+          : path.startsWith('/support')
+            ? 'support'
+            : path.startsWith('/chat')
+              ? 'chat'
+              : baseView;
         setView(routedView);
       } catch (e) {
         console.error('Failed to load profile', e);
@@ -394,9 +410,11 @@ export default function ArtesApp() {
       const path = window.location.pathname || '/';
       if (path.startsWith('/moderation')) {
         setView('moderation');
+      } else if (path.startsWith('/support')) {
+        setView('support');
       } else if (path.startsWith('/chat')) {
-        setView('gallery');
-      } else if (view === 'moderation') {
+        setView('chat');
+      } else if (view === 'moderation' || view === 'support' || view === 'chat') {
         setView('gallery');
       }
     };
@@ -407,10 +425,18 @@ export default function ArtesApp() {
   useEffect(() => {
     if (view === 'moderation') {
       window.history.pushState({}, '', '/moderation');
-    } else if (window.location.pathname === '/moderation' || window.location.pathname === '/chat') {
+    } else if (view === 'support') {
+      window.history.pushState({}, '', '/support');
+    } else if (view === 'chat') {
+      const params = new URLSearchParams(window.location.search);
+      const existingThreadId = params.get('threadId');
+      const threadId = supportThreadId || existingThreadId;
+      const query = threadId ? `?threadId=${threadId}` : '';
+      window.history.pushState({}, '', `/chat${query}`);
+    } else if (window.location.pathname === '/moderation' || window.location.pathname === '/chat' || window.location.pathname === '/support') {
       window.history.pushState({}, '', '/');
     }
-  }, [view]);
+  }, [view, supportThreadId]);
 
   // Data Listeners
   useEffect(() => {
@@ -446,6 +472,40 @@ export default function ArtesApp() {
       setModerationModal({ id: docSnap.id, ...docSnap.data() });
     });
   }, [authUser?.uid, moderationModal?.id]);
+
+  useEffect(() => {
+    if (!authUser?.uid || !functionsBase) return;
+    let active = true;
+    const ensureSupportThread = async () => {
+      try {
+        const token = await authUser.getIdToken();
+        await fetch(`${functionsBase}/ensureModerationThread`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch (error) {
+        if (active) {
+          console.error('Failed to ensure support thread', error);
+        }
+      }
+    };
+    ensureSupportThread();
+    return () => {
+      active = false;
+    };
+  }, [authUser?.uid, functionsBase]);
+
+  useEffect(() => {
+    if (view !== 'chat') return;
+    const params = new URLSearchParams(window.location.search);
+    const threadId = params.get('threadId');
+    if (threadId) {
+      setSupportThreadId(threadId);
+    }
+  }, [view]);
 
   useEffect(() => {
     if (!authUser) {
@@ -496,6 +556,33 @@ export default function ArtesApp() {
       active = false;
     };
   }, [view, authUser?.uid]);
+
+  const handleOpenSupportChat = async () => {
+    if (!authUser?.uid || !functionsBase) {
+      setToastMessage('Support chat is momenteel niet beschikbaar.');
+      return;
+    }
+    try {
+      const token = await authUser.getIdToken();
+      const response = await fetch(`${functionsBase}/ensureModerationThread`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await response.json();
+      if (response.ok && data?.threadId) {
+        setSupportThreadId(data.threadId);
+      } else if (response.ok) {
+        setSupportThreadId(`moderation_${authUser.uid}`);
+      }
+      setView('chat');
+    } catch (error) {
+      console.error('Failed to open support chat', error);
+      setToastMessage('Support chat openen is mislukt.');
+    }
+  };
 
   const handleToggleDarkMode = async () => {
     const nextTheme = darkMode ? 'light' : 'dark';
@@ -786,12 +873,28 @@ export default function ArtesApp() {
           )}
           
           {!profileLoading && view === 'community' && <CommunityList setView={setView} />}
+          {!profileLoading && view === 'support' && (
+            <SupportLanding onOpenChat={handleOpenSupportChat} canOpenChat={Boolean(authUser)} />
+          )}
+          {!profileLoading && view === 'chat' && (
+            authUser ? (
+              <div className="max-w-6xl mx-auto px-4 py-6 h-[75vh]">
+                <ChatPanel authUser={authUser} functionsBase={functionsBase} initialThreadId={supportThreadId} />
+              </div>
+            ) : (
+              <div className="max-w-2xl mx-auto px-4 py-6">
+                <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
+                  Log in om de chat te openen.
+                </div>
+              </div>
+            )
+          )}
           {!profileLoading && view === 'challenge_detail' && (
             <ChallengeDetail setView={setView} posts={posts.filter(p => p.isChallenge)} onPostClick={setSelectedPost} />
           )}
           
           {!profileLoading && view.startsWith('community_') && (
-            <CommunityDetail id={view.split('_')[1]} setView={setView} authUser={authUser} />
+            <CommunityDetail id={view.split('_')[1]} setView={setView} authUser={authUser} functionsBase={functionsBase} />
           )}
 
           {/* Wrapper logic for viewing profiles */}
@@ -834,6 +937,10 @@ export default function ArtesApp() {
             onOpenModeration={() => {
               setShowSettingsModal(false);
               setView('moderation');
+            }}
+            onOpenSupport={() => {
+              setShowSettingsModal(false);
+              setView('support');
             }}
             darkMode={darkMode}
             onToggleDark={handleToggleDarkMode}
@@ -2770,7 +2877,7 @@ function CommunityList({ setView }) {
   );
 }
 
-function CommunityDetail({ id, setView, authUser }) {
+function CommunityDetail({ id, setView, authUser, functionsBase }) {
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 font-medium">
@@ -2782,10 +2889,10 @@ function CommunityDetail({ id, setView, authUser }) {
       </div>
       <div className="min-h-[60vh]">
         {authUser ? (
-          <SupportChatPanel authUser={authUser} />
+          <ChatPanel authUser={authUser} functionsBase={functionsBase} />
         ) : (
           <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
-            Log in om de support chat met moderatie te openen.
+            Log in om de chat te openen.
           </div>
         )}
       </div>
@@ -3003,7 +3110,7 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
     return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"><div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col"><div className="h-64 bg-indigo-900 flex items-center justify-center flex-col text-white"><div className="text-4xl font-bold mb-2">{name}</div><p>Tijdelijk Profiel. Claim dit profiel.</p><button onClick={onClose} className="absolute top-4 right-4"><X/></button></div><div className="flex-1 p-6 overflow-y-auto no-scrollbar"><div className="grid grid-cols-3 gap-2">{shadowPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div></div></div></div> 
 }
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, darkMode, onToggleDark }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, darkMode, onToggleDark }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white dark:bg-slate-900 w-80 h-full p-6 flex flex-col gap-6 text-slate-900 dark:text-slate-100">
@@ -3044,7 +3151,14 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, darkMode, o
                       </>
                     )}
                     <h4 className="text-xs uppercase font-bold text-slate-400">Overig</h4>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Support</span><HelpCircle className="w-4 h-4"/></div>
+                    <button
+                      type="button"
+                      onClick={onOpenSupport}
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                    >
+                      <span>Support</span>
+                      <HelpCircle className="w-4 h-4" />
+                    </button>
                 </div>
             </div>
         </div>

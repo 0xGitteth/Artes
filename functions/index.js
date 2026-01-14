@@ -123,34 +123,88 @@ const fetchPublicUser = async (uid) => {
 
 const resolveDisplayTitle = (publicUser) => publicUser?.displayName || publicUser?.username || 'Chat';
 
+const SUPPORT_INTRO_MESSAGE = 'Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen totdat wij reageren. We reageren binnen 3 werkdagen.';
+
 const ensureModerationThreadForUser = async (uid) => {
   if (!uid) return null;
   const threadId = `moderation_${uid}`;
   const threadRef = db.collection('threads').doc(threadId);
   const threadIndexRef = db.collection('users').doc(uid).collection('threadIndex').doc(threadId);
-  await Promise.all([
-    threadRef.set(
-      {
-        type: 'system',
+  const publicProfile = await fetchPublicUser(uid);
+  const displayName = publicProfile?.displayName || publicProfile?.username || 'Artes gebruiker';
+  const displayNameLower = displayName.toLowerCase();
+  const created = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(threadRef);
+    if (snapshot.exists) {
+      const data = snapshot.data() || {};
+      const updates = {
+        type: 'support',
         title: 'Artes Moderatie',
+        userUid: uid,
+        userDisplayName: data.userDisplayName || displayName,
+        userDisplayNameLower: data.userDisplayNameLower || displayNameLower,
+        userPhotoURL: data.userPhotoURL || publicProfile?.photoURL || null,
+        userUsername: data.userUsername || publicProfile?.username || '',
         participantUids: [uid],
-        createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
-        lastMessageAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    ),
-    threadIndexRef.set(
-      {
-        threadId,
-        pinned: true,
-        hidden: false,
-        displayTitle: 'Artes Moderatie',
-        lastMessageAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    ),
-  ]);
+      };
+      if (typeof data.userMessageAllowance !== 'number') {
+        updates.userMessageAllowance = 1;
+      }
+      if (typeof data.userCanSend !== 'boolean') {
+        updates.userCanSend = true;
+      }
+      if (!data.lastMessagePreview) {
+        updates.lastMessagePreview = SUPPORT_INTRO_MESSAGE;
+      }
+      transaction.set(
+        threadRef,
+        updates,
+        { merge: true }
+      );
+      return false;
+    }
+    transaction.set(threadRef, {
+      type: 'support',
+      title: 'Artes Moderatie',
+      threadKey: threadId,
+      userUid: uid,
+      participantUids: [uid],
+      userDisplayName: displayName,
+      userDisplayNameLower: displayNameLower,
+      userPhotoURL: publicProfile?.photoURL || null,
+      userUsername: publicProfile?.username || '',
+      userMessageAllowance: 1,
+      userCanSend: true,
+      lastMessageAt: FieldValue.serverTimestamp(),
+      lastMessagePreview: SUPPORT_INTRO_MESSAGE,
+      unreadForModerator: 0,
+      unreadForUser: 0,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    const messageRef = threadRef.collection('messages').doc();
+    transaction.set(messageRef, {
+      text: SUPPORT_INTRO_MESSAGE,
+      senderUid: 'system',
+      senderRole: 'system',
+      senderLabel: 'Artes Moderatie',
+      type: 'system',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
+  await threadIndexRef.set(
+    {
+      threadId,
+      pinned: true,
+      hidden: false,
+      displayTitle: 'Artes Moderatie',
+      threadType: 'support',
+      lastMessageAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
   return threadId;
 };
 
@@ -971,6 +1025,75 @@ export const sendDmMessage = onRequest({ cors: true }, async (req, res) => {
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to send message' });
+  }
+});
+
+export const sendSupportMessage = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const body = parseJsonBody(req);
+    const threadId = body?.threadId || `moderation_${decoded.uid}`;
+    const text = String(body?.text || '').trim();
+    if (!threadId || !text) {
+      res.status(400).json({ error: 'threadId and text are required' });
+      return;
+    }
+    if (text.length > 2000) {
+      res.status(400).json({ error: 'Message too long' });
+      return;
+    }
+
+    const threadRef = db.collection('threads').doc(threadId);
+    await db.runTransaction(async (transaction) => {
+      const threadSnap = await transaction.get(threadRef);
+      if (!threadSnap.exists) {
+        const error = new Error('Thread not found');
+        error.status = 404;
+        throw error;
+      }
+      const threadData = threadSnap.data();
+      if (threadData?.type !== 'support' || threadData?.userUid !== decoded.uid) {
+        const error = new Error('Not authorized for support thread');
+        error.status = 403;
+        throw error;
+      }
+      const allowance = threadData?.userMessageAllowance ?? 0;
+      const allowed = threadData?.userCanSend === true || allowance > 0;
+      if (!allowed) {
+        const error = new Error('User may not send yet');
+        error.status = 403;
+        throw error;
+      }
+      const publicProfile = await fetchPublicUser(decoded.uid);
+      const senderLabel = publicProfile?.displayName || publicProfile?.username || decoded.name || 'Artes gebruiker';
+      const messageRef = threadRef.collection('messages').doc();
+      transaction.set(messageRef, {
+        text,
+        senderUid: decoded.uid,
+        senderRole: 'user',
+        senderLabel,
+        type: 'text',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      transaction.update(threadRef, {
+        lastMessageAt: FieldValue.serverTimestamp(),
+        lastMessagePreview: text,
+        userMessageAllowance: 0,
+        userCanSend: false,
+        unreadForModerator: (threadData?.unreadForModerator || 0) + 1,
+        unreadForUser: 0,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to send support message' });
   }
 });
 

@@ -368,7 +368,12 @@ export default function ArtesApp() {
       if (!u) {
         setProfile(null);
         const path = window.location.pathname || '/';
-        setView(path.startsWith('/support') ? 'support' : 'login');
+        const unauthView = path.startsWith('/support')
+          ? 'support'
+          : path.startsWith('/chat') || path.startsWith('/messages')
+            ? 'chat'
+            : 'login';
+        setView(unauthView);
         setProfileLoading(false);
         return;
       }
@@ -383,7 +388,7 @@ export default function ArtesApp() {
           ? 'moderation'
           : path.startsWith('/support')
             ? 'support'
-            : path.startsWith('/chat')
+            : path.startsWith('/chat') || path.startsWith('/messages')
               ? 'chat'
               : baseView;
         setView(routedView);
@@ -412,7 +417,7 @@ export default function ArtesApp() {
         setView('moderation');
       } else if (path.startsWith('/support')) {
         setView('support');
-      } else if (path.startsWith('/chat')) {
+      } else if (path.startsWith('/chat') || path.startsWith('/messages')) {
         setView('chat');
       } else if (view === 'moderation' || view === 'support' || view === 'chat') {
         setView('gallery');
@@ -430,10 +435,22 @@ export default function ArtesApp() {
     } else if (view === 'chat') {
       const params = new URLSearchParams(window.location.search);
       const existingThreadId = params.get('threadId');
+      const openTarget = params.get('open');
       const threadId = supportThreadId || existingThreadId;
-      const query = threadId ? `?threadId=${threadId}` : '';
-      window.history.pushState({}, '', `/chat${query}`);
-    } else if (window.location.pathname === '/moderation' || window.location.pathname === '/chat' || window.location.pathname === '/support') {
+      const queryParams = new URLSearchParams();
+      if (threadId) {
+        queryParams.set('threadId', threadId);
+      } else if (openTarget) {
+        queryParams.set('open', openTarget);
+      }
+      const query = queryParams.toString();
+      window.history.pushState({}, '', `/chat${query ? `?${query}` : ''}`);
+    } else if (
+      window.location.pathname === '/moderation'
+      || window.location.pathname === '/chat'
+      || window.location.pathname === '/messages'
+      || window.location.pathname === '/support'
+    ) {
       window.history.pushState({}, '', '/');
     }
   }, [view, supportThreadId]);
@@ -508,6 +525,43 @@ export default function ArtesApp() {
   }, [view]);
 
   useEffect(() => {
+    if (view !== 'chat') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('open') !== 'moderation') return;
+    if (!authUser?.uid || !functionsBase) return;
+    let active = true;
+    const ensureModerationThread = async () => {
+      try {
+        const token = await authUser.getIdToken();
+        const response = await fetch(`${functionsBase}/ensureModerationThread`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const data = await response.json();
+        if (!active) return;
+        if (response.ok && data?.threadId) {
+          setSupportThreadId(data.threadId);
+        } else if (response.ok) {
+          setSupportThreadId(`moderation_${authUser.uid}`);
+        } else {
+          setToastMessage('Support chat openen is mislukt.');
+        }
+      } catch (error) {
+        if (!active) return;
+        console.error('Failed to ensure moderation thread', error);
+        setToastMessage('Support chat openen is mislukt.');
+      }
+    };
+    ensureModerationThread();
+    return () => {
+      active = false;
+    };
+  }, [view, authUser?.uid, functionsBase]);
+
+  useEffect(() => {
     if (!authUser) {
       setModeratorAccess(false);
       return;
@@ -557,31 +611,15 @@ export default function ArtesApp() {
     };
   }, [view, authUser?.uid]);
 
-  const handleOpenSupportChat = async () => {
+  const handleOpenSupportChat = () => {
     if (!authUser?.uid || !functionsBase) {
       setToastMessage('Support chat is momenteel niet beschikbaar.');
       return;
     }
-    try {
-      const token = await authUser.getIdToken();
-      const response = await fetch(`${functionsBase}/ensureModerationThread`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const data = await response.json();
-      if (response.ok && data?.threadId) {
-        setSupportThreadId(data.threadId);
-      } else if (response.ok) {
-        setSupportThreadId(`moderation_${authUser.uid}`);
-      }
-      setView('chat');
-    } catch (error) {
-      console.error('Failed to open support chat', error);
-      setToastMessage('Support chat openen is mislukt.');
-    }
+    const params = new URLSearchParams();
+    params.set('open', 'moderation');
+    window.history.pushState({}, '', `/chat?${params.toString()}`);
+    setView('chat');
   };
 
   const handleToggleDarkMode = async () => {
@@ -2863,6 +2901,18 @@ function CommunityList({ setView }) {
       </div>
 
       <div className="space-y-4">
+        <div
+          className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex gap-6 hover:shadow-md transition-shadow cursor-pointer"
+          onClick={() => setView('chat')}
+        >
+          <div className="w-12 h-12 bg-blue-50 dark:bg-slate-700 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+            <MessageCircle className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="font-bold text-lg dark:text-white mb-1">Chat</h3>
+            <p className="text-slate-600 dark:text-slate-400 text-sm">Open je gesprekken en contact met Artes Moderatie.</p>
+          </div>
+        </div>
         {COMMUNITIES.map(comm => {
           const Icon = comm.icon;
           return (

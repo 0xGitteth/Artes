@@ -337,7 +337,8 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <p className="font-semibold text-sm dark:text-white">{thread.displayTitle || 'Chat'}</p>
-                    {thread.threadType === 'support' && (
+                    {(thread.threadType === 'support'
+                      || (thread.threadId || thread.id || '').startsWith('moderation_')) && (
                       <span className="text-[10px] uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">
                         Support
                       </span>

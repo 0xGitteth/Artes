@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Image as ImageIcon, Search, Users, Plus, Hand, Cloud, Bookmark,
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
@@ -341,6 +341,22 @@ export default function ArtesApp() {
     }
     return moderationUrl || '';
   }, []);
+  const ensureModerationThread = useCallback(async (user) => {
+    if (!user?.uid || !functionsBase) return null;
+    const token = await user.getIdToken();
+    const response = await fetch(`${functionsBase}/ensureModerationThread`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error('Failed to ensure moderation thread');
+    }
+    const data = await response.json();
+    return data?.threadId || `moderation_${user.uid}`;
+  }, [functionsBase]);
 
   // Seeding
   useEffect(() => {
@@ -392,6 +408,9 @@ export default function ArtesApp() {
               ? 'chat'
               : baseView;
         setView(routedView);
+        ensureModerationThread(u).catch((error) => {
+          console.error('Failed to ensure support thread', error);
+        });
       } catch (e) {
         console.error('Failed to load profile', e);
         setView('onboarding');
@@ -403,7 +422,7 @@ export default function ArtesApp() {
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [ensureModerationThread]);
 
   useEffect(() => {
     if (!profile?.preferences?.theme) return;
@@ -491,31 +510,6 @@ export default function ArtesApp() {
   }, [authUser?.uid, moderationModal?.id]);
 
   useEffect(() => {
-    if (!authUser?.uid || !functionsBase) return;
-    let active = true;
-    const ensureSupportThread = async () => {
-      try {
-        const token = await authUser.getIdToken();
-        await fetch(`${functionsBase}/ensureModerationThread`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      } catch (error) {
-        if (active) {
-          console.error('Failed to ensure support thread', error);
-        }
-      }
-    };
-    ensureSupportThread();
-    return () => {
-      active = false;
-    };
-  }, [authUser?.uid, functionsBase]);
-
-  useEffect(() => {
     if (view !== 'chat') return;
     const params = new URLSearchParams(window.location.search);
     const threadId = params.get('threadId');
@@ -530,36 +524,20 @@ export default function ArtesApp() {
     if (params.get('open') !== 'moderation') return;
     if (!authUser?.uid || !functionsBase) return;
     let active = true;
-    const ensureModerationThread = async () => {
-      try {
-        const token = await authUser.getIdToken();
-        const response = await fetch(`${functionsBase}/ensureModerationThread`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        const data = await response.json();
+    ensureModerationThread(authUser)
+      .then((threadId) => {
         if (!active) return;
-        if (response.ok && data?.threadId) {
-          setSupportThreadId(data.threadId);
-        } else if (response.ok) {
-          setSupportThreadId(`moderation_${authUser.uid}`);
-        } else {
-          setToastMessage('Support chat openen is mislukt.');
-        }
-      } catch (error) {
+        setSupportThreadId(threadId || `moderation_${authUser.uid}`);
+      })
+      .catch((error) => {
         if (!active) return;
         console.error('Failed to ensure moderation thread', error);
         setToastMessage('Support chat openen is mislukt.');
-      }
-    };
-    ensureModerationThread();
+      });
     return () => {
       active = false;
     };
-  }, [view, authUser?.uid, functionsBase]);
+  }, [view, authUser, functionsBase, ensureModerationThread]);
 
   useEffect(() => {
     if (!authUser) {
@@ -616,10 +594,18 @@ export default function ArtesApp() {
       setToastMessage('Support chat is momenteel niet beschikbaar.');
       return;
     }
-    const params = new URLSearchParams();
-    params.set('open', 'moderation');
-    window.history.pushState({}, '', `/chat?${params.toString()}`);
+    const fallbackThreadId = `moderation_${authUser.uid}`;
+    setSupportThreadId(fallbackThreadId);
     setView('chat');
+    ensureModerationThread(authUser)
+      .then((threadId) => {
+        if (threadId) {
+          setSupportThreadId(threadId);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to ensure moderation thread', error);
+      });
   };
 
   const handleToggleDarkMode = async () => {

@@ -2785,13 +2785,18 @@ function EditProfileModal({ onClose, profile, user }) {
           <div className="flex-1 overflow-y-auto p-8 space-y-6">
              {/* Simple Tabs for this view */}
              <div className="flex gap-4 border-b mb-4">
-                 {['Algemeen', 'Triggers', 'Rollen', 'Stijlen'].map(t => (
+                 {[
+                   { key: 'general', label: 'Algemeen' },
+                   { key: 'triggers', label: 'Triggers' },
+                   { key: 'rollen', label: 'Rollen' },
+                   { key: 'stijlen', label: 'Stijlen' },
+                 ].map(({ key, label }) => (
                    <button
-                     key={t}
-                     onClick={() => setTab(t.toLowerCase())}
-                     className={`pb-2 ${tab === t.toLowerCase() ? 'border-b-2 border-blue-600 font-bold' : ''}`}
+                     key={key}
+                     onClick={() => setTab(key)}
+                     className={`pb-2 ${tab === key ? 'border-b-2 border-blue-600 font-bold' : ''}`}
                    >
-                     {t}
+                     {label}
                    </button>
                  ))}
              </div>

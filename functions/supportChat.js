@@ -18,7 +18,7 @@ async function verifyIdToken(req) {
 
 const corsHandler = cors({ origin: true });
 
-export const ensureSupportThread = onRequest({ region: "europe-west1" }, (req, res) => {
+export const ensureSupportThread = onRequest({ cors: true, region: "europe-west1" }, (req, res) => {
   corsHandler(req, res, async () => {
     try {
       if (req.method !== "POST") {

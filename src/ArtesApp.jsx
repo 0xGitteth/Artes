@@ -2765,10 +2765,13 @@ function EditProfileModal({ onClose, profile, user }) {
   const [formData, setFormData] = useState({ ...profile });
   const [agencySearch, setAgencySearch] = useState('');
   const [tab, setTab] = useState('general');
+  const [pendingRoleRemoval, setPendingRoleRemoval] = useState(null);
+  const selectedRoles = formData.roles || [];
   
   const handleSave = async () => {
      const payload = {
        ...formData,
+       roles: formData.roles?.length ? formData.roles : ['fan'],
        preferences: {
          ...formData.preferences,
          triggerVisibility: normalizeTriggerPreferences(formData.preferences?.triggerVisibility),
@@ -2776,6 +2779,26 @@ function EditProfileModal({ onClose, profile, user }) {
      };
      await updateProfileData(user.uid, payload);
      onClose();
+  };
+
+  const handleRoleToggle = (roleId) => {
+    if (selectedRoles.includes(roleId)) {
+      setPendingRoleRemoval(roleId);
+      return;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      roles: [...(prev.roles || []), roleId],
+    }));
+  };
+
+  const confirmRoleRemoval = () => {
+    if (!pendingRoleRemoval) return;
+    setFormData((prev) => ({
+      ...prev,
+      roles: (prev.roles || []).filter((role) => role !== pendingRoleRemoval),
+    }));
+    setPendingRoleRemoval(null);
   };
 
   return (
@@ -2866,10 +2889,68 @@ function EditProfileModal({ onClose, profile, user }) {
              )}
 
              {/* Placeholder for other tabs logic to keep file size manageable but show structure */}
-             {tab === 'rollen' && <div><p className="text-sm text-slate-500">Rol selectie hier...</p></div>}
+             {tab === 'rollen' && (
+               <div className="space-y-5">
+                 <div>
+                   <h4 className="font-bold text-slate-800 dark:text-white">Rollen</h4>
+                   <p className="text-sm text-slate-500 dark:text-slate-400">
+                     Kies welke rollen zichtbaar zijn op je profiel. Je bestaande posts blijven staan en credits blijven gekoppeld,
+                     maar de uitgezette rol wordt niet meer getoond bij je profiel of nieuwe posts/credits (we migreren niets).
+                   </p>
+                 </div>
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                   {ROLES.map((role) => {
+                     const isSelected = selectedRoles.includes(role.id);
+                     return (
+                       <button
+                         key={role.id}
+                         type="button"
+                         onClick={() => handleRoleToggle(role.id)}
+                         className={`rounded-2xl border px-4 py-3 text-left transition-all ${
+                           isSelected
+                             ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
+                             : 'border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                         }`}
+                       >
+                         <div className="flex items-center justify-between gap-2">
+                           <span className="text-sm font-semibold text-slate-900 dark:text-white">{role.label}</span>
+                           {isSelected && <span className="text-[10px] uppercase tracking-wide text-blue-600">Actief</span>}
+                         </div>
+                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{role.desc}</p>
+                       </button>
+                     );
+                   })}
+                 </div>
+               </div>
+             )}
           </div>
           <div className="p-6 border-t flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Annuleren</Button><Button onClick={handleSave}>Opslaan</Button></div>
        </div>
+       {pendingRoleRemoval && (
+         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-6">
+           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-md shadow-xl space-y-4">
+             <div className="flex items-center gap-3">
+               <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
+                 <AlertTriangle className="w-5 h-5" />
+               </div>
+               <div>
+                 <h4 className="font-bold text-slate-900 dark:text-white">Rol uitschakelen?</h4>
+                 <p className="text-sm text-slate-500 dark:text-slate-400">
+                   Je zet <span className="font-semibold">{ROLES.find((role) => role.id === pendingRoleRemoval)?.label}</span> uit.
+                 </p>
+               </div>
+             </div>
+             <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
+               <p>Bestaande posts en credits blijven gekoppeld aan jou en blijven zichtbaar.</p>
+               <p>We migreren niets: deze rol wordt alleen verwijderd van je profiel en verschijnt niet meer bij nieuwe posts/credits.</p>
+             </div>
+             <div className="flex justify-end gap-2">
+               <Button variant="ghost" onClick={() => setPendingRoleRemoval(null)}>Annuleren</Button>
+               <Button className="bg-amber-500 hover:bg-amber-600 text-white" onClick={confirmRoleRemoval}>Rol uitschakelen</Button>
+             </div>
+           </div>
+         </div>
+       )}
     </div>
   );
 }

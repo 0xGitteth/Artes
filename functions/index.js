@@ -466,7 +466,7 @@ const runGeminiClassifier = async ({ buffer, mimeType }) => {
     return null;
   }
   const project = process.env.GOOGLE_CLOUD_PROJECT;
-  const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+  const location = process.env.GOOGLE_CLOUD_LOCATION || 'europe-west4';
   if (!project) {
     logger.warn('Gemini classifier skipped: GOOGLE_CLOUD_PROJECT ontbreekt.');
     return null;
@@ -500,7 +500,7 @@ const runGeminiClassifier = async ({ buffer, mimeType }) => {
   return parseGeminiJson(text);
 };
 
-export const moderateImage = onRequest({ cors: true }, async (req, res) => {
+export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.status(204).send('');
     return;
@@ -722,7 +722,6 @@ export const moderateImage = onRequest({ cors: true }, async (req, res) => {
   let reviewCaseId = cachedResult?.reviewCaseId || null;
   let canRequestReview = outcome === 'forbidden';
   let openReviewCase = null;
-  let userModeration = null;
   let inCooldown = false;
   let reviewCreated = false;
 
@@ -845,7 +844,7 @@ export const moderateImage = onRequest({ cors: true }, async (req, res) => {
   res.status(200).json(response);
 });
 
-export const isModerator = onRequest({ cors: true }, async (req, res) => {
+export const isModerator = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -862,7 +861,7 @@ export const isModerator = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-export const ensureModerationThread = onRequest({ cors: true }, async (req, res) => {
+export const ensureModerationThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -877,7 +876,7 @@ export const ensureModerationThread = onRequest({ cors: true }, async (req, res)
   }
 });
 
-export const createDmThread = onRequest({ cors: true }, async (req, res) => {
+export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -949,7 +948,7 @@ export const createDmThread = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-export const sendDmMessage = onRequest({ cors: true }, async (req, res) => {
+export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -1097,7 +1096,7 @@ export const sendSupportMessage = onRequest({ cors: true }, async (req, res) => 
   }
 });
 
-export const reportPost = onRequest({ cors: true }, async (req, res) => {
+export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -1158,7 +1157,7 @@ export const reportPost = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-export const moderatorClaim = onRequest({ cors: true }, async (req, res) => {
+export const moderatorClaim = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -1218,7 +1217,7 @@ export const moderatorClaim = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-export const moderatorRelease = onRequest({ cors: true }, async (req, res) => {
+export const moderatorRelease = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -1248,7 +1247,7 @@ export const moderatorRelease = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-export const moderatorDecide = onRequest({ cors: true }, async (req, res) => {
+export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -1462,7 +1461,7 @@ export const moderatorDecide = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-export const userModerationAction = onRequest({ cors: true }, async (req, res) => {
+export const userModerationAction = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -1568,3 +1567,5 @@ export const userModerationAction = onRequest({ cors: true }, async (req, res) =
 export const config = {
   runtime: 'nodejs18',
 };
+
+export { ensureSupportThread } from "./supportChat.js";

@@ -49,11 +49,18 @@ service cloud.firestore {
     }
 
     match /threads/{threadId} {
-      allow read: if request.auth != null
-        && (
-          (resource.data.type == 'dm' && request.auth.uid in resource.data.participantUids)
-          || (resource.data.type == 'support' && (isModerator() || request.auth.uid == resource.data.userUid))
-        );
+      allow read: if request.auth != null && (
+        // eigenaar van support thread
+        resource.data.userUid == request.auth.uid
+        // participants array (jouw code gebruikt "participants")
+        || (resource.data.participants is list && request.auth.uid in resource.data.participants)
+        // fallback als sommige docs "participantUids" gebruiken
+        || (resource.data.participantUids is list && request.auth.uid in resource.data.participantUids)
+        // moderators mogen alle support threads lezen
+        || (isModerator() && (resource.data.type == "support" || threadId.matches("^support_")))
+        // DM support
+        || (resource.data.type == 'dm' && request.auth.uid in resource.data.participantUids)
+      );
       allow create: if request.auth != null
         && (
           (request.resource.data.type == 'dm'
@@ -109,13 +116,21 @@ service cloud.firestore {
       allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if request.auth != null
-          && (
-            (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
+        allow read: if request.auth != null && (
+          get(/databases/$(database)/documents/threads/$(threadId)).data.userUid == request.auth.uid
+          || (
+            get(/databases/$(database)/documents/threads/$(threadId)).data.participants is list
+            && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants
+          )
+          || (
+            get(/databases/$(database)/documents/threads/$(threadId)).data.participantUids is list
+            && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participantUids
+          )
+          || (isModerator() && (get(/databases/$(database)/documents/threads/$(threadId)).data.type == "support"
+              || threadId.matches("^support_")))
+          || (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
               && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participantUids)
-            || (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'support'
-              && (isModerator() || request.auth.uid == get(/databases/$(database)/documents/threads/$(threadId)).data.userUid))
-          );
+        );
         allow create: if request.auth != null
           && (
             (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'

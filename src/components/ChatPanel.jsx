@@ -104,6 +104,22 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
     };
   }, [normalizedQuery]);
 
+  useEffect(() => {
+  if (!authUser?.uid) return;
+
+  const run = async () => {
+    const token = await authUser.getIdToken();
+    await fetch(import.meta.env.VITE_FUNCTIONS_BASE_URL + "/ensureSupportThread", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  };
+
+  run().catch(() => {});
+}, [authUser]);
+
   const handleStartChat = async () => {
     if (!selectedUser || selectedUser.uid === authUser.uid) return;
     if (!functionsBase) return;

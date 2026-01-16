@@ -73,6 +73,8 @@ export const seedDemoContent = async (seedUsers, seedPosts) => {
   await batch.commit();
 };
 
+// Profile payload fields we store (subset used by UI):
+// avatar, headerImage, headerPosition, quickProfilePreviewMode, quickProfilePostIds.
 export const createProfile = async (uid, profile) => {
   const payload = {
     createdAt: serverTimestamp(),
@@ -82,6 +84,8 @@ export const createProfile = async (uid, profile) => {
   await setDoc(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', uid), payload);
 };
 
+// Update is merged into both private and public profile indices.
+// Keep profile preview preferences in sync with UI expectations.
 export const updateProfile = async (uid, payload) => {
   await updateDoc(doc(db, ...artifactsPath, 'users', uid, 'profile', 'main'), payload);
   await updateDoc(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', uid), payload);

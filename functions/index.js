@@ -186,10 +186,12 @@ const ensureModerationThreadForUser = async (uid) => {
     const messageRef = threadRef.collection('messages').doc();
     transaction.set(messageRef, {
       text: SUPPORT_INTRO_MESSAGE,
-      senderUid: 'system',
-      senderRole: 'system',
-      senderLabel: 'Artes Moderatie',
+      // Maak het voor elke mogelijke frontend check herkenbaar als system message
       type: 'system',
+      senderRole: 'system',
+      senderUid: 'system',
+      senderId: 'system',
+      senderLabel: 'Artes Moderatie',
       createdAt: FieldValue.serverTimestamp(),
     });
     return true;
@@ -861,20 +863,7 @@ export const isModerator = onRequest({ cors: true, region: 'europe-west4' }, asy
   }
 });
 
-export const ensureModerationThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
-    return;
-  }
-  try {
-    const decoded = await verifyToken(req);
-    const threadId = await ensureModerationThreadForUser(decoded.uid);
-    res.status(200).json({ ok: true, threadId });
-  } catch (error) {
-    const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Failed to ensure moderation thread' });
-  }
-});
+
 
 export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
@@ -1568,4 +1557,4 @@ export const config = {
   runtime: 'nodejs18',
 };
 
-export { ensureSupportThread } from "./supportChat.js";
+export { ensureSupportThread, ensureModerationThread } from "./supportChat.js";

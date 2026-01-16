@@ -117,6 +117,18 @@ export default function SupportChatPanel({ authUser }) {
 
   const canSend = Boolean(thread?.userCanSend || thread?.userMessageAllowance > 0);
 
+  // Helper om system messages te herkennen
+  const isSystemMessage = (message) => {
+    if (!message) return false;
+    // Check op meerdere mogelijke veldnamen voor system messages
+    return (
+      message.type === 'system' ||
+      message.senderRole === 'system' ||
+      message.senderUid === 'system' ||
+      message.senderId === 'system'
+    );
+  };
+
   const handleSendMessage = async () => {
     if (!authUser?.uid || !threadId) return;
     const trimmed = composerText.trim();

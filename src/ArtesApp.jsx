@@ -199,11 +199,23 @@ const getPostContentPreference = (post, triggerVisibility) => {
 };
 
 const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
+  // Profile expectations:
+  // avatar: string (data URL or https) for the profile avatar.
+  // headerImage: string (data URL or https) for header/hero usage.
+  // headerPosition: CSS object-position value for headerImage (e.g. "center", "top").
+  // quickProfilePreviewMode: "latest" | "best" | "manual".
+  // quickProfilePostIds: array of post IDs to preview when mode is "manual".
   const seed = profileData?.uid || profileData?.displayName || fallbackSeed;
   const roles = Array.isArray(profileData?.roles) && profileData.roles.length ? profileData.roles : ['fan'];
   const themes = Array.isArray(profileData?.themes) && profileData.themes.length ? profileData.themes : ['General'];
   const triggerVisibility = normalizeTriggerPreferences(profileData?.preferences?.triggerVisibility);
   const themePreference = profileData?.preferences?.theme || 'light';
+  const quickProfilePreviewMode = ['latest', 'best', 'manual'].includes(profileData?.quickProfilePreviewMode)
+    ? profileData.quickProfilePreviewMode
+    : 'latest';
+  const quickProfilePostIds = Array.isArray(profileData?.quickProfilePostIds)
+    ? profileData.quickProfilePostIds.filter(Boolean)
+    : [];
 
   return {
     ...profileData,
@@ -213,6 +225,10 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
     roles,
     themes,
     avatar: profileData?.avatar || buildDefaultAvatar(seed),
+    headerImage: profileData?.headerImage || '',
+    headerPosition: profileData?.headerPosition || 'center',
+    quickProfilePreviewMode,
+    quickProfilePostIds,
     linkedAgencyName: profileData?.linkedAgencyName ?? null,
     linkedCompanyName: profileData?.linkedCompanyName ?? null,
     linkedAgencyLink: profileData?.linkedAgencyLink ?? '',
@@ -1547,13 +1563,19 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }
   const companyName = normalizedProfile.linkedCompanyName || '';
   const agencyLink = normalizedProfile.linkedAgencyLink || '';
   const companyLink = normalizedProfile.linkedCompanyLink || '';
+  const headerImage = normalizedProfile.headerImage || normalizedProfile.avatar;
+  const headerPosition = normalizedProfile.headerPosition || 'center';
   const hasAgency = Boolean(agencyName);
   const hasCompany = Boolean(companyName);
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
   return (
      <div className="min-h-screen bg-white dark:bg-slate-900 pb-20">
         <div className="relative h-[520px] w-full overflow-hidden">
-           <img src={normalizedProfile.avatar} className="w-full h-full object-cover scale-105" />
+           <img
+             src={headerImage}
+             className="w-full h-full object-cover scale-105"
+             style={{ objectPosition: headerPosition }}
+           />
            <div className="absolute inset-0 bg-white/40 dark:bg-black/55" />
            <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white dark:from-slate-900 to-transparent z-10" /> 
@@ -2799,14 +2821,24 @@ function EditProfileModal({ onClose, profile, user }) {
   const [agencySearch, setAgencySearch] = useState('');
   const [tab, setTab] = useState('general');
   const [pendingRoleRemoval, setPendingRoleRemoval] = useState(null);
+  const [avatarInputMode, setAvatarInputMode] = useState(profile?.avatar?.startsWith('data:') ? 'upload' : 'url');
+  const [headerInputMode, setHeaderInputMode] = useState(profile?.headerImage?.startsWith('data:') ? 'upload' : 'url');
+  const [manualPostIdsText, setManualPostIdsText] = useState((profile?.quickProfilePostIds || []).join(', '));
   const selectedRoles = formData.roles || [];
   const selectedThemes = formData.themes || [];
-  
+
   const handleSave = async () => {
+     const quickProfilePostIds = manualPostIdsText
+       .split(',')
+       .map((id) => id.trim())
+       .filter(Boolean);
      const payload = {
        ...formData,
        roles: formData.roles?.length ? formData.roles : ['fan'],
        themes: formData.themes || [],
+       headerPosition: formData.headerPosition || 'center',
+       quickProfilePreviewMode: formData.quickProfilePreviewMode || 'latest',
+       quickProfilePostIds,
        preferences: {
          ...formData.preferences,
          triggerVisibility: normalizeTriggerPreferences(formData.preferences?.triggerVisibility),
@@ -2848,6 +2880,21 @@ function EditProfileModal({ onClose, profile, user }) {
     });
   };
 
+  const handleImageUpload = (event, key) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormData((prev) => ({
+        ...prev,
+        [key]: reader.result,
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const quickPreviewMode = formData.quickProfilePreviewMode || 'latest';
+
   return (
     <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4">
        <div className="bg-white dark:bg-slate-900 w-full max-w-2xl h-[80vh] rounded-3xl overflow-hidden flex flex-col">
@@ -2857,6 +2904,7 @@ function EditProfileModal({ onClose, profile, user }) {
              <div className="flex gap-4 border-b mb-4">
                  {[
                    { key: 'general', label: 'Algemeen' },
+                   { key: 'preview', label: 'Quick Preview' },
                    { key: 'triggers', label: 'Triggers' },
                    { key: 'rollen', label: 'Rollen' },
                    { key: 'stijlen', label: 'Stijlen' },
@@ -2875,7 +2923,126 @@ function EditProfileModal({ onClose, profile, user }) {
                 <>
                     <Input label="Weergavenaam" value={formData.displayName} onChange={e => setFormData({...formData, displayName: e.target.value})} />
                     <div><label className="block text-sm font-medium mb-1 dark:text-slate-300">Bio</label><textarea className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white h-24" value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} /></div>
-                    
+
+                    <div className="border-t pt-6 space-y-4">
+                      <h4 className="font-bold dark:text-white">Profielafbeeldingen</h4>
+                      <div className="space-y-2">
+                        <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Avatar</p>
+                        <div className="flex gap-2">
+                          {['upload', 'url'].map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setAvatarInputMode(mode)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                                avatarInputMode === mode
+                                  ? 'bg-blue-600 text-white border-blue-600'
+                                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              {mode === 'upload' ? 'Upload' : 'URL'}
+                            </button>
+                          ))}
+                        </div>
+                        {avatarInputMode === 'upload' ? (
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                            onChange={(event) => handleImageUpload(event, 'avatar')}
+                          />
+                        ) : (
+                          <input
+                            className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                            placeholder="https://"
+                            value={formData.avatar || ''}
+                            onChange={(event) => setFormData({ ...formData, avatar: event.target.value })}
+                          />
+                        )}
+                        {formData.avatar && (
+                          <div className="flex items-center gap-3">
+                            <img src={formData.avatar} alt="Avatar preview" className="w-12 h-12 rounded-full object-cover border" />
+                            <button
+                              type="button"
+                              className="text-xs text-slate-500 hover:text-slate-700"
+                              onClick={() => setFormData({ ...formData, avatar: '' })}
+                            >
+                              Verwijderen
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Header afbeelding</p>
+                        <div className="flex gap-2">
+                          {['upload', 'url'].map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setHeaderInputMode(mode)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                                headerInputMode === mode
+                                  ? 'bg-blue-600 text-white border-blue-600'
+                                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              {mode === 'upload' ? 'Upload' : 'URL'}
+                            </button>
+                          ))}
+                        </div>
+                        {headerInputMode === 'upload' ? (
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                            onChange={(event) => handleImageUpload(event, 'headerImage')}
+                          />
+                        ) : (
+                          <input
+                            className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                            placeholder="https://"
+                            value={formData.headerImage || ''}
+                            onChange={(event) => setFormData({ ...formData, headerImage: event.target.value })}
+                          />
+                        )}
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Header positie</label>
+                            <select
+                              className="w-full p-2 rounded-xl border text-sm dark:bg-slate-800 dark:text-white"
+                              value={formData.headerPosition || 'center'}
+                              onChange={(event) => setFormData({ ...formData, headerPosition: event.target.value })}
+                            >
+                              {[
+                                'center',
+                                'top',
+                                'bottom',
+                                'left',
+                                'right',
+                                'left top',
+                                'right top',
+                                'left bottom',
+                                'right bottom',
+                              ].map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {formData.headerImage && (
+                            <div className="rounded-2xl border overflow-hidden h-20">
+                              <img
+                                src={formData.headerImage}
+                                alt="Header preview"
+                                className="w-full h-full object-cover"
+                                style={{ objectPosition: formData.headerPosition || 'center' }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="border-t pt-6">
                         <h4 className="font-bold mb-4 dark:text-white">Connecties</h4>
                         <div className="grid md:grid-cols-2 gap-4">
@@ -2890,6 +3057,54 @@ function EditProfileModal({ onClose, profile, user }) {
                         </div>
                     </div>
                 </>
+             )}
+
+             {tab === 'preview' && (
+               <div className="space-y-5">
+                 <div>
+                   <h4 className="font-bold text-slate-800 dark:text-white">Quick Profile preview</h4>
+                   <p className="text-sm text-slate-500 dark:text-slate-400">
+                     Kies welke posts je visitekaartje toont in snelle previews.
+                   </p>
+                 </div>
+                 <div className="space-y-2">
+                   <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400">Modus</label>
+                   <div className="flex flex-wrap gap-2">
+                     {[
+                       { id: 'latest', label: 'Laatste' },
+                       { id: 'best', label: 'Beste' },
+                       { id: 'manual', label: 'Handmatig' },
+                     ].map((option) => (
+                       <button
+                         key={option.id}
+                         type="button"
+                         onClick={() => setFormData({ ...formData, quickProfilePreviewMode: option.id })}
+                         className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                           quickPreviewMode === option.id
+                             ? 'bg-blue-600 text-white border-blue-600'
+                             : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                         }`}
+                       >
+                         {option.label}
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+                 {quickPreviewMode === 'manual' && (
+                   <div className="space-y-2">
+                     <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400">Post IDs (komma-gescheiden)</label>
+                     <textarea
+                       className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white h-24"
+                       placeholder="bijv. p12, p9, p2"
+                       value={manualPostIdsText}
+                       onChange={(event) => setManualPostIdsText(event.target.value)}
+                     />
+                     <p className="text-xs text-slate-500 dark:text-slate-400">
+                       Alleen ingevulde IDs worden getoond. Laat leeg om terug te vallen op de laatste posts.
+                     </p>
+                   </div>
+                 )}
+               </div>
              )}
 
              {tab === 'triggers' && (
@@ -3218,13 +3433,38 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
   const themes = userProfile.themes || [];
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
   const userPosts = posts.filter((post) => post.authorId === userId);
-  const previewPosts = userPosts.slice(0, 3);
+  const resolvePostTimestamp = (post) => {
+    if (post?.createdAt?.seconds) return post.createdAt.seconds * 1000;
+    if (post?.createdAt?.toMillis) return post.createdAt.toMillis();
+    if (typeof post?.createdAt === 'number') return post.createdAt;
+    return 0;
+  };
+  const previewMode = userProfile.quickProfilePreviewMode || 'latest';
+  const manualIds = Array.isArray(userProfile.quickProfilePostIds) ? userProfile.quickProfilePostIds : [];
+  const previewPosts = useMemo(() => {
+    if (previewMode === 'manual' && manualIds.length) {
+      const manualPosts = manualIds
+        .map((id) => userPosts.find((post) => post.id === id))
+        .filter(Boolean);
+      if (manualPosts.length) return manualPosts.slice(0, 3);
+    }
+    if (previewMode === 'best') {
+      return [...userPosts]
+        .sort((a, b) => (b.likes || 0) - (a.likes || 0))
+        .slice(0, 3);
+    }
+    return [...userPosts]
+      .sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a))
+      .slice(0, 3);
+  }, [manualIds, previewMode, userPosts]);
+  const headerImage = userProfile.headerImage || userProfile.avatar;
+  const headerPosition = userProfile.headerPosition || 'center';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
       <div className="bg-white dark:bg-slate-900 rounded-[32px] w-full max-w-4xl shadow-2xl overflow-hidden border border-white/10">
         <div className="relative h-80 w-full">
-          <img src={userProfile.avatar} className="w-full h-full object-cover scale-105" />
+          <img src={headerImage} className="w-full h-full object-cover scale-105" style={{ objectPosition: headerPosition }} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
           <div className="absolute inset-x-0 bottom-0 p-8 text-white">
             <h2 className="text-4xl font-bold mb-3">{userProfile.displayName}</h2>

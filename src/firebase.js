@@ -130,6 +130,8 @@ const upsertPublicUserProfile = async (uid, payload) => {
   );
 };
 
+// Profile payload fields we store (subset used by UI):
+// avatar, headerImage, headerPosition, quickProfilePreviewMode, quickProfilePostIds.
 export const createUserProfile = async (uid, profile) => {
   const payload = {
     ...profile,

@@ -1451,7 +1451,11 @@ function Discover({ users, posts, onUserClick, onPostClick, setView }) {
   }, [users, posts, search, tab]);
 
   const filteredPosts = posts.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) && (activeThemes.length === 0 || p.styles?.some(s => activeThemes.includes(s))));
-  const filteredUsers = users.filter(u => u.displayName.toLowerCase().includes(search.toLowerCase()) && (!activeRole || u.roles?.includes(activeRole)));
+  const filteredUsers = users.filter((u) => (
+    u.displayName.toLowerCase().includes(search.toLowerCase())
+    && (!activeRole || u.roles?.includes(activeRole))
+    && (activeThemes.length === 0 || u.themes?.some((theme) => activeThemes.includes(theme)))
+  ));
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
@@ -1475,7 +1479,36 @@ function Discover({ users, posts, onUserClick, onPostClick, setView }) {
        </div>}
 
        {tab === 'people' && <div>
-          <div className="flex flex-wrap gap-2 mb-6"><button onClick={() => setActiveRole(null)} className="px-4 py-2 rounded-full text-xs font-bold bg-blue-600 text-white">Iedereen</button>{displayedRoles.map(r => <button key={r.id} onClick={() => setActiveRole(r.id)} className={`px-4 py-2 rounded-full text-xs font-bold border ${activeRole === r.id ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{r.label}</button>)}<button onClick={() => setShowAllRoles(!showAllRoles)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button></div>
+          <div className="space-y-3 mb-6">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setActiveThemes([])}
+                className={`px-4 py-2 rounded-full text-xs font-bold border ${activeThemes.length === 0 ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
+              >
+                Alle thema&apos;s
+              </button>
+              {displayedThemes.map((theme) => (
+                <button
+                  key={theme}
+                  onClick={() => toggleTheme(theme)}
+                  className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${activeThemes.includes(theme) ? 'ring-2 ring-blue-500 ' + getThemeStyle(theme) : 'bg-white dark:bg-slate-800 text-slate-500'}`}
+                >
+                  {theme}
+                </button>
+              ))}
+              <button onClick={() => setShowAllThemes(!showAllThemes)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setActiveRole(null)}
+                className={`px-4 py-2 rounded-full text-xs font-bold border ${!activeRole ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
+              >
+                Iedereen
+              </button>
+              {displayedRoles.map(r => <button key={r.id} onClick={() => setActiveRole(r.id)} className={`px-4 py-2 rounded-full text-xs font-bold border ${activeRole === r.id ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{r.label}</button>)}
+              <button onClick={() => setShowAllRoles(!showAllRoles)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button>
+            </div>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{filteredUsers.map(u => <div key={u.uid} onClick={() => onUserClick(u.uid)} className="bg-white dark:bg-slate-800 rounded-2xl overflow-hidden shadow-sm cursor-pointer"><div className="aspect-square relative"><img src={u.avatar} className="w-full h-full object-cover"/><div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-3"><span className="text-white font-bold">{u.displayName}</span><span className="text-white/70 text-xs">{ROLES.find(r => r.id === u.roles[0])?.label}</span></div></div></div>)}</div>
        </div>}
     </div>
@@ -2767,11 +2800,13 @@ function EditProfileModal({ onClose, profile, user }) {
   const [tab, setTab] = useState('general');
   const [pendingRoleRemoval, setPendingRoleRemoval] = useState(null);
   const selectedRoles = formData.roles || [];
+  const selectedThemes = formData.themes || [];
   
   const handleSave = async () => {
      const payload = {
        ...formData,
        roles: formData.roles?.length ? formData.roles : ['fan'],
+       themes: formData.themes || [],
        preferences: {
          ...formData.preferences,
          triggerVisibility: normalizeTriggerPreferences(formData.preferences?.triggerVisibility),
@@ -2799,6 +2834,18 @@ function EditProfileModal({ onClose, profile, user }) {
       roles: (prev.roles || []).filter((role) => role !== pendingRoleRemoval),
     }));
     setPendingRoleRemoval(null);
+  };
+
+  const handleThemeToggle = (theme) => {
+    setFormData((prev) => {
+      const prevThemes = prev.themes || [];
+      return {
+        ...prev,
+        themes: prevThemes.includes(theme)
+          ? prevThemes.filter((item) => item !== theme)
+          : [...prevThemes, theme],
+      };
+    });
   };
 
   return (
@@ -2917,6 +2964,32 @@ function EditProfileModal({ onClose, profile, user }) {
                            {isSelected && <span className="text-[10px] uppercase tracking-wide text-blue-600">Actief</span>}
                          </div>
                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{role.desc}</p>
+                       </button>
+                     );
+                   })}
+                 </div>
+               </div>
+             )}
+
+             {tab === 'stijlen' && (
+               <div className="space-y-4">
+                 <div>
+                   <h4 className="font-bold text-slate-800 dark:text-white">Stijlen</h4>
+                   <p className="text-sm text-slate-500 dark:text-slate-400">Selecteer de thema&apos;s die bij jouw werk passen.</p>
+                 </div>
+                 <div className="flex flex-wrap gap-2 max-h-56 overflow-y-auto no-scrollbar">
+                   {THEMES.map((theme) => {
+                     const isSelected = selectedThemes.includes(theme);
+                     return (
+                       <button
+                         key={theme}
+                         type="button"
+                         onClick={() => handleThemeToggle(theme)}
+                         className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${getThemeStyle(theme)} ${
+                           isSelected ? 'ring-2 ring-blue-500' : ''
+                         }`}
+                       >
+                         {theme}
                        </button>
                      );
                    })}

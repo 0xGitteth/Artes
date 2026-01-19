@@ -986,7 +986,15 @@ export default function ArtesApp() {
             onToggleDark={handleToggleDarkMode}
           />
         )}
-        {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} profile={profile} user={user} />}
+        {showEditProfile && (
+          <EditProfileModal
+            onClose={() => setShowEditProfile(false)}
+            profile={profile}
+            user={user}
+            posts={posts}
+            onOpenQuickProfile={() => setQuickProfileId(user?.uid || null)}
+          />
+        )}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
         {toastMessage && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-slate-900 text-white text-sm px-4 py-2 rounded-full shadow-lg">
@@ -2816,22 +2824,34 @@ function UploadModal({ onClose, user, profile, users }) {
   );
 }
 
-function EditProfileModal({ onClose, profile, user }) {
+function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile }) {
   const [formData, setFormData] = useState({ ...profile });
   const [agencySearch, setAgencySearch] = useState('');
   const [tab, setTab] = useState('general');
   const [pendingRoleRemoval, setPendingRoleRemoval] = useState(null);
   const [avatarInputMode, setAvatarInputMode] = useState(profile?.avatar?.startsWith('data:') ? 'upload' : 'url');
   const [headerInputMode, setHeaderInputMode] = useState(profile?.headerImage?.startsWith('data:') ? 'upload' : 'url');
-  const [manualPostIdsText, setManualPostIdsText] = useState((profile?.quickProfilePostIds || []).join(', '));
+  const [manualPostIds, setManualPostIds] = useState(profile?.quickProfilePostIds || []);
+  const [saveError, setSaveError] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const selectedRoles = formData.roles || [];
   const selectedThemes = formData.themes || [];
+  const userPosts = useMemo(() => (posts || []).filter((post) => post.authorId === user?.uid), [posts, user?.uid]);
+  const resolvePostTimestamp = (post) => {
+    if (post?.createdAt?.seconds) return post.createdAt.seconds * 1000;
+    if (post?.createdAt?.toMillis) return post.createdAt.toMillis();
+    if (typeof post?.createdAt === 'number') return post.createdAt;
+    return 0;
+  };
+  const sortedUserPosts = useMemo(
+    () => [...userPosts].sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a)),
+    [userPosts]
+  );
 
   const handleSave = async () => {
-     const quickProfilePostIds = manualPostIdsText
-       .split(',')
-       .map((id) => id.trim())
-       .filter(Boolean);
+     setSaveError(null);
+     setIsSaving(true);
+     const quickProfilePostIds = Array.from(new Set(manualPostIds));
      const payload = {
        ...formData,
        roles: formData.roles?.length ? formData.roles : ['fan'],
@@ -2844,8 +2864,15 @@ function EditProfileModal({ onClose, profile, user }) {
          triggerVisibility: normalizeTriggerPreferences(formData.preferences?.triggerVisibility),
        },
      };
-     await updateProfileData(user.uid, payload);
-     onClose();
+     try {
+       await updateProfileData(user.uid, payload);
+       onClose();
+     } catch (error) {
+       console.error('Failed to save profile settings', error);
+       setSaveError('Opslaan mislukt. Probeer het opnieuw.');
+     } finally {
+       setIsSaving(false);
+     }
   };
 
   const handleRoleToggle = (roleId) => {
@@ -2893,6 +2920,12 @@ function EditProfileModal({ onClose, profile, user }) {
     reader.readAsDataURL(file);
   };
 
+  const handleManualPostToggle = (postId) => {
+    setManualPostIds((prev) => (
+      prev.includes(postId) ? prev.filter((id) => id !== postId) : [...prev, postId]
+    ));
+  };
+
   const quickPreviewMode = formData.quickProfilePreviewMode || 'latest';
 
   return (
@@ -2904,7 +2937,7 @@ function EditProfileModal({ onClose, profile, user }) {
              <div className="flex gap-4 border-b mb-4">
                  {[
                    { key: 'general', label: 'Algemeen' },
-                   { key: 'preview', label: 'Quick Preview' },
+                   { key: 'preview', label: 'Quick Profile' },
                    { key: 'triggers', label: 'Triggers' },
                    { key: 'rollen', label: 'Rollen' },
                    { key: 'stijlen', label: 'Stijlen' },
@@ -3061,11 +3094,20 @@ function EditProfileModal({ onClose, profile, user }) {
 
              {tab === 'preview' && (
                <div className="space-y-5">
-                 <div>
-                   <h4 className="font-bold text-slate-800 dark:text-white">Quick Profile preview</h4>
-                   <p className="text-sm text-slate-500 dark:text-slate-400">
-                     Kies welke posts je visitekaartje toont in snelle previews.
-                   </p>
+                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                   <div>
+                     <h4 className="font-bold text-slate-800 dark:text-white">Quick Profile</h4>
+                     <p className="text-sm text-slate-500 dark:text-slate-400">
+                       Kies welke posts je visitekaartje toont in snelle previews.
+                     </p>
+                   </div>
+                   <Button
+                     variant="secondary"
+                     className="self-start sm:self-auto"
+                     onClick={() => onOpenQuickProfile?.()}
+                   >
+                     Bekijk Quick Profile
+                   </Button>
                  </div>
                  <div className="space-y-2">
                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400">Modus</label>
@@ -3092,15 +3134,45 @@ function EditProfileModal({ onClose, profile, user }) {
                  </div>
                  {quickPreviewMode === 'manual' && (
                    <div className="space-y-2">
-                     <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400">Post IDs (komma-gescheiden)</label>
-                     <textarea
-                       className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white h-24"
-                       placeholder="bijv. p12, p9, p2"
-                       value={manualPostIdsText}
-                       onChange={(event) => setManualPostIdsText(event.target.value)}
-                     />
+                     <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400">Selecteer posts</label>
+                     {sortedUserPosts.length > 0 ? (
+                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                         {sortedUserPosts.map((post) => {
+                           const isSelected = manualPostIds.includes(post.id);
+                           return (
+                             <button
+                               key={post.id}
+                               type="button"
+                               onClick={() => handleManualPostToggle(post.id)}
+                               className={`relative rounded-2xl overflow-hidden border transition ${
+                                 isSelected
+                                   ? 'border-blue-500 ring-2 ring-blue-500'
+                                   : 'border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                               }`}
+                             >
+                               <img src={post.imageUrl} alt={post.title} className="w-full h-32 object-cover" />
+                               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent opacity-0 hover:opacity-100 transition" />
+                               <div className="absolute bottom-2 left-2 right-2 text-left">
+                                 <p className="text-xs font-semibold text-white truncate">{post.title}</p>
+                               </div>
+                               {isSelected && (
+                                 <div className="absolute top-2 right-2 bg-blue-600 text-white rounded-full p-1">
+                                   <CheckCircle className="w-4 h-4" />
+                                 </div>
+                               )}
+                             </button>
+                           );
+                         })}
+                       </div>
+                     ) : (
+                       <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-4 text-sm text-slate-500 dark:text-slate-400 text-center">
+                         Nog geen uploads gevonden. Upload eerst posts om ze hier te selecteren.
+                       </div>
+                     )}
                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                       Alleen ingevulde IDs worden getoond. Laat leeg om terug te vallen op de laatste posts.
+                       {manualPostIds.length > 0
+                         ? `${manualPostIds.length} geselecteerd. Deze worden getoond in de snelle preview.`
+                         : 'Geen selectie gemaakt: we tonen automatisch je laatste posts.'}
                      </p>
                    </div>
                  )}
@@ -3212,7 +3284,15 @@ function EditProfileModal({ onClose, profile, user }) {
                </div>
              )}
           </div>
-          <div className="p-6 border-t flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Annuleren</Button><Button onClick={handleSave}>Opslaan</Button></div>
+          <div className="p-6 border-t space-y-3">
+            {saveError && <p className="text-sm text-red-500">{saveError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={onClose}>Annuleren</Button>
+              <Button onClick={handleSave} disabled={isSaving}>
+                {isSaving ? 'Opslaan...' : 'Opslaan'}
+              </Button>
+            </div>
+          </div>
        </div>
        {pendingRoleRemoval && (
          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-6">

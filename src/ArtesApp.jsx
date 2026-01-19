@@ -14,6 +14,8 @@ import {
   seedDemoContent,
   subscribeToPosts,
   subscribeToUsers,
+  updatePost,
+  deletePost,
   updateProfile as updateProfileData,
 } from './services/firebaseClient';
 import {
@@ -3421,7 +3423,21 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers }) {
 }
 function PhotoDetailModal({ post, onClose, authUser, moderationApiBase }) {
   const [reportState, setReportState] = useState({ status: 'idle', error: null });
+  const [editState, setEditState] = useState({ saving: false, error: null, success: false });
+  const [deleteState, setDeleteState] = useState({ confirm: false, deleting: false, error: null });
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(post?.title || '');
+  const [editDescription, setEditDescription] = useState(post?.description || '');
   const canReport = Boolean(authUser && moderationApiBase);
+  const isOwner = Boolean(authUser?.uid && post?.authorId === authUser?.uid);
+
+  useEffect(() => {
+    setIsEditing(false);
+    setEditState({ saving: false, error: null, success: false });
+    setDeleteState({ confirm: false, deleting: false, error: null });
+    setEditTitle(post?.title || '');
+    setEditDescription(post?.description || '');
+  }, [post?.id]);
 
   const handleReport = async () => {
     if (!canReport || reportState.status === 'pending' || reportState.status === 'sent') return;
@@ -3459,6 +3475,37 @@ function PhotoDetailModal({ post, onClose, authUser, moderationApiBase }) {
     }
   };
 
+  const handleSave = async () => {
+    if (!isOwner || editState.saving) return;
+    setEditState({ saving: true, error: null, success: false });
+    try {
+      await updatePost(post.id, {
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+      });
+      setEditState({ saving: false, error: null, success: true });
+      setIsEditing(false);
+    } catch (error) {
+      setEditState({ saving: false, error: error.message || 'Opslaan mislukt.', success: false });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!isOwner || deleteState.deleting) return;
+    setDeleteState((prev) => ({ ...prev, deleting: true, error: null }));
+    try {
+      await deletePost(post.id);
+      setDeleteState({ confirm: false, deleting: false, error: null });
+      onClose();
+    } catch (error) {
+      setDeleteState((prev) => ({
+        ...prev,
+        deleting: false,
+        error: error.message || 'Verwijderen mislukt.',
+      }));
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-10">
       <img src={post.imageUrl} className="max-h-full" />
@@ -3479,6 +3526,95 @@ function PhotoDetailModal({ post, onClose, authUser, moderationApiBase }) {
           <span className="text-red-200">{reportState.error}</span>
         )}
       </div>
+      {isOwner && (
+        <div className="absolute bottom-6 left-6 right-6 md:right-auto md:max-w-md bg-black/70 text-white p-4 rounded-2xl border border-white/10 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-white/60">Jouw upload</p>
+              <p className="text-sm font-semibold">Beheer je post</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditing((prev) => !prev);
+                  setEditState({ saving: false, error: null, success: false });
+                }}
+                className="text-xs px-3 py-1 rounded-full bg-white/10 hover:bg-white/20"
+              >
+                {isEditing ? 'Annuleren' : 'Bewerken'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteState((prev) => ({ ...prev, confirm: !prev.confirm, error: null }))}
+                className="text-xs px-3 py-1 rounded-full bg-red-500/20 text-red-100 hover:bg-red-500/30"
+              >
+                Verwijderen
+              </button>
+            </div>
+          </div>
+
+          {isEditing && (
+            <div className="space-y-2">
+              <div>
+                <label className="text-xs text-white/70">Titel</label>
+                <input
+                  className="w-full mt-1 rounded-lg bg-black/40 border border-white/10 p-2 text-sm text-white"
+                  value={editTitle}
+                  onChange={(event) => setEditTitle(event.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-white/70">Beschrijving</label>
+                <textarea
+                  className="w-full mt-1 rounded-lg bg-black/40 border border-white/10 p-2 text-sm text-white"
+                  value={editDescription}
+                  onChange={(event) => setEditDescription(event.target.value)}
+                  rows={3}
+                />
+              </div>
+              {editState.error && <p className="text-xs text-red-200">{editState.error}</p>}
+              {editState.success && <p className="text-xs text-emerald-200">Wijzigingen opgeslagen.</p>}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={editState.saving}
+                  className="text-xs px-4 py-1.5 rounded-full bg-emerald-500/80 hover:bg-emerald-500 disabled:opacity-60"
+                >
+                  {editState.saving ? 'Opslaan...' : 'Opslaan'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {deleteState.confirm && (
+            <div className="rounded-xl border border-red-400/40 bg-red-500/10 p-3 space-y-2">
+              <p className="text-xs text-red-100">
+                Weet je zeker dat je deze post wilt verwijderen? Dit kan niet ongedaan worden gemaakt.
+              </p>
+              {deleteState.error && <p className="text-xs text-red-200">{deleteState.error}</p>}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteState((prev) => ({ ...prev, confirm: false }))}
+                  className="text-xs px-3 py-1 rounded-full bg-white/10 hover:bg-white/20"
+                >
+                  Annuleren
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={deleteState.deleting}
+                  className="text-xs px-3 py-1 rounded-full bg-red-500 text-white hover:bg-red-600 disabled:opacity-60"
+                >
+                  {deleteState.deleting ? 'Verwijderen...' : 'Bevestig verwijderen'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <button onClick={onClose} className="absolute top-4 right-4 text-white"><X/></button>
     </div>
   );

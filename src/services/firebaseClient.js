@@ -18,6 +18,8 @@ import {
   setDoc,
   getDoc,
   writeBatch,
+  updateDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -95,6 +97,17 @@ export const publishPost = async (post) => {
     ...post,
     createdAt: serverTimestamp(),
   });
+};
+
+export const updatePost = async (postId, payload) => {
+  await updateDoc(doc(db, ...artifactsPath, 'public', 'data', 'posts', postId), {
+    ...payload,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+export const deletePost = async (postId) => {
+  await deleteDoc(doc(db, ...artifactsPath, 'public', 'data', 'posts', postId));
 };
 
 export const fetchUserIndex = async (userId) => {

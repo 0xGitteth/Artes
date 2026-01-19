@@ -18,7 +18,6 @@ import {
   setDoc,
   getDoc,
   writeBatch,
-  updateDoc,
 } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -87,8 +86,8 @@ export const createProfile = async (uid, profile) => {
 // Update is merged into both private and public profile indices.
 // Keep profile preview preferences in sync with UI expectations.
 export const updateProfile = async (uid, payload) => {
-  await updateDoc(doc(db, ...artifactsPath, 'users', uid, 'profile', 'main'), payload);
-  await updateDoc(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', uid), payload);
+  await setDoc(doc(db, ...artifactsPath, 'users', uid, 'profile', 'main'), payload, { merge: true });
+  await setDoc(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', uid), payload, { merge: true });
 };
 
 export const publishPost = async (post) => {

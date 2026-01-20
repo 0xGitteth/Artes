@@ -1558,3 +1558,4 @@ export const config = {
 };
 
 export { ensureSupportThread, ensureModerationThread } from "./supportChat.js";
+export { deleteOnboardingAccount } from "./accountLifecycle.js";

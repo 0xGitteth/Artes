@@ -376,6 +376,31 @@ export default function ArtesApp() {
     return data?.threadId || `moderation_${user.uid}`;
   }, [functionsBase]);
 
+  const handleDeleteOnboardingAccount = useCallback(async () => {
+    if (!authUser?.uid) {
+      throw new Error('Geen account gevonden om te verwijderen.');
+    }
+    if (!functionsBase) {
+      throw new Error('Account verwijderen is momenteel niet beschikbaar.');
+    }
+    const token = await authUser.getIdToken();
+    const response = await fetch(`${functionsBase}/deleteOnboardingAccount`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new Error(data?.error || 'Account verwijderen is mislukt.');
+    }
+    await firebaseLogout();
+    setProfile(null);
+    setView('login');
+    setToastMessage('Account verwijderd.');
+  }, [authUser, functionsBase]);
+
   // Seeding
   useEffect(() => {
      const checkAndSeed = async () => {
@@ -880,6 +905,7 @@ export default function ArtesApp() {
               users={users}
               onSignup={handleSignup}
               onCompleteProfile={handleCompleteProfile}
+              onDeclineDidit={handleDeleteOnboardingAccount}
               authUser={authUser}
               authError={authError}
               profile={profile}
@@ -1130,7 +1156,7 @@ function LoginScreen({ setView, onLogin, error, loading }) {
   );
 }
 
-function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, authError, profile }) {
+function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile }) {
     const [step, setStep] = useState(() => Math.max(1, profile?.onboardingStep ?? 1));
     const [roles, setRoles] = useState([]);
     const [profileData, setProfileData] = useState({
@@ -1144,6 +1170,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
     const [accountCreated, setAccountCreated] = useState(!!authUser);
     const [pending, setPending] = useState(false);
     const [error, setError] = useState(null);
+    const [diditPending, setDiditPending] = useState(false);
+    const [diditError, setDiditError] = useState(null);
     const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
     const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
     const isGoogleUser = authUser?.providerData?.some((provider) => provider?.providerId === 'google.com')
@@ -1261,7 +1289,29 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
         <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border dark:border-slate-700 space-y-6">
            <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Artes staan respect en consent centraal.</p></div>
            <div className="flex gap-3"><CheckCircle className="text-green-500"/><p className="text-sm dark:text-slate-300">Identificatie via Didit is verplicht voor veiligheid.</p></div>
-           <Button onClick={() => setStep(3)} className="w-full">Start Didit Verificatie</Button>
+           {diditError && <p className="text-sm text-red-500">{diditError}</p>}
+           <div className="flex flex-col gap-3">
+             <Button onClick={() => setStep(3)} className="w-full" disabled={diditPending}>Start Didit Verificatie</Button>
+             <Button
+               variant="danger"
+               onClick={async () => {
+                 if (!window.confirm('Weet je zeker dat je niet akkoord gaat? Je account wordt verwijderd.')) return;
+                 try {
+                   setDiditPending(true);
+                   setDiditError(null);
+                   await onDeclineDidit?.();
+                 } catch (e) {
+                   setDiditError(e.message || 'Account verwijderen is mislukt.');
+                 } finally {
+                   setDiditPending(false);
+                 }
+               }}
+               className="w-full"
+               disabled={diditPending}
+             >
+               Niet akkoord, verwijder mijn account
+             </Button>
+           </div>
         </div>
       </div>
     );
@@ -1300,7 +1350,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
                  <input className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="Naam Bedrijf" value={profileData.linkedCompanyName} onChange={e => setProfileData({...profileData, linkedCompanyName: e.target.value})} />
              </div>
           </div>
-          <Button className="w-full mt-4" onClick={() => setStep(5)}>Volgende</Button>
+          <div className="flex flex-col gap-3 mt-4">
+            <Button className="w-full" onClick={() => setStep(5)}>Volgende</Button>
+            <Button variant="secondary" onClick={() => setStep(3)} className="w-full">Terug</Button>
+          </div>
         </div>
       </div>
     );
@@ -1386,17 +1439,20 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, authUser, aut
           </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
-          <Button className="w-full" disabled={!accountCreated || pending || roles.length === 0} onClick={async () => {
-              try {
-                setPending(true);
-                setError(null);
-                await onCompleteProfile?.(profileData, roles);
-              } catch (e) {
-                setError(e.message);
-              } finally {
-                setPending(false);
-              }
-          }}>{pending ? 'Opslaan...' : 'Afronden'}</Button>
+          <div className="flex flex-col gap-3">
+            <Button className="w-full" disabled={!accountCreated || pending || roles.length === 0} onClick={async () => {
+                try {
+                  setPending(true);
+                  setError(null);
+                  await onCompleteProfile?.(profileData, roles);
+                } catch (e) {
+                  setError(e.message);
+                } finally {
+                  setPending(false);
+                }
+            }}>{pending ? 'Opslaan...' : 'Afronden'}</Button>
+            <Button variant="secondary" onClick={() => setStep(4)} className="w-full" disabled={pending}>Terug</Button>
+          </div>
         </div>
       </div>
     );

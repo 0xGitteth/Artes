@@ -114,16 +114,58 @@ const generateUsername = (displayName, uid) => {
   return `${base.slice(0, maxBaseLength)}${suffix}`;
 };
 
-const upsertPublicUserProfile = async (uid, payload) => {
+const PUBLIC_PROFILE_FIELDS = [
+  'bio',
+  'roles',
+  'themes',
+  'linkedAgencyName',
+  'linkedCompanyName',
+  'linkedAgencyLink',
+  'linkedCompanyLink',
+  'headerImage',
+  'headerPosition',
+  'quickProfilePreviewMode',
+  'quickProfilePostIds',
+  'avatar',
+];
+
+const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
+  const payload = {};
+  PUBLIC_PROFILE_FIELDS.forEach((field) => {
+    if (data[field] !== undefined) {
+      payload[field] = data[field];
+    }
+  });
+  const hasDisplayName = data.displayName !== undefined;
+  const hasUsername = data.username !== undefined;
+  if (hasDisplayName) {
+    payload.displayName = data.displayName;
+    payload.displayNameLower = String(data.displayName || '').toLowerCase();
+  }
+  if (hasUsername) {
+    payload.username = normalizeUsername(data.username);
+  }
+  if (data.photoURL !== undefined || data.avatar !== undefined) {
+    payload.photoURL = data.photoURL ?? data.avatar ?? null;
+  }
+  if ((hasDisplayName || hasUsername) && !payload.username) {
+    const fallbackUsername = existingPublic.username || (hasDisplayName ? generateUsername(data.displayName, uid) : null);
+    if (fallbackUsername) {
+      payload.username = fallbackUsername;
+    }
+  }
+  return payload;
+};
+
+const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   if (!uid) return;
+  const payload = buildPublicProfilePayload(data, uid, existingPublic);
+  if (!Object.keys(payload).length) return;
   await setDoc(
     doc(getFirebaseDb(), 'publicUsers', uid),
     {
       uid,
-      username: payload.username,
-      displayName: payload.displayName,
-      displayNameLower: payload.displayNameLower,
-      photoURL: payload.photoURL ?? null,
+      ...payload,
       updatedAt: serverTimestamp(),
     },
     { merge: true },
@@ -147,29 +189,18 @@ export const updateUserProfile = async (uid, data) => {
     { ...data, updatedAt: serverTimestamp() },
     { merge: true },
   );
-  const publicUpdates = {};
-  if (data.displayName) {
-    publicUpdates.displayName = data.displayName;
-    publicUpdates.displayNameLower = String(data.displayName || '').toLowerCase();
-  }
-  if (data.username) {
-    publicUpdates.username = normalizeUsername(data.username);
-  }
-  if (data.photoURL || data.avatar) {
-    publicUpdates.photoURL = data.photoURL ?? data.avatar ?? null;
-  }
-  if (Object.keys(publicUpdates).length > 0) {
-    const publicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', uid));
-    const existing = publicSnap.exists() ? publicSnap.data() : {};
-    const displayName = publicUpdates.displayName || existing.displayName || 'Artes gebruiker';
-    const displayNameLower = publicUpdates.displayNameLower || existing.displayNameLower || displayName.toLowerCase();
-    const username = publicUpdates.username || existing.username || generateUsername(displayName, uid);
-    await upsertPublicUserProfile(uid, {
-      username,
-      displayName,
-      displayNameLower,
-      photoURL: publicUpdates.photoURL ?? existing.photoURL ?? null,
-    });
+  const shouldSyncPublic = PUBLIC_PROFILE_FIELDS.some((field) => field in data)
+    || data.displayName !== undefined
+    || data.username !== undefined
+    || data.photoURL !== undefined
+    || data.avatar !== undefined;
+  if (shouldSyncPublic) {
+    let existingPublic = {};
+    if (data.displayName !== undefined && data.username === undefined) {
+      const publicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', uid));
+      existingPublic = publicSnap.exists() ? publicSnap.data() : {};
+    }
+    await writePublicUserProfile(uid, data, existingPublic);
   }
 };
 
@@ -250,14 +281,17 @@ export const ensureUserProfile = async (user) => {
       await updateUserProfile(user.uid, updates);
     }
     const displayName = updates.displayName || data.displayName || resolvedDisplayName;
-    const displayNameLower = String(displayName || '').toLowerCase();
     const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
-    await upsertPublicUserProfile(user.uid, {
-      username,
-      displayName,
-      displayNameLower,
-      photoURL: data.photoURL ?? user.photoURL ?? null,
-    });
+    await writePublicUserProfile(
+      user.uid,
+      {
+        ...data,
+        displayName,
+        username,
+        photoURL: data.photoURL ?? user.photoURL ?? null,
+      },
+      {},
+    );
     return { ...data, ...updates };
   }
   const profile = {
@@ -270,15 +304,42 @@ export const ensureUserProfile = async (user) => {
     onboardingComplete: false,
   };
   await createUserProfile(user.uid, profile);
-  const displayNameLower = String(resolvedDisplayName || '').toLowerCase();
   const username = generateUsername(resolvedDisplayName, user.uid);
-  await upsertPublicUserProfile(user.uid, {
+  await writePublicUserProfile(user.uid, {
     username,
     displayName: resolvedDisplayName,
-    displayNameLower,
     photoURL: user.photoURL ?? null,
   });
   return profile;
+};
+
+export const migrateArtifactsUserData = async (user) => {
+  if (!user?.uid) return null;
+  const appId = import.meta.env.VITE_FIREBASE_APP_ID;
+  if (!appId) return null;
+  const db = getFirebaseDb();
+  const [profileSnap, publicSnap] = await Promise.all([
+    getDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main')),
+    getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', user.uid)),
+  ]);
+  const migrations = [];
+  if (profileSnap.exists()) {
+    const data = profileSnap.data();
+    migrations.push(setDoc(
+      doc(db, 'users', user.uid),
+      { ...data, updatedAt: serverTimestamp() },
+      { merge: true },
+    ));
+  }
+  if (publicSnap.exists()) {
+    const data = publicSnap.data();
+    const existingPublicSnap = await getDoc(doc(db, 'publicUsers', user.uid));
+    const existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
+    migrations.push(writePublicUserProfile(user.uid, data, existingPublic));
+  }
+  if (!migrations.length) return null;
+  await Promise.all(migrations);
+  return { migratedProfile: profileSnap.exists(), migratedPublic: publicSnap.exists() };
 };
 
 const shouldRedirect = (error) =>

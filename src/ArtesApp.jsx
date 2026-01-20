@@ -7,16 +7,13 @@ import {
   Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle
 } from 'lucide-react';
 import {
-  createProfile,
   fetchUserIndex,
-  getAppId,
   publishPost,
   seedDemoContent,
   subscribeToPosts,
   subscribeToUsers,
   updatePost,
   deletePost,
-  updateProfile as updateProfileData,
 } from './services/firebaseClient';
 import {
   ensureUserProfile,
@@ -25,6 +22,7 @@ import {
   initAuth,
   loginWithEmail,
   logout as firebaseLogout,
+  migrateArtifactsUserData,
   observeAuth,
   reloadCurrentUser,
   registerWithEmail,
@@ -437,6 +435,7 @@ export default function ArtesApp() {
         return;
       }
       try {
+        await migrateArtifactsUserData(u);
         const profileData = await ensureUserProfile(u);
         const normalized = normalizeProfileData(profileData, u.uid);
         setProfile(normalized);
@@ -715,12 +714,13 @@ export default function ArtesApp() {
   };
 
   const handleCompleteProfile = async (profileData, roles) => {
+    const themes = Array.isArray(profileData.themes) && profileData.themes.length ? profileData.themes : ['General'];
     const finalProfile = {
       uid: authUser?.uid,
       displayName: profileData.displayName || 'Nieuwe Maker',
       bio: profileData.bio,
       roles,
-      themes: ['General'],
+      themes,
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.uid || 'artes'}`,
       linkedAgencyName: profileData.linkedAgencyName,
       linkedCompanyName: profileData.linkedCompanyName,
@@ -734,9 +734,6 @@ export default function ArtesApp() {
     };
       if (authUser?.uid) {
         await updateUserProfile(authUser.uid, finalProfile);
-        createProfile(authUser.uid, finalProfile).catch((error) => {
-          console.error('Failed to sync profile to Firestore', error);
-        });
       }
     const normalized = normalizeProfileData(finalProfile, authUser?.uid);
     setProfile(normalized);
@@ -1159,12 +1156,18 @@ function LoginScreen({ setView, onLogin, error, loading }) {
 function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile }) {
     const [step, setStep] = useState(() => Math.max(1, profile?.onboardingStep ?? 1));
     const [roles, setRoles] = useState([]);
-    const [profileData, setProfileData] = useState({
-       displayName: '', bio: '', insta: '', linkedAgencyName: '', linkedCompanyName: '', preferences: {
+    const [profileData, setProfileData] = useState(() => ({
+       displayName: profile?.displayName || '',
+       bio: profile?.bio || '',
+       insta: '',
+       linkedAgencyName: profile?.linkedAgencyName || '',
+       linkedCompanyName: profile?.linkedCompanyName || '',
+       themes: Array.isArray(profile?.themes) ? profile.themes : [],
+       preferences: {
          triggerVisibility: normalizeTriggerPreferences(),
-         theme: 'light',
+         theme: profile?.preferences?.theme || 'light',
        },
-    });
+    }));
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [accountCreated, setAccountCreated] = useState(!!authUser);
@@ -1349,6 +1352,36 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                  <label className="block text-sm font-medium mb-1 dark:text-slate-300">Bedrijf/Studio (Optioneel)</label>
                  <input className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="Naam Bedrijf" value={profileData.linkedCompanyName} onChange={e => setProfileData({...profileData, linkedCompanyName: e.target.value})} />
              </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2 dark:text-slate-300">Thema&apos;s</label>
+            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto no-scrollbar">
+              {THEMES.map((theme) => {
+                const isSelected = profileData.themes?.includes(theme);
+                return (
+                  <button
+                    key={theme}
+                    type="button"
+                    onClick={() =>
+                      setProfileData((prev) => {
+                        const prevThemes = prev.themes || [];
+                        return {
+                          ...prev,
+                          themes: prevThemes.includes(theme)
+                            ? prevThemes.filter((item) => item !== theme)
+                            : [...prevThemes, theme],
+                        };
+                      })
+                    }
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${getThemeStyle(theme)} ${
+                      isSelected ? 'ring-2 ring-blue-500' : ''
+                    }`}
+                  >
+                    {theme}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="flex flex-col gap-3 mt-4">
             <Button className="w-full" onClick={() => setStep(5)}>Volgende</Button>
@@ -2923,7 +2956,7 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
        },
      };
      try {
-       await updateProfileData(user.uid, payload);
+       await updateUserProfile(user.uid, payload);
        onClose();
      } catch (error) {
        console.error('Failed to save profile settings', error);

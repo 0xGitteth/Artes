@@ -36,6 +36,10 @@ const db = getFirestore(app);
 const appId = import.meta.env.VITE_FIREBASE_APP_ID || 'default-app-id';
 
 const artifactsPath = ['artifacts', appId];
+const normalizeUsername = (value) => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '')
+  .slice(0, 20);
 
 export const ensureUserSignedIn = async (customToken) => {
   if (customToken) return signInWithCustomToken(auth, customToken);
@@ -44,9 +48,7 @@ export const ensureUserSignedIn = async (customToken) => {
 
 export const subscribeToAuth = (callback) => onAuthStateChanged(auth, callback);
 
-export const subscribeToProfile = (uid, callback) => {
-  return onSnapshot(doc(db, ...artifactsPath, 'users', uid, 'profile', 'main'), callback);
-};
+export const subscribeToProfile = (uid, callback) => onSnapshot(doc(db, 'users', uid), callback);
 
 export const subscribeToPosts = (callback) =>
   onSnapshot(
@@ -55,16 +57,16 @@ export const subscribeToPosts = (callback) =>
   );
 
 export const subscribeToUsers = (callback) =>
-  onSnapshot(collection(db, ...artifactsPath, 'public', 'data', 'user_indices'), (snapshot) =>
+  onSnapshot(collection(db, 'publicUsers'), (snapshot) =>
     callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })))
   );
 
 export const seedDemoContent = async (seedUsers, seedPosts) => {
-  const check = await getDoc(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', 'user_sophie'));
+  const check = await getDoc(doc(db, 'publicUsers', 'user_sophie'));
   if (check.exists()) return;
 
   const batch = writeBatch(db);
-  seedUsers.forEach((user) => batch.set(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', user.uid), user));
+  seedUsers.forEach((user) => batch.set(doc(db, 'publicUsers', user.uid), user));
   seedPosts.forEach((post) => {
     batch.set(doc(db, ...artifactsPath, 'public', 'data', 'posts', post.id), {
       ...post,
@@ -79,17 +81,37 @@ export const seedDemoContent = async (seedUsers, seedPosts) => {
 export const createProfile = async (uid, profile) => {
   const payload = {
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
     ...profile,
   };
-  await setDoc(doc(db, ...artifactsPath, 'users', uid, 'profile', 'main'), payload);
-  await setDoc(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', uid), payload);
+  await setDoc(doc(db, 'users', uid), payload);
+  const displayNameLower = String(profile?.displayName || '').toLowerCase();
+  const publicPayload = {
+    ...profile,
+    uid,
+    displayNameLower,
+    username: profile?.username ? normalizeUsername(profile.username) : profile?.username,
+    updatedAt: serverTimestamp(),
+  };
+  await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
 };
 
 // Update is merged into both private and public profile indices.
 // Keep profile preview preferences in sync with UI expectations.
 export const updateProfile = async (uid, payload) => {
-  await setDoc(doc(db, ...artifactsPath, 'users', uid, 'profile', 'main'), payload, { merge: true });
-  await setDoc(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', uid), payload, { merge: true });
+  await setDoc(doc(db, 'users', uid), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+  const publicPayload = {
+    ...payload,
+    uid,
+    updatedAt: serverTimestamp(),
+  };
+  if (payload.displayName) {
+    publicPayload.displayNameLower = String(payload.displayName).toLowerCase();
+  }
+  if (payload.username) {
+    publicPayload.username = normalizeUsername(payload.username);
+  }
+  await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
 };
 
 export const publishPost = async (post) => {
@@ -111,7 +133,7 @@ export const deletePost = async (postId) => {
 };
 
 export const fetchUserIndex = async (userId) => {
-  const snapshot = await getDoc(doc(db, ...artifactsPath, 'public', 'data', 'user_indices', userId));
+  const snapshot = await getDoc(doc(db, 'publicUsers', userId));
   return snapshot.exists() ? snapshot.data() : null;
 };
 

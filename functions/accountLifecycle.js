@@ -38,6 +38,13 @@ export const deleteOnboardingAccount = onRequest({ region: "europe-west1" }, (re
 
       const userRef = db.collection("users").doc(uid);
       const publicUserRef = db.collection("publicUsers").doc(uid);
+      const userSnapshot = await userRef.get();
+      if (!userSnapshot.exists) {
+        return res.status(404).json({ error: "User profile not found" });
+      }
+      if (userSnapshot.get("onboardingComplete") === true) {
+        return res.status(403).json({ error: "Onboarding already completed" });
+      }
 
       await Promise.all([
         userRef.delete().catch(() => null),

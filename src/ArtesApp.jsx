@@ -788,6 +788,15 @@ export default function ArtesApp() {
     setView('login');
   };
 
+  const handleSettingsLogout = async () => {
+    await firebaseLogout();
+    setProfile(null);
+    setAuthUser(null);
+    setUser(null);
+    setShowSettingsModal(false);
+    setView('login');
+  };
+
   const handleModerationAction = async (action) => {
     if (!moderationModal || !authUser || !moderationApiBase) return;
     setModerationActionPending(true);
@@ -1009,6 +1018,7 @@ export default function ArtesApp() {
             }}
             darkMode={darkMode}
             onToggleDark={handleToggleDarkMode}
+            onLogout={handleSettingsLogout}
           />
         )}
         {showEditProfile && (
@@ -3850,7 +3860,7 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
     return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"><div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col"><div className="h-64 bg-indigo-900 flex items-center justify-center flex-col text-white"><div className="text-4xl font-bold mb-2">{name}</div><p>Tijdelijk Profiel. Claim dit profiel.</p><button onClick={onClose} className="absolute top-4 right-4"><X/></button></div><div className="flex-1 p-6 overflow-y-auto no-scrollbar"><div className="grid grid-cols-3 gap-2">{shadowPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div></div></div></div> 
 }
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, darkMode, onToggleDark }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, darkMode, onToggleDark, onLogout }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white dark:bg-slate-900 w-80 h-full p-6 flex flex-col gap-6 text-slate-900 dark:text-slate-100">
@@ -3862,6 +3872,14 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     <h4 className="text-xs uppercase font-bold text-slate-400">Account</h4>
                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Meldingen</span><Bell className="w-4 h-4"/></div>
                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Privacy</span><Lock className="w-4 h-4"/></div>
+                    <button
+                      type="button"
+                      onClick={onLogout}
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left text-rose-600 dark:text-rose-300"
+                    >
+                      <span>Log uit</span>
+                      <LogOut className="w-4 h-4" />
+                    </button>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Weergave</h4>
                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between gap-3">
                       <button

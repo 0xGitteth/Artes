@@ -41,6 +41,13 @@ const normalizeUsername = (value) => String(value || '')
   .replace(/[^a-z0-9]+/g, '')
   .slice(0, 20);
 
+// Debug logging helper (dev mode only)
+const logFirestoreOp = (operation, path, context = '') => {
+  if (import.meta.env.DEV) {
+    console.log(`[Firestore ${operation}] ${path} ${context ? `(${context})` : ''}`);
+  }
+};
+
 export const ensureUserSignedIn = async (customToken) => {
   if (customToken) return signInWithCustomToken(auth, customToken);
   return signInAnonymously(auth);
@@ -48,13 +55,18 @@ export const ensureUserSignedIn = async (customToken) => {
 
 export const subscribeToAuth = (callback) => onAuthStateChanged(auth, callback);
 
-export const subscribeToProfile = (uid, callback) => onSnapshot(doc(db, 'users', uid), callback);
+export const subscribeToProfile = (uid, callback) => {
+  logFirestoreOp('SUBSCRIBE', `users/${uid}`, 'profile');
+  return onSnapshot(doc(db, 'users', uid), callback);
+};
 
-export const subscribeToPosts = (callback) =>
-  onSnapshot(
-    query(collection(db, ...artifactsPath, 'public', 'data', 'posts'), orderBy('createdAt', 'desc')),
+export const subscribeToPosts = (callback) => {
+  logFirestoreOp('SUBSCRIBE', 'posts', 'all posts ordered by createdAt');
+  return onSnapshot(
+    query(collection(db, 'posts'), orderBy('createdAt', 'desc')),
     (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })))
   );
+};
 
 export const subscribeToUsers = (callback) =>
   onSnapshot(collection(db, 'publicUsers'), (snapshot) =>
@@ -62,13 +74,18 @@ export const subscribeToUsers = (callback) =>
   );
 
 export const seedDemoContent = async (seedUsers, seedPosts) => {
+  logFirestoreOp('READ', 'publicUsers/user_sophie', 'seed check');
   const check = await getDoc(doc(db, 'publicUsers', 'user_sophie'));
   if (check.exists()) return;
 
   const batch = writeBatch(db);
-  seedUsers.forEach((user) => batch.set(doc(db, 'publicUsers', user.uid), user));
+  seedUsers.forEach((user) => {
+    logFirestoreOp('WRITE', `publicUsers/${user.uid}`, 'seed');
+    batch.set(doc(db, 'publicUsers', user.uid), user);
+  });
   seedPosts.forEach((post) => {
-    batch.set(doc(db, ...artifactsPath, 'public', 'data', 'posts', post.id), {
+    logFirestoreOp('WRITE', `posts/${post.id}`, 'seed');
+    batch.set(doc(db, 'posts', post.id), {
       ...post,
       createdAt: serverTimestamp(),
     });
@@ -84,6 +101,7 @@ export const createProfile = async (uid, profile) => {
     updatedAt: serverTimestamp(),
     ...profile,
   };
+  logFirestoreOp('WRITE', `users/${uid}`, 'createProfile');
   await setDoc(doc(db, 'users', uid), payload);
   const displayNameLower = String(profile?.displayName || '').toLowerCase();
   const publicPayload = {
@@ -93,12 +111,14 @@ export const createProfile = async (uid, profile) => {
     username: profile?.username ? normalizeUsername(profile.username) : profile?.username,
     updatedAt: serverTimestamp(),
   };
+  logFirestoreOp('WRITE', `publicUsers/${uid}`, 'createProfile');
   await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
 };
 
 // Update is merged into both private and public profile indices.
 // Keep profile preview preferences in sync with UI expectations.
 export const updateProfile = async (uid, payload) => {
+  logFirestoreOp('UPDATE', `users/${uid}`, 'updateProfile');
   await setDoc(doc(db, 'users', uid), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
   const publicPayload = {
     ...payload,
@@ -111,25 +131,29 @@ export const updateProfile = async (uid, payload) => {
   if (payload.username) {
     publicPayload.username = normalizeUsername(payload.username);
   }
+  logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
   await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
 };
 
 export const publishPost = async (post) => {
-  await addDoc(collection(db, ...artifactsPath, 'public', 'data', 'posts'), {
+  logFirestoreOp('WRITE', 'posts/{auto}', 'publishPost');
+  await addDoc(collection(db, 'posts'), {
     ...post,
     createdAt: serverTimestamp(),
   });
 };
 
 export const updatePost = async (postId, payload) => {
-  await updateDoc(doc(db, ...artifactsPath, 'public', 'data', 'posts', postId), {
+  logFirestoreOp('UPDATE', `posts/${postId}`, 'updatePost');
+  await updateDoc(doc(db, 'posts', postId), {
     ...payload,
     updatedAt: serverTimestamp(),
   });
 };
 
 export const deletePost = async (postId) => {
-  await deleteDoc(doc(db, ...artifactsPath, 'public', 'data', 'posts', postId));
+  logFirestoreOp('DELETE', `posts/${postId}`, 'deletePost');
+  await deleteDoc(doc(db, 'posts', postId));
 };
 
 export const fetchUserIndex = async (userId) => {

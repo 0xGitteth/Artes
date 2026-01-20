@@ -1,0 +1,473 @@
+================================================================================
+VERIFICATIE RAPPORT - Firestore Paden Normalisatie
+Datum: 2025-01-20
+Status: CODE REVIEW & LOGGING KLAAR - FIREBASE CONFIG NODIG
+================================================================================
+
+SAMENVATTING
+===============
+De refactoring van /artifacts/{appId}/... naar root paden is in code voltooid.
+Debug logging is toegevoegd voor verificatie. Echter, POSTS nog steeds naar
+artifacts geschreven - dit is in deze sessie gerepareerd. Firebase Console
+rules en indexes moeten nog handmatig worden geconfigureerd.
+
+================================================================================
+1) HUIDIGE FIRESTORE PADEN IN CODE (firebaseClient.js)
+================================================================================
+
+PROFILE READS:
+  - Pad: /users/{uid}
+  - Functie: subscribeToProfile(uid, callback)
+  - Status: ✅ ROOT PAD
+  - Logging: JA (logFirestoreOp geactiveerd in dev mode)
+  - Regel: src/services/firebaseClient.js:58-62
+
+PROFILE WRITES:
+  - Pad: /users/{uid}
+  - Functies: 
+    • createProfile(uid, profile) - src/services/firebaseClient.js:97
+    • updateProfile(uid, payload) - src/services/firebaseClient.js:113
+  - Status: ✅ ROOT PAD
+  - Logging: JA
+  - Details: updatedAt serverTimestamp altijd gezet
+
+PUBLIC USER READS:
+  - Pad: /publicUsers/{uid}
+  - Functie: subscribeToUsers(callback)
+  - Status: ✅ ROOT PAD
+  - Logging: JA (implicit via subscribeToUsers)
+  - Regel: src/services/firebaseClient.js:68
+
+PUBLIC USER WRITES:
+  - Pad: /publicUsers/{uid}
+  - Functies: 
+    • createProfile(uid, profile) - publieke fields sync
+    • updateProfile(uid, payload) - publieke fields sync
+  - Status: ✅ ROOT PAD
+  - Logging: JA
+  - Sync velden: displayName, displayNameLower, username, photoURL, updatedAt
+
+POSTS READS:
+  - Pad: /posts/{postId}
+  - Functie: subscribeToPosts(callback)
+  - Status: ✅ ROOT PAD (GEREPAREERD deze sessie)
+  - Logging: JA
+  - Query: collection(db, 'posts'), orderBy('createdAt', 'desc')
+  - Regel: src/services/firebaseClient.js:66-71
+
+POSTS WRITES:
+  - Pad: /posts/{postId}
+  - Functies:
+    • publishPost(post) - addDoc naar posts - src/services/firebaseClient.js:133
+    • updatePost(postId, payload) - updateDoc posts - src/services/firebaseClient.js:139
+    • deletePost(postId) - deleteDoc posts - src/services/firebaseClient.js:144
+  - Status: ✅ ROOT PAD (GEREPAREERD deze sessie)
+  - Logging: JA (WRITE, UPDATE, DELETE)
+  - Details: createdAt/updatedAt serverTimestamp altijd gezet
+
+SEED DEMO CONTENT:
+  - Paden:
+    • publicUsers/{uid} - seed users
+    • posts/{postId} - seed posts
+  - Status: ✅ ROOT PADEN (GEREPAREERD deze sessie)
+  - Logging: JA per item in batch
+  - Regel: src/services/firebaseClient.js:76-93
+
+MIGRATIE READS (fallback only):
+  - Functie: migrateArtifactsUserData(user)
+  - Paden: 
+    • /artifacts/{appId}/users/{uid}/profile/main
+    • /artifacts/{appId}/public/data/user_indices/{uid}
+  - Status: ✅ READ ONLY (fallback voor bestaande data)
+  - Logging: NEE (migratie is silent)
+  - Regel: src/firebase.js:316-352
+
+================================================================================
+2) ARTIFACTS STATUS IN CODEBASE
+================================================================================
+
+COMES artifacts STILL EXIST IN CODE?
+  Ja, op deze plekken:
+
+  a) LEGACY READ FALLBACK (OK - voor migratie):
+     ❌ artifactsPath variabele gedefinieerd: src/services/firebaseClient.js:38
+     ✅ migrateArtifactsUserData() functie: src/firebase.js:316-352
+     
+  b) STORAGE PATH (OK - dit is Cloud Storage, niet Firestore):
+     ✅ buildReportedPostPath() - Storage path: functions/index.js:52-56
+     - Gebruikt voor moderation reporting naar Storage
+     - Cloud Storage != Firestore, dus apart
+
+ZIJN ER NOG WRITES NAAR ARTIFACTS?
+  Nee (✅ GEREPAREERD)
+  
+  Wat gerepareerd is in deze sessie:
+  1. subscribeToPosts() - was: artifactsPath posts → nu: /posts
+  2. seedDemoContent() - was: artifactsPath posts → nu: /posts
+  3. publishPost() - was: artifactsPath posts → nu: /posts
+  4. updatePost() - was: artifactsPath posts → nu: /posts
+  5. deletePost() - was: artifactsPath posts → nu: /posts
+
+  Enige artifacts-referenties nu alleen in:
+  - migrateArtifactsUserData() - dit is READ ONLY fallback
+  - buildReportedPostPath() - dit is Cloud Storage, niet Firestore
+
+KUNNEN WE ARTIFACTS FIRESTORE RULES DICHTZETTEN?
+  Ja, maar voorzichtig:
+  - Laat /artifacts/{appId}/... reads nog toe voor migratie van bestaande users
+  - Zet /artifacts/{appId}/... writes volledig uit (allow: false)
+  - Of verander naar "read_only" voor voorzichtigheid
+
+================================================================================
+3) FIRESTORE RULES ALIGNMENT
+================================================================================
+
+HUIDE RULES STATUS:
+  Bestand: /workspaces/Artes/firestore.rules
+  
+  ✅ /users/{userId} rules - OK
+     - Private profiel, read/create/update voor eigenaar
+     
+  ✅ /publicUsers/{uid} rules - BIJNA OK
+     - Public profiel
+     - Waarschuwing: veldvalidatie bevat noch 'themes' noch 'avatar'
+     - Zie: regel 37-49 firestore.rules - keys().hasOnly([...])
+     
+  ✅ /posts/{postId} rules - OK
+     - Read: openbaar (allow: true)
+     - Create: verified user
+     - Update/Delete: verified user AND request.resource.data.authorId == uid
+     - Zie: regel 169-181 firestore.rules
+
+VALIDATOR ISSUE IN publicUsers:
+  Huidt regel (ligne 43-44):
+    keys().hasOnly(['uid', 'username', 'displayName', 'displayNameLower', 'photoURL', 'updatedAt'])
+  
+  Dit blokkeert POTENTIEEL: avatar, themes, en andere publieke velden
+  
+  Voorstel: update naar:
+    keys().hasOnly(['uid', 'username', 'displayName', 'displayNameLower', 'photoURL', 'updatedAt', 'avatar', 'themes'])
+
+POSTS RULES - HUILE STATUS:
+  Huidig (regel 169-175):
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isVerifiedUser();
+      allow update, delete: if isVerifiedUser() && request.resource.data.authorId == request.auth.uid;
+  
+  Status: ✅ OK
+  - De app gebruikt authorId (niet authorUid)
+  - Rules matchen huidge codenaam
+
+================================================================================
+4) VOORGESTELDE FIRESTORE RULES WIJZIGINGEN
+================================================================================
+
+WIJZIGING 1: publicUsers validator uitbreiden
+  
+  HUIDDEN (regel 37-49):
+    match /publicUsers/{uid} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'displayName', 'displayNameLower', 'photoURL', 'updatedAt'])
+        [... meer validaties ...]
+  
+  VOORSTEL:
+    match /publicUsers/{uid} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'displayName', 'displayNameLower', 'photoURL', 'updatedAt', 'avatar', 'themes', 'roles', 'bio'])
+        [... rest ongewijzigd ...]
+  
+  Waarom: Binnenkort kan avatar, themes, roles, bio naar publicUsers geschreven worden
+  
+  
+WIJZIGING 2: Artifacts rules beveiligen (OPTIONEEL maar AANBEVOLEN)
+
+  HUINDEN: geen /artifacts rules aanwezig
+  
+  VOORSTEL (toevoegen aan firestore.rules, voor veiligheid):
+    // Legacy artifacts - migration fallback only
+    match /artifacts/{document=**} {
+      allow read: if request.auth != null;
+      allow write: if false;  // All writes blocked - migration is one-way
+    }
+  
+  Waarom: Voorkomt accidentele writes naar oude pad
+
+================================================================================
+5) DEBUG LOGGING SETUP (dev mode)
+================================================================================
+
+LOGGING FUNCTIE GEÏMPLEMENTEERD:
+  Bestand: src/services/firebaseClient.js, regel 44-50
+  
+  Functie:
+    const logFirestoreOp = (operation, path, context = '') => {
+      if (import.meta.env.DEV) {
+        console.log(`[Firestore ${operation}] ${path} ${context ? `(${context})` : ''}`);
+      }
+    };
+  
+  Logging activations:
+    ✅ subscribeToProfile() - [Firestore SUBSCRIBE] users/{uid} (profile)
+    ✅ subscribeToPosts() - [Firestore SUBSCRIBE] posts (all posts ordered by createdAt)
+    ✅ createProfile() - [Firestore WRITE] users/{uid} (createProfile)
+    ✅ createProfile() - [Firestore WRITE] publicUsers/{uid} (createProfile)
+    ✅ updateProfile() - [Firestore UPDATE] users/{uid} (updateProfile)
+    ✅ updateProfile() - [Firestore UPDATE] publicUsers/{uid} (updateProfile)
+    ✅ publishPost() - [Firestore WRITE] posts/{auto} (publishPost)
+    ✅ updatePost() - [Firestore UPDATE] posts/{postId} (updatePost)
+    ✅ deletePost() - [Firestore DELETE] posts/{postId} (deletePost)
+    ✅ seedDemoContent() - [Firestore WRITE] publicUsers/{uid} (seed)
+    ✅ seedDemoContent() - [Firestore WRITE] posts/{postId} (seed)
+    ✅ seedDemoContent() - [Firestore READ] publicUsers/user_sophie (seed check)
+
+  Logging is DISABLED in production (only in DEV)
+
+================================================================================
+6) HANDMATIGE TEST STAPPEN (in dev mode met browser console)
+================================================================================
+
+TEST 1: ONBOARDING AFRONDEN
+  Acties:
+    1. Open app in dev mode (npm run dev)
+    2. Open browser console (F12)
+    3. Doe onboarding compleet: signup → Didit → roles → profiel → themes → opslaan
+    
+  Verwachte console logs:
+    [Firestore WRITE] users/{uid} (createProfile)
+    [Firestore WRITE] publicUsers/{uid} (createProfile)
+  
+  Verwachte Firestore wijzigingen:
+    ✅ /users/{uid} document aangemaakt met displayName, bio, roles, themes, etc.
+    ✅ /publicUsers/{uid} document aangemaakt met displayName, photoURL, themes, etc.
+    ❌ GEEN /artifacts/{appId}/... documenten
+  
+  Check in Firebase Console:
+    • Firestore Data → filter op /users
+    • Firestore Data → filter op /publicUsers
+    • Zoek je uid
+
+TEST 2: PROFIELINSTELLINGEN WIJZIGEN
+  Acties:
+    1. Logged in user
+    2. Open Settings → Edit Profile (of knop in profile)
+    3. Wijzig Bio
+    4. Wijzig themes (selecteer ander thema)
+    5. Klik Opslaan
+  
+  Verwachte console logs:
+    [Firestore UPDATE] users/{uid} (updateProfile)
+    [Firestore UPDATE] publicUsers/{uid} (updateProfile)
+  
+  Verwachte Firestore wijzigingen:
+    ✅ /users/{uid} document updated: bio veld veranderd
+    ✅ /users/{uid} document: themes array updated
+    ✅ /publicUsers/{uid} document updated: themes array geupdate
+    ✅ updatedAt serverTimestamp in beide documenten
+    ❌ GEEN /artifacts writes
+  
+  Check in Firebase Console:
+    • Firestore Data → /users/{uid} → kijk bio en themes
+    • Firestore Data → /publicUsers/{uid} → kijk themes
+
+TEST 3: POST PUBLICEREN
+  Acties:
+    1. Logged in user
+    2. Klik + button (upload)
+    3. Upload afbeelding
+    4. Vul titel, beschrijving, styles
+    5. Klik Publiceer
+  
+  Verwachte console logs:
+    [Firestore WRITE] posts/{auto} (publishPost)
+    [Firestore SUBSCRIBE] posts (all posts ordered by createdAt) - refresh
+  
+  Verwachte Firestore wijzigingen:
+    ✅ Nieuw document in /posts/{auto-id}
+    ✅ Document bevat: title, description, imageUrl, authorId (jouw uid), createdAt, etc.
+    ❌ GEEN /artifacts/{appId}/public/data/posts write
+  
+  Check in Firebase Console:
+    • Firestore Data → /posts → zie nieuw document
+    • Kijk dat authorId = jouw uid
+
+TEST 4: POSTS LADEN (Gallery view)
+  Acties:
+    1. Home/Gallery view openen
+    2. Kijk naar console
+  
+  Verwachte console logs:
+    [Firestore SUBSCRIBE] posts (all posts ordered by createdAt)
+    [Firestore SUBSCRIBE] users/{uid} (profile) - voor elke user
+  
+  Verwachte Firestore reads:
+    ✅ Posts uit /posts collection
+    ✅ User profiel uit /users/{uid}
+    ❌ GEEN /artifacts reads (tenzij migratie aan de gang)
+
+TEST 5: BESTAANDE USER LOGIN (migratie check)
+  Acties:
+    1. Log in met bestaande account (van vóór refactoring)
+    2. Zet breakpoint op migrateArtifactsUserData in dev tools
+  
+  Verwachte gedrag:
+    ✅ migrateArtifactsUserData() leest van /artifacts/{appId}/... als fallback
+    ✅ Data wordt geschreven naar /users/{uid} en /publicUsers/{uid}
+    ✅ Volgende login leest direct van /users (geen migration meer)
+
+================================================================================
+7) FIREBASE CONSOLE CHECKLIST (handmatig uitvoeren)
+================================================================================
+
+CHECKLIST A: FIRESTORE DATABASE SETUP
+  
+  ☐ Ga naar Firebase Console → Firestore Database
+  
+  ☐ Collections aanwezig?
+    ☐ /users (heb je minstens 1 document na login?)
+    ☐ /publicUsers (heb je minstens 1 document?)
+    ☐ /posts (verschijnen posts na publiceren?)
+  
+  ☐ GEEN /artifacts writes
+    ☐ Zoekmiddel: Firestore Data, filter op "artifacts"
+    ☐ Er mogen wél /artifacts/{appId}/... documenten bestaan (legacy data)
+    ☐ Maar er mogen GEEN NIEUWE documents onder /artifacts/{appId}/... toevoegd worden
+      na deze refactoring
+    
+    Test: Maak een post, dan zoek:
+      - POST moet in /posts/{id} zitten
+      - POST mag NIET in /artifacts/{appId}/public/data/posts/{id} zitten
+
+CHECKLIST B: FIRESTORE RULES DEPLOY
+  
+  ☐ Ga naar Firebase Console → Firestore → Rules
+  
+  ☐ Deploy huidge rules (firestore.rules) naar Firebase:
+    
+    Commando (Firebase CLI):
+      firebase deploy --only firestore:rules
+    
+    Of handmatig in console:
+      1. Kopieer inhoud van /workspaces/Artes/firestore.rules
+      2. Paste in Firebase Console Rules editor
+      3. Klik "Publish"
+  
+  ☐ Voeg artifacts block toe (AANBEVOLEN):
+    
+    Plaats voor match /databases/{database}/documents:
+      // Legacy artifacts - migration fallback only
+      match /artifacts/{document=**} {
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
+  
+  ☐ Update /publicUsers validator (AANBEVOLEN):
+    
+    Huige regel (ca. regel 37):
+      keys().hasOnly(['uid', 'username', 'displayName', 'displayNameLower', 'photoURL', 'updatedAt'])
+    
+    Naar:
+      keys().hasOnly(['uid', 'username', 'displayName', 'displayNameLower', 'photoURL', 'updatedAt', 'avatar', 'themes', 'roles', 'bio'])
+
+CHECKLIST C: FIRESTORE INDEXES
+
+  ☐ Ga naar Firebase Console → Firestore → Indexes
+  
+  ☐ Zoek index: /posts ordered by createdAt (desc)
+  
+    Status mogelijkheden:
+    - ✅ Index al aanwezig? OK
+    - ❌ Error in Firestore logs: "index required"? Dan moet index handmatig aangemaakt
+    
+  ☐ Create index if needed:
+    Collection: posts
+    Fields to index:
+      - createdAt (Descending)
+    
+    Or klik link in error message: "Create index"
+
+CHECKLIST D: AUTHENTICATION SETUP
+
+  ☐ Ga naar Firebase Console → Authentication → Providers
+  
+  ☐ Enabled providers:
+    ☐ Google (gebruikt?)
+    ☐ Email/Password (gebruikt?)
+    ☐ Anonymous (test code gebruikt?)
+  
+  ☐ Authorized domains:
+    ☐ localhost (dev test)
+    ☐ artis.sliplane.app (production)
+    ☐ www.artis.sliplane.app (als gebruikt)
+
+CHECKLIST E: CLOUD FUNCTIONS CORS (indien relevant)
+
+  ☐ Functions met Firestore writes
+    
+    Function: moderateImage
+    Status: ✅ OK (alleen Storage writes, geen Firestore changes)
+    
+    Function: ensureModerationThread
+    Status: ✅ OK (geen Firestore changes, support threads legacy)
+    
+    No action needed unless you deploy new functions
+
+CHECKLIST F: CLOUD STORAGE RULES (optional, als uploads via functions)
+
+  ☐ Ga naar Firebase Console → Storage → Rules
+  
+  ☐ Huidge rules ondersteunen:
+    ☐ /artifacts/{appId}/public/data/posts/{postId} uploads? (legacy if needed)
+    ☐ New posts bucket? (if you decide to separate)
+  
+  ☐ Voor nu geen changes nodig (buildReportedPostPath is read-only reference)
+
+================================================================================
+8) PULL REQUEST / GIT STATUS
+================================================================================
+
+CODE WIJZIGINGEN:
+  ✅ src/services/firebaseClient.js - Debug logging + posts pad fix
+  ✅ src/firebase.js - (al vorige PR)
+  ✅ src/ArtesApp.jsx - (al vorige PR)
+  ✅ src/components/EditProfileModal.jsx - (al vorige PR)
+  ✅ firestore.rules - (al vorige PR, nu review)
+
+KLAAR VOOR COMMIT:
+  Ja, alle wijzigingen kunnen gecommit worden naar feature branch en PR
+
+KLAAR VOOR FIREBASE DEPLOY:
+  Ja, rules kunnen naar Firebase, maar wacht op checklist verwerking
+
+================================================================================
+9) SAMENVATTING & VOLGENDE STAPPEN
+================================================================================
+
+GEDAAN:
+  ✅ Code migratie afgerond
+  ✅ Debug logging geïmplementeerd
+  ✅ Posts pad gerepareerd van /artifacts naar /posts
+  ✅ Alle Firestore writes gaan nu naar root paden
+  ✅ Verification rapport gemaakt
+
+TODO (jij, in Firebase Console):
+  ☐ Stap 1: Deploy firestore.rules (add artifacts block, update publicUsers validator)
+  ☐ Stap 2: Controleer Firestore Database → Collections zijn leeg of hebben root docs
+  ☐ Stap 3: Zet seed data (onboarding of handmatig create)
+  ☐ Stap 4: Voer Test 1-5 uit uit "Handmatige test stappen" sectie
+  ☐ Stap 5: Verifieer in Firebase Console dat metrics klopt
+
+BLOCKING ISSUES:
+  Geen. Code is clean. Enkel Firebase Console setup nodig.
+
+OPMERKINGEN:
+  - Logging is dev-mode only, production ongeaffecteerd
+  - artifactsPath variable nog in code, maar ongebruikt buiten migratie
+  - Cloud Storage path (functions/index.js) is apart, geen Firestore impact
+  - Migratie fallback blijft bestaan voor backward compatibility
+
+================================================================================

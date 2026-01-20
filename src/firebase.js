@@ -318,12 +318,13 @@ export const migrateArtifactsUserData = async (user) => {
   const appId = import.meta.env.VITE_FIREBASE_APP_ID;
   if (!appId) return null;
   const db = getFirebaseDb();
-  const [profileSnap, publicSnap] = await Promise.all([
+  const [profileSnap, publicSnap, existingProfileSnap] = await Promise.all([
     getDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main')),
     getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', user.uid)),
+    getDoc(doc(db, 'users', user.uid)),
   ]);
   const migrations = [];
-  if (profileSnap.exists()) {
+  if (profileSnap.exists() && !existingProfileSnap.exists()) {
     const data = profileSnap.data();
     migrations.push(setDoc(
       doc(db, 'users', user.uid),
@@ -339,7 +340,10 @@ export const migrateArtifactsUserData = async (user) => {
   }
   if (!migrations.length) return null;
   await Promise.all(migrations);
-  return { migratedProfile: profileSnap.exists(), migratedPublic: publicSnap.exists() };
+  return {
+    migratedProfile: profileSnap.exists() && !existingProfileSnap.exists(),
+    migratedPublic: publicSnap.exists(),
+  };
 };
 
 const shouldRedirect = (error) =>

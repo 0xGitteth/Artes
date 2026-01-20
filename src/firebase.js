@@ -324,13 +324,36 @@ export const migrateArtifactsUserData = async (user) => {
     getDoc(doc(db, 'users', user.uid)),
   ]);
   const migrations = [];
-  if (profileSnap.exists() && !existingProfileSnap.exists()) {
+  let migratedProfile = false;
+  if (profileSnap.exists()) {
     const data = profileSnap.data();
-    migrations.push(setDoc(
-      doc(db, 'users', user.uid),
-      { ...data, updatedAt: serverTimestamp() },
-      { merge: true },
-    ));
+    const targetRef = doc(db, 'users', user.uid);
+    if (!existingProfileSnap.exists()) {
+      migrations.push(setDoc(
+        targetRef,
+        { ...data, updatedAt: serverTimestamp() },
+        { merge: true },
+      ));
+      migratedProfile = true;
+    } else {
+      const existingData = existingProfileSnap.data() || {};
+      const updates = Object.entries(data).reduce((acc, [key, value]) => {
+        if (value === undefined) return acc;
+        const existingValue = existingData[key];
+        if (existingValue === undefined || existingValue === null) {
+          acc[key] = value;
+        }
+        return acc;
+      }, {});
+      if (Object.keys(updates).length) {
+        migrations.push(setDoc(
+          targetRef,
+          { ...updates, updatedAt: serverTimestamp() },
+          { merge: true },
+        ));
+        migratedProfile = true;
+      }
+    }
   }
   if (publicSnap.exists()) {
     const data = publicSnap.data();
@@ -341,7 +364,7 @@ export const migrateArtifactsUserData = async (user) => {
   if (!migrations.length) return null;
   await Promise.all(migrations);
   return {
-    migratedProfile: profileSnap.exists() && !existingProfileSnap.exists(),
+    migratedProfile,
     migratedPublic: publicSnap.exists(),
   };
 };

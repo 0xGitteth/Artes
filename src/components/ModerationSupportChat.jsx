@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, Send } from 'lucide-react';
 import {
   collection,
@@ -58,9 +58,24 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
   const [searchValue, setSearchValue] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [userProfiles, setUserProfiles] = useState({});
+  const moderationThreadsLogRef = useRef(null);
 
   useEffect(() => {
-    if (!isModerator) return undefined;
+    const shouldStart = Boolean(authUser) && isModerator === true;
+    if (import.meta.env.DEV) {
+      const reason = !authUser
+        ? 'skip: no auth user'
+        : isModerator === null
+          ? 'skip: moderator check pending'
+          : isModerator === false
+            ? 'skip: not a moderator'
+            : 'start';
+      if (moderationThreadsLogRef.current !== reason) {
+        console.log(`[ModerationSupportChat] reviewCases listener ${reason}`);
+        moderationThreadsLogRef.current = reason;
+      }
+    }
+    if (!shouldStart) return undefined;
     const db = getFirebaseDbInstance();
     const q = query(
       collection(db, 'threads'),
@@ -78,7 +93,7 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation threads listener (reviewCases)'),
     );
-  }, [isModerator, activeThreadId]);
+  }, [authUser, isModerator, activeThreadId]);
 
   useEffect(() => {
     if (!activeThreadId) {

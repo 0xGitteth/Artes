@@ -604,6 +604,7 @@ export const ensureSupportThreadExists = async (uid) => {
 
     await setDoc(threadRef, {
       type: 'support',
+      threadKey: threadId,
       userUid: uid,
       participants: [uid],
       participantUids: [uid],

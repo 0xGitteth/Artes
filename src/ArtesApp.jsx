@@ -338,6 +338,7 @@ export default function ArtesApp() {
   const [toastMessage, setToastMessage] = useState(null);
   const [supportThreadId, setSupportThreadId] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
+  const userProfile = profile;
 
   // Data
   const [posts, setPosts] = useState([]);
@@ -2000,9 +2001,24 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [moderatorNote, setModeratorNote] = useState('');
   const [decisionPending, setDecisionPending] = useState(false);
   const [decisionError, setDecisionError] = useState(null);
+  const reviewCasesListenerLogRef = useRef(null);
 
   useEffect(() => {
-    if (!isModerator) return;
+    const shouldStart = Boolean(authUser) && isModerator === true;
+    if (import.meta.env.DEV) {
+      const reason = !authUser
+        ? 'skip: no auth user'
+        : isModerator === null
+          ? 'skip: moderator check pending'
+          : isModerator === false
+            ? 'skip: not a moderator'
+            : 'start';
+      if (reviewCasesListenerLogRef.current !== reason) {
+        console.log(`[ModerationPanel] reviewCases listener ${reason}`);
+        reviewCasesListenerLogRef.current = reason;
+      }
+    }
+    if (!shouldStart) return;
     const db = getFirebaseDbInstance();
     const q = query(collection(db, 'reviewCases'), where('status', '==', 'inReview'), orderBy('createdAt', 'desc'));
     return onSnapshot(
@@ -2012,7 +2028,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation reviewCases listener (ArtesApp)'),
     );
-  }, [isModerator]);
+  }, [authUser, isModerator]);
 
   const filteredCases = useMemo(() => {
     if (caseTypeFilter === 'report') {

@@ -543,20 +543,47 @@ export default function ArtesApp() {
 
   useEffect(() => {
     if (!authUser?.uid) return;
-    const db = getFirebaseDbInstance();
-    const threadId = `moderation_${authUser.uid}`;
-    const messagesRef = collection(db, 'threads', threadId, 'messages');
-    const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (snapshot.empty) return;
-        const docSnap = snapshot.docs[0];
-        if (moderationModal?.id === docSnap.id) return;
-        setModerationModal({ id: docSnap.id, ...docSnap.data() });
-      },
-      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation unread listener (ArtesApp)'),
-    );
+    let unsubscribe = null;
+    let active = true;
+
+    const setup = async () => {
+      const db = getFirebaseDbInstance();
+      try {
+        const moderationDoc = await getDoc(doc(db, 'config', 'moderation'));
+        const moderatorEmails = moderationDoc.exists() ? (moderationDoc.data().moderatorEmails || []) : [];
+        const isModeratorClient = authUser?.email && moderatorEmails.includes(authUser.email);
+
+        if (!isModeratorClient) {
+          console.log('Moderation unread listener skipped: not a moderator');
+          return;
+        }
+
+        const threadId = `moderation_${authUser.uid}`;
+        const messagesRef = collection(db, 'threads', threadId, 'messages');
+        const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
+
+        unsubscribe = onSnapshot(
+          q,
+          (snapshot) => {
+            if (!active) return;
+            if (snapshot.empty) return;
+            const docSnap = snapshot.docs[0];
+            if (moderationModal?.id === docSnap.id) return;
+            setModerationModal({ id: docSnap.id, ...docSnap.data() });
+          },
+          (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation unread listener (ArtesApp)'),
+        );
+      } catch (error) {
+        console.error('Failed to setup moderation unread listener check', error);
+      }
+    };
+
+    setup();
+
+    return () => {
+      active = false;
+      if (unsubscribe) unsubscribe();
+    };
   }, [authUser?.uid, moderationModal?.id]);
 
   useEffect(() => {

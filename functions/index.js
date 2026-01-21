@@ -138,7 +138,9 @@ const fetchPublicUser = async (uid) => {
 
 const resolveDisplayTitle = (publicUser) => publicUser?.displayName || publicUser?.username || 'Chat';
 
-const SUPPORT_INTRO_MESSAGE = 'Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen totdat wij reageren. We reageren binnen 3 werkdagen.';
+const SUPPORT_INTRO_MESSAGE = 'Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen. Je krijgt binnen 3 werkdagen reactie.';
+const LEGACY_SUPPORT_INTRO_MESSAGE = 'Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen totdat wij reageren. We reageren binnen 3 werkdagen.';
+const SUPPORT_INTRO_TEXTS = [SUPPORT_INTRO_MESSAGE, LEGACY_SUPPORT_INTRO_MESSAGE];
 
 const ensureModerationThreadForUser = async (uid) => {
   if (!uid) return null;
@@ -204,7 +206,7 @@ const ensureModerationThreadForUser = async (uid) => {
       // Maak het voor elke mogelijke frontend check herkenbaar als system message
       type: 'system',
       senderRole: 'system',
-      senderUid: 'system',
+      senderUid: null,
       senderId: 'system',
       senderLabel: 'Artes Moderatie',
       createdAt: FieldValue.serverTimestamp(),
@@ -235,6 +237,16 @@ const parseJsonBody = (req) => {
     }
   }
   return null;
+};
+
+const normalizeSupportSenderRole = (message, threadUserUid) => {
+  if (!message) return 'user';
+  if (message.senderRole) return message.senderRole;
+  const text = message.text || message.message || '';
+  const senderUid = message.senderUid || message.senderId || null;
+  if (SUPPORT_INTRO_TEXTS.includes(text)) return 'system';
+  if (threadUserUid && senderUid === threadUserUid) return 'user';
+  return 'moderator';
 };
 
 const createDecisionMessage = ({
@@ -1084,23 +1096,20 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west1
         throw error;
       }
 
-      // Count only real user messages (senderRole === 'user' or legacy messages without senderRole)
+      // Count only real user messages (senderRole === 'user' or legacy fallback)
       const messagesSnap = await transaction.get(threadRef.collection('messages'));
       let userMessageCount = 0;
       let hasModeratorReply = false;
 
       messagesSnap.docs.forEach((doc) => {
         const msg = doc.data();
-        const senderRole = msg.senderRole || 'user'; // backward compat: assume 'user' if missing
-        const isWelcomeMessage = msg.text?.includes('Om spam te voorkomen');
-        
-        // Only count actual user messages (not system, not moderator welcome message)
+        const senderRole = normalizeSupportSenderRole(msg, threadData?.userUid);
+
         if (senderRole === 'user') {
           userMessageCount++;
         }
         
-        // Check if there's any moderator response
-        if (senderRole === 'moderator' || msg.senderUid === 'moderator') {
+        if (senderRole === 'moderator') {
           hasModeratorReply = true;
         }
       });

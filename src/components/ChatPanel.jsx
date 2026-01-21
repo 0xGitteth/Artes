@@ -11,9 +11,9 @@ import {
   where,
 } from 'firebase/firestore';
 import { getFirebaseDbInstance } from '../firebase';
+import { normalizeSupportMessage } from '../utils/supportChat';
 
 const MESSAGE_LIMIT = 50;
-const SYSTEM_INTRO_TEXT = 'Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen. Je krijgt binnen 3 werkdagen reactie.';
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
@@ -303,51 +303,33 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
     return threads.find((thread) => thread.threadId === activeThreadId || thread.id === activeThreadId) || null;
   }, [threads, activeThreadId]);
 
-  // Helper om echte user messages te herkennen (niet system, niet moderator)
-  const isUserMessage = (message) => {
-    if (!message) return false;
-    // Backward compatibility: behandel als user message tenzij aangemerkt als system/moderator
-    const role = message.senderRole || 'unknown';
-    if (role === 'system' || role === 'moderator') return false;
-    // Voor oude berichten: check of het het standaard welkomsbericht is
-    if (message.text === SYSTEM_INTRO_TEXT) {
-      return false;
-    }
-    return true;
-  };
-
-  // Count only real user messages for anti-spam logic
-  const userMessageCount = messages.filter(isUserMessage).length;
-  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-  const hasModeratorReplyAfterLastUser = lastMessage?.senderRole === 'moderator';
-  const canSendSupport = !(userMessageCount > 0 && !hasModeratorReplyAfterLastUser);
+  const normalizedSupportMessages = useMemo(() => {
+    if (activeThread?.type !== 'support') return [];
+    return messages.map((message) => normalizeSupportMessage(message, activeThread)).filter(Boolean);
+  }, [messages, activeThread]);
+  const lastSupportMessage = useMemo(
+    () => [...normalizedSupportMessages].reverse().find((message) => message.senderRole === 'user' || message.senderRole === 'moderator'),
+    [normalizedSupportMessages],
+  );
+  const canSendSupport = activeThread?.type === 'support'
+    ? !lastSupportMessage || lastSupportMessage.senderRole === 'moderator'
+    : true;
+  const renderMessages = activeThread?.type === 'support' ? normalizedSupportMessages : messages;
 
   if (import.meta.env.DEV && activeThread?.type === 'support') {
     console.log('[ChatPanel] Support thread anti-spam check:', {
-      totalMessages: messages.length,
-      userMessages: userMessageCount,
-      lastMessageRole: lastMessage?.senderRole,
-      hasModeratorReply: hasModeratorReplyAfterLastUser,
+      totalMessages: normalizedSupportMessages.length,
+      userMessages: normalizedSupportMessages.filter((message) => message.senderRole === 'user').length,
+      lastMessageRole: lastSupportMessage?.senderRole,
+      hasModeratorReply: lastSupportMessage?.senderRole === 'moderator',
       canSendSupport: canSendSupport,
-      messageSummary: messages.map((m) => ({
+      messageSummary: normalizedSupportMessages.map((m) => ({
         role: m.senderRole || 'unknown',
         text: m.text?.substring(0, 40) || '(empty)',
-        counted: isUserMessage(m)
+        counted: m.senderRole === 'user',
       }))
     });
   }
-
-  // Helper om system messages te herkennen
-  const isSystemMessage = (message) => {
-    if (!message) return false;
-    // Check op meerdere mogelijke veldnamen voor system messages
-    return (
-      message.type === 'system' ||
-      message.senderRole === 'system' ||
-      message.senderUid === 'system' ||
-      message.senderId === 'system'
-    );
-  };
 
   const handleSendMessage = async () => {
     if (!authUser?.uid || !activeThread) return;
@@ -448,12 +430,18 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-              {messages.length === 0 ? (
+              {renderMessages.length === 0 ? (
                 <div className="text-sm text-slate-500">Nog geen berichten.</div>
               ) : (
-                messages.map((message) => {
-                  const isOwn = message.senderUid === authUser.uid;
-                  const isSystem = message.senderUid === 'system' || message.type === 'moderation_decision';
+                renderMessages.map((message) => {
+                  const isSupportThread = activeThread.type === 'support';
+                  const normalizedMessage = isSupportThread ? message : null;
+                  const isOwn = isSupportThread
+                    ? normalizedMessage?.senderRole === 'user'
+                    : message.senderUid === authUser.uid;
+                  const isSystem = isSupportThread
+                    ? normalizedMessage?.senderRole === 'system'
+                    : message.senderUid === 'system' || message.type === 'moderation_decision';
                   const bodyText = message.text || message.message || '';
                   return (
                     <div

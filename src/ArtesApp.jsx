@@ -1796,9 +1796,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }
                       {theme}
                     </span>
                   ))
-                ) : (
-                  <span className="text-xs text-slate-400 italic">Thema's niet ingesteld</span>
-                )}
+                ) : null}
               </div>
            </div>
         </div>
@@ -3884,9 +3882,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
                   {theme}
                 </span>
               ))
-            ) : (
-              <span className="text-xs text-slate-400 italic">Thema's niet ingesteld</span>
-            )}
+            ) : null}
           </div>
 
           <div>

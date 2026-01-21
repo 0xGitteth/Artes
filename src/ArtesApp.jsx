@@ -477,10 +477,6 @@ export default function ArtesApp() {
     batch.set(doc(db, 'config', 'community'), normalizedCommunity);
     batch.set(doc(db, 'config', 'challenge'), normalizedChallenge);
     await batch.commit();
-    await Promise.all([
-      setDoc(doc(db, 'config', 'community'), normalizedCommunity),
-      setDoc(doc(db, 'config', 'challenge'), normalizedChallenge),
-    ]);
     setCommunityConfig(normalizedCommunity);
     setChallengeConfig(normalizedChallenge);
   }, []);
@@ -2690,10 +2686,6 @@ function ModerationPortal({
         errors.id = 'Vul een unieke sleutel in.';
       } else if (idCounts[trimmedId] > 1) {
         errors.id = 'Community ID moet uniek zijn.';
-    const communityErrors = communityDraft.communities.map((community) => {
-      const errors = {};
-      if (!community.id?.trim()) {
-        errors.id = 'Vul een unieke sleutel in.';
       }
       if (!community.title?.trim()) {
         errors.title = 'Titel is verplicht.';

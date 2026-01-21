@@ -1056,7 +1056,12 @@ export default function ArtesApp() {
           {!profileLoading && view === 'chat' && (
             authUser ? (
               <div className="max-w-6xl mx-auto px-4 py-6 h-[75vh]">
-                <ChatPanel authUser={authUser} functionsBase={functionsBase} initialThreadId={supportThreadId} />
+                <ChatPanel
+                  authUser={authUser}
+                  functionsBase={functionsBase}
+                  initialThreadId={supportThreadId}
+                  userProfile={userProfile}
+                />
               </div>
             ) : (
               <div className="max-w-2xl mx-auto px-4 py-6">
@@ -1071,7 +1076,13 @@ export default function ArtesApp() {
           )}
           
           {!profileLoading && view.startsWith('community_') && (
-            <CommunityDetail id={view.split('_')[1]} setView={setView} authUser={authUser} functionsBase={functionsBase} />
+            <CommunityDetail
+              id={view.split('_')[1]}
+              setView={setView}
+              authUser={authUser}
+              functionsBase={functionsBase}
+              userProfile={userProfile}
+            />
           )}
 
           {/* Wrapper logic for viewing profiles */}
@@ -3601,7 +3612,7 @@ function CommunityList({ setView }) {
   );
 }
 
-function CommunityDetail({ id, setView, authUser, functionsBase }) {
+function CommunityDetail({ id, setView, authUser, functionsBase, userProfile }) {
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 font-medium">
@@ -3613,7 +3624,7 @@ function CommunityDetail({ id, setView, authUser, functionsBase }) {
       </div>
       <div className="min-h-[60vh]">
         {authUser ? (
-          <ChatPanel authUser={authUser} functionsBase={functionsBase} />
+          <ChatPanel authUser={authUser} functionsBase={functionsBase} userProfile={userProfile} />
         ) : (
           <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
             Log in om de chat te openen.

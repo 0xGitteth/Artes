@@ -3330,7 +3330,12 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
                    <Button
                      variant="secondary"
                      className="self-start sm:self-auto"
-                     onClick={() => onOpenQuickProfile?.()}
+                     onClick={() => {
+                       if (import.meta.env.DEV) {
+                         console.log('[EditProfileModal] Opening QuickProfile for uid:', user?.uid);
+                       }
+                       onOpenQuickProfile?.();
+                     }}
                    >
                      Bekijk Quick Profile
                    </Button>
@@ -3858,19 +3863,10 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
     });
   }, [userId, allUsers]);
 
-  if (!userProfile) {
-    return (
-      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 w-full max-w-md text-center shadow-2xl">
-          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-600 dark:text-slate-300">Profiel laden...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const roles = userProfile.roles || [];
-  const themes = userProfile.themes || [];
+  // All hooks must be called in the same order on every render
+  // Moved BEFORE the early return to prevent "Rendered more hooks" error
+  const roles = userProfile?.roles || [];
+  const themes = userProfile?.themes || [];
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
   const userPosts = posts.filter((post) => post.authorId === userId);
   const resolvePostTimestamp = (post) => {
@@ -3879,8 +3875,8 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
     if (typeof post?.createdAt === 'number') return post.createdAt;
     return 0;
   };
-  const previewMode = userProfile.quickProfilePreviewMode || 'latest';
-  const manualIds = Array.isArray(userProfile.quickProfilePostIds) ? userProfile.quickProfilePostIds : [];
+  const previewMode = userProfile?.quickProfilePreviewMode || 'latest';
+  const manualIds = Array.isArray(userProfile?.quickProfilePostIds) ? userProfile.quickProfilePostIds : [];
   const previewPosts = useMemo(() => {
     if (previewMode === 'manual' && manualIds.length) {
       const manualPosts = manualIds
@@ -3897,8 +3893,20 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
       .sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a))
       .slice(0, 3);
   }, [manualIds, previewMode, userPosts]);
-  const headerImage = userProfile.headerImage || userProfile.avatar;
-  const headerPosition = userProfile.headerPosition || 'center';
+  const headerImage = userProfile?.headerImage || userProfile?.avatar;
+  const headerPosition = userProfile?.headerPosition || 'center';
+
+  // Early return after all hooks
+  if (!userProfile) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 w-full max-w-md text-center shadow-2xl">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-slate-600 dark:text-slate-300">Profiel laden...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">

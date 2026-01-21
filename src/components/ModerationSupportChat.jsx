@@ -296,13 +296,17 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
                 <div className="text-sm text-slate-500">Nog geen berichten.</div>
               ) : (
                 normalizedMessages.map((message) => {
-                  const isModeratorMessage = message.senderRole === 'moderator';
+                  const isModeratorMessage = message.senderRole === 'moderator' || message.senderRole === 'system';
                   const bubbleStyle = message.senderRole === 'system'
                     ? 'bg-blue-50 text-blue-900 border border-blue-100'
                     : isModeratorMessage
                       ? 'bg-blue-600 text-white'
                       : 'bg-white dark:bg-slate-800 dark:text-white border border-slate-200 dark:border-slate-700';
-                  const senderName = isModeratorMessage ? 'Moderator' : (message.senderLabel || display.displayName);
+                  const senderName = message.senderRole === 'system'
+                    ? 'ARTES MODERATIE'
+                    : isModeratorMessage
+                      ? 'Moderator'
+                      : (message.senderLabel || display.displayName);
                   return (
                     <div
                       key={message.id}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Image as ImageIcon, Search, Users, Plus, Hand, Cloud, Bookmark,
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
@@ -32,7 +32,7 @@ import {
   updateUserProfile,
   getFirebaseDbInstance,
   isModerator,
-  ensureThreadExists,
+  ensureSupportThreadExists,
   migrateRemoveGeneralTheme,
 } from './firebase';
 import {
@@ -337,6 +337,7 @@ export default function ArtesApp() {
   const [moderatorAccess, setModeratorAccess] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [supportThreadId, setSupportThreadId] = useState(null);
+  const ensuredSupportThreadUidRef = useRef(null);
 
   // Data
   const [posts, setPosts] = useState([]);
@@ -426,6 +427,7 @@ export default function ArtesApp() {
       setAuthUser(u);
       if (!u) {
         setProfile(null);
+        ensuredSupportThreadUidRef.current = null;
         const path = window.location.pathname || '/';
         const unauthView = path.startsWith('/support')
           ? 'support'
@@ -437,6 +439,12 @@ export default function ArtesApp() {
         return;
       }
       try {
+        if (u?.uid && ensuredSupportThreadUidRef.current !== u.uid) {
+          ensuredSupportThreadUidRef.current = u.uid;
+          ensureSupportThreadExists(u.uid).catch((error) => {
+            console.error('[ArtesApp] Failed to ensure support thread', error);
+          });
+        }
         await migrateArtifactsUserData(u);
         const profileData = await ensureUserProfile(u);
         const normalized = normalizeProfileData(profileData, u.uid);
@@ -814,12 +822,7 @@ export default function ArtesApp() {
       
       // Create support thread for the user after onboarding
       try {
-        const userProfile = {
-          displayName: finalProfile.displayName,
-          photoURL: finalProfile.avatar,
-          username: '',
-        };
-        await ensureThreadExists(`support_${authUser.uid}`, 'support', userProfile);
+        await ensureSupportThreadExists(authUser.uid);
         if (import.meta.env.DEV) {
           console.log('[ArtesApp] Created support thread after onboarding');
         }

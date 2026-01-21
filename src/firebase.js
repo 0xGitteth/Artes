@@ -30,6 +30,7 @@ import {
   deleteDoc,
   runTransaction,
 } from 'firebase/firestore';
+import { SUPPORT_INTRO_TEXT } from './utils/supportChat';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -579,6 +580,56 @@ export const ensureThreadExists = async (threadId, type = 'support', userProfile
     return threadId;
   } catch (error) {
     console.error(`[ensureThreadExists] Error ensuring thread ${threadId}:`, error);
+    throw error;
+  }
+};
+
+export const ensureSupportThreadExists = async (uid) => {
+  if (!uid) {
+    throw new Error('uid is required to ensure support thread');
+  }
+
+  const db = getFirebaseDb();
+  const threadId = `support_${uid}`;
+  const threadRef = doc(db, 'threads', threadId);
+
+  try {
+    const snap = await getDoc(threadRef);
+    if (snap.exists()) {
+      if (import.meta.env.DEV) {
+        console.log(`[ensureSupportThreadExists] Thread ${threadId} already exists`);
+      }
+      return threadId;
+    }
+
+    await setDoc(threadRef, {
+      type: 'support',
+      userUid: uid,
+      participants: [uid],
+      participantUids: [uid],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessagePreview: SUPPORT_INTRO_TEXT,
+      lastMessageAt: serverTimestamp(),
+      userCanSend: true,
+      userMessageAllowance: 1,
+    });
+
+    await addDoc(collection(db, 'threads', threadId, 'messages'), {
+      text: SUPPORT_INTRO_TEXT,
+      createdAt: serverTimestamp(),
+      senderRole: 'system',
+      senderUid: null,
+      senderId: uid,
+    });
+
+    if (import.meta.env.DEV) {
+      console.log(`[ensureSupportThreadExists] Created support thread ${threadId} with intro message`);
+    }
+
+    return threadId;
+  } catch (error) {
+    console.error(`[ensureSupportThreadExists] Error ensuring support thread ${threadId}:`, error);
     throw error;
   }
 };

@@ -44,6 +44,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  writeBatch,
   setDoc,
   where,
 } from 'firebase/firestore';
@@ -472,6 +473,10 @@ export default function ArtesApp() {
     const db = getFirebaseDbInstance();
     const normalizedCommunity = normalizeCommunityConfig(communityDraft);
     const normalizedChallenge = normalizeChallengeConfig(challengeDraft);
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'config', 'community'), normalizedCommunity);
+    batch.set(doc(db, 'config', 'challenge'), normalizedChallenge);
+    await batch.commit();
     await Promise.all([
       setDoc(doc(db, 'config', 'community'), normalizedCommunity),
       setDoc(doc(db, 'config', 'challenge'), normalizedChallenge),
@@ -2671,6 +2676,20 @@ function ModerationPortal({
   };
 
   const validateConfigDraft = () => {
+    const idCounts = communityDraft.communities.reduce((acc, community) => {
+      const id = community.id?.trim();
+      if (!id) return acc;
+      acc[id] = (acc[id] || 0) + 1;
+      return acc;
+    }, {});
+
+    const communityErrors = communityDraft.communities.map((community) => {
+      const errors = {};
+      const trimmedId = community.id?.trim();
+      if (!trimmedId) {
+        errors.id = 'Vul een unieke sleutel in.';
+      } else if (idCounts[trimmedId] > 1) {
+        errors.id = 'Community ID moet uniek zijn.';
     const communityErrors = communityDraft.communities.map((community) => {
       const errors = {};
       if (!community.id?.trim()) {

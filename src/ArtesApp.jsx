@@ -44,6 +44,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  writeBatch,
   where,
 } from 'firebase/firestore';
 import ChatPanel from './components/ChatPanel';
@@ -121,11 +122,52 @@ const tintTowardWhite = (hexColor, intensity = 0.9) => {
   return `rgb(${blend(r)}, ${blend(g)}, ${blend(b)})`;
 };
 
-const COMMUNITIES = [
-  { id: 'safety', title: 'Veiligheid & Consent', icon: Shield, members: 1240, desc: 'Over grenzen, afspraken en veilig werken.' },
-  { id: 'network', title: 'Netwerk & Collabs', icon: Handshake, members: 3500, desc: 'Vind je team voor de volgende shoot.' },
-  { id: 'tech', title: 'Techniek & Gear', icon: Camera, members: 2100, desc: "Alles over licht, camera's en lenzen." },
+const COMMUNITY_ICON_OPTIONS = [
+  { key: 'shield', label: 'Shield', icon: Shield },
+  { key: 'handshake', label: 'Handshake', icon: Handshake },
+  { key: 'camera', label: 'Camera', icon: Camera },
+  { key: 'users', label: 'Users', icon: Users },
+  { key: 'star', label: 'Star', icon: Star },
+  { key: 'globe', label: 'Globe', icon: Globe },
+  { key: 'message', label: 'Message', icon: MessageCircle },
 ];
+
+const COMMUNITY_ICON_MAP = COMMUNITY_ICON_OPTIONS.reduce((acc, option) => {
+  acc[option.key] = option.icon;
+  return acc;
+}, {});
+
+const DEFAULT_COMMUNITY_CONFIG = {
+  communities: [
+    {
+      id: 'safety',
+      title: 'Veiligheid & Consent',
+      description: 'Over grenzen, afspraken en veilig werken.',
+      iconKey: 'shield',
+      topics: ['Consent', 'Grenzen', 'Veilig werken'],
+    },
+    {
+      id: 'network',
+      title: 'Netwerk & Collabs',
+      description: 'Vind je team voor de volgende shoot.',
+      iconKey: 'handshake',
+      topics: ['Samenwerkingen', 'Crew gezocht', 'Portfolioshoots'],
+    },
+    {
+      id: 'tech',
+      title: 'Techniek & Gear',
+      description: "Alles over licht, camera's en lenzen.",
+      iconKey: 'camera',
+      topics: ['Lichtopstellingen', 'Gear tips', 'Workflow'],
+    },
+  ],
+};
+
+const DEFAULT_CHALLENGE_CONFIG = {
+  title: 'Weekly Challenge',
+  theme: 'Shadow Play',
+  description: 'Deel je beste interpretatie van dit thema en inspireer de community.',
+};
 
 const TRIGGERS = [
   { id: 'nudityErotic', label: 'Naakt (erotisch)' },
@@ -184,6 +226,26 @@ const resolveTriggerKey = (trigger) => {
   const match = TRIGGERS.find((item) => item.id === trigger || item.label === trigger);
   return match ? match.id : trigger;
 };
+
+const resolveCommunityIcon = (iconKey) => COMMUNITY_ICON_MAP[iconKey] || Users;
+
+const normalizeCommunityConfig = (config = {}) => {
+  const base = config && Array.isArray(config.communities) ? config : DEFAULT_COMMUNITY_CONFIG;
+  const communities = (base.communities || []).map((community, index) => ({
+    id: community?.id || `community_${index + 1}`,
+    title: community?.title || '',
+    description: community?.description || community?.desc || '',
+    iconKey: community?.iconKey || community?.icon || 'users',
+    topics: Array.isArray(community?.topics) ? community.topics.filter(Boolean) : [],
+  }));
+  return { communities };
+};
+
+const normalizeChallengeConfig = (config = {}) => ({
+  title: config?.title || DEFAULT_CHALLENGE_CONFIG.title,
+  theme: config?.theme || DEFAULT_CHALLENGE_CONFIG.theme,
+  description: config?.description || DEFAULT_CHALLENGE_CONFIG.description,
+});
 
 const getPostTriggerKeys = (post) => {
   const triggers = [...(post.appliedTriggers || []), ...(post.makerTags || []), ...(post.triggers || [])];
@@ -339,6 +401,9 @@ export default function ArtesApp() {
   const [supportThreadId, setSupportThreadId] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
   const userProfile = profile;
+  const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
+  const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
+  const [configLoading, setConfigLoading] = useState(true);
 
   // Data
   const [posts, setPosts] = useState([]);
@@ -402,6 +467,18 @@ export default function ArtesApp() {
     setView('login');
     setToastMessage('Account verwijderd.');
   }, [authUser, functionsBase]);
+
+  const handleSaveCommunityConfig = useCallback(async (communityDraft, challengeDraft) => {
+    const db = getFirebaseDbInstance();
+    const normalizedCommunity = normalizeCommunityConfig(communityDraft);
+    const normalizedChallenge = normalizeChallengeConfig(challengeDraft);
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'config', 'community'), normalizedCommunity);
+    batch.set(doc(db, 'config', 'challenge'), normalizedChallenge);
+    await batch.commit();
+    setCommunityConfig(normalizedCommunity);
+    setChallengeConfig(normalizedChallenge);
+  }, []);
 
   // Seeding
   useEffect(() => {
@@ -476,6 +553,40 @@ export default function ArtesApp() {
       unsubscribe();
     };
   }, [ensureModerationThread]);
+
+  useEffect(() => {
+    let active = true;
+    const loadConfig = async () => {
+      setConfigLoading(true);
+      try {
+        const db = getFirebaseDbInstance();
+        const [communityDoc, challengeDoc] = await Promise.all([
+          getDoc(doc(db, 'config', 'community')),
+          getDoc(doc(db, 'config', 'challenge')),
+        ]);
+        if (!active) return;
+        const communityData = communityDoc.exists() ? communityDoc.data() : null;
+        const challengeData = challengeDoc.exists() ? challengeDoc.data() : null;
+        setCommunityConfig(normalizeCommunityConfig(communityData));
+        setChallengeConfig(normalizeChallengeConfig(challengeData));
+      } catch (error) {
+        console.error('Failed to load community config', error);
+        if (!active) return;
+        setCommunityConfig(DEFAULT_COMMUNITY_CONFIG);
+        setChallengeConfig(DEFAULT_CHALLENGE_CONFIG);
+      } finally {
+        if (active) {
+          setConfigLoading(false);
+        }
+      }
+    };
+
+    loadConfig();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!profile?.preferences?.theme) return;
@@ -1036,6 +1147,10 @@ export default function ArtesApp() {
               moderationActionPending={moderationActionPending}
               onModerationAction={handleModerationAction}
               onCloseModerationModal={() => handleModerationAction('dismiss')}
+              communityConfig={communityConfig}
+              challengeConfig={challengeConfig}
+              configLoading={configLoading}
+              onSaveCommunityConfig={handleSaveCommunityConfig}
             />
           )}
 
@@ -1050,7 +1165,14 @@ export default function ArtesApp() {
             />
           )}
           
-          {!profileLoading && view === 'community' && <CommunityList setView={setView} />}
+          {!profileLoading && view === 'community' && (
+            <CommunityList
+              setView={setView}
+              communities={communityConfig.communities}
+              challenge={challengeConfig}
+              configLoading={configLoading}
+            />
+          )}
           {!profileLoading && view === 'support' && (
             <SupportLanding onOpenChat={handleOpenSupportChat} canOpenChat={Boolean(authUser)} />
           )}
@@ -1073,7 +1195,12 @@ export default function ArtesApp() {
             )
           )}
           {!profileLoading && view === 'challenge_detail' && (
-            <ChallengeDetail setView={setView} posts={posts.filter(p => p.isChallenge)} onPostClick={setSelectedPost} />
+            <ChallengeDetail
+              setView={setView}
+              posts={posts.filter(p => p.isChallenge)}
+              onPostClick={setSelectedPost}
+              challenge={challengeConfig}
+            />
           )}
           
           {!profileLoading && view.startsWith('community_') && (
@@ -1083,6 +1210,7 @@ export default function ArtesApp() {
               authUser={authUser}
               functionsBase={functionsBase}
               userProfile={userProfile}
+              communities={communityConfig.communities}
             />
           )}
 
@@ -2454,8 +2582,33 @@ function ModerationPortal({
   moderationActionPending,
   onModerationAction,
   onCloseModerationModal,
+  communityConfig,
+  challengeConfig,
+  configLoading,
+  onSaveCommunityConfig,
 }) {
   const [activeTab, setActiveTab] = useState('chat');
+  const [communityDraft, setCommunityDraft] = useState(DEFAULT_COMMUNITY_CONFIG);
+  const [challengeDraft, setChallengeDraft] = useState(DEFAULT_CHALLENGE_CONFIG);
+  const [configErrors, setConfigErrors] = useState({ communities: [], challenge: {} });
+  const [configSaveState, setConfigSaveState] = useState({ saving: false, error: null, success: false });
+  const hasLoadedConfigRef = useRef(false);
+
+  useEffect(() => {
+    if (configLoading) return;
+    if (!hasLoadedConfigRef.current) {
+      setCommunityDraft(normalizeCommunityConfig(communityConfig));
+      setChallengeDraft(normalizeChallengeConfig(challengeConfig));
+      setConfigErrors({ communities: [], challenge: {} });
+      hasLoadedConfigRef.current = true;
+    }
+  }, [communityConfig, challengeConfig, configLoading]);
+
+  useEffect(() => {
+    if (configSaveState.success) {
+      setConfigSaveState((prev) => ({ ...prev, success: false }));
+    }
+  }, [communityDraft, challengeDraft, configSaveState.success]);
 
   if (isModerator === null) {
     return (
@@ -2477,10 +2630,118 @@ function ModerationPortal({
     );
   }
 
+  const updateCommunityField = (index, field, value) => {
+    setCommunityDraft((prev) => {
+      const next = prev.communities.map((community, communityIndex) => (
+        communityIndex === index ? { ...community, [field]: value } : community
+      ));
+      return { ...prev, communities: next };
+    });
+  };
+
+  const handleCommunityTopicsChange = (index, value) => {
+    const topics = value
+      .split(',')
+      .map((topic) => topic.trim())
+      .filter(Boolean);
+    updateCommunityField(index, 'topics', topics);
+  };
+
+  const handleAddCommunity = () => {
+    setCommunityDraft((prev) => ({
+      ...prev,
+      communities: [
+        ...prev.communities,
+        {
+          id: `community_${prev.communities.length + 1}`,
+          title: '',
+          description: '',
+          iconKey: 'users',
+          topics: [],
+        },
+      ],
+    }));
+  };
+
+  const handleRemoveCommunity = (index) => {
+    setCommunityDraft((prev) => ({
+      ...prev,
+      communities: prev.communities.filter((_, communityIndex) => communityIndex !== index),
+    }));
+  };
+
+  const validateConfigDraft = () => {
+    const idCounts = communityDraft.communities.reduce((acc, community) => {
+      const id = community.id?.trim();
+      if (!id) return acc;
+      acc[id] = (acc[id] || 0) + 1;
+      return acc;
+    }, {});
+
+    const communityErrors = communityDraft.communities.map((community) => {
+      const errors = {};
+      const trimmedId = community.id?.trim();
+      if (!trimmedId) {
+        errors.id = 'Vul een unieke sleutel in.';
+      } else if (idCounts[trimmedId] > 1) {
+        errors.id = 'Community ID moet uniek zijn.';
+      }
+      if (!community.title?.trim()) {
+        errors.title = 'Titel is verplicht.';
+      }
+      if (!community.description?.trim()) {
+        errors.description = 'Beschrijving is verplicht.';
+      }
+      if (!community.iconKey) {
+        errors.iconKey = 'Kies een icoon.';
+      }
+      if (!community.topics || community.topics.length === 0) {
+        errors.topics = 'Voeg minstens één topic toe.';
+      }
+      return errors;
+    });
+
+    const challengeErrors = {};
+    if (!challengeDraft.title?.trim()) {
+      challengeErrors.title = 'Titel is verplicht.';
+    }
+    if (!challengeDraft.theme?.trim()) {
+      challengeErrors.theme = 'Thema is verplicht.';
+    }
+    if (!challengeDraft.description?.trim()) {
+      challengeErrors.description = 'Beschrijving is verplicht.';
+    }
+
+    const hasCommunityErrors = communityErrors.some((errors) => Object.keys(errors).length > 0);
+    const hasChallengeErrors = Object.keys(challengeErrors).length > 0;
+
+    setConfigErrors({ communities: communityErrors, challenge: challengeErrors });
+
+    return !(hasCommunityErrors || hasChallengeErrors);
+  };
+
+  const handleSaveConfig = async () => {
+    if (configLoading || configSaveState.saving) return;
+    if (!validateConfigDraft()) return;
+    setConfigSaveState({ saving: true, error: null, success: false });
+    try {
+      await onSaveCommunityConfig(communityDraft, challengeDraft);
+      setConfigSaveState({ saving: false, error: null, success: true });
+    } catch (error) {
+      console.error('Failed to save community config', error);
+      setConfigSaveState({
+        saving: false,
+        error: 'Opslaan mislukt. Probeer het opnieuw.',
+        success: false,
+      });
+    }
+  };
+
   const tabs = [
     { id: 'chat', label: 'Berichten', icon: MessageCircle },
     { id: 'review', label: 'Review voor posten', icon: ImageIcon },
     { id: 'reports', label: 'Rapportages', icon: AlertTriangle },
+    { id: 'community', label: 'Community', icon: Users },
   ];
 
   return (
@@ -2543,6 +2804,193 @@ function ModerationPortal({
           isModerator={isModerator}
           caseTypeFilter="report"
         />
+      )}
+
+      {activeTab === 'community' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold dark:text-white">Community configuratie</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Beheer community-tegels en de wekelijkse challenge voor de community-pagina.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={handleSaveConfig}
+                  disabled={configLoading || configSaveState.saving}
+                  className="whitespace-nowrap"
+                >
+                  {configLoading
+                    ? 'Configuratie laden...'
+                    : configSaveState.saving
+                      ? 'Opslaan...'
+                      : 'Configuratie opslaan'}
+                </Button>
+              </div>
+            </div>
+            {configLoading && (
+              <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Configuratie laden...
+              </div>
+            )}
+            {configSaveState.error && (
+              <div className="text-sm text-red-500">{configSaveState.error}</div>
+            )}
+            {configSaveState.success && (
+              <div className="text-sm text-emerald-500">Configuratie opgeslagen.</div>
+            )}
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
+              <div>
+                <h4 className="font-semibold dark:text-white">Weekly Challenge</h4>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Teksten die bovenaan de community-pagina staan.</p>
+              </div>
+              <div className="grid gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Titel</label>
+                  <input
+                    className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                    value={challengeDraft.title}
+                    onChange={(event) => setChallengeDraft((prev) => ({ ...prev, title: event.target.value }))}
+                  />
+                  {configErrors.challenge?.title && (
+                    <p className="text-xs text-red-500 mt-1">{configErrors.challenge.title}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Thema</label>
+                  <input
+                    className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                    value={challengeDraft.theme}
+                    onChange={(event) => setChallengeDraft((prev) => ({ ...prev, theme: event.target.value }))}
+                  />
+                  {configErrors.challenge?.theme && (
+                    <p className="text-xs text-red-500 mt-1">{configErrors.challenge.theme}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Beschrijving</label>
+                  <textarea
+                    className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                    rows={4}
+                    value={challengeDraft.description}
+                    onChange={(event) => setChallengeDraft((prev) => ({ ...prev, description: event.target.value }))}
+                  />
+                  {configErrors.challenge?.description && (
+                    <p className="text-xs text-red-500 mt-1">{configErrors.challenge.description}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-semibold dark:text-white">Community-tegels</h4>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Voeg communities toe of pas bestaande aan.</p>
+                </div>
+                <Button variant="ghost" onClick={handleAddCommunity}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Community toevoegen
+                </Button>
+              </div>
+              <div className="space-y-6">
+                {communityDraft.communities.map((community, index) => {
+                  const Icon = resolveCommunityIcon(community.iconKey);
+                  const errors = configErrors.communities?.[index] || {};
+                  return (
+                    <div
+                      key={`${community.id}-${index}`}
+                      className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-slate-800 flex items-center justify-center">
+                            <Icon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                              Community {index + 1}
+                            </p>
+                            <p className="text-xs text-slate-400">Pas titel, beschrijving en topics aan.</p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          className="text-red-500 hover:text-red-600"
+                          onClick={() => handleRemoveCommunity(index)}
+                          disabled={communityDraft.communities.length <= 1}
+                        >
+                          <Trash2 className="w-4 h-4 mr-1" />
+                          Verwijderen
+                        </Button>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Community ID</label>
+                          <input
+                            className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                            value={community.id}
+                            onChange={(event) => updateCommunityField(index, 'id', event.target.value)}
+                          />
+                          {errors.id && <p className="text-xs text-red-500 mt-1">{errors.id}</p>}
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Icon-key</label>
+                          <select
+                            className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                            value={community.iconKey}
+                            onChange={(event) => updateCommunityField(index, 'iconKey', event.target.value)}
+                          >
+                            {COMMUNITY_ICON_OPTIONS.map((option) => (
+                              <option key={option.key} value={option.key}>{option.label}</option>
+                            ))}
+                          </select>
+                          {errors.iconKey && <p className="text-xs text-red-500 mt-1">{errors.iconKey}</p>}
+                        </div>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Titel</label>
+                          <input
+                            className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                            value={community.title}
+                            onChange={(event) => updateCommunityField(index, 'title', event.target.value)}
+                          />
+                          {errors.title && <p className="text-xs text-red-500 mt-1">{errors.title}</p>}
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Beschrijving</label>
+                          <input
+                            className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                            value={community.description}
+                            onChange={(event) => updateCommunityField(index, 'description', event.target.value)}
+                          />
+                          {errors.description && <p className="text-xs text-red-500 mt-1">{errors.description}</p>}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Topics (komma-gescheiden)</label>
+                        <input
+                          className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                          value={community.topics.join(', ')}
+                          onChange={(event) => handleCommunityTopicsChange(index, event.target.value)}
+                        />
+                        <p className="text-xs text-slate-400 mt-1">Bijv. consent, crew gezocht, portfolio shoots</p>
+                        {errors.topics && <p className="text-xs text-red-500 mt-1">{errors.topics}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {moderationModal && (
@@ -3584,7 +4032,12 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
   );
 }
 
-function CommunityList({ setView }) {
+function CommunityList({ setView, communities, challenge, configLoading }) {
+  const safeCommunities = Array.isArray(communities) && communities.length
+    ? communities
+    : DEFAULT_COMMUNITY_CONFIG.communities;
+  const challengeData = challenge || DEFAULT_CHALLENGE_CONFIG;
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
       <div className="flex justify-between items-center mb-6">
@@ -3594,14 +4047,20 @@ function CommunityList({ setView }) {
       <div className="mb-8 cursor-pointer" onClick={() => setView('challenge_detail')}>
          <div className="bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/20 p-6 rounded-2xl border border-amber-200 dark:border-amber-800/30 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
             <div>
-               <h3 className="font-bold text-amber-900 dark:text-amber-400 text-lg mb-1 flex items-center gap-2"><Star className="w-5 h-5 fill-amber-500 text-amber-500" /> Weekly Challenge</h3>
-               <p className="text-sm text-amber-800 dark:text-amber-200/80 mb-0">Thema: &quot;Shadow Play&quot;</p>
+               <h3 className="font-bold text-amber-900 dark:text-amber-400 text-lg mb-1 flex items-center gap-2"><Star className="w-5 h-5 fill-amber-500 text-amber-500" /> {challengeData.title}</h3>
+               <p className="text-sm text-amber-800 dark:text-amber-200/80 mb-0">Thema: &quot;{challengeData.theme}&quot;</p>
             </div>
             <Button className="bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/20" asChild>Doe mee</Button>
          </div>
       </div>
 
       <div className="space-y-4">
+        {configLoading && (
+          <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Communitydata laden...
+          </div>
+        )}
         <div
           className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex gap-6 hover:shadow-md transition-shadow cursor-pointer"
           onClick={() => setView('chat')}
@@ -3614,12 +4073,12 @@ function CommunityList({ setView }) {
             <p className="text-slate-600 dark:text-slate-400 text-sm">Open je gesprekken en contact met Artes Moderatie.</p>
           </div>
         </div>
-        {COMMUNITIES.map(comm => {
-          const Icon = comm.icon;
+        {safeCommunities.map(comm => {
+          const Icon = resolveCommunityIcon(comm.iconKey);
           return (
             <div key={comm.id} className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex gap-6 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setView(`community_${comm.id}`)}>
               <div className="w-12 h-12 bg-blue-50 dark:bg-slate-700 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0"><Icon className="w-6 h-6" /></div>
-              <div><h3 className="font-bold text-lg dark:text-white mb-1">{comm.title}</h3><p className="text-slate-600 dark:text-slate-400 text-sm">{comm.desc}</p></div>
+              <div><h3 className="font-bold text-lg dark:text-white mb-1">{comm.title}</h3><p className="text-slate-600 dark:text-slate-400 text-sm">{comm.description}</p></div>
             </div>
           );
         })}
@@ -3628,16 +4087,51 @@ function CommunityList({ setView }) {
   );
 }
 
-function CommunityDetail({ id, setView, authUser, functionsBase, userProfile }) {
+function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, communities }) {
+  const communityList = Array.isArray(communities) && communities.length
+    ? communities
+    : DEFAULT_COMMUNITY_CONFIG.communities;
+  const selectedCommunity = communityList.find((community) => community.id === id);
+  const communityTitle = selectedCommunity?.title || `Community: ${id}`;
+  const communityDescription = selectedCommunity?.description || 'Praat mee of neem contact op met Artes Moderatie.';
+  const communityTopics = selectedCommunity?.topics || [];
+  const CommunityIcon = resolveCommunityIcon(selectedCommunity?.iconKey);
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 font-medium">
         <ChevronLeft className="w-4 h-4 mr-1" /> Terug
       </button>
       <div>
-        <h2 className="text-2xl font-bold dark:text-white">Community: {id}</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Praat mee of neem contact op met Artes Moderatie.</p>
+        <h2 className="text-2xl font-bold dark:text-white">{communityTitle}</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">{communityDescription}</p>
       </div>
+      {selectedCommunity && (
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-slate-800 flex items-center justify-center">
+              <CommunityIcon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Topics</p>
+              <div className="flex flex-wrap gap-2">
+                {communityTopics.length > 0 ? (
+                  communityTopics.map((topic) => (
+                    <span
+                      key={topic}
+                      className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300"
+                    >
+                      {topic}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-sm text-slate-400">Nog geen topics toegevoegd.</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="min-h-[60vh]">
         {authUser ? (
           <ChatPanel authUser={authUser} functionsBase={functionsBase} userProfile={userProfile} />
@@ -3650,12 +4144,15 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile }) 
     </div>
   );
 }
-function ChallengeDetail({ setView, posts, onPostClick }) {
+function ChallengeDetail({ setView, posts, onPostClick, challenge }) {
+   const challengeData = challenge || DEFAULT_CHALLENGE_CONFIG;
    return (
       <div className="max-w-4xl mx-auto px-4 py-6">
          <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 mb-6 font-medium"><ChevronLeft className="w-4 h-4 mr-1"/> Terug</button>
          <div className="bg-amber-100 dark:bg-amber-900/20 p-8 rounded-3xl border border-amber-200 dark:border-amber-800 mb-8 text-center relative overflow-hidden">
-            <h1 className="text-4xl font-bold text-amber-900 dark:text-amber-100 mb-2">Shadow Play</h1>
+            <p className="text-sm uppercase tracking-widest text-amber-700 dark:text-amber-200 mb-2">{challengeData.title}</p>
+            <h1 className="text-4xl font-bold text-amber-900 dark:text-amber-100 mb-2">{challengeData.theme}</h1>
+            <p className="text-sm text-amber-800 dark:text-amber-200/80">{challengeData.description}</p>
          </div>
          <div className="grid grid-cols-2 md:grid-cols-3 gap-1 md:gap-4">
             {posts.map(post => (<div key={post.id} onClick={() => onPostClick(post)} className="aspect-square bg-slate-200 rounded-lg overflow-hidden cursor-pointer"><img src={post.imageUrl} className="w-full h-full object-cover" /></div>))}

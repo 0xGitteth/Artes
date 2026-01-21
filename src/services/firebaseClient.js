@@ -53,7 +53,11 @@ export const ensureUserSignedIn = async (customToken) => {
   return signInAnonymously(auth);
 };
 
-export const subscribeToAuth = (callback) => onAuthStateChanged(auth, callback);
+export const subscribeToAuth = (callback) =>
+  onAuthStateChanged(auth, (user) => {
+    console.log("AUTH STATE:", user ? user.uid : null);
+    callback(user);
+  });
 
 export const subscribeToProfile = (uid, callback) => {
   logFirestoreOp('SUBSCRIBE', `users/${uid}`, 'profile');

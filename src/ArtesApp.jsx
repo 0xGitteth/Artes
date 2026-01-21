@@ -44,6 +44,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  setDoc,
   where,
 } from 'firebase/firestore';
 import ChatPanel from './components/ChatPanel';
@@ -121,11 +122,88 @@ const tintTowardWhite = (hexColor, intensity = 0.9) => {
   return `rgb(${blend(r)}, ${blend(g)}, ${blend(b)})`;
 };
 
-const COMMUNITIES = [
-  { id: 'safety', title: 'Veiligheid & Consent', icon: Shield, members: 1240, desc: 'Over grenzen, afspraken en veilig werken.' },
-  { id: 'network', title: 'Netwerk & Collabs', icon: Handshake, members: 3500, desc: 'Vind je team voor de volgende shoot.' },
-  { id: 'tech', title: 'Techniek & Gear', icon: Camera, members: 2100, desc: "Alles over licht, camera's en lenzen." },
+const COMMUNITY_ICON_MAP = {
+  shield: Shield,
+  handshake: Handshake,
+  camera: Camera,
+  users: Users,
+  globe: Globe,
+  star: Star,
+  briefcase: Briefcase,
+  building: Building2,
+};
+
+const COMMUNITY_ICON_OPTIONS = [
+  { value: 'shield', label: 'Shield' },
+  { value: 'handshake', label: 'Handshake' },
+  { value: 'camera', label: 'Camera' },
+  { value: 'users', label: 'Users' },
+  { value: 'globe', label: 'Globe' },
+  { value: 'star', label: 'Star' },
+  { value: 'briefcase', label: 'Briefcase' },
+  { value: 'building', label: 'Building' },
 ];
+
+const DEFAULT_COMMUNITY_CONFIG = {
+  communities: [
+    {
+      id: 'safety',
+      title: 'Veiligheid & Consent',
+      description: 'Over grenzen, afspraken en veilig werken.',
+      iconKey: 'shield',
+      topics: ['Consent', 'Grenzen', 'Afspraken'],
+    },
+    {
+      id: 'network',
+      title: 'Netwerk & Collabs',
+      description: 'Vind je team voor de volgende shoot.',
+      iconKey: 'handshake',
+      topics: ['Collabs', 'Casting', 'Portfolio'],
+    },
+    {
+      id: 'tech',
+      title: 'Techniek & Gear',
+      description: "Alles over licht, camera's en lenzen.",
+      iconKey: 'camera',
+      topics: ['Licht', 'Camera gear', 'Workflow'],
+    },
+  ],
+};
+
+const DEFAULT_CHALLENGE_CONFIG = {
+  label: 'Weekly Challenge',
+  title: 'Shadow Play',
+  subtitle: 'Thema: "Shadow Play"',
+  description: 'Speel met contrast en laat zien hoe jij licht en schaduw inzet.',
+  ctaLabel: 'Doe mee',
+};
+
+const normalizeCommunityConfig = (data) => {
+  if (!data?.communities || !Array.isArray(data.communities)) {
+    return DEFAULT_COMMUNITY_CONFIG;
+  }
+  const communities = data.communities.map((community) => ({
+    id: String(community?.id || '').trim(),
+    title: String(community?.title || '').trim(),
+    description: String(community?.description || community?.desc || '').trim(),
+    iconKey: String(community?.iconKey || '').trim() || 'users',
+    topics: Array.isArray(community?.topics)
+      ? community.topics.map((topic) => String(topic).trim()).filter(Boolean)
+      : [],
+  })).filter((community) => community.id || community.title || community.description);
+  return { communities: communities.length ? communities : DEFAULT_COMMUNITY_CONFIG.communities };
+};
+
+const normalizeChallengeConfig = (data) => {
+  if (!data) return DEFAULT_CHALLENGE_CONFIG;
+  return {
+    label: String(data?.label || DEFAULT_CHALLENGE_CONFIG.label).trim() || DEFAULT_CHALLENGE_CONFIG.label,
+    title: String(data?.title || DEFAULT_CHALLENGE_CONFIG.title).trim() || DEFAULT_CHALLENGE_CONFIG.title,
+    subtitle: String(data?.subtitle || DEFAULT_CHALLENGE_CONFIG.subtitle).trim() || DEFAULT_CHALLENGE_CONFIG.subtitle,
+    description: String(data?.description || DEFAULT_CHALLENGE_CONFIG.description).trim() || DEFAULT_CHALLENGE_CONFIG.description,
+    ctaLabel: String(data?.ctaLabel || DEFAULT_CHALLENGE_CONFIG.ctaLabel).trim() || DEFAULT_CHALLENGE_CONFIG.ctaLabel,
+  };
+};
 
 const TRIGGERS = [
   { id: 'nudityErotic', label: 'Naakt (erotisch)' },
@@ -337,6 +415,9 @@ export default function ArtesApp() {
   const [moderatorAccess, setModeratorAccess] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [supportThreadId, setSupportThreadId] = useState(null);
+  const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
+  const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
+  const [configLoading, setConfigLoading] = useState(true);
 
   // Data
   const [posts, setPosts] = useState([]);
@@ -467,6 +548,35 @@ export default function ArtesApp() {
       unsubscribe();
     };
   }, [ensureModerationThread]);
+
+  useEffect(() => {
+    let active = true;
+    const loadConfig = async () => {
+      try {
+        const db = getFirebaseDbInstance();
+        const [communityDoc, challengeDoc] = await Promise.all([
+          getDoc(doc(db, 'config', 'community')),
+          getDoc(doc(db, 'config', 'challenge')),
+        ]);
+        if (!active) return;
+        setCommunityConfig(normalizeCommunityConfig(communityDoc.exists() ? communityDoc.data() : DEFAULT_COMMUNITY_CONFIG));
+        setChallengeConfig(normalizeChallengeConfig(challengeDoc.exists() ? challengeDoc.data() : DEFAULT_CHALLENGE_CONFIG));
+      } catch (error) {
+        console.error('Failed to load community config', error);
+        if (!active) return;
+        setCommunityConfig(DEFAULT_COMMUNITY_CONFIG);
+        setChallengeConfig(DEFAULT_CHALLENGE_CONFIG);
+      } finally {
+        if (active) {
+          setConfigLoading(false);
+        }
+      }
+    };
+    loadConfig();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!profile?.preferences?.theme) return;
@@ -1032,6 +1142,13 @@ export default function ArtesApp() {
               moderationActionPending={moderationActionPending}
               onModerationAction={handleModerationAction}
               onCloseModerationModal={() => handleModerationAction('dismiss')}
+              communityConfig={communityConfig}
+              challengeConfig={challengeConfig}
+              configLoading={configLoading}
+              onConfigSaved={(nextCommunityConfig, nextChallengeConfig) => {
+                setCommunityConfig(nextCommunityConfig);
+                setChallengeConfig(nextChallengeConfig);
+              }}
             />
           )}
 
@@ -1046,7 +1163,14 @@ export default function ArtesApp() {
             />
           )}
           
-          {!profileLoading && view === 'community' && <CommunityList setView={setView} />}
+          {!profileLoading && view === 'community' && (
+            <CommunityList
+              setView={setView}
+              communityConfig={communityConfig}
+              challengeConfig={challengeConfig}
+              configLoading={configLoading}
+            />
+          )}
           {!profileLoading && view === 'support' && (
             <SupportLanding onOpenChat={handleOpenSupportChat} canOpenChat={Boolean(authUser)} />
           )}
@@ -1064,7 +1188,12 @@ export default function ArtesApp() {
             )
           )}
           {!profileLoading && view === 'challenge_detail' && (
-            <ChallengeDetail setView={setView} posts={posts.filter(p => p.isChallenge)} onPostClick={setSelectedPost} />
+            <ChallengeDetail
+              setView={setView}
+              posts={posts.filter(p => p.isChallenge)}
+              onPostClick={setSelectedPost}
+              challengeConfig={challengeConfig}
+            />
           )}
           
           {!profileLoading && view.startsWith('community_') && (
@@ -2424,8 +2553,25 @@ function ModerationPortal({
   moderationActionPending,
   onModerationAction,
   onCloseModerationModal,
+  communityConfig,
+  challengeConfig,
+  configLoading,
+  onConfigSaved,
 }) {
   const [activeTab, setActiveTab] = useState('chat');
+  const [communityDraft, setCommunityDraft] = useState(communityConfig);
+  const [challengeDraft, setChallengeDraft] = useState(challengeConfig);
+  const [communityErrors, setCommunityErrors] = useState([]);
+  const [challengeErrors, setChallengeErrors] = useState({});
+  const [configSaveState, setConfigSaveState] = useState({ saving: false, error: null, success: false });
+
+  useEffect(() => {
+    setCommunityDraft(communityConfig);
+  }, [communityConfig]);
+
+  useEffect(() => {
+    setChallengeDraft(challengeConfig);
+  }, [challengeConfig]);
 
   if (isModerator === null) {
     return (
@@ -2451,7 +2597,112 @@ function ModerationPortal({
     { id: 'chat', label: 'Berichten', icon: MessageCircle },
     { id: 'review', label: 'Review voor posten', icon: ImageIcon },
     { id: 'reports', label: 'Rapportages', icon: AlertTriangle },
+    { id: 'community', label: 'Community & Challenges', icon: LayoutGrid },
   ];
+
+  const updateCommunityField = (index, field, value) => {
+    setCommunityDraft((prev) => {
+      const nextCommunities = [...(prev?.communities || [])];
+      nextCommunities[index] = { ...nextCommunities[index], [field]: value };
+      return { ...prev, communities: nextCommunities };
+    });
+  };
+
+  const handleAddCommunity = () => {
+    setCommunityDraft((prev) => ({
+      ...prev,
+      communities: [
+        ...(prev?.communities || []),
+        {
+          id: '',
+          title: '',
+          description: '',
+          iconKey: 'users',
+          topics: [],
+        },
+      ],
+    }));
+  };
+
+  const handleRemoveCommunity = (index) => {
+    setCommunityDraft((prev) => ({
+      ...prev,
+      communities: (prev?.communities || []).filter((_, idx) => idx !== index),
+    }));
+  };
+
+  const validateConfig = () => {
+    const errors = [];
+    const seenIds = new Set();
+    (communityDraft?.communities || []).forEach((community) => {
+      const entryErrors = {};
+      const id = (community?.id || '').trim();
+      const title = (community?.title || '').trim();
+      const description = (community?.description || '').trim();
+      const iconKey = (community?.iconKey || '').trim();
+      const topics = Array.isArray(community?.topics) ? community.topics : [];
+
+      if (!id) {
+        entryErrors.id = 'Vul een unieke ID in.';
+      } else if (!/^[a-z0-9_-]+$/i.test(id)) {
+        entryErrors.id = 'Gebruik alleen letters, cijfers, - of _.';
+      } else if (seenIds.has(id)) {
+        entryErrors.id = 'ID moet uniek zijn.';
+      } else {
+        seenIds.add(id);
+      }
+
+      if (!title) entryErrors.title = 'Titel is verplicht.';
+      if (!description) entryErrors.description = 'Beschrijving is verplicht.';
+      if (!iconKey || !COMMUNITY_ICON_OPTIONS.some((option) => option.value === iconKey)) {
+        entryErrors.iconKey = 'Kies een geldig icoon.';
+      }
+      if (!topics.length) {
+        entryErrors.topics = 'Voeg minstens één topic toe.';
+      }
+
+      errors.push(entryErrors);
+    });
+
+    const challengeErrorsNext = {};
+    if (!challengeDraft?.label?.trim()) challengeErrorsNext.label = 'Label is verplicht.';
+    if (!challengeDraft?.title?.trim()) challengeErrorsNext.title = 'Titel is verplicht.';
+    if (!challengeDraft?.subtitle?.trim()) challengeErrorsNext.subtitle = 'Subtitel is verplicht.';
+    if (!challengeDraft?.description?.trim()) challengeErrorsNext.description = 'Beschrijving is verplicht.';
+    if (!challengeDraft?.ctaLabel?.trim()) challengeErrorsNext.ctaLabel = 'Call-to-action is verplicht.';
+
+    setCommunityErrors(errors);
+    setChallengeErrors(challengeErrorsNext);
+
+    const hasCommunityErrors = errors.some((entry) => Object.keys(entry).length > 0);
+    const hasChallengeErrors = Object.keys(challengeErrorsNext).length > 0;
+    return !hasCommunityErrors && !hasChallengeErrors;
+  };
+
+  const handleSaveConfig = async () => {
+    if (configSaveState.saving) return;
+    setConfigSaveState({ saving: true, error: null, success: false });
+    if (!validateConfig()) {
+      setConfigSaveState({ saving: false, error: 'Controleer de velden hieronder.', success: false });
+      return;
+    }
+
+    const sanitizedCommunityConfig = normalizeCommunityConfig(communityDraft);
+    const sanitizedChallengeConfig = normalizeChallengeConfig(challengeDraft);
+
+    try {
+      const db = getFirebaseDbInstance();
+      await Promise.all([
+        setDoc(doc(db, 'config', 'community'), sanitizedCommunityConfig, { merge: true }),
+        setDoc(doc(db, 'config', 'challenge'), sanitizedChallengeConfig, { merge: true }),
+      ]);
+      setConfigSaveState({ saving: false, error: null, success: true });
+      onConfigSaved?.(sanitizedCommunityConfig, sanitizedChallengeConfig);
+    } catch (error) {
+      console.error('Failed to save community config', error);
+      setConfigSaveState({ saving: false, error: 'Opslaan mislukt. Probeer het opnieuw.', success: false });
+    }
+  };
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
@@ -2513,6 +2764,179 @@ function ModerationPortal({
           isModerator={isModerator}
           caseTypeFilter="report"
         />
+      )}
+
+      {activeTab === 'community' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-6">
+            <div>
+              <h2 className="text-xl font-bold dark:text-white">Community-tegels</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Beheer de community-tegels en de topics die zichtbaar zijn in de community-sectie.
+              </p>
+            </div>
+            {configLoading && (
+              <div className="text-sm text-slate-500 dark:text-slate-400">Configuratie laden...</div>
+            )}
+            <div className="space-y-4">
+              {(communityDraft?.communities || []).map((community, index) => (
+                <div key={`${community.id || 'new'}-${index}`} className="rounded-2xl border border-slate-200 dark:border-slate-700 p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold dark:text-white">Community {index + 1}</h3>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCommunity(index)}
+                      className="text-xs font-semibold text-red-500 hover:text-red-600 flex items-center gap-1"
+                    >
+                      <Trash2 className="w-4 h-4" /> Verwijder
+                    </button>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">ID (slug)</label>
+                      <input
+                        className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                        value={community.id}
+                        onChange={(event) => updateCommunityField(index, 'id', event.target.value)}
+                        placeholder="bijv. safety"
+                      />
+                      {communityErrors[index]?.id && (
+                        <p className="text-xs text-red-500 mt-1">{communityErrors[index].id}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Icoon</label>
+                      <select
+                        className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                        value={community.iconKey}
+                        onChange={(event) => updateCommunityField(index, 'iconKey', event.target.value)}
+                      >
+                        {COMMUNITY_ICON_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      {communityErrors[index]?.iconKey && (
+                        <p className="text-xs text-red-500 mt-1">{communityErrors[index].iconKey}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Titel</label>
+                      <input
+                        className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                        value={community.title}
+                        onChange={(event) => updateCommunityField(index, 'title', event.target.value)}
+                        placeholder="Community titel"
+                      />
+                      {communityErrors[index]?.title && (
+                        <p className="text-xs text-red-500 mt-1">{communityErrors[index].title}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Beschrijving</label>
+                      <input
+                        className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                        value={community.description}
+                        onChange={(event) => updateCommunityField(index, 'description', event.target.value)}
+                        placeholder="Korte beschrijving"
+                      />
+                      {communityErrors[index]?.description && (
+                        <p className="text-xs text-red-500 mt-1">{communityErrors[index].description}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Topics (komma-gescheiden)</label>
+                    <input
+                      className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                      value={(community.topics || []).join(', ')}
+                      onChange={(event) => updateCommunityField(
+                        index,
+                        'topics',
+                        event.target.value.split(',').map((topic) => topic.trim()).filter(Boolean),
+                      )}
+                      placeholder="bijv. Consent, Grenzen, Veiligheid"
+                    />
+                    {communityErrors[index]?.topics && (
+                      <p className="text-xs text-red-500 mt-1">{communityErrors[index].topics}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <Button variant="secondary" onClick={handleAddCommunity}>Community toevoegen</Button>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-6">
+            <div>
+              <h2 className="text-xl font-bold dark:text-white">Challenge-gegevens</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Bewerk de teksten voor de actuele challenge.
+              </p>
+            </div>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Label</label>
+                <input
+                  className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                  value={challengeDraft?.label || ''}
+                  onChange={(event) => setChallengeDraft((prev) => ({ ...prev, label: event.target.value }))}
+                />
+                {challengeErrors.label && <p className="text-xs text-red-500 mt-1">{challengeErrors.label}</p>}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Call-to-action</label>
+                <input
+                  className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                  value={challengeDraft?.ctaLabel || ''}
+                  onChange={(event) => setChallengeDraft((prev) => ({ ...prev, ctaLabel: event.target.value }))}
+                />
+                {challengeErrors.ctaLabel && <p className="text-xs text-red-500 mt-1">{challengeErrors.ctaLabel}</p>}
+              </div>
+            </div>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Titel</label>
+                <input
+                  className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                  value={challengeDraft?.title || ''}
+                  onChange={(event) => setChallengeDraft((prev) => ({ ...prev, title: event.target.value }))}
+                />
+                {challengeErrors.title && <p className="text-xs text-red-500 mt-1">{challengeErrors.title}</p>}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Subtitel</label>
+                <input
+                  className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                  value={challengeDraft?.subtitle || ''}
+                  onChange={(event) => setChallengeDraft((prev) => ({ ...prev, subtitle: event.target.value }))}
+                />
+                {challengeErrors.subtitle && <p className="text-xs text-red-500 mt-1">{challengeErrors.subtitle}</p>}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Beschrijving</label>
+              <textarea
+                className="mt-2 w-full rounded-xl border p-3 text-sm dark:bg-slate-800 dark:text-white"
+                value={challengeDraft?.description || ''}
+                onChange={(event) => setChallengeDraft((prev) => ({ ...prev, description: event.target.value }))}
+                rows={3}
+              />
+              {challengeErrors.description && <p className="text-xs text-red-500 mt-1">{challengeErrors.description}</p>}
+            </div>
+          </div>
+
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              {configSaveState.error && <p className="text-sm text-red-500">{configSaveState.error}</p>}
+              {configSaveState.success && <p className="text-sm text-emerald-500">Configuratie opgeslagen.</p>}
+            </div>
+            <Button onClick={handleSaveConfig} disabled={configSaveState.saving}>
+              {configSaveState.saving ? 'Opslaan...' : 'Configuratie opslaan'}
+            </Button>
+          </div>
+        </div>
       )}
 
       {moderationModal && (
@@ -3549,7 +3973,9 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
   );
 }
 
-function CommunityList({ setView }) {
+function CommunityList({ setView, communityConfig, challengeConfig, configLoading }) {
+  const communities = communityConfig?.communities || DEFAULT_COMMUNITY_CONFIG.communities;
+  const resolvedChallenge = challengeConfig || DEFAULT_CHALLENGE_CONFIG;
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
       <div className="flex justify-between items-center mb-6">
@@ -3559,10 +3985,14 @@ function CommunityList({ setView }) {
       <div className="mb-8 cursor-pointer" onClick={() => setView('challenge_detail')}>
          <div className="bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/20 p-6 rounded-2xl border border-amber-200 dark:border-amber-800/30 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
             <div>
-               <h3 className="font-bold text-amber-900 dark:text-amber-400 text-lg mb-1 flex items-center gap-2"><Star className="w-5 h-5 fill-amber-500 text-amber-500" /> Weekly Challenge</h3>
-               <p className="text-sm text-amber-800 dark:text-amber-200/80 mb-0">Thema: &quot;Shadow Play&quot;</p>
+               <h3 className="font-bold text-amber-900 dark:text-amber-400 text-lg mb-1 flex items-center gap-2">
+                 <Star className="w-5 h-5 fill-amber-500 text-amber-500" /> {resolvedChallenge.label}
+               </h3>
+               <p className="text-sm text-amber-800 dark:text-amber-200/80 mb-0">{resolvedChallenge.subtitle}</p>
             </div>
-            <Button className="bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/20" asChild>Doe mee</Button>
+            <Button className="bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/20" asChild>
+              {resolvedChallenge.ctaLabel}
+            </Button>
          </div>
       </div>
 
@@ -3579,12 +4009,15 @@ function CommunityList({ setView }) {
             <p className="text-slate-600 dark:text-slate-400 text-sm">Open je gesprekken en contact met Artes Moderatie.</p>
           </div>
         </div>
-        {COMMUNITIES.map(comm => {
-          const Icon = comm.icon;
+        {configLoading && (
+          <div className="text-sm text-slate-500 dark:text-slate-400">Community-tegels laden...</div>
+        )}
+        {communities.map(comm => {
+          const Icon = COMMUNITY_ICON_MAP[comm.iconKey] || Users;
           return (
             <div key={comm.id} className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex gap-6 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setView(`community_${comm.id}`)}>
               <div className="w-12 h-12 bg-blue-50 dark:bg-slate-700 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0"><Icon className="w-6 h-6" /></div>
-              <div><h3 className="font-bold text-lg dark:text-white mb-1">{comm.title}</h3><p className="text-slate-600 dark:text-slate-400 text-sm">{comm.desc}</p></div>
+              <div><h3 className="font-bold text-lg dark:text-white mb-1">{comm.title}</h3><p className="text-slate-600 dark:text-slate-400 text-sm">{comm.description}</p></div>
             </div>
           );
         })}
@@ -3615,12 +4048,14 @@ function CommunityDetail({ id, setView, authUser, functionsBase }) {
     </div>
   );
 }
-function ChallengeDetail({ setView, posts, onPostClick }) {
+function ChallengeDetail({ setView, posts, onPostClick, challengeConfig }) {
+   const resolvedChallenge = challengeConfig || DEFAULT_CHALLENGE_CONFIG;
    return (
       <div className="max-w-4xl mx-auto px-4 py-6">
          <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 mb-6 font-medium"><ChevronLeft className="w-4 h-4 mr-1"/> Terug</button>
          <div className="bg-amber-100 dark:bg-amber-900/20 p-8 rounded-3xl border border-amber-200 dark:border-amber-800 mb-8 text-center relative overflow-hidden">
-            <h1 className="text-4xl font-bold text-amber-900 dark:text-amber-100 mb-2">Shadow Play</h1>
+            <h1 className="text-4xl font-bold text-amber-900 dark:text-amber-100 mb-2">{resolvedChallenge.title}</h1>
+            <p className="text-sm text-amber-800 dark:text-amber-200">{resolvedChallenge.description}</p>
          </div>
          <div className="grid grid-cols-2 md:grid-cols-3 gap-1 md:gap-4">
             {posts.map(post => (<div key={post.id} onClick={() => onPostClick(post)} className="aspect-square bg-slate-200 rounded-lg overflow-hidden cursor-pointer"><img src={post.imageUrl} className="w-full h-full object-cover" /></div>))}

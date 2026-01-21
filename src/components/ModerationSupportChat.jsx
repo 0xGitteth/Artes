@@ -202,6 +202,9 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
         updatedAt: serverTimestamp(),
       });
     });
+    if (import.meta.env.DEV) {
+      console.log('[ModerationSupportChat] Sent moderator message with senderRole: moderator, re-enabled user to send messages');
+    }
     setComposerText('');
   };
 

@@ -13,6 +13,7 @@ import {
 import { getFirebaseDbInstance } from '../firebase';
 
 const MESSAGE_LIMIT = 50;
+const SYSTEM_INTRO_TEXT = 'Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen. Je krijgt binnen 3 werkdagen reactie.';
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
@@ -302,10 +303,38 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
     return threads.find((thread) => thread.threadId === activeThreadId || thread.id === activeThreadId) || null;
   }, [threads, activeThreadId]);
 
-  const canSendSupport = Boolean(activeThread?.userCanSend || activeThread?.userMessageAllowance > 0);
+  // Helper om echte user messages te herkennen (niet system, niet moderator)
+  const isUserMessage = (message) => {
+    if (!message) return false;
+    // Backward compatibility: behandel als user message tenzij aangemerkt als system/moderator
+    const role = message.senderRole || 'unknown';
+    if (role === 'system' || role === 'moderator') return false;
+    // Voor oude berichten: check of het het standaard welkomsbericht is
+    if (message.text === SYSTEM_INTRO_TEXT) {
+      return false;
+    }
+    return true;
+  };
+
+  // Count only real user messages for anti-spam logic
+  const userMessageCount = messages.filter(isUserMessage).length;
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const hasModeratorReplyAfterLastUser = lastMessage?.senderRole === 'moderator';
+  const canSendSupport = !(userMessageCount > 0 && !hasModeratorReplyAfterLastUser);
 
   if (import.meta.env.DEV && activeThread?.type === 'support') {
-    console.log('[ChatPanel] Support thread state - canSendSupport:', canSendSupport, 'userCanSend:', activeThread?.userCanSend, 'userMessageAllowance:', activeThread?.userMessageAllowance);
+    console.log('[ChatPanel] Support thread anti-spam check:', {
+      totalMessages: messages.length,
+      userMessages: userMessageCount,
+      lastMessageRole: lastMessage?.senderRole,
+      hasModeratorReply: hasModeratorReplyAfterLastUser,
+      canSendSupport: canSendSupport,
+      messageSummary: messages.map((m) => ({
+        role: m.senderRole || 'unknown',
+        text: m.text?.substring(0, 40) || '(empty)',
+        counted: isUserMessage(m)
+      }))
+    });
   }
 
   // Helper om system messages te herkennen

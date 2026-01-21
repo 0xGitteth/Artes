@@ -137,6 +137,40 @@ export default function SupportChatPanel({ authUser }) {
     );
   };
 
+  // Helper om echte user messages te herkennen (niet system, niet moderator)
+  const isUserMessage = (message) => {
+    if (!message) return false;
+    // Backward compatibility: behandel als user message tenzij aangemerkt als system/moderator
+    const role = message.senderRole || 'unknown';
+    if (role === 'system' || role === 'moderator') return false;
+    // Voor oude berichten: check of het het standaard welkomsbericht is
+    if (message.text === SYSTEM_INTRO_TEXT) {
+      return false;
+    }
+    return true;
+  };
+
+  // Count user messages for anti-spam logic (debug)
+  if (import.meta.env.DEV) {
+    const userMsgCount = messages.filter(isUserMessage).length;
+    const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+    const hasModReply = lastMsg?.senderRole === 'moderator';
+    console.log('[SupportChatPanel] Support thread state:', {
+      totalMessages: messages.length,
+      userMessages: userMsgCount,
+      lastMessageRole: lastMsg?.senderRole || 'none',
+      hasModeratorReply: hasModReply,
+      canSend: canSend,
+      userCanSend: thread?.userCanSend,
+      userMessageAllowance: thread?.userMessageAllowance,
+      messageSummary: messages.map((m) => ({
+        role: m.senderRole || 'unknown',
+        text: m.text?.substring(0, 40) || '(empty)',
+        isUserMessage: isUserMessage(m)
+      }))
+    });
+  }
+
   const handleSendMessage = async () => {
     if (!authUser?.uid || !threadId) return;
     const trimmed = composerText.trim();

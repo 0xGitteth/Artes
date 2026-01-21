@@ -162,13 +162,25 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   if (!uid) return;
   const payload = buildPublicProfilePayload(data, uid, existingPublic);
   if (!Object.keys(payload).length) return;
+  
+  // Sanitize themes: remove "General" which should never be auto-added
+  if (payload.themes && Array.isArray(payload.themes)) {
+    payload.themes = sanitizeThemes(payload.themes);
+  }
+  
+  const finalPayload = {
+    uid,
+    ...payload,
+    updatedAt: serverTimestamp(),
+  };
+  
+  if (import.meta.env.DEV) {
+    console.log('[writePublicUserProfile] Writing to publicUsers/' + uid, finalPayload);
+  }
+  
   await setDoc(
     doc(getFirebaseDb(), 'publicUsers', uid),
-    {
-      uid,
-      ...payload,
-      updatedAt: serverTimestamp(),
-    },
+    finalPayload,
     { merge: true },
   );
 };
@@ -196,13 +208,34 @@ export const createUserProfile = async (uid, profile) => {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+  
+  // Sanitize themes: remove "General" which should never be auto-added
+  if (payload.themes && Array.isArray(payload.themes)) {
+    payload.themes = sanitizeThemes(payload.themes);
+  }
+  
+  if (import.meta.env.DEV) {
+    console.log('[createUserProfile] Writing to users/' + uid, payload);
+  }
+  
   await setDoc(doc(getFirebaseDb(), 'users', uid), payload);
 };
 
 export const updateUserProfile = async (uid, data) => {
+  const updatePayload = { ...data, updatedAt: serverTimestamp() };
+  
+  // Sanitize themes: remove "General" which should never be auto-added
+  if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
+    updatePayload.themes = sanitizeThemes(updatePayload.themes);
+  }
+  
+  if (import.meta.env.DEV) {
+    console.log('[updateUserProfile] Writing to users/' + uid, updatePayload);
+  }
+  
   await setDoc(
     doc(getFirebaseDb(), 'users', uid),
-    { ...data, updatedAt: serverTimestamp() },
+    updatePayload,
     { merge: true },
   );
   const shouldSyncPublic = PUBLIC_PROFILE_FIELDS.some((field) => field in data)
@@ -348,7 +381,16 @@ export const migrateArtifactsUserData = async (user) => {
   if (profileSnap.exists()) {
     const data = profileSnap.data();
     const targetRef = doc(db, 'users', user.uid);
+    
+    // Sanitize themes in migrated data
+    if (data.themes && Array.isArray(data.themes)) {
+      data.themes = sanitizeThemes(data.themes);
+    }
+    
     if (!existingProfileSnap.exists()) {
+      if (import.meta.env.DEV) {
+        console.log('[migrateArtifactsUserData] Creating users/' + user.uid + ' from artifacts', data);
+      }
       migrations.push(setDoc(
         targetRef,
         { ...data, updatedAt: serverTimestamp() },
@@ -366,6 +408,9 @@ export const migrateArtifactsUserData = async (user) => {
         return acc;
       }, {});
       if (Object.keys(updates).length) {
+        if (import.meta.env.DEV) {
+          console.log('[migrateArtifactsUserData] Updating users/' + user.uid + ' from artifacts', updates);
+        }
         migrations.push(setDoc(
           targetRef,
           { ...updates, updatedAt: serverTimestamp() },

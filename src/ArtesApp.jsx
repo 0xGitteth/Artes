@@ -33,7 +33,6 @@ import {
   getFirebaseDbInstance,
   isModerator,
   ensureThreadExists,
-  sanitizeThemes,
   migrateRemoveGeneralTheme,
 } from './firebase';
 import {
@@ -760,13 +759,12 @@ export default function ArtesApp() {
   };
 
   const handleCompleteProfile = async (profileData, roles) => {
-    const themes = sanitizeThemes(Array.isArray(profileData.themes) ? profileData.themes : []);
     const finalProfile = {
       uid: authUser?.uid,
       displayName: profileData.displayName || 'Nieuwe Maker',
       bio: profileData.bio,
       roles,
-      themes,
+      themes: Array.isArray(profileData.themes) ? profileData.themes : [],
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.uid || 'artes'}`,
       linkedAgencyName: profileData.linkedAgencyName,
       linkedCompanyName: profileData.linkedCompanyName,

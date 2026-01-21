@@ -61,31 +61,31 @@ export const subscribeToAuth = (callback) =>
 
 export const subscribeToProfile = (uid, callback) => {
   logFirestoreOp('SUBSCRIBE', `users/${uid}`, 'profile');
-  return onSnapshot(doc(db, 'users', uid), callback);
+
+  return onSnapshot(
+    doc(db, 'users', uid),
+    (snapshot) => callback(snapshot),
+    (err) => console.error('PROFILE LISTENER ERROR:', err.code, err.message, `path=users/${uid}`)
+  );
 };
 
 export const subscribeToPosts = (callback) => {
-  if (!auth.currentUser) {
-    console.log('subscribeToPosts skipped: not signed in');
-    return () => {};
-  }
-
   logFirestoreOp('SUBSCRIBE', 'posts', 'all posts ordered by createdAt');
+
   return onSnapshot(
     query(collection(db, 'posts'), orderBy('createdAt', 'desc')),
-    (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })))
+    (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
+    (err) => console.error('POSTS LISTENER ERROR:', err.code, err.message, 'path=posts')
   );
 };
 
 export const subscribeToUsers = (callback) => {
-  if (!auth.currentUser) {
-    console.log('subscribeToUsers skipped: not signed in');
-    return () => {};
-  }
-
   logFirestoreOp('SUBSCRIBE', 'publicUsers', 'all public users');
-  return onSnapshot(collection(db, 'publicUsers'), (snapshot) =>
-    callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })))
+
+  return onSnapshot(
+    collection(db, 'publicUsers'),
+    (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
+    (err) => console.error('PUBLICUSERS LISTENER ERROR:', err.code, err.message, 'path=publicUsers')
   );
 };
 

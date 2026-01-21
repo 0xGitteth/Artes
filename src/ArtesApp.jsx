@@ -661,20 +661,47 @@ export default function ArtesApp() {
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
+  // Live snapshot listener for own profile updates
+  // This ensures UI updates immediately when profile is saved, not just on tab switch
   useEffect(() => {
-    if (view !== 'profile' || !authUser?.uid) return;
-    let active = true;
-    fetchUserProfile(authUser?.uid)
-      .then((snapshot) => {
-        if (!active || !snapshot?.exists()) return;
-        const normalized = normalizeProfileData(snapshot.data(), authUser?.uid);
+    if (!authUser?.uid) return;
+    
+    const db = getFirebaseDbInstance();
+    if (import.meta.env.DEV) {
+      console.log('[ArtesApp] Setting up live profile listener for uid:', authUser.uid);
+    }
+    
+    const unsubscribe = onSnapshot(
+      doc(db, 'users', authUser.uid),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          if (import.meta.env.DEV) {
+            console.log('[ArtesApp] Profile snapshot: doc does not exist');
+          }
+          return;
+        }
+        const normalized = normalizeProfileData(snapshot.data(), authUser.uid);
+        if (import.meta.env.DEV) {
+          console.log('[ArtesApp] Profile snapshot update received:', {
+            themes: normalized.themes,
+            displayName: normalized.displayName,
+            bio: normalized.bio?.substring(0, 30),
+          });
+        }
         setProfile(normalized);
-      })
-      .catch((error) => console.error('Failed to refresh profile', error));
+      },
+      (error) => {
+        console.error('[ArtesApp] Profile snapshot error:', error.code, error.message);
+      }
+    );
+    
     return () => {
-      active = false;
+      if (import.meta.env.DEV) {
+        console.log('[ArtesApp] Cleaning up profile listener for uid:', authUser.uid);
+      }
+      unsubscribe();
     };
-  }, [view, authUser?.uid]);
+  }, [authUser?.uid]);
 
   const handleOpenSupportChat = () => {
     if (!authUser?.uid || !functionsBase) {
@@ -708,7 +735,13 @@ export default function ArtesApp() {
 
     if (!authUser?.uid) return;
     try {
+      if (import.meta.env.DEV) {
+        console.log('[ArtesApp] Saving theme preference:', nextTheme);
+      }
       await updateUserProfile(authUser.uid, { preferences: nextPreferences });
+      if (import.meta.env.DEV) {
+        console.log('[ArtesApp] Theme save completed, snapshot listener will sync');
+      }
     } catch (error) {
       console.error('Failed to update theme preference', error);
       setToastMessage('Opslaan van het thema is mislukt. Probeer het opnieuw.');
@@ -3032,7 +3065,17 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
        },
      };
      try {
+       if (import.meta.env.DEV) {
+         console.log('[EditProfileModal] Saving profile with payload:', { 
+           displayName: payload.displayName, 
+           themes: payload.themes, 
+           roles: payload.roles 
+         });
+       }
        await updateUserProfile(user.uid, payload);
+       if (import.meta.env.DEV) {
+         console.log('[EditProfileModal] Profile save completed, snapshot listener will update UI');
+       }
        onClose();
      } catch (error) {
        console.error('Failed to save profile settings', error);

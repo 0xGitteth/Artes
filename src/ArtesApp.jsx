@@ -3899,7 +3899,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
   // Early return after all hooks
   if (!userProfile) {
     return (
-      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+      <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-6">
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 w-full max-w-md text-center shadow-2xl">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-slate-600 dark:text-slate-300">Profiel laden...</p>
@@ -3909,7 +3909,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+    <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-6">
       <div className="bg-white dark:bg-slate-900 rounded-[32px] w-full max-w-4xl shadow-2xl overflow-hidden border border-white/10">
         <div className="relative h-80 w-full">
           <img src={headerImage} className="w-full h-full object-cover scale-105" style={{ objectPosition: headerPosition }} />

@@ -182,12 +182,16 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
       const messageRef = doc(collection(threadRef, 'messages'));
       transaction.set(messageRef, {
         text: trimmed,
+        senderId: authUser.uid,
         senderUid: authUser.uid,
         senderRole: 'moderator',
         senderLabel: 'Moderator',
         type: 'text',
         createdAt: serverTimestamp(),
       });
+      if (import.meta.env.DEV) {
+        console.log('[ModerationSupportChat] Sent moderator message with senderRole: moderator');
+      }
       transaction.update(threadRef, {
         lastMessageAt: serverTimestamp(),
         lastMessagePreview: trimmed,

@@ -304,6 +304,10 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
 
   const canSendSupport = Boolean(activeThread?.userCanSend || activeThread?.userMessageAllowance > 0);
 
+  if (import.meta.env.DEV && activeThread?.type === 'support') {
+    console.log('[ChatPanel] Support thread state - canSendSupport:', canSendSupport, 'userCanSend:', activeThread?.userCanSend, 'userMessageAllowance:', activeThread?.userMessageAllowance);
+  }
+
   // Helper om system messages te herkennen
   const isSystemMessage = (message) => {
     if (!message) return false;

@@ -160,12 +160,16 @@ export default function SupportChatPanel({ authUser }) {
       const messageRef = doc(collection(threadRef, 'messages'));
       transaction.set(messageRef, {
         text: trimmed,
+        senderId: authUser.uid,
         senderUid: authUser.uid,
         senderRole: 'user',
         senderLabel: resolveDisplayName(authUser),
         type: 'text',
         createdAt: serverTimestamp(),
       });
+      if (import.meta.env.DEV) {
+        console.log('[SupportChatPanel] Sent user message with senderRole: user');
+      }
       transaction.update(threadRef, {
         lastMessageAt: serverTimestamp(),
         lastMessagePreview: trimmed,

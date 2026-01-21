@@ -32,6 +32,9 @@ import {
   updateUserProfile,
   getFirebaseDbInstance,
   isModerator,
+  ensureThreadExists,
+  sanitizeThemes,
+  migrateRemoveGeneralTheme,
 } from './firebase';
 import {
   collection,
@@ -207,7 +210,7 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
   // quickProfilePostIds: array of post IDs to preview when mode is "manual".
   const seed = profileData?.uid || profileData?.displayName || fallbackSeed;
   const roles = Array.isArray(profileData?.roles) && profileData.roles.length ? profileData.roles : ['fan'];
-  const themes = Array.isArray(profileData?.themes) && profileData.themes.length ? profileData.themes : ['General'];
+  const themes = Array.isArray(profileData?.themes) ? profileData.themes : [];
   const triggerVisibility = normalizeTriggerPreferences(profileData?.preferences?.triggerVisibility);
   const themePreference = profileData?.preferences?.theme || 'light';
   const quickProfilePreviewMode = ['latest', 'best', 'manual'].includes(profileData?.quickProfilePreviewMode)
@@ -757,7 +760,7 @@ export default function ArtesApp() {
   };
 
   const handleCompleteProfile = async (profileData, roles) => {
-    const themes = Array.isArray(profileData.themes) && profileData.themes.length ? profileData.themes : ['General'];
+    const themes = sanitizeThemes(Array.isArray(profileData.themes) ? profileData.themes : []);
     const finalProfile = {
       uid: authUser?.uid,
       displayName: profileData.displayName || 'Nieuwe Maker',
@@ -775,9 +778,25 @@ export default function ArtesApp() {
         theme: profileData.preferences?.theme || 'light',
       },
     };
-      if (authUser?.uid) {
-        await updateUserProfile(authUser.uid, finalProfile);
+    if (authUser?.uid) {
+      await updateUserProfile(authUser.uid, finalProfile);
+      
+      // Create support thread for the user after onboarding
+      try {
+        const userProfile = {
+          displayName: finalProfile.displayName,
+          photoURL: finalProfile.avatar,
+          username: '',
+        };
+        await ensureThreadExists(`support_${authUser.uid}`, 'support', userProfile);
+        if (import.meta.env.DEV) {
+          console.log('[ArtesApp] Created support thread after onboarding');
+        }
+      } catch (error) {
+        console.error('[ArtesApp] Error creating support thread:', error);
+        // Don't block onboarding if thread creation fails
       }
+    }
     const normalized = normalizeProfileData(finalProfile, authUser?.uid);
     setProfile(normalized);
     setDarkMode(finalProfile?.preferences?.theme === 'dark');
@@ -1773,11 +1792,15 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }
                 </div>
               )}
               <div className="flex flex-wrap justify-center gap-2 mt-1">
-                {themes.map((theme) => (
-                  <span key={theme} className={`px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
-                    {theme}
-                  </span>
-                ))}
+                {themes && themes.length > 0 ? (
+                  themes.map((theme) => (
+                    <span key={theme} className={`px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
+                      {theme}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-slate-400 italic">Thema's niet ingesteld</span>
+                )}
               </div>
            </div>
         </div>
@@ -3857,11 +3880,15 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
 
         <div className="p-8 space-y-6">
           <div className="flex flex-wrap gap-2">
-            {themes.map((theme) => (
-              <span key={theme} className={`px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
-                {theme}
-              </span>
-            ))}
+            {themes && themes.length > 0 ? (
+              themes.map((theme) => (
+                <span key={theme} className={`px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
+                  {theme}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-slate-400 italic">Thema's niet ingesteld</span>
+            )}
           </div>
 
           <div>

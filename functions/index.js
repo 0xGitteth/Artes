@@ -979,7 +979,9 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
 
     await Promise.all([
       messageRef.set({
+        senderId: decoded.uid,
         senderUid: decoded.uid,
+        senderRole: 'user',
         text,
         type: 'text',
         createdAt: now,
@@ -1062,11 +1064,15 @@ export const sendSupportMessage = onRequest({ cors: true }, async (req, res) => 
       transaction.set(messageRef, {
         text,
         senderUid: decoded.uid,
+        senderId: decoded.uid,
         senderRole: 'user',
         senderLabel,
         type: 'text',
         createdAt: FieldValue.serverTimestamp(),
       });
+      if (process.env.NODE_ENV === 'development') {
+        logger.info('sendSupportMessage: sent user message with senderRole: user');
+      }
       transaction.update(threadRef, {
         lastMessageAt: FieldValue.serverTimestamp(),
         lastMessagePreview: text,

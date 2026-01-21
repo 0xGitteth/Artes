@@ -28,6 +28,7 @@ import {
   query,
   orderBy,
   deleteDoc,
+  runTransaction,
 } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -170,6 +171,21 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
     },
     { merge: true },
   );
+};
+
+/**
+ * Sanitizes themes array by removing "General" (which should never be auto-added).
+ * Use this before storing theme data.
+ */
+export const sanitizeThemes = (themes) => {
+  if (!Array.isArray(themes)) return [];
+  const filtered = themes.filter((t) => t !== 'General');
+  if (import.meta.env.DEV) {
+    if (filtered.length !== themes.length) {
+      console.log('[sanitizeThemes] Removed "General" from themes:', themes, '→', filtered);
+    }
+  }
+  return filtered;
 };
 
 // Profile payload fields we store (subset used by UI):
@@ -457,3 +473,110 @@ export const subscribeToLikes = (postId, cb) =>
     cb,
     (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Likes listener posts/${postId}/likes`),
   );
+
+/**
+ * Ensures a support or moderation thread exists for a user.
+ * Creates the thread with base fields if it doesn't exist.
+ * 
+ * @param {string} threadId - The thread ID (e.g., 'support_uid' or 'moderation_uid')
+ * @param {string} type - Thread type: 'support' or 'moderation'
+ * @param {Object} userProfile - Optional user profile data { displayName, photoURL, username }
+ * @returns {Promise<string>} - The threadId
+ */
+export const ensureThreadExists = async (threadId, type = 'support', userProfile = {}) => {
+  if (!threadId) {
+    throw new Error('threadId is required');
+  }
+
+  const db = getFirebaseDb();
+  const threadRef = doc(db, 'threads', threadId);
+
+  try {
+    const created = await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(threadRef);
+
+      if (snap.exists()) {
+        if (import.meta.env.DEV) {
+          console.log(`[ensureThreadExists] Thread ${threadId} already exists`);
+        }
+        return false;
+      }
+
+      // Thread doesn't exist, create it
+      const { displayName = 'Artes gebruiker', photoURL = null, username = '' } = userProfile;
+      const uid = threadId.split('_')[1]; // Extract uid from 'support_uid' or 'moderation_uid'
+
+      transaction.set(threadRef, {
+        type,
+        threadKey: threadId,
+        userUid: uid,
+        participantUids: [uid],
+        participants: [uid],
+        userDisplayName: displayName,
+        userDisplayNameLower: displayName.toLowerCase(),
+        userPhotoURL: photoURL,
+        userUsername: username,
+        userMessageAllowance: 1,
+        userCanSend: true,
+        unreadForModerator: 0,
+        unreadForUser: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      if (import.meta.env.DEV) {
+        console.log(`[ensureThreadExists] Created thread ${threadId} with type: ${type}`);
+      }
+
+      return true;
+    });
+
+    return threadId;
+  } catch (error) {
+    console.error(`[ensureThreadExists] Error ensuring thread ${threadId}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * DEV-ONLY MIGRATION: Remove "General" from user's themes in both users and publicUsers collections.
+ * Call this once to clean up existing data. NOT for production.
+ */
+export const migrateRemoveGeneralTheme = async (uid) => {
+  if (!import.meta.env.DEV) {
+    console.warn('[migrateRemoveGeneralTheme] Skipped: only runs in DEV mode');
+    return;
+  }
+  
+  const db = getFirebaseDb();
+  try {
+    // Check users/{uid}
+    const userRef = doc(db, 'users', uid);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists() && Array.isArray(userSnap.data().themes)) {
+      const userThemes = userSnap.data().themes;
+      if (userThemes.includes('General')) {
+        const cleaned = userThemes.filter((t) => t !== 'General');
+        await setDoc(userRef, { themes: cleaned }, { merge: true });
+        console.log('[migrateRemoveGeneralTheme] Updated users/' + uid + ' themes:', cleaned);
+      }
+    }
+
+    // Check publicUsers/{uid}
+    const publicRef = doc(db, 'publicUsers', uid);
+    const publicSnap = await getDoc(publicRef);
+    if (publicSnap.exists() && Array.isArray(publicSnap.data().themes)) {
+      const publicThemes = publicSnap.data().themes;
+      if (publicThemes.includes('General')) {
+        const cleaned = publicThemes.filter((t) => t !== 'General');
+        await setDoc(publicRef, { themes: cleaned }, { merge: true });
+        console.log('[migrateRemoveGeneralTheme] Updated publicUsers/' + uid + ' themes:', cleaned);
+      }
+    }
+
+    console.log('[migrateRemoveGeneralTheme] Completed for uid:', uid);
+  } catch (error) {
+    console.error('[migrateRemoveGeneralTheme] Error:', error);
+    throw error;
+  }
+};

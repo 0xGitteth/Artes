@@ -10,9 +10,9 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { getFirebaseDbInstance } from '../firebase';
+import { normalizeSupportMessage, SUPPORT_INTRO_TEXT } from '../utils/supportChat';
 
 const MESSAGE_LIMIT = 80;
-const SYSTEM_INTRO_TEXT = 'Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen. Je krijgt binnen 3 werkdagen reactie.';
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
@@ -62,7 +62,7 @@ export default function SupportChatPanel({ authUser }) {
           userMessageAllowance: 1,
           userCanSend: true,
           lastMessageAt: serverTimestamp(),
-          lastMessagePreview: SYSTEM_INTRO_TEXT,
+          lastMessagePreview: SUPPORT_INTRO_TEXT,
           unreadForModerator: 0,
           unreadForUser: 0,
           createdAt: serverTimestamp(),
@@ -70,8 +70,8 @@ export default function SupportChatPanel({ authUser }) {
         });
         const messageRef = doc(collection(threadRef, 'messages'));
         transaction.set(messageRef, {
-          text: SYSTEM_INTRO_TEXT,
-          senderUid: 'system',
+          text: SUPPORT_INTRO_TEXT,
+          senderUid: null,
           senderRole: 'system',
           senderLabel: 'Artes Moderatie',
           type: 'system',
@@ -123,50 +123,33 @@ export default function SupportChatPanel({ authUser }) {
     );
   }, [threadId]);
 
-  const canSend = Boolean(thread?.userCanSend || thread?.userMessageAllowance > 0);
-
-  // Helper om system messages te herkennen
-  const isSystemMessage = (message) => {
-    if (!message) return false;
-    // Check op meerdere mogelijke veldnamen voor system messages
-    return (
-      message.type === 'system' ||
-      message.senderRole === 'system' ||
-      message.senderUid === 'system' ||
-      message.senderId === 'system'
-    );
-  };
-
-  // Helper om echte user messages te herkennen (niet system, niet moderator)
-  const isUserMessage = (message) => {
-    if (!message) return false;
-    // Backward compatibility: behandel als user message tenzij aangemerkt als system/moderator
-    const role = message.senderRole || 'unknown';
-    if (role === 'system' || role === 'moderator') return false;
-    // Voor oude berichten: check of het het standaard welkomsbericht is
-    if (message.text === SYSTEM_INTRO_TEXT) {
-      return false;
-    }
-    return true;
-  };
+  const normalizedMessages = useMemo(
+    () => messages.map((message) => normalizeSupportMessage(message, thread)).filter(Boolean),
+    [messages, thread],
+  );
+  const lastRealMessage = useMemo(
+    () => [...normalizedMessages].reverse().find((message) => message.senderRole === 'user' || message.senderRole === 'moderator'),
+    [normalizedMessages],
+  );
+  const canSend = !lastRealMessage || lastRealMessage.senderRole === 'moderator';
 
   // Count user messages for anti-spam logic (debug)
   if (import.meta.env.DEV) {
-    const userMsgCount = messages.filter(isUserMessage).length;
-    const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+    const userMsgCount = normalizedMessages.filter((message) => message.senderRole === 'user').length;
+    const lastMsg = lastRealMessage;
     const hasModReply = lastMsg?.senderRole === 'moderator';
     console.log('[SupportChatPanel] Support thread state:', {
-      totalMessages: messages.length,
+      totalMessages: normalizedMessages.length,
       userMessages: userMsgCount,
       lastMessageRole: lastMsg?.senderRole || 'none',
       hasModeratorReply: hasModReply,
       canSend: canSend,
       userCanSend: thread?.userCanSend,
       userMessageAllowance: thread?.userMessageAllowance,
-      messageSummary: messages.map((m) => ({
+      messageSummary: normalizedMessages.map((m) => ({
         role: m.senderRole || 'unknown',
         text: m.text?.substring(0, 40) || '(empty)',
-        isUserMessage: isUserMessage(m)
+        isUserMessage: m.senderRole === 'user',
       }))
     });
   }
@@ -186,9 +169,7 @@ export default function SupportChatPanel({ authUser }) {
       const threadSnap = await transaction.get(threadRef);
       if (!threadSnap.exists()) throw new Error('Thread ontbreekt.');
       const threadData = threadSnap.data();
-      const allowance = threadData?.userMessageAllowance ?? 0;
-      const allowed = threadData?.userCanSend === true || allowance > 0;
-      if (!allowed) {
+      if (!canSend) {
         throw new Error('Je kunt pas weer een bericht sturen nadat de moderatie heeft gereageerd.');
       }
       const messageRef = doc(collection(threadRef, 'messages'));
@@ -230,10 +211,10 @@ export default function SupportChatPanel({ authUser }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-slate-50 dark:bg-slate-900">
-        {messages.length === 0 ? (
+        {normalizedMessages.length === 0 ? (
           <div className="text-sm text-slate-500">Nog geen berichten.</div>
         ) : (
-          messages.map((message) => {
+          normalizedMessages.map((message) => {
             const isOwn = message.senderRole === 'user';
             const isSystem = message.senderRole === 'system';
             const bubbleStyle = isSystem

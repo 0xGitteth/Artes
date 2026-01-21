@@ -54,12 +54,12 @@ export const ensureSupportThread = onRequest({ region: "europe-west1" }, (req, r
 
         await threadRef.collection("messages").add({
           text:
-            "Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen totdat wij reageren. We reageren binnen 3 werkdagen.",
+            "Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen. Je krijgt binnen 3 werkdagen reactie.",
           createdAt: FieldValue.serverTimestamp(),
           // Maak het voor elke mogelijke frontend check herkenbaar als system message
           type: "system",
           senderRole: "system",
-          senderUid: "system",
+          senderUid: null,
           senderId: "system",
           senderLabel: "Artes Moderatie",
         });

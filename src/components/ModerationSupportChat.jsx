@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { getFirebaseDbInstance } from '../firebase';
 import SearchWithAutocomplete from './SearchWithAutocomplete';
+import { normalizeSupportMessage } from '../utils/supportChat';
 
 const MESSAGE_LIMIT = 80;
 
@@ -168,6 +169,10 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
 
   const activeProfile = activeThread?.userUid ? userProfiles[activeThread.userUid] : null;
   const display = resolveThreadDisplay(activeThread, activeProfile);
+  const normalizedMessages = useMemo(
+    () => messages.map((message) => normalizeSupportMessage(message, activeThread)).filter(Boolean),
+    [messages, activeThread],
+  );
 
   const handleSendMessage = async () => {
     if (!authUser?.uid || !activeThread) return;
@@ -287,10 +292,10 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-              {messages.length === 0 ? (
+              {normalizedMessages.length === 0 ? (
                 <div className="text-sm text-slate-500">Nog geen berichten.</div>
               ) : (
-                messages.map((message) => {
+                normalizedMessages.map((message) => {
                   const isModeratorMessage = message.senderRole === 'moderator';
                   const bubbleStyle = message.senderRole === 'system'
                     ? 'bg-blue-50 text-blue-900 border border-blue-100'

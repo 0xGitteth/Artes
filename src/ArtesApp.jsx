@@ -1036,7 +1036,14 @@ export default function ArtesApp() {
           )}
 
           {!profileLoading && view === 'discover' && (
-            <Discover users={users} posts={posts} onUserClick={setQuickProfileId} onPostClick={setSelectedPost} setView={setView} />
+            <Discover
+              users={users}
+              posts={posts}
+              currentUserId={authUser?.uid}
+              onUserClick={setQuickProfileId}
+              onPostClick={setSelectedPost}
+              setView={setView}
+            />
           )}
           
           {!profileLoading && view === 'community' && <CommunityList setView={setView} />}
@@ -1644,13 +1651,22 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
   );
 }
 
-function Discover({ users, posts, onUserClick, onPostClick, setView }) {
+function Discover({ users, posts, currentUserId, onUserClick, onPostClick, setView }) {
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
   const [activeThemes, setActiveThemes] = useState([]);
   const [activeRole, setActiveRole] = useState(null);
   const [showAllThemes, setShowAllThemes] = useState(false);
   const [showAllRoles, setShowAllRoles] = useState(false);
+
+  const visibleUsers = useMemo(
+    () => users.filter((u) => !currentUserId || u.uid !== currentUserId),
+    [users, currentUserId]
+  );
+  const visiblePosts = useMemo(
+    () => posts.filter((p) => !currentUserId || p.authorId !== currentUserId),
+    [posts, currentUserId]
+  );
 
   const displayedThemes = showAllThemes ? THEMES : THEMES.slice(0, 5);
   const displayedRoles = showAllRoles ? ROLES : ROLES.slice(0, 5);
@@ -1660,16 +1676,16 @@ function Discover({ users, posts, onUserClick, onPostClick, setView }) {
   const mixedContent = useMemo(() => {
      if (tab !== 'all') return [];
      const res = [];
-     const max = Math.max(users.length, posts.length);
+     const max = Math.max(visibleUsers.length, visiblePosts.length);
      for(let i=0; i<max; i++) {
-        if(posts[i]) res.push({type: 'post', data: posts[i]});
-        if(users[i]) res.push({type: 'user', data: users[i]});
+        if(visiblePosts[i]) res.push({type: 'post', data: visiblePosts[i]});
+        if(visibleUsers[i]) res.push({type: 'user', data: visibleUsers[i]});
      }
      return res.filter(i => (i.type === 'post' ? i.data.title : i.data.displayName).toLowerCase().includes(search.toLowerCase()));
-  }, [users, posts, search, tab]);
+  }, [visibleUsers, visiblePosts, search, tab]);
 
-  const filteredPosts = posts.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) && (activeThemes.length === 0 || p.styles?.some(s => activeThemes.includes(s))));
-  const filteredUsers = users.filter((u) => (
+  const filteredPosts = visiblePosts.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) && (activeThemes.length === 0 || p.styles?.some(s => activeThemes.includes(s))));
+  const filteredUsers = visibleUsers.filter((u) => (
     u.displayName.toLowerCase().includes(search.toLowerCase())
     && (!activeRole || u.roles?.includes(activeRole))
     && (activeThemes.length === 0 || u.themes?.some((theme) => activeThemes.includes(theme)))

@@ -551,6 +551,14 @@ export default function ArtesApp() {
       try {
         const moderationDoc = await getDoc(doc(db, 'config', 'moderation'));
         const moderatorEmails = moderationDoc.exists() ? (moderationDoc.data().moderatorEmails || []) : [];
+        
+        console.log("MOD CHECK:", {
+          email: authUser?.email,
+          emailVerified: authUser?.emailVerified,
+          moderatorEmailsCount: moderatorEmails?.length || 0,
+          isModeratorClient: !!(authUser?.email && moderatorEmails.includes(authUser.email)),
+        });
+        
         const isModeratorClient = authUser?.email && moderatorEmails.includes(authUser.email);
 
         if (!isModeratorClient) {

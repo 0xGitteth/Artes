@@ -32,7 +32,12 @@ const resolveDisplayName = (authUser, fallback) => {
   return fallback || 'Artes gebruiker';
 };
 
-export default function SupportChatPanel({ authUser }) {
+const resolveUserLabel = (userProfile, authUser) => {
+  const name = userProfile?.displayName || authUser?.displayName;
+  return name?.trim() || 'Jij';
+};
+
+export default function SupportChatPanel({ authUser, userProfile }) {
   const [thread, setThread] = useState(null);
   const [messages, setMessages] = useState([]);
   const [composerText, setComposerText] = useState('');
@@ -214,7 +219,7 @@ export default function SupportChatPanel({ authUser }) {
         {normalizedMessages.length === 0 ? (
           <div className="text-sm text-slate-500">Nog geen berichten.</div>
         ) : (
-          normalizedMessages.map((message) => {
+          normalizedMessages.map((message, index) => {
             const isOwn = message.senderRole === 'user';
             const isSystem = message.senderRole === 'system';
             const bubbleStyle = isSystem
@@ -222,19 +227,28 @@ export default function SupportChatPanel({ authUser }) {
               : isOwn
                 ? 'bg-blue-600 text-white'
                 : 'bg-white dark:bg-slate-800 dark:text-white border border-slate-200 dark:border-slate-700';
-            const senderName = message.senderRole === 'moderator'
-              ? 'Moderator'
-              : message.senderLabel || (isOwn ? resolveDisplayName(authUser) : 'Artes Moderatie');
+            const senderLabel = isOwn ? resolveUserLabel(userProfile, authUser) : 'ARTES MODERATIE';
+            const bodyText = message.text || message.message || '';
+            const hasSystemHeader = isSystem && bodyText.toUpperCase().includes('ARTES MODERATIE');
+            const previousMessage = normalizedMessages[index - 1];
+            const shouldShowLabel = (!isSystem || !hasSystemHeader)
+              && (!previousMessage || previousMessage.senderRole !== message.senderRole);
             return (
               <div
                 key={message.id}
                 className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
               >
-                <div className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${bubbleStyle}`}>
-                  <div className="text-[11px] uppercase font-semibold mb-1 opacity-70">{senderName}</div>
-                  <p>{message.text || message.message}</p>
-                  <div className="mt-1 text-[10px] text-slate-400 text-right">
-                    {formatTime(message.createdAt)}
+                <div className="max-w-[75%] flex flex-col">
+                  {shouldShowLabel && (
+                    <div className={`text-[11px] uppercase font-semibold mb-1 opacity-70 ${isOwn ? 'text-right' : 'text-left'}`}>
+                      {senderLabel}
+                    </div>
+                  )}
+                  <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${bubbleStyle}`}>
+                    <p>{bodyText}</p>
+                    <div className="mt-1 text-[10px] text-slate-400 text-right">
+                      {formatTime(message.createdAt)}
+                    </div>
                   </div>
                 </div>
               </div>

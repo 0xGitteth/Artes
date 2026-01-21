@@ -23,6 +23,32 @@ const formatTime = (timestamp) => {
 
 const normalizeQuery = (value) => value.trim().toLowerCase();
 
+const resolveSupportUserLabel = (userProfile, authUser) => {
+  const name = userProfile?.displayName || authUser?.displayName;
+  return name?.trim() || 'Jij';
+};
+
+const resolveDirectMessageLabel = ({ message, activeThreadIndex, activeThread }) => {
+  const directName = message.senderName
+    || message.senderDisplayName
+    || message.displayName
+    || message.senderLabel;
+  if (directName?.trim()) return directName.trim();
+
+  const username = message.senderUsername
+    || message.username
+    || activeThreadIndex?.username
+    || activeThread?.otherUsername;
+  if (username?.trim()) {
+    const trimmed = username.trim();
+    return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
+  }
+
+  const uid = message.senderUid || message.senderId;
+  if (uid) return uid.slice(0, 6);
+  return 'Gebruiker';
+};
+
 const Avatar = ({ photoURL, name }) => {
   if (photoURL) {
     return <img src={photoURL} alt={name} className="h-9 w-9 rounded-full object-cover" />;
@@ -230,7 +256,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   );
 }
 
-export default function ChatPanel({ authUser, functionsBase, initialThreadId }) {
+export default function ChatPanel({ authUser, functionsBase, initialThreadId, userProfile }) {
   const [threads, setThreads] = useState([]);
   const [activeThreadId, setActiveThreadId] = useState(null);
   const [activeThread, setActiveThread] = useState(null);
@@ -433,7 +459,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
               {renderMessages.length === 0 ? (
                 <div className="text-sm text-slate-500">Nog geen berichten.</div>
               ) : (
-                renderMessages.map((message) => {
+                renderMessages.map((message, index) => {
                   const isSupportThread = activeThread.type === 'support';
                   const normalizedMessage = isSupportThread ? message : null;
                   const isOwn = isSupportThread
@@ -443,38 +469,63 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
                     ? normalizedMessage?.senderRole === 'system'
                     : message.senderUid === 'system' || message.type === 'moderation_decision';
                   const bodyText = message.text || message.message || '';
+                  const senderLabel = isSupportThread
+                    ? (normalizedMessage?.senderRole === 'user'
+                      ? resolveSupportUserLabel(userProfile, authUser)
+                      : 'ARTES MODERATIE')
+                    : (isOwn
+                      ? resolveSupportUserLabel(userProfile, authUser)
+                      : resolveDirectMessageLabel({ message, activeThreadIndex, activeThread }));
+                  const hasSystemHeader = isSupportThread && isSystem && bodyText.toUpperCase().includes('ARTES MODERATIE');
+                  const previousMessage = renderMessages[index - 1];
+                  const previousSender = isSupportThread
+                    ? previousMessage?.senderRole
+                    : previousMessage?.senderUid || previousMessage?.senderId;
+                  const currentSender = isSupportThread
+                    ? normalizedMessage?.senderRole
+                    : message.senderUid || message.senderId;
+                  const shouldShowLabel = isSupportThread
+                    ? (!isSystem || !hasSystemHeader) && (!previousMessage || previousSender !== currentSender)
+                    : !isSystem && (!previousMessage || previousSender !== currentSender);
                   return (
                     <div
                       key={message.id}
                       className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div
-                        className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                          isSystem
-                            ? 'bg-blue-50 text-blue-900 border border-blue-100'
-                            : isOwn
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-white dark:bg-slate-800 dark:text-white border border-slate-200 dark:border-slate-700'
-                        }`}
-                      >
-                        {message.type === 'moderation_decision' && (
-                          <div className="text-[10px] uppercase font-semibold text-blue-700 mb-1">Moderatie</div>
-                        )}
-                        <p>{bodyText}</p>
-                        {message.metadata?.reasons?.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {message.metadata.reasons.map((reason) => (
-                              <span
-                                key={reason}
-                                className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700"
-                              >
-                                {reason}
-                              </span>
-                            ))}
+                      <div className="max-w-[75%] flex flex-col">
+                        {shouldShowLabel && (
+                          <div className={`text-[11px] uppercase font-semibold mb-1 opacity-70 ${isOwn ? 'text-right' : 'text-left'}`}>
+                            {senderLabel}
                           </div>
                         )}
-                        <div className="mt-1 text-[10px] text-slate-400 text-right">
-                          {formatTime(message.createdAt)}
+                        <div
+                          className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                            isSystem
+                              ? 'bg-blue-50 text-blue-900 border border-blue-100'
+                              : isOwn
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white dark:bg-slate-800 dark:text-white border border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          {message.type === 'moderation_decision' && (
+                            <div className="text-[10px] uppercase font-semibold text-blue-700 mb-1">Moderatie</div>
+                          )}
+                          <p>{bodyText}</p>
+                          {message.metadata?.reasons?.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {message.metadata.reasons.map((reason) => (
+                                <span
+                                  key={reason}
+                                  className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700"
+                                >
+                                  {reason}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="mt-1 text-[10px] text-slate-400 text-right">
+                            {formatTime(message.createdAt)}
+                          </div>
                         </div>
                       </div>
                     </div>

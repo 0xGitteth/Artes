@@ -1210,7 +1210,7 @@ export default function ArtesApp() {
           
           {!profileLoading && view.startsWith('community_') && (
             <CommunityDetail
-              id={view.split('_')[1]}
+              id={view.slice('community_'.length)}
               setView={setView}
               authUser={authUser}
               functionsBase={functionsBase}

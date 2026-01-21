@@ -250,7 +250,11 @@ export const isModerator = async (user) => {
   }
 };
 
-export const subscribeToProfile = (uid, cb) => onSnapshot(doc(getFirebaseDb(), 'users', uid), cb);
+export const subscribeToProfile = (uid, cb) => onSnapshot(
+  doc(getFirebaseDb(), 'users', uid),
+  cb,
+  (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Profile listener users/${uid}`),
+);
 
 const resolveAuthProvider = (user) => {
   if (user?.providerData?.some((provider) => provider?.providerId === 'google.com')) {
@@ -418,7 +422,11 @@ export const addPost = async (post) => {
 };
 
 export const subscribeToPosts = (cb) =>
-  onSnapshot(query(collection(getFirebaseDb(), 'posts'), orderBy('createdAt', 'desc')), cb);
+  onSnapshot(
+    query(collection(getFirebaseDb(), 'posts'), orderBy('createdAt', 'desc')),
+    cb,
+    (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Posts listener posts'),
+  );
 
 export const addComment = (postId, comment) =>
   addDoc(collection(getFirebaseDb(), 'posts', postId, 'comments'), {
@@ -427,7 +435,11 @@ export const addComment = (postId, comment) =>
   });
 
 export const subscribeToComments = (postId, cb) =>
-  onSnapshot(query(collection(getFirebaseDb(), 'posts', postId, 'comments'), orderBy('createdAt', 'asc')), cb);
+  onSnapshot(
+    query(collection(getFirebaseDb(), 'posts', postId, 'comments'), orderBy('createdAt', 'asc')),
+    cb,
+    (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Comments listener posts/${postId}/comments`),
+  );
 
 export const toggleLike = async (postId, uid) => {
   const likeRef = doc(getFirebaseDb(), 'posts', postId, 'likes', uid);
@@ -440,4 +452,8 @@ export const toggleLike = async (postId, uid) => {
 };
 
 export const subscribeToLikes = (postId, cb) =>
-  onSnapshot(collection(getFirebaseDb(), 'posts', postId, 'likes'), cb);
+  onSnapshot(
+    collection(getFirebaseDb(), 'posts', postId, 'likes'),
+    cb,
+    (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Likes listener posts/${postId}/likes`),
+  );

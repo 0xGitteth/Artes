@@ -248,13 +248,17 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
     const db = getFirebaseDbInstance();
     const threadIndexRef = collection(db, 'users', authUser.uid, 'threadIndex');
     const q = query(threadIndexRef, orderBy('pinned', 'desc'), orderBy('lastMessageAt', 'desc'));
-    return onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
-      setThreads(items);
-      if (!activeThreadId && items.length > 0) {
-        setActiveThreadId(items[0].threadId || items[0].id);
-      }
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const items = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        setThreads(items);
+        if (!activeThreadId && items.length > 0) {
+          setActiveThreadId(items[0].threadId || items[0].id);
+        }
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Thread index listener users/${authUser?.uid}/threadIndex`),
+    );
   }, [authUser?.uid, activeThreadId]);
 
   useEffect(() => {
@@ -263,13 +267,17 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
       return undefined;
     }
     const db = getFirebaseDbInstance();
-    return onSnapshot(doc(db, 'threads', activeThreadId), (snapshot) => {
-      if (!snapshot.exists()) {
-        setActiveThread(null);
-        return;
-      }
-      setActiveThread({ id: snapshot.id, ...snapshot.data() });
-    });
+    return onSnapshot(
+      doc(db, 'threads', activeThreadId),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setActiveThread(null);
+          return;
+        }
+        setActiveThread({ id: snapshot.id, ...snapshot.data() });
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Active thread listener threads/${activeThreadId}`),
+    );
   }, [activeThreadId]);
 
   useEffect(() => {
@@ -280,9 +288,13 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId }) 
     const db = getFirebaseDbInstance();
     const messagesRef = collection(db, 'threads', activeThreadId, 'messages');
     const q = query(messagesRef, orderBy('createdAt', 'asc'), limit(MESSAGE_LIMIT));
-    return onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        setMessages(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Active thread messages listener threads/${activeThreadId}/messages`),
+    );
   }, [activeThreadId]);
 
   const activeThreadIndex = useMemo(() => {

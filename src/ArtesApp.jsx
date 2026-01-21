@@ -532,9 +532,13 @@ export default function ArtesApp() {
       where('userId', '==', authUser.uid),
       orderBy('createdAt', 'desc'),
     );
-    return onSnapshot(q, (snapshot) => {
-      setUploads(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        setUploads(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Uploads listener (ArtesApp)'),
+    );
   }, [authUser?.uid]);
 
   useEffect(() => {
@@ -543,12 +547,16 @@ export default function ArtesApp() {
     const threadId = `moderation_${authUser.uid}`;
     const messagesRef = collection(db, 'threads', threadId, 'messages');
     const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
-    return onSnapshot(q, (snapshot) => {
-      if (snapshot.empty) return;
-      const docSnap = snapshot.docs[0];
-      if (moderationModal?.id === docSnap.id) return;
-      setModerationModal({ id: docSnap.id, ...docSnap.data() });
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        if (snapshot.empty) return;
+        const docSnap = snapshot.docs[0];
+        if (moderationModal?.id === docSnap.id) return;
+        setModerationModal({ id: docSnap.id, ...docSnap.data() });
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation unread listener (ArtesApp)'),
+    );
   }, [authUser?.uid, moderationModal?.id]);
 
   useEffect(() => {
@@ -1880,9 +1888,13 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     if (!isModerator) return;
     const db = getFirebaseDbInstance();
     const q = query(collection(db, 'reviewCases'), where('status', '==', 'inReview'), orderBy('createdAt', 'desc'));
-    return onSnapshot(q, (snapshot) => {
-      setCases(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        setCases(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation reviewCases listener (ArtesApp)'),
+    );
   }, [isModerator]);
 
   const filteredCases = useMemo(() => {

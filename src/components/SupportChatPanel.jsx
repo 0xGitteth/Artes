@@ -92,13 +92,17 @@ export default function SupportChatPanel({ authUser }) {
       return undefined;
     }
     const db = getFirebaseDbInstance();
-    return onSnapshot(doc(db, 'threads', threadId), (snapshot) => {
-      if (!snapshot.exists()) {
-        setThread(null);
-        return;
-      }
-      setThread({ id: snapshot.id, ...snapshot.data() });
-    });
+    return onSnapshot(
+      doc(db, 'threads', threadId),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setThread(null);
+          return;
+        }
+        setThread({ id: snapshot.id, ...snapshot.data() });
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Thread listener threads/${threadId}`),
+    );
   }, [threadId]);
 
   useEffect(() => {
@@ -109,10 +113,14 @@ export default function SupportChatPanel({ authUser }) {
     const db = getFirebaseDbInstance();
     const messagesRef = collection(db, 'threads', threadId, 'messages');
     const q = query(messagesRef, orderBy('createdAt', 'asc'));
-    return onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
-      setMessages(list.slice(-MESSAGE_LIMIT));
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        setMessages(list.slice(-MESSAGE_LIMIT));
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Thread messages listener threads/${threadId}/messages`),
+    );
   }, [threadId]);
 
   const canSend = Boolean(thread?.userCanSend || thread?.userMessageAllowance > 0);

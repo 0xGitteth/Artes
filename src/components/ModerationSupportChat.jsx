@@ -66,13 +66,17 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
       where('type', '==', 'support'),
       orderBy('lastMessageAt', 'desc'),
     );
-    return onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
-      setThreads(items);
-      if (!activeThreadId && items.length > 0) {
-        setActiveThreadId(items[0].id);
-      }
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const items = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        setThreads(items);
+        if (!activeThreadId && items.length > 0) {
+          setActiveThreadId(items[0].id);
+        }
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation threads listener (reviewCases)'),
+    );
   }, [isModerator, activeThreadId]);
 
   useEffect(() => {
@@ -81,13 +85,17 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
       return undefined;
     }
     const db = getFirebaseDbInstance();
-    return onSnapshot(doc(db, 'threads', activeThreadId), (snapshot) => {
-      if (!snapshot.exists()) {
-        setActiveThread(null);
-        return;
-      }
-      setActiveThread({ id: snapshot.id, ...snapshot.data() });
-    });
+    return onSnapshot(
+      doc(db, 'threads', activeThreadId),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setActiveThread(null);
+          return;
+        }
+        setActiveThread({ id: snapshot.id, ...snapshot.data() });
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Moderation active thread listener threads/${activeThreadId}`),
+    );
   }, [activeThreadId]);
 
   useEffect(() => {
@@ -98,10 +106,14 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
     const db = getFirebaseDbInstance();
     const messagesRef = collection(db, 'threads', activeThreadId, 'messages');
     const q = query(messagesRef, orderBy('createdAt', 'asc'));
-    return onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
-      setMessages(list.slice(-MESSAGE_LIMIT));
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        setMessages(list.slice(-MESSAGE_LIMIT));
+      },
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Moderation thread messages listener threads/${activeThreadId}/messages`),
+    );
   }, [activeThreadId]);
 
   useEffect(() => {

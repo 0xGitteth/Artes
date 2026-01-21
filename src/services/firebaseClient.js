@@ -61,6 +61,11 @@ export const subscribeToProfile = (uid, callback) => {
 };
 
 export const subscribeToPosts = (callback) => {
+  if (!auth.currentUser) {
+    console.log('subscribeToPosts skipped: not signed in');
+    return () => {};
+  }
+
   logFirestoreOp('SUBSCRIBE', 'posts', 'all posts ordered by createdAt');
   return onSnapshot(
     query(collection(db, 'posts'), orderBy('createdAt', 'desc')),
@@ -68,29 +73,23 @@ export const subscribeToPosts = (callback) => {
   );
 };
 
-export const subscribeToUsers = (callback) =>
-  onSnapshot(collection(db, 'publicUsers'), (snapshot) =>
+export const subscribeToUsers = (callback) => {
+  if (!auth.currentUser) {
+    console.log('subscribeToUsers skipped: not signed in');
+    return () => {};
+  }
+
+  logFirestoreOp('SUBSCRIBE', 'publicUsers', 'all public users');
+  return onSnapshot(collection(db, 'publicUsers'), (snapshot) =>
     callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })))
   );
+};
 
-export const seedDemoContent = async (seedUsers, seedPosts) => {
-  logFirestoreOp('READ', 'publicUsers/user_sophie', 'seed check');
-  const check = await getDoc(doc(db, 'publicUsers', 'user_sophie'));
-  if (check.exists()) return;
+export const seedDemoContent = async () => {
+  if (!import.meta.env.DEV) return;
+  if (!auth.currentUser) return;
 
-  const batch = writeBatch(db);
-  seedUsers.forEach((user) => {
-    logFirestoreOp('WRITE', `publicUsers/${user.uid}`, 'seed');
-    batch.set(doc(db, 'publicUsers', user.uid), user);
-  });
-  seedPosts.forEach((post) => {
-    logFirestoreOp('WRITE', `posts/${post.id}`, 'seed');
-    batch.set(doc(db, 'posts', post.id), {
-      ...post,
-      createdAt: serverTimestamp(),
-    });
-  });
-  await batch.commit();
+  console.log('Seeding disabled for now');
 };
 
 // Profile payload fields we store (subset used by UI):
@@ -136,10 +135,14 @@ export const updateProfile = async (uid, payload) => {
 };
 
 export const publishPost = async (post) => {
+  if (!auth.currentUser) throw new Error('Not signed in');
+
   logFirestoreOp('WRITE', 'posts/{auto}', 'publishPost');
   await addDoc(collection(db, 'posts'), {
     ...post,
+    authorUid: auth.currentUser.uid,
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 };
 

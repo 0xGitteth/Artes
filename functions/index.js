@@ -36,6 +36,21 @@ if (!admin.apps.length) {
 const db = getFirestore();
 const lockDurationMs = 10 * 60 * 1000;
 
+const setCorsHeaders = (req, res) => {
+  const allowedOrigins = [
+    'https://artis.sliplane.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+  ];
+  const origin = req.get('origin');
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+};
+
 const getAppIdFromEnv = () => {
   const direct = process.env.FIREBASE_APP_ID;
   if (direct) return direct;
@@ -1018,21 +1033,38 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 });
 
-export const sendSupportMessage = onRequest({ cors: true }, async (req, res) => {
+export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west1' }, async (req, res) => {
+  setCorsHeaders(req, res);
+  
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
+  
   try {
+    logger.info('sendSupportMessage: Received POST request', { origin: req.get('origin') });
+    
     const decoded = await verifyToken(req);
+    logger.info('sendSupportMessage: Token verified', { uid: decoded.uid });
+    
     const body = parseJsonBody(req);
     const threadId = body?.threadId || `moderation_${decoded.uid}`;
     const text = String(body?.text || '').trim();
+    
     if (!threadId || !text) {
+      logger.warn('sendSupportMessage: Missing required fields', { threadId, textLength: text?.length });
       res.status(400).json({ error: 'threadId and text are required' });
       return;
     }
+    
     if (text.length > 2000) {
+      logger.warn('sendSupportMessage: Message too long', { textLength: text.length });
       res.status(400).json({ error: 'Message too long' });
       return;
     }
@@ -1051,13 +1083,46 @@ export const sendSupportMessage = onRequest({ cors: true }, async (req, res) => 
         error.status = 403;
         throw error;
       }
-      const allowance = threadData?.userMessageAllowance ?? 0;
-      const allowed = threadData?.userCanSend === true || allowance > 0;
-      if (!allowed) {
+
+      // Count only real user messages (senderRole === 'user' or legacy messages without senderRole)
+      const messagesSnap = await transaction.get(threadRef.collection('messages'));
+      let userMessageCount = 0;
+      let hasModeratorReply = false;
+
+      messagesSnap.docs.forEach((doc) => {
+        const msg = doc.data();
+        const senderRole = msg.senderRole || 'user'; // backward compat: assume 'user' if missing
+        const isWelcomeMessage = msg.text?.includes('Om spam te voorkomen');
+        
+        // Only count actual user messages (not system, not moderator welcome message)
+        if (senderRole === 'user') {
+          userMessageCount++;
+        }
+        
+        // Check if there's any moderator response
+        if (senderRole === 'moderator' || msg.senderUid === 'moderator') {
+          hasModeratorReply = true;
+        }
+      });
+
+      if (process.env.NODE_ENV === 'development') {
+        logger.info('sendSupportMessage: Throttle check', {
+          uid: decoded.uid,
+          threadId,
+          userMessageCount,
+          hasModeratorReply,
+          userCanSend: threadData?.userMaySend ?? threadData?.userCanSend,
+        });
+      }
+
+      // User can send if: they haven't sent yet OR moderator has replied
+      const canSendMessage = userMessageCount === 0 || hasModeratorReply;
+      if (!canSendMessage) {
         const error = new Error('User may not send yet');
         error.status = 403;
         throw error;
       }
+
       const publicProfile = await fetchPublicUser(decoded.uid);
       const senderLabel = publicProfile?.displayName || publicProfile?.username || decoded.name || 'Artes gebruiker';
       const messageRef = threadRef.collection('messages').doc();
@@ -1070,23 +1135,32 @@ export const sendSupportMessage = onRequest({ cors: true }, async (req, res) => 
         type: 'text',
         createdAt: FieldValue.serverTimestamp(),
       });
+
       if (process.env.NODE_ENV === 'development') {
-        logger.info('sendSupportMessage: sent user message with senderRole: user');
+        logger.info('sendSupportMessage: User message stored', {
+          uid: decoded.uid,
+          threadId,
+          senderUid: decoded.uid,
+          messageLength: text.length,
+          newUserMessageCount: userMessageCount + 1,
+        });
       }
+
       transaction.update(threadRef, {
         lastMessageAt: FieldValue.serverTimestamp(),
         lastMessagePreview: text,
-        userMessageAllowance: 0,
-        userCanSend: false,
+        userMaySend: false,
         unreadForModerator: (threadData?.unreadForModerator || 0) + 1,
         unreadForUser: 0,
         updatedAt: FieldValue.serverTimestamp(),
       });
     });
 
+    logger.info('sendSupportMessage: Message sent successfully', { uid: decoded.uid });
     res.status(200).json({ ok: true });
   } catch (error) {
     const status = error.status || 500;
+    logger.error('sendSupportMessage: Error', { status, error: error.message });
     res.status(status).json({ error: error.message || 'Failed to send support message' });
   }
 });

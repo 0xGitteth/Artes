@@ -4885,9 +4885,89 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
     </div>
   );
 }
-function ShadowProfileModal({ name, posts, onClose, onPostClick }) { 
+function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
-    return <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"><div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col"><div className="h-64 bg-indigo-900 flex items-center justify-center flex-col text-white"><div className="text-4xl font-bold mb-2">{name}</div><p>Tijdelijk Profiel. Claim dit profiel.</p><button onClick={onClose} className="absolute top-4 right-4"><X/></button></div><div className="flex-1 p-6 overflow-y-auto no-scrollbar"><div className="grid grid-cols-3 gap-2">{shadowPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div></div></div></div> 
+
+    const normalizeExternalLink = (link) => {
+      if (!link) return null;
+      const trimmed = link.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith('@')) {
+        const handle = trimmed.replace(/^@+/, '');
+        return { type: 'instagram', label: `@${handle}`, url: `https://instagram.com/${handle}` };
+      }
+      if (/instagram\.com/i.test(trimmed)) {
+        const url = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+        const handle = url.split('instagram.com/')[1]?.split(/[/?#]/)[0];
+        return { type: 'instagram', label: handle ? `@${handle}` : url, url };
+      }
+      if (/^https?:\/\//i.test(trimmed)) {
+        return { type: 'website', label: trimmed.replace(/^https?:\/\//i, ''), url: trimmed };
+      }
+      if (trimmed.includes('.')) {
+        return { type: 'website', label: trimmed, url: `https://${trimmed}` };
+      }
+      return { type: 'instagram', label: `@${trimmed}`, url: `https://instagram.com/${trimmed}` };
+    };
+
+    const externalLinks = useMemo(() => {
+      const collected = new Map();
+      shadowPosts.forEach((post) => {
+        post.credits?.forEach((credit) => {
+          if (credit.name !== name || !credit.link) return;
+          const normalized = normalizeExternalLink(credit.link);
+          if (normalized) collected.set(normalized.url, normalized);
+        });
+      });
+      return Array.from(collected.values());
+    }, [shadowPosts, name]);
+
+    return (
+      <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4">
+        <div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col">
+          <div className="relative h-64 bg-indigo-900 flex items-center justify-center flex-col text-white px-6 text-center">
+            <div className="text-4xl font-bold mb-2">{name}</div>
+            <p className="text-sm text-white/80">
+              Tijdelijk profiel. Laat deze persoon weten dat er een tijdelijk profiel is aangemaakt zodat ze het kunnen claimen.
+            </p>
+            {externalLinks.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-sm">
+                {externalLinks.map((link) => (
+                  <a
+                    key={link.url}
+                    href={link.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-white hover:bg-white/20 transition"
+                  >
+                    {link.type === 'instagram' ? 'Instagram' : 'Website'}: {link.label}
+                  </a>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => {}}
+              className="mt-5 inline-flex items-center justify-center rounded-full bg-white text-indigo-900 px-5 py-2 text-sm font-semibold shadow-sm hover:bg-indigo-50 transition"
+            >
+              Claim dit profiel
+            </button>
+            <button onClick={onClose} className="absolute top-4 right-4">
+              <X />
+            </button>
+          </div>
+          <div className="flex-1 p-6 overflow-y-auto no-scrollbar">
+            <div className="grid grid-cols-3 gap-2">
+              {shadowPosts.map(p => (
+                <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800">
+                  <img src={p.imageUrl} className="w-full h-full object-cover" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
 }
 function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, darkMode, onToggleDark, onLogout }) { 
     return (
@@ -4954,7 +5034,25 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
 function WelcomeTour({ onClose, setView }) {
   const [step, setStep] = useState(0);
   const steps = [
-    { title: 'Welkom bij Artes!', desc: 'Dit is een demoversie. Feedback is welkom via Instagram @maraeliza.portfolio.', icon: Info, action: null },
+    {
+      title: 'Welkom bij Artes!',
+      desc: (
+        <>
+          Dit is een demoversie. Feedback is welkom via Instagram{' '}
+          <a
+            href="https://instagram.com/maraeliza.portfolio"
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-600 hover:text-blue-700"
+          >
+            @maraeliza.portfolio
+          </a>
+          .
+        </>
+      ),
+      icon: Info,
+      action: null,
+    },
     { title: 'De Galerij', desc: 'Hier vind je inspirerend werk van mensen die je volgt.', icon: ImageIcon, action: 'gallery' },
     { title: 'Ontdekken', desc: 'Zoek nieuwe makers, ideeën en connecties.', icon: Search, action: 'discover' },
     { title: 'Community', desc: 'Praat mee over veiligheid, techniek en samenwerkingen.', icon: Users, action: 'community' },

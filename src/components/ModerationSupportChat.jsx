@@ -279,7 +279,7 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-500">@{info.username || 'onbekend'}</p>
+                      <p className="text-xs text-slate-500">{info.username || 'onbekend'}</p>
                       <p className="text-xs text-slate-500 mt-1 line-clamp-1">
                         {thread.lastMessagePreview || 'Nog geen berichten'}
                       </p>
@@ -301,7 +301,7 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
               <div>
                 <h3 className="text-lg font-semibold dark:text-white">{display.displayName}</h3>
-                <p className="text-xs text-slate-500">@{display.username || 'onbekend'}</p>
+                <p className="text-xs text-slate-500">{display.username || 'onbekend'}</p>
               </div>
               <span className="text-xs text-slate-400">{formatDate(activeThread.lastMessageAt)}</span>
             </div>

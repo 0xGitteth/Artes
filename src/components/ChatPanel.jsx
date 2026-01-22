@@ -40,8 +40,7 @@ const resolveDirectMessageLabel = ({ message, activeThreadIndex, activeThread })
     || activeThreadIndex?.username
     || activeThread?.otherUsername;
   if (username?.trim()) {
-    const trimmed = username.trim();
-    return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
+    return username.trim().replace(/^@+/, '');
   }
 
   const uid = message.senderUid || message.senderId;
@@ -175,7 +174,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
         <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-700">
           <div>
             <h2 className="text-lg font-semibold dark:text-white">Nieuwe chat</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Zoek op @username of naam.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Zoek op naam of gebruikersnaam.</p>
           </div>
           <button onClick={onClose}>
             <X className="w-5 h-5" />
@@ -186,7 +185,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
             <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
             <input
               className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-              placeholder="Zoek op @username of naam"
+              placeholder="Zoek op naam of gebruikersnaam"
               value={queryText}
               onChange={(event) => {
                 setQueryText(event.target.value);
@@ -211,7 +210,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
                   <Avatar photoURL={user.photoURL} name={user.displayName || user.username} />
                   <div className="text-left">
                     <p className="text-sm font-semibold dark:text-white">{user.displayName || 'Onbekend'}</p>
-                    <p className="text-xs text-slate-500">@{user.username}</p>
+                    <p className="text-xs text-slate-500">{user.username}</p>
                   </div>
                 </button>
               ))}
@@ -228,7 +227,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
                 <Avatar photoURL={selectedUser.photoURL} name={selectedUser.displayName || selectedUser.username} />
                 <div>
                   <p className="text-sm font-semibold dark:text-white">{selectedUser.displayName || 'Onbekend'}</p>
-                  <p className="text-xs text-slate-500">@{selectedUser.username}</p>
+                  <p className="text-xs text-slate-500">{selectedUser.username}</p>
                 </div>
               </div>
               {selectedUser.uid === authUser.uid ? (

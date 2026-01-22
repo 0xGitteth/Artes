@@ -27,7 +27,7 @@ export default function SearchWithAutocomplete({
   value,
   onChange,
   onSelect,
-  placeholder = 'Zoek op naam of @username',
+  placeholder = 'Zoek op naam of gebruikersnaam',
 }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -127,7 +127,7 @@ export default function SearchWithAutocomplete({
                   <Avatar photoURL={user.photoURL} name={user.displayName || user.username} />
                   <div>
                     <p className="text-sm font-semibold dark:text-white">{user.displayName || 'Onbekend'}</p>
-                    <p className="text-xs text-slate-500">@{user.username || 'onbekend'}</p>
+                    <p className="text-xs text-slate-500">{user.username || 'onbekend'}</p>
                   </div>
                 </button>
               ))}

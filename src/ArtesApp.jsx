@@ -4055,6 +4055,15 @@ function CommunityList({ setView, communities, challenge, configLoading }) {
         <div><h2 className="text-2xl font-bold dark:text-white">Community</h2></div>
       </div>
 
+      <div className="flex justify-end mb-3">
+        <Button
+          className="h-8 px-3 text-sm rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 shadow-none"
+          onClick={() => setView('chat')}
+        >
+          Chat openen
+        </Button>
+      </div>
+
       <div className="mb-8 cursor-pointer" onClick={() => setView('challenge_detail')}>
          <div className="bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/20 p-6 rounded-2xl border border-amber-200 dark:border-amber-800/30 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
             <div>
@@ -4072,18 +4081,6 @@ function CommunityList({ setView, communities, challenge, configLoading }) {
             Communitydata laden...
           </div>
         )}
-        <div
-          className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex gap-6 hover:shadow-md transition-shadow cursor-pointer"
-          onClick={() => setView('chat')}
-        >
-          <div className="w-12 h-12 bg-blue-50 dark:bg-slate-700 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-            <MessageCircle className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="font-bold text-lg dark:text-white mb-1">Chat</h3>
-            <p className="text-slate-600 dark:text-slate-400 text-sm">Open je gesprekken en contact met Artes Moderatie.</p>
-          </div>
-        </div>
         {safeCommunities.map(comm => {
           const Icon = resolveCommunityIcon(comm.iconKey);
           const encodedTopicTitle = comm?.title ? `__topic__${encodeURIComponent(comm.title)}` : '';

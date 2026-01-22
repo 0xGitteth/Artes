@@ -393,6 +393,7 @@ export default function ArtesApp() {
   
   // Modals & States
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadContext, setUploadContext] = useState({ isChallenge: false });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [quickProfileId, setQuickProfileId] = useState(null);
@@ -409,6 +410,10 @@ export default function ArtesApp() {
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
   const [configLoading, setConfigLoading] = useState(true);
+  const handleOpenUploadModal = useCallback((options = {}) => {
+    setUploadContext({ isChallenge: false, ...options });
+    setShowUploadModal(true);
+  }, []);
 
   // Data
   const [posts, setPosts] = useState([]);
@@ -1137,7 +1142,7 @@ export default function ArtesApp() {
               onUserClick={setQuickProfileId}
               onShadowClick={setShadowProfileName}
               onPostClick={setSelectedPost}
-              onChallengeClick={() => setView('challenge_detail')}
+              onChallengeClick={() => setView('challenge_timeline')}
               profile={profile}
             />
           )}
@@ -1176,6 +1181,7 @@ export default function ArtesApp() {
               communities={communityConfig.communities}
               challenge={challengeConfig}
               configLoading={configLoading}
+              onStartChallengeUpload={() => handleOpenUploadModal({ isChallenge: true })}
             />
           )}
           {!profileLoading && view === 'support' && (
@@ -1199,7 +1205,7 @@ export default function ArtesApp() {
               </div>
             )
           )}
-          {!profileLoading && view === 'challenge_detail' && (
+          {!profileLoading && view === 'challenge_timeline' && (
             <ChallengeDetail
               setView={setView}
               posts={posts.filter(p => p.isChallenge)}
@@ -1250,14 +1256,22 @@ export default function ArtesApp() {
         {/* FAB */}
         {profile && view !== 'onboarding' && view !== 'login' && canUpload && (
            <div className="fixed bottom-6 right-6 z-40">
-             <button onClick={() => setShowUploadModal(true)} className="w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-xl shadow-blue-600/30 flex items-center justify-center transition-transform hover:scale-105 active:scale-95">
+             <button onClick={() => handleOpenUploadModal()} className="w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-xl shadow-blue-600/30 flex items-center justify-center transition-transform hover:scale-105 active:scale-95">
                <Plus className="w-7 h-7" />
              </button>
            </div>
         )}
 
         {/* Modals */}
-        {showUploadModal && <UploadModal onClose={() => setShowUploadModal(false)} user={user} profile={profile} users={users} />}
+        {showUploadModal && (
+          <UploadModal
+            onClose={() => setShowUploadModal(false)}
+            user={user}
+            profile={profile}
+            users={users}
+            isChallenge={uploadContext.isChallenge}
+          />
+        )}
         {showSettingsModal && (
           <SettingsModal
             onClose={() => setShowSettingsModal(false)}
@@ -3016,7 +3030,7 @@ function ModerationPortal({
   );
 }
 
-function UploadModal({ onClose, user, profile, users }) {
+function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
   const defaultRole = profile.roles?.[0] || 'photographer';
   const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true };
   const triggerLabelMap = useMemo(() => new Map(TRIGGERS.map((trigger) => [trigger.id, trigger.label])), []);
@@ -3275,17 +3289,23 @@ function UploadModal({ onClose, user, profile, users }) {
 
     try {
       await publishPost({
-         title, description: desc, imageUrl: image, authorId: user.uid, authorName: profile.displayName, authorRole: uploaderRole,
-         styles: selectedStyles,
-         sensitive: triggerFlag,
-         triggers: finalAppliedTriggers.map(getTriggerLabel),
-         makerTags,
-         appliedTriggers: finalAppliedTriggers,
-         outcome: nextOutcome || 'unchecked',
-         forbiddenReasons: effectiveForbiddenReasons,
-         reviewCaseId: effectiveReviewCaseId,
-         credits,
-         likes: 0
+        title,
+        description: desc,
+        imageUrl: image,
+        authorId: user.uid,
+        authorName: profile.displayName,
+        authorRole: uploaderRole,
+        styles: selectedStyles,
+        sensitive: triggerFlag,
+        triggers: finalAppliedTriggers.map(getTriggerLabel),
+        makerTags,
+        appliedTriggers: finalAppliedTriggers,
+        outcome: nextOutcome || 'unchecked',
+        forbiddenReasons: effectiveForbiddenReasons,
+        reviewCaseId: effectiveReviewCaseId,
+        credits,
+        likes: 0,
+        isChallenge,
       });
 
       setErrors({});
@@ -3319,7 +3339,17 @@ function UploadModal({ onClose, user, profile, users }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
        <div className="bg-white dark:bg-slate-900 w-full max-w-4xl h-[85vh] rounded-3xl overflow-hidden flex flex-col">
-          <div className="p-4 border-b flex justify-between"><h3 className="font-bold dark:text-white">Beeld publiceren</h3><button onClick={onClose}><X className="dark:text-white"/></button></div>
+          <div className="p-4 border-b flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <h3 className="font-bold dark:text-white">Beeld publiceren</h3>
+              {isChallenge && (
+                <span className="text-xs uppercase tracking-wide bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
+                  Challenge
+                </span>
+              )}
+            </div>
+            <button onClick={onClose}><X className="dark:text-white"/></button>
+          </div>
           <div className="flex-1 overflow-y-auto p-6 no-scrollbar">
              {step === 1 ? <div className="h-full border-2 border-dashed rounded-3xl flex items-center justify-center relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-10 h-10 text-slate-400"/></div> : (
                 <div className="grid md:grid-cols-2 gap-8">
@@ -4043,7 +4073,7 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
   );
 }
 
-function CommunityList({ setView, communities, challenge, configLoading }) {
+function CommunityList({ setView, communities, challenge, configLoading, onStartChallengeUpload }) {
   const safeCommunities = Array.isArray(communities) && communities.length
     ? communities
     : DEFAULT_COMMUNITY_CONFIG.communities;
@@ -4064,13 +4094,27 @@ function CommunityList({ setView, communities, challenge, configLoading }) {
         </Button>
       </div>
 
-      <div className="mb-8 cursor-pointer" onClick={() => setView('challenge_detail')}>
-         <div className="bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/20 p-6 rounded-2xl border border-amber-200 dark:border-amber-800/30 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+      <div className="mb-8 cursor-pointer" onClick={() => setView('challenge_timeline')}>
+         <div className="bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/20 p-6 rounded-2xl border border-amber-200 dark:border-amber-800/30 flex items-center justify-between gap-4 shadow-sm hover:shadow-md transition-shadow">
             <div>
                <h3 className="font-bold text-amber-900 dark:text-amber-400 text-lg mb-1 flex items-center gap-2"><Star className="w-5 h-5 fill-amber-500 text-amber-500" /> {challengeData.title}</h3>
                <p className="text-sm text-amber-800 dark:text-amber-200/80 mb-0">Thema: &quot;{challengeData.theme}&quot;</p>
             </div>
-            <Button className="bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/20" asChild>Doe mee</Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                type="button"
+                className="bg-white/80 hover:bg-white text-amber-900 border border-amber-200 shadow-sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onStartChallengeUpload?.();
+                }}
+              >
+                Upload challenge
+              </Button>
+              <Button className="bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/20">
+                Bekijk inzendingen
+              </Button>
+            </div>
          </div>
       </div>
 
@@ -4470,7 +4514,15 @@ function ChallengeDetail({ setView, posts, onPostClick, challenge }) {
             <p className="text-sm text-amber-800 dark:text-amber-200/80">{challengeData.description}</p>
          </div>
          <div className="grid grid-cols-2 md:grid-cols-3 gap-1 md:gap-4">
-            {posts.map(post => (<div key={post.id} onClick={() => onPostClick(post)} className="aspect-square bg-slate-200 rounded-lg overflow-hidden cursor-pointer"><img src={post.imageUrl} className="w-full h-full object-cover" /></div>))}
+            {posts.map(post => (
+              <div
+                key={post.id}
+                onClick={() => onPostClick(post)}
+                className={`aspect-square bg-slate-200 rounded-lg overflow-hidden cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`}
+              >
+                <img src={post.imageUrl} className="w-full h-full object-cover" />
+              </div>
+            ))}
          </div>
       </div>
    );

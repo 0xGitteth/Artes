@@ -38,12 +38,14 @@ import {
 import {
   collection,
   doc,
+  addDoc,
   getDoc,
   getDocs,
   limit,
   onSnapshot,
   orderBy,
   query,
+  serverTimestamp,
   writeBatch,
   setDoc,
   where,
@@ -213,6 +215,8 @@ const buildDecisionTemplate = (decision, reasons) => {
 
 const buildDefaultAvatar = (seed) =>
   `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(seed || 'artes')}`;
+
+const sanitizeHandle = (value) => (value || '').replace(/^@+/, '').trim();
 
 const normalizeTriggerPreferences = (triggerVisibility = {}) => {
   const normalized = { ...triggerVisibility };
@@ -1204,16 +1208,22 @@ export default function ArtesApp() {
             />
           )}
           
-          {!profileLoading && view.startsWith('community_') && (
-            <CommunityDetail
-              id={view.slice('community_'.length)}
-              setView={setView}
-              authUser={authUser}
-              functionsBase={functionsBase}
-              userProfile={userProfile}
-              communities={communityConfig.communities}
-            />
-          )}
+          {!profileLoading && view.startsWith('community_') && (() => {
+            const communityView = view.slice('community_'.length);
+            const [communityId, topicTitleEncoded] = communityView.split('__topic__');
+            const initialTopicTitle = topicTitleEncoded ? decodeURIComponent(topicTitleEncoded) : null;
+            return (
+              <CommunityDetail
+                id={communityId}
+                setView={setView}
+                authUser={authUser}
+                functionsBase={functionsBase}
+                userProfile={userProfile}
+                communities={communityConfig.communities}
+                initialTopicTitle={initialTopicTitle}
+              />
+            );
+          })()}
 
           {/* Wrapper logic for viewing profiles */}
           {!profileLoading && view === 'profile' && (
@@ -4076,8 +4086,13 @@ function CommunityList({ setView, communities, challenge, configLoading }) {
         </div>
         {safeCommunities.map(comm => {
           const Icon = resolveCommunityIcon(comm.iconKey);
+          const encodedTopicTitle = comm?.title ? `__topic__${encodeURIComponent(comm.title)}` : '';
           return (
-            <div key={comm.id} className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex gap-6 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setView(`community_${comm.id}`)}>
+            <div
+              key={comm.id}
+              className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex gap-6 hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => setView(`community_${comm.id}${encodedTopicTitle}`)}
+            >
               <div className="w-12 h-12 bg-blue-50 dark:bg-slate-700 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0"><Icon className="w-6 h-6" /></div>
               <div><h3 className="font-bold text-lg dark:text-white mb-1">{comm.title}</h3><p className="text-slate-600 dark:text-slate-400 text-sm">{comm.description}</p></div>
             </div>
@@ -4088,7 +4103,8 @@ function CommunityList({ setView, communities, challenge, configLoading }) {
   );
 }
 
-function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, communities }) {
+function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, communities, initialTopicTitle }) {
+  const db = getFirebaseDbInstance();
   const communityList = Array.isArray(communities) && communities.length
     ? communities
     : DEFAULT_COMMUNITY_CONFIG.communities;
@@ -4097,6 +4113,91 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
   const communityDescription = selectedCommunity?.description || 'Praat mee of neem contact op met Artes Moderatie.';
   const communityTopics = selectedCommunity?.topics || [];
   const CommunityIcon = resolveCommunityIcon(selectedCommunity?.iconKey);
+  const [topics, setTopics] = useState([]);
+  const [topicsLoading, setTopicsLoading] = useState(true);
+  const [topicError, setTopicError] = useState(null);
+  const [activeTopicId, setActiveTopicId] = useState(null);
+  const [newTopicTitle, setNewTopicTitle] = useState('');
+  const [newTopicBody, setNewTopicBody] = useState('');
+  const [topicSaving, setTopicSaving] = useState(false);
+  const fallbackTopics = communityTopics.length
+    ? communityTopics.map((topic, index) => ({
+      id: `suggested_${index}`,
+      title: topic,
+      body: 'Deel hier je vraag, tips of ervaringen met de community.',
+      isSuggested: true,
+    }))
+    : [];
+  const displayName = sanitizeHandle(userProfile?.displayName || userProfile?.username || authUser?.displayName || '');
+
+  useEffect(() => {
+    if (!db || !id) return undefined;
+    setTopicsLoading(true);
+    const topicsRef = collection(db, 'communities', id, 'topics');
+    const topicsQuery = query(topicsRef, orderBy('createdAt', 'desc'));
+    return onSnapshot(
+      topicsQuery,
+      (snapshot) => {
+        const entries = snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...docSnapshot.data(),
+        }));
+        setTopics(entries);
+        setTopicsLoading(false);
+      },
+      (error) => {
+        console.error('Failed to load topics', error);
+        setTopicError('Topics konden niet worden geladen.');
+        setTopicsLoading(false);
+      },
+    );
+  }, [db, id]);
+
+  const topicsToRender = topics.length ? topics : fallbackTopics;
+
+  useEffect(() => {
+    if (!initialTopicTitle || activeTopicId || !topics.length) return;
+    const matchingTopic = topics.find(
+      (topic) => topic?.title?.toLowerCase() === initialTopicTitle.toLowerCase(),
+    );
+    if (matchingTopic) {
+      setActiveTopicId(matchingTopic.id);
+    }
+  }, [activeTopicId, initialTopicTitle, topics]);
+
+  const handleCreateTopic = async () => {
+    if (!authUser) {
+      setTopicError('Log in om een topic te starten.');
+      return;
+    }
+    if (!newTopicTitle.trim() || !newTopicBody.trim()) {
+      setTopicError('Vul een titel en uitleg in.');
+      return;
+    }
+    if (!db) {
+      setTopicError('Database niet beschikbaar.');
+      return;
+    }
+    setTopicSaving(true);
+    setTopicError(null);
+    try {
+      const topicsRef = collection(db, 'communities', id, 'topics');
+      await addDoc(topicsRef, {
+        title: newTopicTitle.trim(),
+        body: newTopicBody.trim(),
+        authorId: authUser.uid,
+        authorName: displayName || sanitizeHandle(authUser?.email?.split('@')[0]) || 'Communitylid',
+        createdAt: serverTimestamp(),
+      });
+      setNewTopicTitle('');
+      setNewTopicBody('');
+    } catch (error) {
+      console.error('Failed to create topic', error);
+      setTopicError('Topic kon niet worden opgeslagen.');
+    } finally {
+      setTopicSaving(false);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
@@ -4133,14 +4234,230 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
           </div>
         </div>
       )}
-      <div className="min-h-[60vh]">
-        {authUser ? (
-          <ChatPanel authUser={authUser} functionsBase={functionsBase} userProfile={userProfile} />
+      <div className="min-h-[60vh] space-y-6">
+        {activeTopicId ? (
+          <CommunityTopicDetail
+            communityId={id}
+            topicId={activeTopicId}
+            onBack={() => setActiveTopicId(null)}
+            authUser={authUser}
+            userProfile={userProfile}
+          />
         ) : (
-          <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
-            Log in om de chat te openen.
-          </div>
+          <>
+            <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Topics in {communityTitle}</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Start een onderwerp of lees mee met anderen.</p>
+                </div>
+                {topicsLoading && (
+                  <div className="flex items-center text-sm text-slate-500 dark:text-slate-400 gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Laden...
+                  </div>
+                )}
+              </div>
+              {topicsToRender.length > 0 ? (
+                <div className="grid gap-3">
+                  {topicsToRender.map((topic) => (
+                    <button
+                      key={topic.id}
+                      type="button"
+                      className="text-left p-4 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-blue-400/60 hover:bg-blue-50/40 dark:hover:bg-slate-800 transition"
+                      onClick={() => !topic.isSuggested && setActiveTopicId(topic.id)}
+                      disabled={topic.isSuggested}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-base font-semibold text-slate-900 dark:text-white">{topic.title || 'Nieuw topic'}</p>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                            {topic.body ? `${topic.body.slice(0, 140)}${topic.body.length > 140 ? '…' : ''}` : 'Nog geen uitleg toegevoegd.'}
+                          </p>
+                        </div>
+                        {topic.isSuggested && (
+                          <span className="text-xs uppercase tracking-wide text-slate-400">Suggestie</span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500 dark:text-slate-400">Nog geen topics. Start het eerste onderwerp.</p>
+              )}
+            </div>
+            <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 space-y-4">
+              <div>
+                <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Start een nieuw topic</h4>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Geef de community wat context en een duidelijke vraag.</p>
+              </div>
+              <div className="space-y-3">
+                <input
+                  value={newTopicTitle}
+                  onChange={(event) => setNewTopicTitle(event.target.value)}
+                  placeholder="Titel van het topic"
+                  className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-2 text-sm text-slate-800 dark:text-slate-100"
+                />
+                <textarea
+                  value={newTopicBody}
+                  onChange={(event) => setNewTopicBody(event.target.value)}
+                  placeholder="Geef een uitgebreide uitleg van je topic."
+                  rows={4}
+                  className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-2 text-sm text-slate-800 dark:text-slate-100"
+                />
+              </div>
+              {topicError && <p className="text-sm text-red-500">{topicError}</p>}
+              {!authUser && <p className="text-sm text-slate-500 dark:text-slate-400">Log in om een topic te starten.</p>}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-full bg-blue-600 text-white text-sm font-semibold disabled:opacity-60"
+                  onClick={handleCreateTopic}
+                  disabled={topicSaving}
+                >
+                  {topicSaving ? 'Opslaan...' : 'Topic plaatsen'}
+                </button>
+              </div>
+            </div>
+          </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProfile }) {
+  const db = getFirebaseDbInstance();
+  const [topic, setTopic] = useState(null);
+  const [topicLoading, setTopicLoading] = useState(true);
+  const [comments, setComments] = useState([]);
+  const [commentText, setCommentText] = useState('');
+  const [commentError, setCommentError] = useState(null);
+  const [commentSaving, setCommentSaving] = useState(false);
+  const commentAuthorName = sanitizeHandle(
+    userProfile?.displayName || userProfile?.username || authUser?.displayName || authUser?.email?.split('@')[0],
+  );
+
+  useEffect(() => {
+    if (!db || !communityId || !topicId) return undefined;
+    setTopicLoading(true);
+    const topicRef = doc(db, 'communities', communityId, 'topics', topicId);
+    return onSnapshot(
+      topicRef,
+      (snapshot) => {
+        setTopic(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+        setTopicLoading(false);
+      },
+      (error) => {
+        console.error('Failed to load topic', error);
+        setTopicLoading(false);
+      },
+    );
+  }, [db, communityId, topicId]);
+
+  useEffect(() => {
+    if (!db || !communityId || !topicId) return undefined;
+    const commentsRef = collection(db, 'communities', communityId, 'topics', topicId, 'comments');
+    const commentsQuery = query(commentsRef, orderBy('createdAt', 'desc'));
+    return onSnapshot(
+      commentsQuery,
+      (snapshot) => {
+        setComments(snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })));
+      },
+      (error) => {
+        console.error('Failed to load comments', error);
+      },
+    );
+  }, [db, communityId, topicId]);
+
+  const handleAddComment = async () => {
+    if (!authUser) {
+      setCommentError('Log in om te reageren.');
+      return;
+    }
+    if (!commentText.trim()) {
+      setCommentError('Schrijf eerst een reactie.');
+      return;
+    }
+    if (!db) {
+      setCommentError('Database niet beschikbaar.');
+      return;
+    }
+    setCommentSaving(true);
+    setCommentError(null);
+    try {
+      const commentsRef = collection(db, 'communities', communityId, 'topics', topicId, 'comments');
+      await addDoc(commentsRef, {
+        text: commentText.trim(),
+        authorId: authUser.uid,
+        authorName: commentAuthorName || 'Communitylid',
+        createdAt: serverTimestamp(),
+      });
+      setCommentText('');
+    } catch (error) {
+      console.error('Failed to add comment', error);
+      setCommentError('Reactie kon niet worden opgeslagen.');
+    } finally {
+      setCommentSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <button type="button" onClick={onBack} className="flex items-center text-slate-500 hover:text-slate-800 font-medium">
+        <ChevronLeft className="w-4 h-4 mr-1" /> Terug naar topics
+      </button>
+      <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 space-y-2">
+        {topicLoading ? (
+          <div className="flex items-center text-sm text-slate-500 dark:text-slate-400 gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Topic laden...
+          </div>
+        ) : (
+          <>
+            <h3 className="text-2xl font-semibold text-slate-900 dark:text-white">{topic?.title || 'Topic'}</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{topic?.authorName || 'Communitylid'}</p>
+            <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">{topic?.body || 'Geen extra uitleg toegevoegd.'}</p>
+          </>
+        )}
+      </div>
+      <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 space-y-4">
+        <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Reacties</h4>
+        <div className="space-y-3">
+          {comments.length > 0 ? (
+            comments.map((comment) => (
+              <div key={comment.id} className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {sanitizeHandle(comment.authorName || 'Communitylid')}
+                </p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">{comment.text}</p>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">Wees de eerste die reageert.</p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <textarea
+            value={commentText}
+            onChange={(event) => setCommentText(event.target.value)}
+            rows={3}
+            placeholder="Deel je reactie..."
+            className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-2 text-sm text-slate-800 dark:text-slate-100"
+          />
+          {commentError && <p className="text-sm text-red-500">{commentError}</p>}
+          {!authUser && <p className="text-sm text-slate-500 dark:text-slate-400">Log in om te reageren.</p>}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="px-4 py-2 rounded-full bg-blue-600 text-white text-sm font-semibold disabled:opacity-60"
+              onClick={handleAddComment}
+              disabled={commentSaving}
+            >
+              {commentSaving ? 'Plaatsen...' : 'Plaats reactie'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

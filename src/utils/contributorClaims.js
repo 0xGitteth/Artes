@@ -28,7 +28,7 @@
  * @property {string} requestedByUid
  * @property {string | null} contributorId
  * @property {string | null} aliasId
- * @property {'pending' | 'approved' | 'rejected'} status
+ * @property {'pending' | 'approved' | 'denied' | 'needsModeration'} status
  * @property {import('firebase/firestore').Timestamp | null} createdAt
  * @property {import('firebase/firestore').Timestamp | null} updatedAt
  */

@@ -141,9 +141,14 @@ export const updateProfile = async (uid, payload) => {
 export const publishPost = async (post) => {
   if (!auth.currentUser) throw new Error('Not signed in');
 
+  const contributorIds = Array.isArray(post.credits)
+    ? Array.from(new Set(post.credits.map((credit) => credit?.contributorId).filter(Boolean)))
+    : [];
+
   logFirestoreOp('WRITE', 'posts/{auto}', 'publishPost');
   await addDoc(collection(db, 'posts'), {
     ...post,
+    contributorIds,
     authorUid: auth.currentUser.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

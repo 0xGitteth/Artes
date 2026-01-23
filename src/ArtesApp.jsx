@@ -545,6 +545,8 @@ export default function ArtesApp() {
         const path = window.location.pathname || '/';
         const routedView = path.startsWith('/moderation')
           ? 'moderation'
+          : path.startsWith('/vouch')
+            ? 'vouch'
           : path.startsWith('/support')
             ? 'support'
             : path.startsWith('/chat') || path.startsWith('/messages')
@@ -611,11 +613,13 @@ export default function ArtesApp() {
       const path = window.location.pathname || '/';
       if (path.startsWith('/moderation')) {
         setView('moderation');
+      } else if (path.startsWith('/vouch')) {
+        setView('vouch');
       } else if (path.startsWith('/support')) {
         setView('support');
       } else if (path.startsWith('/chat') || path.startsWith('/messages')) {
         setView('chat');
-      } else if (view === 'moderation' || view === 'support' || view === 'chat') {
+      } else if (view === 'moderation' || view === 'vouch' || view === 'support' || view === 'chat') {
         setView('gallery');
       }
     };
@@ -626,6 +630,8 @@ export default function ArtesApp() {
   useEffect(() => {
     if (view === 'moderation') {
       window.history.pushState({}, '', '/moderation');
+    } else if (view === 'vouch') {
+      window.history.pushState({}, '', '/vouch');
     } else if (view === 'support') {
       window.history.pushState({}, '', '/support');
     } else if (view === 'chat') {
@@ -643,6 +649,7 @@ export default function ArtesApp() {
       window.history.pushState({}, '', `/chat${query ? `?${query}` : ''}`);
     } else if (
       window.location.pathname === '/moderation'
+      || window.location.pathname === '/vouch'
       || window.location.pathname === '/chat'
       || window.location.pathname === '/messages'
       || window.location.pathname === '/support'
@@ -1190,6 +1197,12 @@ export default function ArtesApp() {
           {!profileLoading && view === 'support' && (
             <SupportLanding onOpenChat={handleOpenSupportChat} canOpenChat={Boolean(authUser)} />
           )}
+          {!profileLoading && view === 'vouch' && (
+            <VouchRequestsPanel
+              authUser={authUser}
+              functionsBase={functionsBase}
+            />
+          )}
           {!profileLoading && view === 'chat' && (
             authUser ? (
               <div className="max-w-6xl mx-auto px-4 py-6 h-[75vh]">
@@ -1286,6 +1299,10 @@ export default function ArtesApp() {
             onOpenSupport={() => {
               setShowSettingsModal(false);
               setView('support');
+            }}
+            onOpenVouchRequests={() => {
+              setShowSettingsModal(false);
+              setView('vouch');
             }}
             darkMode={darkMode}
             onToggleDark={handleToggleDarkMode}
@@ -5133,7 +5150,7 @@ function ShadowProfileModal({ name, contributorId, posts, onClose, onPostClick }
       </div>
     );
 }
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, darkMode, onToggleDark, onLogout }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenVouchRequests, darkMode, onToggleDark, onLogout }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white dark:bg-slate-900 w-80 h-full p-6 flex flex-col gap-6 text-slate-900 dark:text-slate-100">
@@ -5184,6 +5201,14 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     <h4 className="text-xs uppercase font-bold text-slate-400">Overig</h4>
                     <button
                       type="button"
+                      onClick={onOpenVouchRequests}
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                    >
+                      <span>Vouch verzoeken</span>
+                      <MessageCircle className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={onOpenSupport}
                       className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
                     >
@@ -5194,6 +5219,143 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
             </div>
         </div>
     ) 
+}
+function VouchRequestsPanel({ authUser, functionsBase }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [error, setError] = useState('');
+
+  const loadRequests = useCallback(async () => {
+    if (!authUser?.uid || !functionsBase) return;
+    setLoading(true);
+    setError('');
+    try {
+      const token = await authUser.getIdToken();
+      const response = await fetch(`${functionsBase}/getVouchRequests`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || 'Vouch verzoeken ophalen mislukt.');
+      }
+      const data = await response.json();
+      setRequests(Array.isArray(data?.requests) ? data.requests : []);
+    } catch (err) {
+      setError(err.message || 'Vouch verzoeken ophalen mislukt.');
+    } finally {
+      setLoading(false);
+    }
+  }, [authUser, functionsBase]);
+
+  useEffect(() => {
+    loadRequests();
+  }, [loadRequests]);
+
+  const submitVote = async (requestId, vote) => {
+    if (!authUser?.uid || !functionsBase) return;
+    setActionLoadingId(requestId);
+    setError('');
+    try {
+      const token = await authUser.getIdToken();
+      const response = await fetch(`${functionsBase}/submitClaimVouch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ requestId, vote }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || 'Stemmen mislukt.');
+      }
+      setRequests((prev) => prev.filter((item) => item.id !== requestId));
+    } catch (err) {
+      setError(err.message || 'Stemmen mislukt.');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-6">
+      <div className="mb-6">
+        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Vouch verzoeken</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Help mee door claims te bevestigen of af te wijzen.
+        </p>
+      </div>
+      <div className="flex items-center justify-between mb-4">
+        <button
+          type="button"
+          onClick={loadRequests}
+          className="px-4 py-2 text-sm font-semibold rounded-full bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-60"
+          disabled={loading}
+        >
+          {loading ? 'Laden...' : 'Ververs'}
+        </button>
+        {error && (
+          <span className="text-sm text-rose-500">{error}</span>
+        )}
+      </div>
+      {loading && requests.length === 0 && (
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
+          Vouch verzoeken laden...
+        </div>
+      )}
+      {!loading && requests.length === 0 && (
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
+          Geen openstaande vouch verzoeken.
+        </div>
+      )}
+      <div className="grid gap-4">
+        {requests.map((request) => (
+          <div
+            key={request.id}
+            className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Contributor claim</p>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                  {request.contributorName || request.contributorId}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Mode: {request.mode === 'merge' ? 'Merge' : 'Link'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span>👍 {request.yesCount || 0}</span>
+                <span>👎 {request.noCount || 0}</span>
+              </div>
+            </div>
+            <div className="mt-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => submitVote(request.id, 'yes')}
+                disabled={actionLoadingId === request.id}
+                className="flex-1 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 py-2 text-sm font-semibold hover:bg-emerald-100 disabled:opacity-60"
+              >
+                Vouch ✅
+              </button>
+              <button
+                type="button"
+                onClick={() => submitVote(request.id, 'no')}
+                disabled={actionLoadingId === request.id}
+                className="flex-1 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 py-2 text-sm font-semibold hover:bg-rose-100 disabled:opacity-60"
+              >
+                Afwijzen ❌
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 function WelcomeTour({ onClose, setView }) {
   const [step, setStep] = useState(0);

@@ -239,6 +239,50 @@ const parseJsonBody = (req) => {
   return null;
 };
 
+const claimStatuses = ['pending', 'approved', 'denied', 'needsModeration'];
+const claimVoteOptions = ['yes', 'no'];
+const claimTimeoutMs = 7 * 24 * 60 * 60 * 1000;
+
+const fetchUserProfile = async (uid) => {
+  if (!uid) return null;
+  const snapshot = await db.collection('users').doc(uid).get();
+  return snapshot.exists ? snapshot.data() : null;
+};
+
+const canCreateClaimRequest = (profile) => Boolean(
+  profile?.ageVerified === true || (typeof profile?.onboardingStep === 'number' && profile.onboardingStep >= 2)
+);
+
+const resolveContributorPostAuthorUid = (post) => post?.authorUid || post?.authorId || null;
+
+const buildEligibleVouchers = async ({ contributorId, claimantUid }) => {
+  const eligible = new Set();
+  const userSnapshots = await db.collection('users')
+    .where('contributorId', '==', contributorId)
+    .limit(20)
+    .get();
+
+  userSnapshots.forEach((docSnap) => {
+    if (docSnap.id && docSnap.id !== claimantUid) {
+      eligible.add(docSnap.id);
+    }
+  });
+
+  const postSnapshots = await db.collection('posts')
+    .where('contributorIds', 'array-contains', contributorId)
+    .limit(50)
+    .get();
+
+  postSnapshots.forEach((docSnap) => {
+    const authorUid = resolveContributorPostAuthorUid(docSnap.data());
+    if (authorUid && authorUid !== claimantUid) {
+      eligible.add(authorUid);
+    }
+  });
+
+  return Array.from(eligible).slice(0, 10);
+};
+
 const normalizeSupportSenderRole = (message, threadUserUid) => {
   if (!message) return 'user';
   if (message.senderRole) return message.senderRole;
@@ -1639,6 +1683,270 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to perform action' });
+  }
+});
+
+export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const body = parseJsonBody(req);
+    const contributorId = body?.contributorId || null;
+    const mode = body?.mode === 'merge' ? 'merge' : 'link';
+    if (!contributorId) {
+      res.status(400).json({ error: 'contributorId is required' });
+      return;
+    }
+
+    const profile = await fetchUserProfile(decoded.uid);
+    if (!canCreateClaimRequest(profile)) {
+      res.status(403).json({ error: 'ID check required to create claim request' });
+      return;
+    }
+
+    const contributorSnap = await db.collection('contributors').doc(contributorId).get();
+    if (!contributorSnap.exists) {
+      res.status(404).json({ error: 'Contributor not found' });
+      return;
+    }
+
+    const eligibleVoterUids = await buildEligibleVouchers({ contributorId, claimantUid: decoded.uid });
+    const now = Date.now();
+    const expiresAt = Timestamp.fromDate(new Date(now + claimTimeoutMs));
+
+    const requestRef = await db.collection('claimRequests').add({
+      contributorId,
+      requestedByUid: decoded.uid,
+      mode,
+      status: 'pending',
+      statusReason: null,
+      yesCount: 0,
+      noCount: 0,
+      eligibleVoterUids,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      expiresAt,
+    });
+
+    res.status(200).json({ ok: true, requestId: requestRef.id, eligibleVoterUids });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to create claim request' });
+  }
+});
+
+export const getVouchRequests = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'GET') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const snapshot = await db.collection('claimRequests')
+      .where('status', '==', 'pending')
+      .where('eligibleVoterUids', 'array-contains', decoded.uid)
+      .orderBy('createdAt', 'desc')
+      .limit(10)
+      .get();
+
+    const requests = await Promise.all(snapshot.docs.map(async (docSnap) => {
+      const data = docSnap.data();
+      const contributorId = data?.contributorId || null;
+      let contributorName = null;
+      if (contributorId) {
+        const contributorSnap = await db.collection('contributors').doc(contributorId).get();
+        contributorName = contributorSnap.exists ? (contributorSnap.data()?.displayName || null) : null;
+      }
+      return {
+        id: docSnap.id,
+        contributorId,
+        contributorName,
+        requestedByUid: data?.requestedByUid || null,
+        mode: data?.mode || 'link',
+        status: data?.status || 'pending',
+        yesCount: data?.yesCount || 0,
+        noCount: data?.noCount || 0,
+        createdAt: data?.createdAt || null,
+      };
+    }));
+
+    res.status(200).json({ ok: true, requests });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to fetch vouch requests' });
+  }
+});
+
+export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const body = parseJsonBody(req);
+    const requestId = body?.requestId || null;
+    const vote = claimVoteOptions.includes(body?.vote) ? body.vote : null;
+    if (!requestId || !vote) {
+      res.status(400).json({ error: 'requestId and vote are required' });
+      return;
+    }
+
+    const requestRef = db.collection('claimRequests').doc(requestId);
+    const voteRef = db.collection('claimVouches').doc(requestId).collection('votes').doc(decoded.uid);
+    let responsePayload = { ok: true };
+
+    await db.runTransaction(async (transaction) => {
+      const requestSnap = await transaction.get(requestRef);
+      if (!requestSnap.exists) {
+        const error = new Error('Claim request not found');
+        error.status = 404;
+        throw error;
+      }
+      const data = requestSnap.data();
+      if (!claimStatuses.includes(data?.status)) {
+        const error = new Error('Invalid claim request status');
+        error.status = 400;
+        throw error;
+      }
+      if (data.status !== 'pending') {
+        const error = new Error('Claim request is not pending');
+        error.status = 409;
+        throw error;
+      }
+      if (!Array.isArray(data?.eligibleVoterUids) || !data.eligibleVoterUids.includes(decoded.uid)) {
+        const error = new Error('Not eligible to vouch');
+        error.status = 403;
+        throw error;
+      }
+
+      const createdAt = data?.createdAt?.toDate ? data.createdAt.toDate() : null;
+      if (createdAt && Date.now() - createdAt.getTime() > claimTimeoutMs) {
+        transaction.update(requestRef, {
+          status: 'needsModeration',
+          statusReason: 'vouch timeout',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        const error = new Error('Claim request expired');
+        error.status = 409;
+        throw error;
+      }
+
+      const existingVote = await transaction.get(voteRef);
+      if (existingVote.exists) {
+        const error = new Error('Already voted');
+        error.status = 409;
+        throw error;
+      }
+
+      const yesCount = Number(data?.yesCount || 0) + (vote === 'yes' ? 1 : 0);
+      const noCount = Number(data?.noCount || 0) + (vote === 'no' ? 1 : 0);
+
+      transaction.set(voteRef, {
+        vote,
+        voterUid: decoded.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      transaction.update(requestRef, {
+        yesCount,
+        noCount,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      if (yesCount >= 1 && noCount >= 1) {
+        transaction.update(requestRef, {
+          status: 'needsModeration',
+          statusReason: 'vouch conflict',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        responsePayload = { ok: true, status: 'needsModeration', reason: 'vouch conflict' };
+        return;
+      }
+
+      if (yesCount >= 2) {
+        const mode = data?.mode === 'merge' ? 'merge' : 'link';
+        if (mode === 'merge') {
+          transaction.update(requestRef, {
+            status: 'needsModeration',
+            statusReason: 'merge requested',
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          responsePayload = { ok: true, status: 'needsModeration', reason: 'merge requested' };
+          return;
+        }
+
+        const contributorId = data?.contributorId || null;
+        const requestedByUid = data?.requestedByUid || null;
+        if (!contributorId || !requestedByUid) {
+          const error = new Error('Claim request missing contributor or requester');
+          error.status = 400;
+          throw error;
+        }
+        const contributorRef = db.collection('contributors').doc(contributorId);
+        const claimantRef = db.collection('users').doc(requestedByUid);
+        transaction.update(claimantRef, {
+          contributorId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(contributorRef, {
+          claimedByUid: requestedByUid,
+          claimedAt: FieldValue.serverTimestamp(),
+          status: 'claimed',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(requestRef, {
+          status: 'approved',
+          statusReason: null,
+          approvedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        responsePayload = { ok: true, status: 'approved' };
+      }
+    });
+
+    res.status(200).json(responsePayload);
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to submit vouch' });
+  }
+});
+
+export const expireClaimRequests = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    await ensureModerator(decoded);
+    const cutoff = Timestamp.fromDate(new Date(Date.now() - claimTimeoutMs));
+    const snapshot = await db.collection('claimRequests')
+      .where('status', '==', 'pending')
+      .where('createdAt', '<=', cutoff)
+      .get();
+
+    if (snapshot.empty) {
+      res.status(200).json({ ok: true, updated: 0 });
+      return;
+    }
+
+    const batch = db.batch();
+    snapshot.docs.forEach((docSnap) => {
+      batch.update(docSnap.ref, {
+        status: 'needsModeration',
+        statusReason: 'vouch timeout',
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+
+    res.status(200).json({ ok: true, updated: snapshot.size });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to expire claim requests' });
   }
 });
 

@@ -34,6 +34,8 @@ import {
   isModerator,
   ensureSupportThreadExists,
   migrateRemoveGeneralTheme,
+  getContributorByAlias,
+  createContributorWithAliases,
 } from './firebase';
 import {
   collection,
@@ -53,6 +55,7 @@ import {
 import ChatPanel from './components/ChatPanel';
 import ModerationSupportChat from './components/ModerationSupportChat';
 import SupportLanding from './components/SupportLanding';
+import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 
 // --- Constants & Styling ---
 
@@ -398,7 +401,7 @@ export default function ArtesApp() {
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [quickProfileId, setQuickProfileId] = useState(null);
   const [selectedPost, setSelectedPost] = useState(null);
-  const [shadowProfileName, setShadowProfileName] = useState(null);
+  const [shadowProfile, setShadowProfile] = useState(null);
   const [uploads, setUploads] = useState([]);
   const [moderationModal, setModerationModal] = useState(null);
   const [moderationActionPending, setModerationActionPending] = useState(false);
@@ -1140,7 +1143,7 @@ export default function ArtesApp() {
             <Gallery 
               posts={posts} 
               onUserClick={setQuickProfileId}
-              onShadowClick={setShadowProfileName}
+              onShadowClick={setShadowProfile}
               onPostClick={setSelectedPost}
               onChallengeClick={() => setView('challenge_timeline')}
               profile={profile}
@@ -1324,7 +1327,15 @@ export default function ArtesApp() {
             moderationApiBase={moderationApiBase}
           />
         )}
-        {shadowProfileName && <ShadowProfileModal name={shadowProfileName} posts={posts} onClose={() => setShadowProfileName(null)} onPostClick={setSelectedPost} />}
+        {shadowProfile && (
+          <ShadowProfileModal
+            name={shadowProfile.name}
+            contributorId={shadowProfile.contributorId}
+            posts={posts}
+            onClose={() => setShadowProfile(null)}
+            onPostClick={setSelectedPost}
+          />
+        )}
 
       </div>
     </div>
@@ -1804,7 +1815,15 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
                     <div className="text-xs font-medium text-slate-900 group-hover:text-blue-600 dark:text-white transition-colors">{post.authorName}</div>
                  </div>
                  {post.credits && post.credits.map((c, i) => (
-                    <div key={i} className="cursor-pointer group" onClick={() => c.uid ? onUserClick(c.uid) : onShadowClick(c.name)}>
+                    <div
+                      key={i}
+                      className="cursor-pointer group"
+                      onClick={() =>
+                        c.uid
+                          ? onUserClick(c.uid)
+                          : onShadowClick({ name: c.name, contributorId: c.contributorId || null })
+                      }
+                    >
                        <div className="text-xs uppercase font-bold text-slate-400">{ROLES.find(r => r.id === c.role)?.label || c.role}</div>
                        <div className="text-xs font-medium text-slate-900 group-hover:text-blue-600 dark:text-white transition-colors flex items-center justify-end gap-1">
                           {c.name} {!c.uid && <ExternalLink className="w-3 h-3 text-slate-400"/>}
@@ -3044,7 +3063,13 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
   const [desc, setDesc] = useState('');
   const [selectedStyles, setSelectedStyles] = useState([]);
   const [credits, setCredits] = useState([selfCredit]);
-  const [newCredit, setNewCredit] = useState({ role: 'model', name: '', link: '' });
+  const [newCredit, setNewCredit] = useState({
+    role: 'model',
+    name: '',
+    instagramHandle: '',
+    website: '',
+    email: '',
+  });
   const [showInvite, setShowInvite] = useState(false);
   const [makerTags, setMakerTags] = useState([]);
   const [appliedTriggers, setAppliedTriggers] = useState([]);
@@ -3214,19 +3239,83 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
     }
   };
 
-  const addCredit = (foundUser) => {
+  const addCredit = async (foundUser) => {
      if(foundUser) {
-        setCredits([...credits, { role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid }]);
+        setCredits((prev) => ([...prev, { role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid }]));
         setContributorSearch('');
-        setNewCredit({...newCredit, name: ''});
-     } else {
-        if(!newCredit.name) return;
-        // Add shadow profile
-        setCredits([...credits, { role: newCredit.role, name: newCredit.name, link: newCredit.link, isExternal: true }]);
-        setContributorSearch('');
-        setNewCredit({ role: 'model', name: '', link: '' });
+        setNewCredit({ role: newCredit.role, name: '', instagramHandle: '', website: '', email: '' });
         setShowInvite(false);
+        return;
      }
+
+     const displayName = newCredit.name.trim();
+     if(!displayName) return;
+
+     const normalizedInstagram = normalizeInstagram(newCredit.instagramHandle);
+     const normalizedWebsite = normalizeDomain(newCredit.website);
+     const normalizedEmail = normalizeEmail(newCredit.email);
+     const aliasCandidates = [
+       normalizedInstagram ? { type: 'instagram', value: normalizedInstagram } : null,
+       normalizedWebsite ? { type: 'domain', value: normalizedWebsite } : null,
+       normalizedEmail ? { type: 'email', value: normalizedEmail } : null,
+     ].filter(Boolean);
+
+     let contributorId = null;
+     for (const alias of aliasCandidates) {
+       const lookup = await getContributorByAlias(alias.type, alias.value);
+       if (import.meta.env.DEV) {
+         console.log('[ContributorAlias] lookup', {
+           type: alias.type,
+           value: alias.value,
+           hit: Boolean(lookup?.contributor?.id),
+         });
+       }
+       if (lookup?.contributor?.id && !contributorId) {
+         contributorId = lookup.contributor.id;
+       } else if (lookup?.contributor?.id && contributorId && contributorId !== lookup.contributor.id) {
+         if (import.meta.env.DEV) {
+           console.warn('[ContributorAlias] multiple contributors found', {
+             primary: contributorId,
+             secondary: lookup.contributor.id,
+           });
+         }
+       }
+     }
+
+     let createdAliasIds = [];
+     if (!contributorId) {
+       const result = await createContributorWithAliases({
+         displayName,
+         instagramHandle: normalizedInstagram || undefined,
+         website: normalizedWebsite || undefined,
+         email: normalizedEmail || undefined,
+       });
+       contributorId = result.contributorId;
+       createdAliasIds = result.aliasIds;
+       if (import.meta.env.DEV) {
+         console.log('[Contributor] created', contributorId);
+       }
+     }
+
+     if (import.meta.env.DEV && createdAliasIds.length > 0) {
+       console.log('[ContributorAlias] created', createdAliasIds);
+     }
+
+     setCredits((prev) => ([
+       ...prev,
+       {
+         role: newCredit.role,
+         name: displayName,
+         contributorId,
+         instagramHandle: normalizedInstagram || null,
+         website: normalizedWebsite || null,
+         email: normalizedEmail || null,
+         isExternal: true,
+       },
+     ]));
+     setContributorSearch('');
+     setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '' });
+     setShowInvite(false);
   };
 
   useEffect(() => {
@@ -3313,8 +3402,8 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
       setTitle('');
       setDesc('');
       setSelectedStyles([]);
-      setCredits([{ role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true }]);
-      setNewCredit({ role: 'model', name: '', link: '' });
+                      setCredits([{ role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true }]);
+      setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '' });
       setShowInvite(false);
       setMakerTags([]);
       setAppliedTriggers([]);
@@ -3501,7 +3590,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
                          </div>
 
                          <div className="flex gap-2 mb-2">
-                            <select className="p-2 border rounded text-sm w-1/3" value={newCredit.role} onChange={e => setNewCredit({...newCredit, role: e.target.value})}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
+                            <select className="p-2 border rounded text-sm w-1/3" value={newCredit.role} onChange={e => setNewCredit((prev) => ({...prev, role: e.target.value}))}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
                             <div className="relative flex-1">
                                 <input 
                                    className="w-full p-2 border rounded text-sm" 
@@ -3509,14 +3598,14 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
                                    value={contributorSearch || newCredit.name} 
                                    onChange={e => {
                                       setContributorSearch(e.target.value);
-                                      setNewCredit({...newCredit, name: e.target.value});
+                                      setNewCredit((prev) => ({...prev, name: e.target.value}));
                                       if(!e.target.value) setShowInvite(false);
                                    }} 
                                 />
                                 {contributorSearch && searchResults.length > 0 && (
                                    <div className="absolute top-full left-0 right-0 bg-white border mt-1 rounded shadow-lg max-h-40 overflow-y-auto z-10">
                                       {searchResults.map(u => (
-                                         <div key={u.uid} className="p-2 hover:bg-slate-100 cursor-pointer text-sm" onClick={() => addCredit(u)}>{u.displayName}</div>
+                                         <div key={u.uid} className="p-2 hover:bg-slate-100 cursor-pointer text-sm" onClick={() => void addCredit(u)}>{u.displayName}</div>
                                       ))}
                                    </div>
                                 )}
@@ -3531,9 +3620,26 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
                          
                          {showInvite && (
                             <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 mb-2 border border-yellow-200">
-                               <p className="mb-2 font-semibold">Tijdelijk profiel aanmaken voor {newCredit.name}</p>
-                               <input className="w-full p-2 rounded border mb-2" placeholder="Website / Instagram Link (Optioneel)" value={newCredit.link} onChange={e => setNewCredit({...newCredit, link: e.target.value})} />
-                               <button onClick={() => addCredit(null)} className="w-full bg-yellow-600 text-white py-1 rounded">Toevoegen</button>
+                               <p className="mb-2 font-semibold">Ongeclaimd profiel aanmaken voor {newCredit.name}</p>
+                               <input
+                                 className="w-full p-2 rounded border mb-2"
+                                 placeholder="Instagram handle (optioneel)"
+                                 value={newCredit.instagramHandle}
+                                 onChange={e => setNewCredit((prev) => ({...prev, instagramHandle: e.target.value}))}
+                               />
+                               <input
+                                 className="w-full p-2 rounded border mb-2"
+                                 placeholder="Website domein (optioneel)"
+                                 value={newCredit.website}
+                                 onChange={e => setNewCredit((prev) => ({...prev, website: e.target.value}))}
+                               />
+                               <input
+                                 className="w-full p-2 rounded border mb-2"
+                                 placeholder="Email (optioneel)"
+                                 value={newCredit.email}
+                                 onChange={e => setNewCredit((prev) => ({...prev, email: e.target.value}))}
+                               />
+                               <button onClick={() => void addCredit(null)} className="w-full bg-yellow-600 text-white py-1 rounded">Toevoegen</button>
                             </div>
                          )}
 
@@ -4885,8 +4991,10 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
     </div>
   );
 }
-function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
-    const shadowPosts = posts.filter(p => p.credits && p.credits.some(c => c.name === name));
+function ShadowProfileModal({ name, contributorId, posts, onClose, onPostClick }) {
+    const shadowPosts = posts.filter(p => p.credits && p.credits.some((c) => (
+      (contributorId && c.contributorId === contributorId) || c.name === name
+    )));
 
     const normalizeExternalLink = (link) => {
       if (!link) return null;
@@ -4914,13 +5022,30 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
       const collected = new Map();
       shadowPosts.forEach((post) => {
         post.credits?.forEach((credit) => {
-          if (credit.name !== name || !credit.link) return;
-          const normalized = normalizeExternalLink(credit.link);
-          if (normalized) collected.set(normalized.url, normalized);
+          const matches = (contributorId && credit.contributorId === contributorId) || credit.name === name;
+          if (!matches) return;
+          if (credit.instagramHandle) {
+            const handle = credit.instagramHandle.replace(/^@+/, '');
+            const url = `https://instagram.com/${handle}`;
+            collected.set(url, { type: 'instagram', label: `@${handle}`, url });
+          }
+          if (credit.website) {
+            const url = /^https?:\/\//i.test(credit.website) ? credit.website : `https://${credit.website}`;
+            const label = credit.website.replace(/^https?:\/\//i, '');
+            collected.set(url, { type: 'website', label, url });
+          }
+          if (credit.email) {
+            const url = `mailto:${credit.email}`;
+            collected.set(url, { type: 'email', label: credit.email, url });
+          }
+          if (credit.link) {
+            const normalized = normalizeExternalLink(credit.link);
+            if (normalized) collected.set(normalized.url, normalized);
+          }
         });
       });
       return Array.from(collected.values());
-    }, [shadowPosts, name]);
+    }, [contributorId, name, shadowPosts]);
 
     return (
       <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4">
@@ -4928,7 +5053,7 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
           <div className="relative h-64 bg-indigo-900 flex items-center justify-center flex-col text-white px-6 text-center">
             <div className="text-4xl font-bold mb-2">{name}</div>
             <p className="text-sm text-white/80">
-              Tijdelijk profiel. Laat deze persoon weten dat er een tijdelijk profiel is aangemaakt zodat ze het kunnen claimen.
+              Ongeclaimd profiel. Laat deze persoon weten dat er een profiel is aangemaakt zodat ze het kunnen claimen.
             </p>
             {externalLinks.length > 0 && (
               <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-sm">
@@ -4940,7 +5065,7 @@ function ShadowProfileModal({ name, posts, onClose, onPostClick }) {
                     rel="noreferrer"
                     className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-white hover:bg-white/20 transition"
                   >
-                    {link.type === 'instagram' ? 'Instagram' : 'Website'}: {link.label}
+                    {link.type === 'instagram' ? 'Instagram' : link.type === 'email' ? 'Email' : 'Website'}: {link.label}
                   </a>
                 ))}
               </div>

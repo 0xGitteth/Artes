@@ -3086,12 +3086,22 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState('');
   const moderationEndpoint = import.meta.env.VITE_MODERATION_FUNCTION_URL;
+  const [allowExternalOverride, setAllowExternalOverride] = useState(false);
 
   // Contributor search logic
   const [contributorSearch, setContributorSearch] = useState('');
+  const normalizeDisplayName = (value) => String(value || '').trim().toLowerCase();
+  const getContributorMatches = (term) => {
+    const normalizedTerm = normalizeDisplayName(term);
+    if (!normalizedTerm) return [];
+    return users.filter((u) => {
+      const candidate = normalizeDisplayName(u.displayNameLower || u.displayName);
+      return candidate === normalizedTerm || candidate.startsWith(normalizedTerm);
+    }).slice(0, 5);
+  };
   const searchResults = useMemo(() => {
     if (!contributorSearch) return [];
-    return users.filter(u => u.displayName.toLowerCase().includes(contributorSearch.toLowerCase()));
+    return getContributorMatches(contributorSearch);
   }, [users, contributorSearch]);
 
   const toDataUrlSize = (dataUrl) => {
@@ -3241,8 +3251,9 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
 
   const addCredit = async (foundUser) => {
      if(foundUser) {
-        setCredits((prev) => ([...prev, { role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid }]));
+        setCredits((prev) => ([...prev, { role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid, contributorId: foundUser.contributorId || null }]));
         setContributorSearch('');
+        setAllowExternalOverride(false);
         setNewCredit({ role: newCredit.role, name: '', instagramHandle: '', website: '', email: '' });
         setShowInvite(false);
         return;
@@ -3250,6 +3261,12 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
 
      const displayName = newCredit.name.trim();
      if(!displayName) return;
+     const nameMatches = getContributorMatches(displayName);
+     if (nameMatches.length > 0 && !allowExternalOverride) {
+       setContributorSearch(displayName);
+       setShowInvite(false);
+       return;
+     }
 
      const normalizedInstagram = normalizeInstagram(newCredit.instagramHandle);
      const normalizedWebsite = normalizeDomain(newCredit.website);
@@ -3314,6 +3331,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
        },
      ]));
      setContributorSearch('');
+     setAllowExternalOverride(false);
      setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '' });
      setShowInvite(false);
   };
@@ -3599,20 +3617,41 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
                                    onChange={e => {
                                       setContributorSearch(e.target.value);
                                       setNewCredit((prev) => ({...prev, name: e.target.value}));
+                                      setAllowExternalOverride(false);
                                       if(!e.target.value) setShowInvite(false);
                                    }} 
                                 />
                                 {contributorSearch && searchResults.length > 0 && (
                                    <div className="absolute top-full left-0 right-0 bg-white border mt-1 rounded shadow-lg max-h-40 overflow-y-auto z-10">
+                                      <p className="px-2 pt-2 text-[11px] text-slate-500">Selecteer een bestaande bijdrager.</p>
                                       {searchResults.map(u => (
                                          <div key={u.uid} className="p-2 hover:bg-slate-100 cursor-pointer text-sm" onClick={() => void addCredit(u)}>{u.displayName}</div>
                                       ))}
+                                      <button
+                                        type="button"
+                                        className="w-full border-t text-xs text-slate-600 px-2 py-2 text-left hover:bg-slate-50"
+                                        onClick={() => {
+                                          setAllowExternalOverride(true);
+                                          setShowInvite(true);
+                                        }}
+                                      >
+                                        Toch extern toevoegen
+                                      </button>
                                    </div>
                                 )}
                                 {contributorSearch && searchResults.length === 0 && (
                                     <div className="absolute top-full left-0 right-0 bg-white border mt-1 rounded shadow-lg p-2 z-10">
                                         <p className="text-xs text-orange-500 mb-2">Geen gebruiker gevonden.</p>
-                                        <button onClick={() => setShowInvite(true)} className="text-xs bg-slate-100 p-1 rounded w-full">Voeg toe als extern</button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setAllowExternalOverride(true);
+                                            setShowInvite(true);
+                                          }}
+                                          className="text-xs bg-slate-100 p-1 rounded w-full"
+                                        >
+                                          Voeg toe als extern
+                                        </button>
                                     </div>
                                 )}
                             </div>

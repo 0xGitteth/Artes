@@ -31,6 +31,13 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { SUPPORT_INTRO_TEXT } from './utils/supportChat';
+import {
+  makeAliasId,
+  normalizeAliasValue,
+  normalizeDomain,
+  normalizeEmail,
+  normalizeInstagram,
+} from './utils/contributorClaims';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -56,6 +63,125 @@ const getFirebaseDb = () => getFirestore(getFirebaseApp());
 
 export const getFirebaseAuthInstance = () => getFirebaseAuth();
 export const getFirebaseDbInstance = () => getFirebaseDb();
+
+export const CLAIMS_COLLECTIONS = {
+  contributors: 'contributors',
+  contributorAliases: 'contributorAliases',
+  claimRequests: 'claimRequests',
+  claimVouches: 'claimVouches',
+  claimInvites: 'claimInvites',
+};
+
+export const getContributorRef = (contributorId) =>
+  doc(getFirebaseDb(), CLAIMS_COLLECTIONS.contributors, contributorId);
+
+export const getContributorAliasRef = (aliasId) =>
+  doc(getFirebaseDb(), CLAIMS_COLLECTIONS.contributorAliases, aliasId);
+
+export const getClaimRequestRef = (requestId) =>
+  doc(getFirebaseDb(), CLAIMS_COLLECTIONS.claimRequests, requestId);
+
+export const getClaimInviteRef = (token) =>
+  doc(getFirebaseDb(), CLAIMS_COLLECTIONS.claimInvites, token);
+
+export const getClaimVouchesVotesCollection = (requestId) =>
+  collection(getFirebaseDb(), CLAIMS_COLLECTIONS.claimVouches, requestId, 'votes');
+
+/**
+ * Fetch a contributor by alias type/value.
+ * @param {'instagram' | 'domain' | 'email'} type
+ * @param {string} rawValue
+ * @returns {Promise<{
+ *   contributor: import('./utils/contributorClaims').Contributor | null,
+ *   alias: import('./utils/contributorClaims').ContributorAlias | null,
+ * } | null>}
+ */
+export const getContributorByAlias = async (type, rawValue) => {
+  const normalizedValue = normalizeAliasValue(type, rawValue);
+  if (!normalizedValue) return null;
+  const aliasId = makeAliasId(type, normalizedValue);
+  const aliasSnap = await getDoc(getContributorAliasRef(aliasId));
+  if (!aliasSnap.exists()) return null;
+  const aliasData = aliasSnap.data();
+  const contributorSnap = await getDoc(getContributorRef(aliasData.contributorId));
+  if (!contributorSnap.exists()) return null;
+  return {
+    alias: {
+      id: aliasSnap.id,
+      ...aliasData,
+    },
+    contributor: {
+      id: contributorSnap.id,
+      ...contributorSnap.data(),
+    },
+  };
+};
+
+/**
+ * Create a contributor profile with alias documents.
+ * @param {{
+ *   displayName: string,
+ *   instagramHandle?: string,
+ *   website?: string,
+ *   email?: string,
+ * }} params
+ * @returns {Promise<{ contributorId: string, aliasIds: string[] }>}
+ */
+export const createContributorWithAliases = async ({
+  displayName,
+  instagramHandle,
+  website,
+  email,
+}) => {
+  const db = getFirebaseDb();
+  const contributorRef = doc(collection(db, CLAIMS_COLLECTIONS.contributors));
+  const normalizedInstagram = instagramHandle ? normalizeInstagram(instagramHandle) : '';
+  const normalizedDomain = website ? normalizeDomain(website) : '';
+  const normalizedEmail = email ? normalizeEmail(email) : '';
+  const aliasEntries = [
+    normalizedInstagram ? { type: 'instagram', value: normalizedInstagram } : null,
+    normalizedDomain ? { type: 'domain', value: normalizedDomain } : null,
+    normalizedEmail ? { type: 'email', value: normalizedEmail } : null,
+  ].filter(Boolean);
+  const contributorPayload = {
+    displayName,
+    instagramHandle: normalizedInstagram || null,
+    website: normalizedDomain || null,
+    email: normalizedEmail || null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  return runTransaction(db, async (transaction) => {
+    const aliasRefs = aliasEntries.map((entry) => {
+      const aliasId = makeAliasId(entry.type, entry.value);
+      return {
+        aliasId,
+        ref: getContributorAliasRef(aliasId),
+        type: entry.type,
+        value: entry.value,
+      };
+    });
+    for (const alias of aliasRefs) {
+      const existing = await transaction.get(alias.ref);
+      if (existing.exists()) {
+        throw new Error(`Alias already claimed: ${alias.aliasId}`);
+      }
+    }
+    transaction.set(contributorRef, contributorPayload);
+    aliasRefs.forEach((alias) => {
+      transaction.set(alias.ref, {
+        type: alias.type,
+        value: alias.value,
+        contributorId: contributorRef.id,
+        createdAt: serverTimestamp(),
+      });
+    });
+    return {
+      contributorId: contributorRef.id,
+      aliasIds: aliasRefs.map((alias) => alias.aliasId),
+    };
+  });
+};
 
 export const initAuth = async () => {
   const auth = getFirebaseAuth();

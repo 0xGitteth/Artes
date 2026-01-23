@@ -148,6 +148,7 @@ export const createContributorWithAliases = async ({
     instagramHandle: normalizedInstagram || null,
     website: normalizedDomain || null,
     email: normalizedEmail || null,
+    status: 'unclaimed',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };

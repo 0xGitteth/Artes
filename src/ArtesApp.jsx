@@ -38,6 +38,7 @@ import {
   getContributorByAlias,
   createContributorWithAliases,
   CLAIMS_COLLECTIONS,
+  getFirebaseStorageInstance,
 } from './firebase';
 import {
   collection,
@@ -56,6 +57,7 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import ChatPanel from './components/ChatPanel';
 import ModerationSupportChat from './components/ModerationSupportChat';
 import SupportLanding from './components/SupportLanding';
@@ -1178,6 +1180,7 @@ export default function ArtesApp() {
               authUser={authUser}
               authError={authError}
               profile={profile}
+              functionsBase={functionsBase}
             />
           )}
           
@@ -1389,6 +1392,7 @@ export default function ArtesApp() {
             onPostClick={setSelectedPost}
             authUser={authUser}
             userProfile={userProfile}
+            functionsBase={functionsBase}
             setView={setView}
           />
         )}
@@ -1498,7 +1502,7 @@ function LoginScreen({ setView, onLogin, error, loading }) {
   );
 }
 
-function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile }) {
+function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase }) {
     const [step, setStep] = useState(() => Math.max(1, profile?.onboardingStep ?? 1));
     const [roles, setRoles] = useState([]);
     const MATCH_STEP = 1.5;
@@ -1610,21 +1614,27 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
     const handleStartPendingClaim = useCallback(async () => {
       if (!authUser?.uid || !resolvedPendingClaimContributorId || !profile?.ageVerified) return;
+      if (!functionsBase) return;
       if (claimRequestInFlightRef.current) return;
       claimRequestInFlightRef.current = true;
       try {
-        const db = getFirebaseDbInstance();
-        const payload = {
-          requestedByUid: authUser.uid,
-          contributorId: resolvedPendingClaimContributorId,
-          contributorName: resolvedPendingClaimContributorName || null,
-          mode: 'link',
-          status: 'pending',
-          method: 'onboarding',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
-        await addDoc(collection(db, CLAIMS_COLLECTIONS.claimRequests), payload);
+        const authToken = await authUser.getIdToken();
+        const response = await fetch(`${functionsBase}/createClaimRequest`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            contributorId: resolvedPendingClaimContributorId,
+            mode: 'link',
+            method: 'onboarding',
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || 'Claim verzoek mislukt.');
+        }
         await updateUserProfile(authUser.uid, {
           pendingClaimContributorId: null,
           pendingClaimContributorName: null,
@@ -1640,6 +1650,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       resolvedPendingClaimContributorId,
       resolvedPendingClaimContributorName,
       profile?.ageVerified,
+      functionsBase,
     ]);
 
     const handleSelectContributor = useCallback(async (match) => {
@@ -5600,6 +5611,7 @@ function ShadowProfileModal({
   onPostClick,
   authUser,
   userProfile,
+  functionsBase,
   setView,
 }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some((c) => (
@@ -5610,6 +5622,13 @@ function ShadowProfileModal({
     const [claimError, setClaimError] = useState('');
     const [claimSuccess, setClaimSuccess] = useState('');
     const [claimRequestId, setClaimRequestId] = useState(null);
+    const [claimCode, setClaimCode] = useState('');
+    const [claimCodeExpiresAt, setClaimCodeExpiresAt] = useState(null);
+    const [claimMethod, setClaimMethod] = useState('');
+    const [claimProofFile, setClaimProofFile] = useState(null);
+    const [claimProofUploading, setClaimProofUploading] = useState(false);
+    const [claimProofError, setClaimProofError] = useState('');
+    const [claimProofSuccess, setClaimProofSuccess] = useState('');
     const [contributorInfo, setContributorInfo] = useState(null);
     const [loadingContributor, setLoadingContributor] = useState(false);
     const [inviteLink, setInviteLink] = useState('');
@@ -5712,10 +5731,10 @@ function ShadowProfileModal({
       const methods = [];
       if (hasInstagramAlias) {
         methods.push({
-          key: 'instagramBioToken',
-          title: 'Instagram bio token',
-          description: 'Plaats een token in je bio om eigenaarschap te bewijzen.',
-          placeholder: true,
+          key: 'instagramScreenshot',
+          title: 'Instagram screenshot',
+          description: 'Plaats de code in je Instagram bio en upload een screenshot.',
+          placeholder: false,
         });
       }
       if (hasWebsiteAlias) {
@@ -5751,28 +5770,44 @@ function ShadowProfileModal({
       return methods;
     }, [hasInstagramAlias, hasWebsiteAlias, hasEmailAlias]);
 
-    const startClaimRequest = useCallback(async ({ mode, status, method }) => {
+    const startClaimRequest = useCallback(async ({ mode, method, status, statusReason }) => {
       if (!authUser?.uid) {
         setClaimError('Log in om te claimen.');
+        return;
+      }
+      if (!functionsBase) {
+        setClaimError('Claim service is niet beschikbaar.');
         return;
       }
       setClaimBusy(true);
       setClaimError('');
       setClaimSuccess('');
+      setClaimProofError('');
+      setClaimProofSuccess('');
       try {
-        const db = getFirebaseDbInstance();
-        const payload = {
-          requestedByUid: authUser.uid,
-          contributorId: contributorId || null,
-          contributorName: name || null,
-          mode,
-          status,
-          method,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
-        const docRef = await addDoc(collection(db, CLAIMS_COLLECTIONS.claimRequests), payload);
-        setClaimRequestId(docRef.id);
+        const authToken = await authUser.getIdToken();
+        const response = await fetch(`${functionsBase}/createClaimRequest`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            contributorId: contributorId || null,
+            mode,
+            method,
+            status,
+            statusReason,
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || 'Claim verzoek mislukt.');
+        }
+        setClaimRequestId(data?.requestId || null);
+        setClaimCode(data?.claimCode || '');
+        setClaimCodeExpiresAt(data?.claimCodeExpiresAt || null);
+        setClaimMethod(method || '');
         setClaimSuccess('Claim verzoek verzonden.');
       } catch (error) {
         console.error('[ShadowProfileModal] Claim request failed', error);
@@ -5783,11 +5818,15 @@ function ShadowProfileModal({
     }, [authUser?.uid, contributorId, name]);
 
     const handleStartVouchClaim = () => {
-      startClaimRequest({ mode: 'link', status: 'pending', method: 'vouch' });
+      startClaimRequest({ mode: 'link', method: 'vouch' });
+    };
+
+    const handleStartInstagramScreenshotClaim = () => {
+      startClaimRequest({ mode: 'link', method: 'instagramScreenshot' });
     };
 
     const handleDisputeClaim = () => {
-      startClaimRequest({ mode: 'dispute', status: 'needsModeration', method: 'dispute' });
+      startClaimRequest({ mode: 'link', method: 'dispute', status: 'needsModeration', statusReason: 'dispute' });
     };
 
     const handleOpenIdCheck = async () => {
@@ -5825,6 +5864,35 @@ function ShadowProfileModal({
         setInviteLoading(false);
       }
     };
+
+    const handleUploadClaimProof = async () => {
+      if (!authUser?.uid || !claimRequestId || !claimProofFile) {
+        setClaimProofError('Selecteer eerst een screenshot.');
+        return;
+      }
+      setClaimProofUploading(true);
+      setClaimProofError('');
+      setClaimProofSuccess('');
+      try {
+        const storage = getFirebaseStorageInstance();
+        const path = `claimProofs/${claimRequestId}/${authUser.uid}.png`;
+        const fileRef = storageRef(storage, path);
+        await uploadBytes(fileRef, claimProofFile, { contentType: claimProofFile.type || 'image/png' });
+        setClaimProofSuccess('Screenshot geüpload. We controleren deze automatisch.');
+      } catch (error) {
+        console.error('[ShadowProfileModal] Claim proof upload failed', error);
+        setClaimProofError(error?.message || 'Upload mislukt.');
+      } finally {
+        setClaimProofUploading(false);
+      }
+    };
+
+    const claimCodeExpiryLabel = useMemo(() => {
+      if (!claimCodeExpiresAt) return null;
+      const date = claimCodeExpiresAt?.toDate ? claimCodeExpiresAt.toDate() : new Date(claimCodeExpiresAt);
+      if (!date || Number.isNaN(date.getTime())) return null;
+      return date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    }, [claimCodeExpiresAt]);
 
     return (
       <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4">
@@ -5960,7 +6028,7 @@ function ShadowProfileModal({
                                 ) : (
                                   <button
                                     type="button"
-                                    onClick={handleStartVouchClaim}
+                                    onClick={method.key === 'instagramScreenshot' ? handleStartInstagramScreenshotClaim : handleStartVouchClaim}
                                     disabled={claimBusy}
                                     className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
                                   >
@@ -5968,6 +6036,47 @@ function ShadowProfileModal({
                                   </button>
                                 )}
                               </div>
+                              {method.key === 'instagramScreenshot' && claimCode && claimMethod === 'instagramScreenshot' && (
+                                <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs text-white/80 space-y-2">
+                                  <p className="font-semibold text-white">Plaats deze code in je Instagram bio:</p>
+                                  <div className="flex items-center gap-2">
+                                    <span className="rounded-full bg-white text-indigo-900 px-3 py-1 text-xs font-semibold">
+                                      {claimCode}
+                                    </span>
+                                    {claimCodeExpiryLabel && (
+                                      <span className="text-[11px] text-white/70">Geldig tot {claimCodeExpiryLabel}</span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-white/70">
+                                    Maak daarna een screenshot van je bio en upload deze hieronder.
+                                  </p>
+                                  <div className="flex flex-col sm:flex-row gap-2">
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0] || null;
+                                        setClaimProofFile(file);
+                                      }}
+                                      className="w-full text-xs text-white"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={handleUploadClaimProof}
+                                      disabled={claimProofUploading || !claimProofFile}
+                                      className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                                    >
+                                      {claimProofUploading ? 'Uploaden...' : 'Upload screenshot'}
+                                    </button>
+                                  </div>
+                                  {claimProofError && (
+                                    <p className="text-[11px] text-rose-200">{claimProofError}</p>
+                                  )}
+                                  {claimProofSuccess && (
+                                    <p className="text-[11px] text-emerald-200">{claimProofSuccess}</p>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -6015,6 +6124,13 @@ function ClaimInvitePage({
   const [claimError, setClaimError] = useState('');
   const [claimSuccess, setClaimSuccess] = useState('');
   const [claimRequestId, setClaimRequestId] = useState(null);
+  const [claimCode, setClaimCode] = useState('');
+  const [claimCodeExpiresAt, setClaimCodeExpiresAt] = useState(null);
+  const [claimProofFile, setClaimProofFile] = useState(null);
+  const [claimProofUploading, setClaimProofUploading] = useState(false);
+  const [claimProofError, setClaimProofError] = useState('');
+  const [claimProofSuccess, setClaimProofSuccess] = useState('');
+  const [useInstagramProof, setUseInstagramProof] = useState(false);
 
   const requiresIdCheck = Boolean(authUser?.uid && (!userProfile?.ageVerified || (userProfile?.onboardingStep ?? 0) < 2));
 
@@ -6090,6 +6206,7 @@ function ClaimInvitePage({
           contributorId: preview.contributorId,
           mode: 'link',
           inviteToken: token,
+          method: useInstagramProof ? 'instagramScreenshot' : 'vouch',
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -6097,6 +6214,8 @@ function ClaimInvitePage({
         throw new Error(data?.error || 'Claim verzoek mislukt.');
       }
       setClaimRequestId(data?.requestId || null);
+      setClaimCode(data?.claimCode || '');
+      setClaimCodeExpiresAt(data?.claimCodeExpiresAt || null);
       setClaimSuccess('Claim verzoek verzonden.');
     } catch (error) {
       setClaimError(error?.message || 'Claim verzoek mislukt.');
@@ -6104,6 +6223,34 @@ function ClaimInvitePage({
       setClaimBusy(false);
     }
   };
+
+  const handleUploadClaimProof = async () => {
+    if (!authUser?.uid || !claimRequestId || !claimProofFile) {
+      setClaimProofError('Selecteer eerst een screenshot.');
+      return;
+    }
+    setClaimProofUploading(true);
+    setClaimProofError('');
+    setClaimProofSuccess('');
+    try {
+      const storage = getFirebaseStorageInstance();
+      const path = `claimProofs/${claimRequestId}/${authUser.uid}.png`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, claimProofFile, { contentType: claimProofFile.type || 'image/png' });
+      setClaimProofSuccess('Screenshot geüpload. We controleren deze automatisch.');
+    } catch (error) {
+      setClaimProofError(error?.message || 'Upload mislukt.');
+    } finally {
+      setClaimProofUploading(false);
+    }
+  };
+
+  const claimCodeExpiryLabel = useMemo(() => {
+    if (!claimCodeExpiresAt) return null;
+    const date = claimCodeExpiresAt?.toDate ? claimCodeExpiresAt.toDate() : new Date(claimCodeExpiresAt);
+    if (!date || Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+  }, [claimCodeExpiresAt]);
 
   const proofMethodLabels = {
     instagram: 'Instagram',
@@ -6166,6 +6313,19 @@ function ClaimInvitePage({
                 <p>Geen publieke hints beschikbaar.</p>
               )}
             </div>
+            {authUser && preview.availableProofMethods?.includes('instagram') && (
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 text-sm text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={useInstagramProof}
+                  onChange={(event) => setUseInstagramProof(event.target.checked)}
+                  className="mt-1"
+                />
+                <span>
+                  Voeg optioneel Instagram screenshot bewijs toe. We genereren een code die je in je bio zet en daarna upload je een screenshot.
+                </span>
+              </label>
+            )}
           </div>
         )}
 
@@ -6209,6 +6369,47 @@ function ClaimInvitePage({
               <p className="text-sm text-emerald-500">
                 {claimSuccess} {claimRequestId && `#${claimRequestId}`}
               </p>
+            )}
+            {claimSuccess && useInstagramProof && claimCode && (
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
+                <p className="font-semibold text-slate-700 dark:text-slate-200">Zet deze code in je Instagram bio</p>
+                <div className="flex items-center gap-3">
+                  <span className="rounded-full bg-emerald-600 text-white px-3 py-1 text-xs font-semibold">
+                    {claimCode}
+                  </span>
+                  {claimCodeExpiryLabel && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Geldig tot {claimCodeExpiryLabel}</span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Upload daarna een screenshot van je bio (we gebruiken dit om je claim te verifiëren).
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] || null;
+                      setClaimProofFile(file);
+                    }}
+                    className="w-full text-xs text-slate-600 dark:text-slate-300"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUploadClaimProof}
+                    disabled={claimProofUploading || !claimProofFile}
+                    className="rounded-full bg-emerald-600 text-white px-4 py-2 text-xs font-semibold hover:bg-emerald-700 transition disabled:opacity-60"
+                  >
+                    {claimProofUploading ? 'Uploaden...' : 'Upload screenshot'}
+                  </button>
+                </div>
+                {claimProofError && (
+                  <p className="text-xs text-rose-500">{claimProofError}</p>
+                )}
+                {claimProofSuccess && (
+                  <p className="text-xs text-emerald-500">{claimProofSuccess}</p>
+                )}
+              </div>
             )}
           </div>
         )}

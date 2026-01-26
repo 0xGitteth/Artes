@@ -31,6 +31,7 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getStorage } from 'firebase/storage';
 import { SUPPORT_INTRO_TEXT } from './utils/supportChat';
 import {
   makeAliasId,
@@ -62,10 +63,12 @@ const getFirebaseApp = () => {
 const getFirebaseAuth = () => getAuth(getFirebaseApp());
 const getFirebaseDb = () => getFirestore(getFirebaseApp());
 const getFirebaseFunctions = () => getFunctions(getFirebaseApp(), 'europe-west4');
+const getFirebaseStorage = () => getStorage(getFirebaseApp());
 
 export const getFirebaseAuthInstance = () => getFirebaseAuth();
 export const getFirebaseDbInstance = () => getFirebaseDb();
 export const getFirebaseFunctionsInstance = () => getFirebaseFunctions();
+export const getFirebaseStorageInstance = () => getFirebaseStorage();
 
 export const CLAIMS_COLLECTIONS = {
   contributors: 'contributors',

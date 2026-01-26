@@ -134,6 +134,7 @@ export const createContributorWithAliases = async ({
   email,
 }) => {
   const db = getFirebaseDb();
+  const displayNameLower = String(displayName || '').trim().toLowerCase();
   const contributorRef = doc(collection(db, CLAIMS_COLLECTIONS.contributors));
   const normalizedInstagram = instagramHandle ? normalizeInstagram(instagramHandle) : '';
   const normalizedDomain = website ? normalizeDomain(website) : '';
@@ -145,6 +146,7 @@ export const createContributorWithAliases = async ({
   ].filter(Boolean);
   const contributorPayload = {
     displayName,
+    displayNameLower,
     instagramHandle: normalizedInstagram || null,
     website: normalizedDomain || null,
     email: normalizedEmail || null,

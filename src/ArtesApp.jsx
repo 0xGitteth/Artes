@@ -42,6 +42,7 @@ import {
   collection,
   doc,
   addDoc,
+  endAt,
   getDoc,
   getDocs,
   limit,
@@ -49,6 +50,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  startAt,
   writeBatch,
   setDoc,
   where,
@@ -1466,6 +1468,7 @@ function LoginScreen({ setView, onLogin, error, loading }) {
 function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile }) {
     const [step, setStep] = useState(() => Math.max(1, profile?.onboardingStep ?? 1));
     const [roles, setRoles] = useState([]);
+    const MATCH_STEP = 1.5;
     const [profileData, setProfileData] = useState(() => ({
        displayName: profile?.displayName || '',
        bio: profile?.bio || '',
@@ -1486,9 +1489,18 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditPending, setDiditPending] = useState(false);
     const [diditError, setDiditError] = useState(null);
     const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
+    const [contributorMatches, setContributorMatches] = useState([]);
+    const [matchLoading, setMatchLoading] = useState(false);
+    const [matchError, setMatchError] = useState(null);
+    const [pendingClaimContributorId, setPendingClaimContributorId] = useState(profile?.pendingClaimContributorId || null);
+    const [pendingClaimContributorName, setPendingClaimContributorName] = useState(null);
+    const claimRequestInFlightRef = useRef(false);
     const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
     const isGoogleUser = authUser?.providerData?.some((provider) => provider?.providerId === 'google.com')
       || profile?.authProvider === 'google.com';
+    const normalizeDisplayName = (value) => String(value || '').trim().toLowerCase();
+    const resolvedPendingClaimContributorId = pendingClaimContributorId || profile?.pendingClaimContributorId || null;
+    const resolvedPendingClaimContributorName = pendingClaimContributorName || profile?.pendingClaimContributorName || null;
 
     useEffect(() => {
       if (!accountCreated && step > 1) {
@@ -1505,6 +1517,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
     useEffect(() => {
       if (profile?.onboardingStep && profile.onboardingStep > step) {
+        if (step === MATCH_STEP && profile.onboardingStep === 2) return;
         setStep(profile.onboardingStep);
       }
     }, [profile?.onboardingStep, step]);
@@ -1530,6 +1543,103 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       }).catch((e) => console.error('Failed to sync Google profile', e));
       setSyncedGoogleProfile(true);
     }, [isGoogleUser, authUser?.uid, authUser?.displayName, authUser?.email, profileData.displayName, syncedGoogleProfile]);
+
+    useEffect(() => {
+      if (!profile?.pendingClaimContributorId) return;
+      setPendingClaimContributorId(profile.pendingClaimContributorId);
+    }, [profile?.pendingClaimContributorId]);
+
+    useEffect(() => {
+      if (!profile?.pendingClaimContributorName) return;
+      setPendingClaimContributorName(profile.pendingClaimContributorName);
+    }, [profile?.pendingClaimContributorName]);
+
+    const fetchContributorMatches = async (displayName) => {
+      const normalized = normalizeDisplayName(displayName);
+      if (!normalized) return [];
+      const db = getFirebaseDbInstance();
+      const contributorsRef = collection(db, CLAIMS_COLLECTIONS.contributors);
+      const q = query(
+        contributorsRef,
+        orderBy('displayNameLower'),
+        startAt(normalized),
+        endAt(`${normalized}\uf8ff`),
+        limit(5),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs
+        .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+        .filter((item) => {
+          const candidate = normalizeDisplayName(item.displayNameLower || item.displayName);
+          return candidate === normalized || candidate.startsWith(normalized);
+        });
+    };
+
+    const handleStartPendingClaim = useCallback(async () => {
+      if (!authUser?.uid || !resolvedPendingClaimContributorId || !profile?.ageVerified) return;
+      if (claimRequestInFlightRef.current) return;
+      claimRequestInFlightRef.current = true;
+      try {
+        const db = getFirebaseDbInstance();
+        const payload = {
+          requestedByUid: authUser.uid,
+          contributorId: resolvedPendingClaimContributorId,
+          contributorName: resolvedPendingClaimContributorName || null,
+          mode: 'link',
+          status: 'pending',
+          method: 'onboarding',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        await addDoc(collection(db, CLAIMS_COLLECTIONS.claimRequests), payload);
+        await updateUserProfile(authUser.uid, {
+          pendingClaimContributorId: null,
+          pendingClaimContributorName: null,
+        });
+        setPendingClaimContributorId(null);
+        setPendingClaimContributorName(null);
+      } catch (error) {
+        console.error('[Onboarding] Failed to start claim request', error);
+        claimRequestInFlightRef.current = false;
+      }
+    }, [
+      authUser?.uid,
+      resolvedPendingClaimContributorId,
+      resolvedPendingClaimContributorName,
+      profile?.ageVerified,
+    ]);
+
+    const handleSelectContributor = useCallback(async (match) => {
+      const contributorId = match?.id || match?.contributorId || null;
+      if (!contributorId) {
+        setMatchError('Geen geldig contributorprofiel gevonden.');
+        return;
+      }
+      setPendingClaimContributorId(contributorId);
+      setPendingClaimContributorName(match?.displayName || null);
+      try {
+        if (authUser?.uid) {
+          await updateUserProfile(authUser.uid, {
+            pendingClaimContributorId: contributorId,
+            pendingClaimContributorName: match?.displayName || null,
+          });
+        }
+      } catch (error) {
+        console.error('[Onboarding] Failed to store pending claim', error);
+        setMatchError(error?.message || 'Claim opslaan mislukt.');
+      } finally {
+        setStep(2);
+      }
+    }, [authUser?.uid]);
+
+    const handleSkipContributorMatch = () => {
+      setStep(2);
+    };
+
+    useEffect(() => {
+      if (!resolvedPendingClaimContributorId || !profile?.ageVerified) return;
+      handleStartPendingClaim();
+    }, [resolvedPendingClaimContributorId, profile?.ageVerified, handleStartPendingClaim]);
 
     if (!enableEmail && !authUser) {
       return (
@@ -1566,6 +1676,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
               try {
                 setPending(true);
                 setError(null);
+                setMatchError(null);
                 if (!enableEmail && !accountCreated) {
                   throw new Error('Email signup staat uitgeschakeld.');
                 }
@@ -1584,13 +1695,78 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                     authProvider: 'password',
                   });
                 }
-                setStep(2);
+                setMatchLoading(true);
+                let matches = [];
+                try {
+                  matches = await fetchContributorMatches(profileData.displayName);
+                } catch (matchErr) {
+                  console.error('[Onboarding] Contributor match lookup failed', matchErr);
+                  setMatchError('Zoekactie naar bestaande profielen mislukt.');
+                }
+                if (matches.length > 0) {
+                  setContributorMatches(matches);
+                  setStep(MATCH_STEP);
+                } else {
+                  setStep(2);
+                }
               } catch (e) {
                 setError(e.message);
               } finally {
+                setMatchLoading(false);
                 setPending(false);
               }
           }} className="w-full" disabled={pending || (!accountCreated && (!email || !password))}> {pending ? 'Bezig...' : accountCreated ? 'Ga verder' : 'Account aanmaken'} </Button>
+        </div>
+      </div>
+    );
+
+    if (step === MATCH_STEP) return (
+      <div className="max-w-2xl mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
+        <h2 className="text-sm font-bold text-blue-600 uppercase tracking-wide mb-1">Stap 1/5</h2>
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">Ben jij misschien al toegevoegd?</h1>
+        <p className="text-slate-600 dark:text-slate-400 mb-8">
+          We vonden bestaande profielen die lijken op je naam. Selecteer je profiel om later te claimen.
+        </p>
+        <div className="space-y-4">
+          {matchError && <p className="text-sm text-red-500">{matchError}</p>}
+          {matchLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {contributorMatches.map((match) => (
+                <div
+                  key={match.id}
+                  className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col gap-3"
+                >
+                  <div>
+                    <p className="text-lg font-semibold text-slate-900 dark:text-white">{match.displayName}</p>
+                    <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      {match.instagramHandle && <span>@{match.instagramHandle}</span>}
+                      {match.website && <span>{match.website}</span>}
+                      {match.email && <span>{match.email}</span>}
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button onClick={() => handleSelectContributor(match)} className="flex-1">
+                      Dit ben ik
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {contributorMatches.length === 0 && (
+                <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-300">
+                  Geen matches gevonden.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="mt-6">
+          <Button variant="secondary" onClick={handleSkipContributorMatch} className="w-full">
+            Geen van deze
+          </Button>
         </div>
       </div>
     );

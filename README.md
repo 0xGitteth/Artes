@@ -13,6 +13,7 @@ Productieklare React/Vite-app met Tailwind, Firebase Auth en Firestore. De app o
   - `VITE_FIREBASE_MESSAGING_SENDER_ID`
   - `VITE_FIREBASE_APP_ID`
   - `VITE_MODERATION_FUNCTION_URL`
+  - `VITE_DEBUG_HOSTS` (optioneel; zie `.env.local.example` en vul je Codespace host in zoals die in je dev-URL staat, bv. `abc123.app.github.dev`)
 
 ## Ontwikkelen
 ```bash
@@ -58,4 +59,3 @@ docker run -p 5000:5000 \
 3. Build stap: `npm ci && npm run build`.
 4. Run stap: `npm ci --omit=dev && node server/index.js` (container luistert op `$PORT`).
 5. Optioneel: deploy Firestore rules met de Firebase CLI voordat je live gaat.
-

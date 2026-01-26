@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Image as ImageIcon, Search, Users, Plus, Hand, Cloud, Bookmark,
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
@@ -67,6 +68,7 @@ import ChatPanel from './components/ChatPanel';
 import ModerationSupportChat from './components/ModerationSupportChat';
 import SupportLanding from './components/SupportLanding';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
+import { debugAllowed } from './utils/debugAccess';
 
 // --- Constants & Styling ---
 
@@ -7249,6 +7251,16 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                       </>
                     )}
                     <h4 className="text-xs uppercase font-bold text-slate-400">Overig</h4>
+                    {debugAllowed() && (
+                      <Link
+                        to="/debug"
+                        onClick={onClose}
+                        className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                      >
+                        <span>Debug</span>
+                        <Info className="w-4 h-4" />
+                      </Link>
+                    )}
                     <button
                       type="button"
                       onClick={onOpenVouchRequests}

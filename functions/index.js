@@ -5,7 +5,7 @@ import { VertexAI } from '@google-cloud/vertexai';
 import { onRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
 import admin from 'firebase-admin';
-import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -242,6 +242,170 @@ const parseJsonBody = (req) => {
 const claimStatuses = ['pending', 'approved', 'denied', 'needsModeration'];
 const claimVoteOptions = ['yes', 'no'];
 const claimTimeoutMs = 7 * 24 * 60 * 60 * 1000;
+
+const arraysEqual = (left = [], right = []) => {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+};
+
+const buildContributorMergePostUpdate = (postData, primaryContributorId, secondaryContributorId) => {
+  const updates = {};
+  let changed = false;
+  let nextCredits = postData?.credits;
+
+  if (Array.isArray(nextCredits)) {
+    let creditsChanged = false;
+    nextCredits = nextCredits.map((credit) => {
+      if (credit?.contributorId !== secondaryContributorId) return credit;
+      creditsChanged = true;
+      return { ...credit, contributorId: primaryContributorId };
+    });
+    if (creditsChanged) {
+      updates.credits = nextCredits;
+      changed = true;
+    }
+  }
+
+  const baseCredits = updates.credits || postData?.credits;
+  let contributorIds = Array.isArray(postData?.contributorIds)
+    ? postData.contributorIds.map((id) => (id === secondaryContributorId ? primaryContributorId : id)).filter(Boolean)
+    : [];
+  if (Array.isArray(baseCredits) && baseCredits.length > 0) {
+    const derived = Array.from(new Set(baseCredits.map((credit) => credit?.contributorId).filter(Boolean)));
+    if (derived.length > 0) {
+      contributorIds = derived;
+    }
+  }
+  contributorIds = Array.from(new Set(contributorIds));
+  const existingContributorIds = Array.isArray(postData?.contributorIds) ? postData.contributorIds.filter(Boolean) : [];
+  if (!arraysEqual(existingContributorIds, contributorIds)) {
+    updates.contributorIds = contributorIds;
+    changed = true;
+  }
+
+  if (changed) {
+    updates.updatedAt = FieldValue.serverTimestamp();
+  }
+
+  return { changed, updates };
+};
+
+const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId) => {
+  let updatedPosts = 0;
+  let lastDoc = null;
+  while (true) {
+    let queryRef = db.collection('posts')
+      .where('contributorIds', 'array-contains', secondaryContributorId)
+      .orderBy(FieldPath.documentId())
+      .limit(200);
+    if (lastDoc) {
+      queryRef = queryRef.startAfter(lastDoc);
+    }
+    const snapshot = await queryRef.get();
+    if (snapshot.empty) break;
+    const batch = db.batch();
+    snapshot.docs.forEach((docSnap) => {
+      const { changed, updates } = buildContributorMergePostUpdate(docSnap.data(), primaryContributorId, secondaryContributorId);
+      if (!changed) return;
+      batch.update(docSnap.ref, updates);
+      updatedPosts += 1;
+    });
+    await batch.commit();
+    lastDoc = snapshot.docs[snapshot.docs.length - 1];
+    if (snapshot.size < 200) break;
+  }
+  return updatedPosts;
+};
+
+const moveContributorAliases = async (primaryContributorId, secondaryContributorId) => {
+  let movedAliases = 0;
+  let skippedAliases = 0;
+  let lastDoc = null;
+  while (true) {
+    let queryRef = db.collection('contributorAliases')
+      .where('contributorId', '==', secondaryContributorId)
+      .orderBy(FieldPath.documentId())
+      .limit(200);
+    if (lastDoc) {
+      queryRef = queryRef.startAfter(lastDoc);
+    }
+    const snapshot = await queryRef.get();
+    if (snapshot.empty) break;
+    const batch = db.batch();
+    snapshot.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data?.contributorId !== secondaryContributorId) {
+        skippedAliases += 1;
+        return;
+      }
+      batch.update(docSnap.ref, { contributorId: primaryContributorId });
+      movedAliases += 1;
+    });
+    await batch.commit();
+    lastDoc = snapshot.docs[snapshot.docs.length - 1];
+    if (snapshot.size < 200) break;
+  }
+  return { movedAliases, skippedAliases };
+};
+
+const mergeContributorsInternal = async ({
+  primaryContributorId,
+  secondaryContributorId,
+  moderatorEmail,
+  source,
+}) => {
+  if (!primaryContributorId || !secondaryContributorId) {
+    const error = new Error('Missing contributor ids');
+    error.status = 400;
+    throw error;
+  }
+  if (primaryContributorId === secondaryContributorId) {
+    const error = new Error('Contributor ids must be different');
+    error.status = 400;
+    throw error;
+  }
+
+  const primaryRef = db.collection('contributors').doc(primaryContributorId);
+  const secondaryRef = db.collection('contributors').doc(secondaryContributorId);
+  const [primarySnap, secondarySnap] = await Promise.all([primaryRef.get(), secondaryRef.get()]);
+
+  if (!primarySnap.exists || !secondarySnap.exists) {
+    const error = new Error('Contributor not found');
+    error.status = 404;
+    throw error;
+  }
+
+  const updatedPosts = await updatePostsForContributorMerge(primaryContributorId, secondaryContributorId);
+  const aliasResult = await moveContributorAliases(primaryContributorId, secondaryContributorId);
+
+  await secondaryRef.set(
+    {
+      status: 'merged',
+      mergedInto: primaryContributorId,
+      mergedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  logger.info('Merged contributors', {
+    primaryContributorId,
+    secondaryContributorId,
+    updatedPosts,
+    movedAliases: aliasResult.movedAliases,
+    skippedAliases: aliasResult.skippedAliases,
+    moderatorEmail,
+    source,
+  });
+
+  return {
+    primaryContributorId,
+    secondaryContributorId,
+    updatedPosts,
+    movedAliases: aliasResult.movedAliases,
+    skippedAliases: aliasResult.skippedAliases,
+  };
+};
 
 const fetchUserProfile = async (uid) => {
   if (!uid) return null;
@@ -1735,6 +1899,141 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create claim request' });
+  }
+});
+
+export const mergeContributors = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const { email } = await ensureModerator(decoded);
+    const body = parseJsonBody(req);
+    const primaryContributorId = body?.primaryContributorId || null;
+    const secondaryContributorId = body?.secondaryContributorId || null;
+    const result = await mergeContributorsInternal({
+      primaryContributorId,
+      secondaryContributorId,
+      moderatorEmail: email,
+      source: 'manual',
+    });
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to merge contributors' });
+  }
+});
+
+export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const { email } = await ensureModerator(decoded);
+    const body = parseJsonBody(req);
+    const requestId = body?.requestId || null;
+    const primaryOverride = body?.primaryContributorId || null;
+    const secondaryOverride = body?.secondaryContributorId || null;
+
+    if (!requestId) {
+      res.status(400).json({ error: 'requestId is required' });
+      return;
+    }
+
+    const requestRef = db.collection('claimRequests').doc(requestId);
+    const requestSnap = await requestRef.get();
+    if (!requestSnap.exists) {
+      res.status(404).json({ error: 'Claim request not found' });
+      return;
+    }
+
+    const requestData = requestSnap.data() || {};
+    const mode = requestData?.mode === 'merge' ? 'merge' : 'link';
+    const requestedByUid = requestData?.requestedByUid || null;
+    const contributorId = primaryOverride || requestData?.contributorId || null;
+
+    if (!requestedByUid || !contributorId) {
+      res.status(400).json({ error: 'Claim request missing contributor or requester' });
+      return;
+    }
+
+    if (requestData?.status === 'approved') {
+      res.status(409).json({ error: 'Claim request already approved' });
+      return;
+    }
+
+    if (mode === 'merge') {
+      const requesterProfile = await fetchUserProfile(requestedByUid);
+      const secondaryContributorId = secondaryOverride || requesterProfile?.contributorId || null;
+      if (!secondaryContributorId) {
+        res.status(400).json({ error: 'Secondary contributor is required for merge' });
+        return;
+      }
+      const mergeResult = await mergeContributorsInternal({
+        primaryContributorId: contributorId,
+        secondaryContributorId,
+        moderatorEmail: email,
+        source: 'claimRequest',
+      });
+      await db.collection('users').doc(requestedByUid).set(
+        {
+          contributorId,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      await requestRef.set(
+        {
+          status: 'approved',
+          statusReason: null,
+          approvedAt: FieldValue.serverTimestamp(),
+          approvedByEmail: email,
+          primaryContributorId: contributorId,
+          secondaryContributorId,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      res.status(200).json({ ok: true, status: 'approved', merge: mergeResult });
+      return;
+    }
+
+    await db.runTransaction(async (transaction) => {
+      const contributorRef = db.collection('contributors').doc(contributorId);
+      const claimantRef = db.collection('users').doc(requestedByUid);
+      const contributorSnap = await transaction.get(contributorRef);
+      if (!contributorSnap.exists) {
+        const error = new Error('Contributor not found');
+        error.status = 404;
+        throw error;
+      }
+      transaction.update(claimantRef, {
+        contributorId,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      transaction.update(contributorRef, {
+        claimedByUid: requestedByUid,
+        claimedAt: FieldValue.serverTimestamp(),
+        status: 'claimed',
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      transaction.update(requestRef, {
+        status: 'approved',
+        statusReason: null,
+        approvedAt: FieldValue.serverTimestamp(),
+        approvedByEmail: email,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    res.status(200).json({ ok: true, status: 'approved' });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to approve claim request' });
   }
 });
 

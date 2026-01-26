@@ -4,7 +4,7 @@ import {
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
-  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle
+  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle, GitMerge
 } from 'lucide-react';
 import {
   fetchUserIndex,
@@ -1163,6 +1163,7 @@ export default function ArtesApp() {
           {!profileLoading && view === 'moderation' && (
             <ModerationPortal
               moderationApiBase={moderationApiBase}
+              functionsBase={functionsBase}
               authUser={authUser}
               isModerator={moderatorAccess}
               uploads={uploads}
@@ -2814,8 +2815,233 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   );
 }
 
+function ContributorMergeTool({ authUser, functionsBase }) {
+  const [primaryContributorId, setPrimaryContributorId] = useState('');
+  const [secondaryContributorId, setSecondaryContributorId] = useState('');
+  const [primaryQuery, setPrimaryQuery] = useState('');
+  const [secondaryQuery, setSecondaryQuery] = useState('');
+  const [primaryMatches, setPrimaryMatches] = useState([]);
+  const [secondaryMatches, setSecondaryMatches] = useState([]);
+  const [primaryLoading, setPrimaryLoading] = useState(false);
+  const [secondaryLoading, setSecondaryLoading] = useState(false);
+  const [mergeState, setMergeState] = useState({ pending: false, error: '', success: '' });
+  const [mergeSummary, setMergeSummary] = useState(null);
+
+  const normalizeTerm = (value) => String(value || '').trim().toLowerCase();
+
+  const searchContributors = useCallback(async (term, setMatches, setLoading) => {
+    const normalized = normalizeTerm(term);
+    if (!normalized) {
+      setMatches([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const db = getFirebaseDbInstance();
+      const contributorsRef = collection(db, CLAIMS_COLLECTIONS.contributors);
+      const q = query(
+        contributorsRef,
+        orderBy('displayNameLower'),
+        startAt(normalized),
+        endAt(`${normalized}\uf8ff`),
+        limit(5),
+      );
+      const snapshot = await getDocs(q);
+      setMatches(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
+    } catch (error) {
+      console.error('[ContributorMergeTool] search failed', error);
+      setMatches([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleSelectMatch = (match, setId, setQuery, setMatches) => {
+    setId(match.id);
+    setQuery(match.displayName || match.id);
+    setMatches([]);
+  };
+
+  const handleMerge = async () => {
+    if (!authUser?.uid) {
+      setMergeState({ pending: false, error: 'Log in om te mergen.', success: '' });
+      return;
+    }
+    if (!functionsBase) {
+      setMergeState({ pending: false, error: 'Merge endpoint ontbreekt.', success: '' });
+      return;
+    }
+    const primaryId = primaryContributorId.trim();
+    const secondaryId = secondaryContributorId.trim();
+    if (!primaryId || !secondaryId) {
+      setMergeState({ pending: false, error: 'Vul beide contributor IDs in.', success: '' });
+      return;
+    }
+    if (primaryId === secondaryId) {
+      setMergeState({ pending: false, error: 'Primary en secondary mogen niet gelijk zijn.', success: '' });
+      return;
+    }
+    if (!window.confirm('Weet je zeker dat je deze contributors wilt mergen? Dit kan niet ongedaan gemaakt worden.')) {
+      return;
+    }
+    setMergeState({ pending: true, error: '', success: '' });
+    setMergeSummary(null);
+    try {
+      const token = await authUser.getIdToken();
+      const response = await fetch(`${functionsBase}/mergeContributors`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          primaryContributorId: primaryId,
+          secondaryContributorId: secondaryId,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || 'Merge mislukt.');
+      }
+      setMergeSummary(data);
+      setMergeState({ pending: false, error: '', success: 'Merge uitgevoerd.' });
+    } catch (error) {
+      setMergeState({ pending: false, error: error.message || 'Merge mislukt.', success: '' });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold dark:text-white">Merge contributors</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Verplaats posts en aliases van secondary naar primary en markeer secondary als merged.
+            </p>
+          </div>
+          <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-slate-800 flex items-center justify-center">
+            <GitMerge className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+        </div>
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">Primary contributor</p>
+              <input
+                className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                placeholder="Primary contributor ID"
+                value={primaryContributorId}
+                onChange={(event) => setPrimaryContributorId(event.target.value)}
+              />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">Zoek op naam</p>
+              <div className="mt-2 flex gap-2">
+                <input
+                  className="flex-1 p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                  placeholder="Naam of Instagram"
+                  value={primaryQuery}
+                  onChange={(event) => setPrimaryQuery(event.target.value)}
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => searchContributors(primaryQuery, setPrimaryMatches, setPrimaryLoading)}
+                  disabled={primaryLoading}
+                >
+                  {primaryLoading ? 'Zoeken...' : 'Zoek'}
+                </Button>
+              </div>
+              {primaryMatches.length > 0 && (
+                <div className="mt-3 grid gap-2">
+                  {primaryMatches.map((match) => (
+                    <button
+                      key={match.id}
+                      type="button"
+                      onClick={() => handleSelectMatch(match, setPrimaryContributorId, setPrimaryQuery, setPrimaryMatches)}
+                      className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                    >
+                      <p className="font-semibold text-slate-800 dark:text-slate-100">{match.displayName || match.id}</p>
+                      <p className="text-xs text-slate-500">{match.id}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">Secondary contributor</p>
+              <input
+                className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                placeholder="Secondary contributor ID"
+                value={secondaryContributorId}
+                onChange={(event) => setSecondaryContributorId(event.target.value)}
+              />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">Zoek op naam</p>
+              <div className="mt-2 flex gap-2">
+                <input
+                  className="flex-1 p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                  placeholder="Naam of Instagram"
+                  value={secondaryQuery}
+                  onChange={(event) => setSecondaryQuery(event.target.value)}
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => searchContributors(secondaryQuery, setSecondaryMatches, setSecondaryLoading)}
+                  disabled={secondaryLoading}
+                >
+                  {secondaryLoading ? 'Zoeken...' : 'Zoek'}
+                </Button>
+              </div>
+              {secondaryMatches.length > 0 && (
+                <div className="mt-3 grid gap-2">
+                  {secondaryMatches.map((match) => (
+                    <button
+                      key={match.id}
+                      type="button"
+                      onClick={() => handleSelectMatch(match, setSecondaryContributorId, setSecondaryQuery, setSecondaryMatches)}
+                      className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                    >
+                      <p className="font-semibold text-slate-800 dark:text-slate-100">{match.displayName || match.id}</p>
+                      <p className="text-xs text-slate-500">{match.id}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {mergeState.error && (
+          <p className="text-sm text-red-500">{mergeState.error}</p>
+        )}
+        {mergeState.success && (
+          <p className="text-sm text-emerald-500">{mergeState.success}</p>
+        )}
+        {mergeSummary && (
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-sm text-slate-600 dark:text-slate-300">
+            <p>Posts bijgewerkt: {mergeSummary.updatedPosts || 0}</p>
+            <p>Aliases verplaatst: {mergeSummary.movedAliases || 0}</p>
+            {mergeSummary.skippedAliases ? <p>Aliases overgeslagen: {mergeSummary.skippedAliases}</p> : null}
+          </div>
+        )}
+
+        <Button onClick={handleMerge} disabled={mergeState.pending} className="w-full">
+          {mergeState.pending ? 'Merge uitvoeren...' : 'Merge uitvoeren'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ModerationPortal({
   moderationApiBase,
+  functionsBase,
   authUser,
   isModerator,
   uploads,
@@ -2983,6 +3209,7 @@ function ModerationPortal({
     { id: 'review', label: 'Review voor posten', icon: ImageIcon },
     { id: 'reports', label: 'Rapportages', icon: AlertTriangle },
     { id: 'community', label: 'Community', icon: Users },
+    { id: 'merge', label: 'Merge', icon: GitMerge },
   ];
 
   return (
@@ -3232,6 +3459,10 @@ function ModerationPortal({
             </div>
           </div>
         </div>
+      )}
+
+      {activeTab === 'merge' && (
+        <ContributorMergeTool authUser={authUser} functionsBase={functionsBase} />
       )}
 
       {moderationModal && (

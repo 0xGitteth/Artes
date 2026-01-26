@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Image as ImageIcon, Search, Users, Plus, Hand, Cloud, Bookmark,
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import {
   fetchUserIndex,
+  ensureUserSignedIn,
   publishPost,
   seedDemoContent,
   subscribeToPosts,
@@ -1207,7 +1208,7 @@ export default function ArtesApp() {
           )}
           
           {!profileLoading && view === 'login' && (
-            <LoginScreen setView={setView} onLogin={handleLogin} error={authError} loading={authPending} />
+            <LoginScreen setView={setView} onLogin={handleLogin} error={authError} loading={authPending} authUser={authUser} />
           )}
 
           {!profileLoading && view === 'claim' && (
@@ -1461,13 +1462,30 @@ export default function ArtesApp() {
 
 // --- SUB COMPONENTS ---
 
-function LoginScreen({ setView, onLogin, error, loading }) {
+function LoginScreen({ setView, onLogin, error, loading, authUser }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState(null);
   const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
   const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
+  const navigate = useNavigate();
+
+  const handleDevLogin = useCallback(async () => {
+    try {
+      setLocalError(null);
+      const credential = await ensureUserSignedIn();
+      const uid = credential?.user?.uid;
+      console.log('[DEV AUTH] signed in anonymously:', uid);
+      if (debugAllowed()) {
+        navigate('/debug', { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
+    } catch (devError) {
+      setLocalError(devError?.message || 'Dev login mislukt.');
+    }
+  }, [navigate]);
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900">
        <div className="max-w-md w-full text-center">
@@ -1476,6 +1494,11 @@ function LoginScreen({ setView, onLogin, error, loading }) {
           <p className="text-slate-500 dark:text-slate-400 mb-8 text-lg">Connect, Create, Inspire.</p>
           <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700">
              <div className="space-y-4">
+               {import.meta.env.DEV && !authUser && (
+                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                   Je bent niet ingelogd. Gebruik Dev login (anoniem).
+                 </div>
+               )}
                <Input label="E-mailadres" placeholder="naam@voorbeeld.nl" value={email} onChange={(e) => setEmail(e.target.value)} />
                <Input label="Wachtwoord" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
                {(localError || error) && <p className="text-sm text-red-500 text-left">{localError || error}</p>}
@@ -1530,10 +1553,19 @@ function LoginScreen({ setView, onLogin, error, loading }) {
                      setLocalError(msg);
                    }
                  }}
-                 className={`w-full border border-slate-200 dark:border-slate-700 rounded-xl py-3 text-sm font-semibold transition ${enableApple ? 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700' : 'text-slate-400 dark:text-slate-500 cursor-not-allowed bg-slate-50 dark:bg-slate-800/40'}`}
-               >
-                 Continue with Apple {enableApple ? '' : '(soon)'}
-               </button>
+                className={`w-full border border-slate-200 dark:border-slate-700 rounded-xl py-3 text-sm font-semibold transition ${enableApple ? 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700' : 'text-slate-400 dark:text-slate-500 cursor-not-allowed bg-slate-50 dark:bg-slate-800/40'}`}
+              >
+                Continue with Apple {enableApple ? '' : '(soon)'}
+              </button>
+              {import.meta.env.DEV && (
+                <button
+                  type="button"
+                  onClick={handleDevLogin}
+                  className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
+                >
+                  Dev login (anoniem)
+                </button>
+              )}
              </div>
              <div className="relative my-8">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200 dark:border-slate-700"></div></div>

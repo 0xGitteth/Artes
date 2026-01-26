@@ -30,6 +30,7 @@ import {
   deleteDoc,
   runTransaction,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { SUPPORT_INTRO_TEXT } from './utils/supportChat';
 import {
   makeAliasId,
@@ -60,9 +61,11 @@ const getFirebaseApp = () => {
 
 const getFirebaseAuth = () => getAuth(getFirebaseApp());
 const getFirebaseDb = () => getFirestore(getFirebaseApp());
+const getFirebaseFunctions = () => getFunctions(getFirebaseApp(), 'europe-west4');
 
 export const getFirebaseAuthInstance = () => getFirebaseAuth();
 export const getFirebaseDbInstance = () => getFirebaseDb();
+export const getFirebaseFunctionsInstance = () => getFirebaseFunctions();
 
 export const CLAIMS_COLLECTIONS = {
   contributors: 'contributors',
@@ -86,6 +89,12 @@ export const getClaimInviteRef = (token) =>
 
 export const getClaimVouchesVotesCollection = (requestId) =>
   collection(getFirebaseDb(), CLAIMS_COLLECTIONS.claimVouches, requestId, 'votes');
+
+export const createClaimInvite = async ({ contributorId, postId = null }) => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'createClaimInvite');
+  const result = await callable({ contributorId, postId });
+  return result?.data || null;
+};
 
 /**
  * Fetch a contributor by alias type/value.

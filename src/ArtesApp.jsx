@@ -31,6 +31,7 @@ import {
   signInWithGoogle,
   updateUserProfile,
   getFirebaseDbInstance,
+  createClaimInvite,
   isModerator,
   ensureSupportThreadExists,
   migrateRemoveGeneralTheme,
@@ -411,6 +412,7 @@ export default function ArtesApp() {
   const [moderatorAccess, setModeratorAccess] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [supportThreadId, setSupportThreadId] = useState(null);
+  const [claimInviteToken, setClaimInviteToken] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
   const userProfile = profile;
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
@@ -441,6 +443,12 @@ export default function ArtesApp() {
       return moderationUrl.replace('/moderateImage', '');
     }
     return moderationUrl || '';
+  }, []);
+  const getClaimTokenFromPath = useCallback((path) => {
+    if (!path?.startsWith('/claim/')) return null;
+    const tokenPart = path.replace('/claim/', '');
+    const token = tokenPart.split('/')[0];
+    return token || null;
   }, []);
   const ensureModerationThread = useCallback(async (user) => {
     if (!user?.uid || !functionsBase) return null;
@@ -523,7 +531,11 @@ export default function ArtesApp() {
         setProfile(null);
         ensuredSupportThreadUidRef.current = null;
         const path = window.location.pathname || '/';
-        const unauthView = path.startsWith('/support')
+        const claimToken = getClaimTokenFromPath(path);
+        setClaimInviteToken(claimToken);
+        const unauthView = claimToken
+          ? 'claim'
+          : path.startsWith('/support')
           ? 'support'
           : path.startsWith('/chat') || path.startsWith('/messages')
             ? 'chat'
@@ -546,7 +558,11 @@ export default function ArtesApp() {
         const onboardingComplete = profileData?.onboardingComplete === true;
         const baseView = onboardingComplete ? 'gallery' : 'onboarding';
         const path = window.location.pathname || '/';
-        const routedView = path.startsWith('/moderation')
+        const claimToken = getClaimTokenFromPath(path);
+        setClaimInviteToken(claimToken);
+        const routedView = claimToken
+          ? 'claim'
+          : path.startsWith('/moderation')
           ? 'moderation'
           : path.startsWith('/vouch')
             ? 'vouch'
@@ -570,7 +586,7 @@ export default function ArtesApp() {
       active = false;
       unsubscribe();
     };
-  }, [ensureModerationThread]);
+  }, [ensureModerationThread, getClaimTokenFromPath]);
 
   useEffect(() => {
     let active = true;
@@ -614,7 +630,10 @@ export default function ArtesApp() {
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname || '/';
-      if (path.startsWith('/moderation')) {
+      if (path.startsWith('/claim/')) {
+        setClaimInviteToken(getClaimTokenFromPath(path));
+        setView('claim');
+      } else if (path.startsWith('/moderation')) {
         setView('moderation');
       } else if (path.startsWith('/vouch')) {
         setView('vouch');
@@ -628,9 +647,12 @@ export default function ArtesApp() {
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [view]);
+  }, [view, getClaimTokenFromPath]);
 
   useEffect(() => {
+    if (view === 'claim') {
+      return;
+    }
     if (view === 'moderation') {
       window.history.pushState({}, '', '/moderation');
     } else if (view === 'vouch') {
@@ -1134,6 +1156,16 @@ export default function ArtesApp() {
           
           {!profileLoading && view === 'login' && (
             <LoginScreen setView={setView} onLogin={handleLogin} error={authError} loading={authPending} />
+          )}
+
+          {!profileLoading && view === 'claim' && (
+            <ClaimInvitePage
+              token={claimInviteToken}
+              authUser={authUser}
+              userProfile={profile}
+              functionsBase={functionsBase}
+              setView={setView}
+            />
           )}
 
           {!profileLoading && view === 'onboarding' && (
@@ -3499,6 +3531,11 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
     email: '',
   });
   const [showInvite, setShowInvite] = useState(false);
+  const [inviteCandidates, setInviteCandidates] = useState([]);
+  const [inviteShareLinks, setInviteShareLinks] = useState([]);
+  const [inviteShareOpen, setInviteShareOpen] = useState(false);
+  const [inviteShareError, setInviteShareError] = useState('');
+  const [inviteShareCopied, setInviteShareCopied] = useState('');
   const [makerTags, setMakerTags] = useState([]);
   const [appliedTriggers, setAppliedTriggers] = useState([]);
   const [suggestedTriggers, setSuggestedTriggers] = useState([]);
@@ -3737,6 +3774,10 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
        });
        contributorId = result.contributorId;
        createdAliasIds = result.aliasIds;
+       setInviteCandidates((prev) => {
+         if (prev.some((entry) => entry.contributorId === contributorId)) return prev;
+         return [...prev, { contributorId, displayName }];
+       });
        if (import.meta.env.DEV) {
          console.log('[Contributor] created', contributorId);
        }
@@ -3823,7 +3864,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
     setPublishError('');
 
     try {
-      await publishPost({
+      const publishedDoc = await publishPost({
         title,
         description: desc,
         imageUrl: image,
@@ -3842,6 +3883,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
         likes: 0,
         isChallenge,
       });
+      const postId = publishedDoc?.id || null;
 
       setErrors({});
       setImage(null);
@@ -3863,6 +3905,38 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
       setUploaderRole(defaultRole);
       setStep(1);
       setPublishing(false);
+
+      if (inviteCandidates.length > 0) {
+        setInviteShareError('');
+        setInviteShareCopied('');
+        const baseUrl = window.location.origin;
+        try {
+          const inviteResults = await Promise.all(
+            inviteCandidates.map(async (candidate) => {
+              const result = await createClaimInvite({
+                contributorId: candidate.contributorId,
+                postId,
+              });
+              const path = result?.path || '';
+              return {
+                contributorId: candidate.contributorId,
+                displayName: candidate.displayName,
+                url: path ? new URL(path, baseUrl).toString() : '',
+              };
+            })
+          );
+          setInviteShareLinks(inviteResults.filter((entry) => entry.url));
+          setInviteShareOpen(true);
+        } catch (error) {
+          console.error('[UploadModal] Failed to create claim invite', error);
+          setInviteShareError(error?.message || 'Invite link maken mislukt.');
+          setInviteShareOpen(true);
+        } finally {
+          setInviteCandidates([]);
+        }
+        return;
+      }
+
       onClose();
     } catch (error) {
       console.error('Publish error', error);
@@ -3873,6 +3947,66 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+       {inviteShareOpen && (
+         <div className="absolute inset-0 z-10 bg-black/70 flex items-center justify-center p-6">
+           <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-lg space-y-4">
+             <div>
+               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Kopieer invite link</h3>
+               <p className="text-sm text-slate-500 dark:text-slate-400">
+                 Deel deze link zodat de contributor het profiel kan claimen.
+               </p>
+             </div>
+             {inviteShareError && (
+               <p className="text-sm text-rose-500">{inviteShareError}</p>
+             )}
+             {!inviteShareError && inviteShareLinks.length === 0 && (
+               <p className="text-sm text-slate-500 dark:text-slate-400">Invite link laden...</p>
+             )}
+             {inviteShareLinks.length > 0 && (
+               <div className="space-y-3">
+                 {inviteShareLinks.map((invite) => (
+                   <div key={invite.contributorId} className="rounded-2xl border border-slate-200 dark:border-slate-700 p-3 flex flex-col gap-2">
+                     <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                       {invite.displayName}
+                     </div>
+                     <div className="flex items-center gap-2">
+                       <input
+                         readOnly
+                         value={invite.url}
+                         className="flex-1 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-600 dark:text-slate-300"
+                       />
+                       <button
+                         type="button"
+                         onClick={async () => {
+                           if (!invite.url) return;
+                           await navigator.clipboard.writeText(invite.url);
+                           setInviteShareCopied(invite.url);
+                         }}
+                         className="rounded-full bg-blue-600 text-white px-4 py-2 text-xs font-semibold"
+                       >
+                         Kopieer
+                       </button>
+                     </div>
+                     {inviteShareCopied === invite.url && (
+                       <p className="text-xs text-emerald-500">Gekopieerd!</p>
+                     )}
+                   </div>
+                 ))}
+               </div>
+             )}
+             <button
+               type="button"
+               onClick={() => {
+                 setInviteShareOpen(false);
+                 onClose();
+               }}
+               className="w-full rounded-full bg-slate-900 text-white px-4 py-2 text-sm font-semibold"
+             >
+               Sluiten
+             </button>
+           </div>
+         </div>
+       )}
        <div className="bg-white dark:bg-slate-900 w-full max-w-4xl h-[85vh] rounded-3xl overflow-hidden flex flex-col">
           <div className="p-4 border-b flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -5478,6 +5612,10 @@ function ShadowProfileModal({
     const [claimRequestId, setClaimRequestId] = useState(null);
     const [contributorInfo, setContributorInfo] = useState(null);
     const [loadingContributor, setLoadingContributor] = useState(false);
+    const [inviteLink, setInviteLink] = useState('');
+    const [inviteLoading, setInviteLoading] = useState(false);
+    const [inviteError, setInviteError] = useState('');
+    const [inviteCopied, setInviteCopied] = useState(false);
 
     const normalizeExternalLink = (link) => {
       if (!link) return null;
@@ -5665,6 +5803,29 @@ function ShadowProfileModal({
       if (setView) setView('onboarding');
     };
 
+    const handleShareInvite = async () => {
+      if (!contributorId) return;
+      if (!authUser?.uid) {
+        setInviteError('Log in om een invite link te delen.');
+        return;
+      }
+      setInviteLoading(true);
+      setInviteError('');
+      try {
+        const result = await createClaimInvite({ contributorId });
+        const path = result?.path || '';
+        if (!path) throw new Error('Invite link maken mislukt.');
+        const url = new URL(path, window.location.origin).toString();
+        setInviteLink(url);
+        setInviteCopied(false);
+      } catch (error) {
+        console.error('[ShadowProfileModal] Failed to create invite', error);
+        setInviteError(error?.message || 'Invite link maken mislukt.');
+      } finally {
+        setInviteLoading(false);
+      }
+    };
+
     return (
       <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4">
         <div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col">
@@ -5686,6 +5847,43 @@ function ShadowProfileModal({
                     {link.type === 'instagram' ? 'Instagram' : link.type === 'email' ? 'Email' : 'Website'}: {link.label}
                   </a>
                 ))}
+              </div>
+            )}
+            {contributorId && (
+              <div className="mt-4 w-full max-w-2xl space-y-2">
+                <button
+                  type="button"
+                  onClick={handleShareInvite}
+                  disabled={inviteLoading}
+                  className="inline-flex items-center justify-center rounded-full bg-white text-indigo-900 px-5 py-2 text-sm font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                >
+                  {inviteLoading ? 'Invite link maken...' : 'Deel invite link'}
+                </button>
+                {inviteLink && (
+                  <div className="flex flex-col sm:flex-row items-center gap-2">
+                    <input
+                      readOnly
+                      value={inviteLink}
+                      className="w-full rounded-full border border-white/30 bg-white/10 px-3 py-2 text-xs text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(inviteLink);
+                        setInviteCopied(true);
+                      }}
+                      className="rounded-full bg-white/90 text-indigo-900 px-4 py-2 text-xs font-semibold"
+                    >
+                      Kopieer
+                    </button>
+                  </div>
+                )}
+                {inviteCopied && (
+                  <p className="text-xs text-emerald-200">Invite link gekopieerd.</p>
+                )}
+                {inviteError && (
+                  <p className="text-xs text-rose-200">{inviteError}</p>
+                )}
               </div>
             )}
             <div className="mt-5 w-full max-w-2xl">
@@ -5801,6 +5999,222 @@ function ShadowProfileModal({
         </div>
       </div>
     );
+}
+
+function ClaimInvitePage({
+  token,
+  authUser,
+  userProfile,
+  functionsBase,
+  setView,
+}) {
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimError, setClaimError] = useState('');
+  const [claimSuccess, setClaimSuccess] = useState('');
+  const [claimRequestId, setClaimRequestId] = useState(null);
+
+  const requiresIdCheck = Boolean(authUser?.uid && (!userProfile?.ageVerified || (userProfile?.onboardingStep ?? 0) < 2));
+
+  useEffect(() => {
+    let active = true;
+    if (!token || !functionsBase) {
+      setPreview(null);
+      setPreviewError(token ? 'Invite preview is niet beschikbaar.' : 'Invite link is ongeldig.');
+      return () => {};
+    }
+
+    const loadPreview = async () => {
+      setPreviewLoading(true);
+      setPreviewError('');
+      try {
+        const response = await fetch(`${functionsBase}/getClaimInvitePreview?token=${encodeURIComponent(token)}`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || 'Invite preview laden mislukt.');
+        }
+        if (!active) return;
+        setPreview(data);
+      } catch (error) {
+        if (!active) return;
+        setPreview(null);
+        setPreviewError(error?.message || 'Invite preview laden mislukt.');
+      } finally {
+        if (active) setPreviewLoading(false);
+      }
+    };
+
+    loadPreview();
+
+    return () => {
+      active = false;
+    };
+  }, [token, functionsBase]);
+
+  const handleLogin = () => {
+    if (setView) setView('login');
+  };
+
+  const handleOpenIdCheck = async () => {
+    if (!authUser?.uid) return;
+    try {
+      await updateUserProfile(authUser.uid, {
+        onboardingStep: 2,
+        onboardingComplete: false,
+      });
+    } catch (error) {
+      console.error('[ClaimInvitePage] Failed to route to ID check', error);
+    }
+    if (setView) setView('onboarding');
+  };
+
+  const handleStartClaim = async () => {
+    if (!authUser?.uid || !preview?.contributorId || !functionsBase || !token) {
+      setClaimError('Log in om te claimen.');
+      return;
+    }
+    setClaimBusy(true);
+    setClaimError('');
+    setClaimSuccess('');
+    try {
+      const authToken = await authUser.getIdToken();
+      const response = await fetch(`${functionsBase}/createClaimRequest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          contributorId: preview.contributorId,
+          mode: 'link',
+          inviteToken: token,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || 'Claim verzoek mislukt.');
+      }
+      setClaimRequestId(data?.requestId || null);
+      setClaimSuccess('Claim verzoek verzonden.');
+    } catch (error) {
+      setClaimError(error?.message || 'Claim verzoek mislukt.');
+    } finally {
+      setClaimBusy(false);
+    }
+  };
+
+  const proofMethodLabels = {
+    instagram: 'Instagram',
+    website: 'Website',
+    email: 'Email',
+    vouch: 'Vouch',
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-10">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-6">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Claim invite</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+            {preview?.displayName || 'Ongeclaimd profiel'}
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-300 mt-2">
+            Gebruik deze link om het profiel te claimen. We tonen alleen minimale informatie voordat je inlogt.
+          </p>
+        </div>
+
+        {previewLoading && (
+          <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Preview laden...
+          </div>
+        )}
+        {previewError && (
+          <div className="text-sm text-rose-500">{previewError}</div>
+        )}
+
+        {preview && (
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">Beschikbare methodes</p>
+              <div className="flex flex-wrap gap-2">
+                {preview.availableProofMethods?.map((method) => (
+                  <span
+                    key={method}
+                    className="text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 px-3 py-1 rounded-full"
+                  >
+                    {proofMethodLabels[method] || method}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 space-y-2 text-sm text-slate-600 dark:text-slate-300">
+              <p className="font-semibold text-slate-700 dark:text-slate-200">Hints</p>
+              {preview?.hints?.instagramHandle && (
+                <p>Instagram: {preview.hints.instagramHandle}</p>
+              )}
+              {preview?.hints?.websiteDomain && (
+                <p>Website: {preview.hints.websiteDomain}</p>
+              )}
+              {preview?.hints?.emailMasked && (
+                <p>Email: {preview.hints.emailMasked}</p>
+              )}
+              {!preview?.hints?.instagramHandle && !preview?.hints?.websiteDomain && !preview?.hints?.emailMasked && (
+                <p>Geen publieke hints beschikbaar.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!authUser && (
+          <button
+            type="button"
+            onClick={handleLogin}
+            className="w-full rounded-full bg-blue-600 text-white px-6 py-3 text-sm font-semibold hover:bg-blue-700 transition"
+          >
+            Inloggen of account maken
+          </button>
+        )}
+
+        {authUser && (
+          <div className="space-y-3">
+            {requiresIdCheck ? (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600 dark:text-slate-300">Voltooi eerst de ID check (stap 2).</p>
+                <button
+                  type="button"
+                  onClick={handleOpenIdCheck}
+                  className="w-full rounded-full bg-slate-900 text-white px-6 py-3 text-sm font-semibold hover:bg-slate-800 transition"
+                >
+                  Ga naar stap 2
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartClaim}
+                disabled={claimBusy || !preview?.contributorId}
+                className="w-full rounded-full bg-emerald-600 text-white px-6 py-3 text-sm font-semibold hover:bg-emerald-700 transition disabled:opacity-60"
+              >
+                {claimBusy ? 'Claim verzoek versturen...' : 'Start claim'}
+              </button>
+            )}
+            {claimError && (
+              <p className="text-sm text-rose-500">{claimError}</p>
+            )}
+            {claimSuccess && (
+              <p className="text-sm text-emerald-500">
+                {claimSuccess} {claimRequestId && `#${claimRequestId}`}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenVouchRequests, darkMode, onToggleDark, onLogout }) { 
     return (

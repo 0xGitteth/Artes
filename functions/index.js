@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { VertexAI } from '@google-cloud/vertexai';
-import { onRequest } from 'firebase-functions/v2/https';
+import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
 import admin from 'firebase-admin';
 import { FieldPath, FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
@@ -28,6 +28,8 @@ const dhashPrefixLength = 4;
 const dhashThreshold = Number.parseInt(process.env.DHASH_HAMMING_THRESHOLD || '8', 10);
 const falseAppealThreshold = Number.parseInt(process.env.FALSE_APPEAL_THRESHOLD || '2', 10);
 const cooldownDays = Number.parseInt(process.env.REVIEW_COOLDOWN_DAYS || '7', 10);
+const claimInviteExpiryMs = Number.parseInt(process.env.CLAIM_INVITE_EXPIRY_MS || `${14 * 24 * 60 * 60 * 1000}`, 10);
+const claimInviteRateLimitPerDay = Number.parseInt(process.env.CLAIM_INVITE_DAILY_LIMIT || '5', 10);
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -416,6 +418,45 @@ const fetchUserProfile = async (uid) => {
 const canCreateClaimRequest = (profile) => Boolean(
   profile?.ageVerified === true || (typeof profile?.onboardingStep === 'number' && profile.onboardingStep >= 2)
 );
+
+const getDateKey = (date = new Date()) => date.toISOString().slice(0, 10);
+
+const extractDomainHint = (website) => {
+  if (!website) return null;
+  const raw = String(website).trim().toLowerCase();
+  if (!raw) return null;
+  const withProtocol = raw.includes('://') ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(withProtocol);
+    return parsed.hostname.replace(/^www\./, '');
+  } catch (error) {
+    return raw.replace(/^www\./, '').split('/')[0];
+  }
+};
+
+const maskEmailHint = (email) => {
+  const raw = String(email || '').trim().toLowerCase();
+  if (!raw || !raw.includes('@')) return null;
+  const [localPart, domainPart] = raw.split('@');
+  const domainSections = domainPart.split('.');
+  const domainLabel = domainSections[0] || '';
+  const domainTld = domainSections.slice(1).join('.') || '';
+  const maskedLocal = localPart.length <= 2
+    ? `${localPart.charAt(0) || ''}*`
+    : `${localPart.slice(0, 1)}***${localPart.slice(-1)}`;
+  const maskedDomain = domainLabel.length <= 2
+    ? `${domainLabel.charAt(0) || ''}*`
+    : `${domainLabel.slice(0, 1)}***${domainLabel.slice(-1)}`;
+  return `${maskedLocal}@${maskedDomain}${domainTld ? `.${domainTld}` : ''}`;
+};
+
+const normalizeInstagramHint = (handle) => {
+  const raw = String(handle || '').trim();
+  if (!raw) return null;
+  const normalized = raw.replace(/^@+/, '');
+  if (!normalized) return null;
+  return `@${normalized}`;
+};
 
 const resolveContributorPostAuthorUid = (post) => post?.authorUid || post?.authorId || null;
 
@@ -1850,6 +1891,125 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
   }
 });
 
+export const createClaimInvite = onCall({ region: 'europe-west4' }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  const contributorId = request.data?.contributorId || null;
+  const postId = request.data?.postId || null;
+  if (!contributorId) {
+    throw new HttpsError('invalid-argument', 'contributorId is required');
+  }
+
+  const contributorSnap = await db.collection('contributors').doc(contributorId).get();
+  if (!contributorSnap.exists) {
+    throw new HttpsError('not-found', 'Contributor not found');
+  }
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const expiresAt = Timestamp.fromDate(new Date(Date.now() + claimInviteExpiryMs));
+  const rateRef = db.collection('claimInviteRateLimits').doc(request.auth.uid);
+
+  await db.runTransaction(async (transaction) => {
+    const rateSnap = await transaction.get(rateRef);
+    const todayKey = getDateKey();
+    const rateData = rateSnap.exists ? rateSnap.data() : null;
+    const currentCount = rateData?.date === todayKey ? Number(rateData?.count || 0) : 0;
+    if (currentCount >= claimInviteRateLimitPerDay) {
+      throw new HttpsError('resource-exhausted', 'Daily invite limit reached');
+    }
+    transaction.set(rateRef, {
+      date: todayKey,
+      count: currentCount + 1,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    const inviteRef = db.collection('claimInvites').doc(token);
+    transaction.set(inviteRef, {
+      contributorId,
+      postId,
+      createdByUid: request.auth.uid,
+      createdAt: FieldValue.serverTimestamp(),
+      expiresAt,
+      usedAt: null,
+      usedByUid: null,
+    });
+  });
+
+  return { path: `/claim/${token}` };
+});
+
+export const getClaimInvitePreview = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const token = req.method === 'GET'
+      ? String(req.query?.token || '')
+      : String(parseJsonBody(req)?.token || '');
+    if (!token) {
+      res.status(400).json({ error: 'Token is required' });
+      return;
+    }
+
+    const inviteSnap = await db.collection('claimInvites').doc(token).get();
+    if (!inviteSnap.exists) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    const inviteData = inviteSnap.data() || {};
+    if (inviteData?.usedAt) {
+      res.status(410).json({ error: 'Invite already used' });
+      return;
+    }
+    const expiresAt = inviteData?.expiresAt instanceof Timestamp ? inviteData.expiresAt : null;
+    if (!expiresAt || expiresAt.toMillis() <= Date.now()) {
+      res.status(410).json({ error: 'Invite expired' });
+      return;
+    }
+
+    const contributorId = inviteData?.contributorId || null;
+    if (!contributorId) {
+      res.status(404).json({ error: 'Contributor missing' });
+      return;
+    }
+
+    const contributorSnap = await db.collection('contributors').doc(contributorId).get();
+    if (!contributorSnap.exists) {
+      res.status(404).json({ error: 'Contributor not found' });
+      return;
+    }
+
+    const contributor = contributorSnap.data() || {};
+    const availableProofMethods = [];
+    if (contributor?.instagramHandle) availableProofMethods.push('instagram');
+    if (contributor?.website) availableProofMethods.push('website');
+    if (contributor?.email) availableProofMethods.push('email');
+    availableProofMethods.push('vouch');
+
+    const hints = {};
+    const websiteDomain = extractDomainHint(contributor?.website);
+    if (websiteDomain) hints.websiteDomain = websiteDomain;
+    const emailMasked = maskEmailHint(contributor?.email);
+    if (emailMasked) hints.emailMasked = emailMasked;
+    const instagramHandle = normalizeInstagramHint(contributor?.instagramHandle);
+    if (instagramHandle) hints.instagramHandle = instagramHandle;
+
+    res.status(200).json({
+      ok: true,
+      displayName: contributor?.displayName || 'Onbekende maker',
+      contributorId,
+      availableProofMethods,
+      hints,
+    });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to load invite preview' });
+  }
+});
+
 export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -1859,6 +2019,7 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
     const decoded = await verifyToken(req);
     const body = parseJsonBody(req);
     const contributorId = body?.contributorId || null;
+    const inviteToken = body?.inviteToken || null;
     const mode = body?.mode === 'merge' ? 'merge' : 'link';
     if (!contributorId) {
       res.status(400).json({ error: 'contributorId is required' });
@@ -1881,21 +2042,62 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
     const now = Date.now();
     const expiresAt = Timestamp.fromDate(new Date(now + claimTimeoutMs));
 
-    const requestRef = await db.collection('claimRequests').add({
-      contributorId,
-      requestedByUid: decoded.uid,
-      mode,
-      status: 'pending',
-      statusReason: null,
-      yesCount: 0,
-      noCount: 0,
-      eligibleVoterUids,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-      expiresAt,
+    const inviteRef = inviteToken ? db.collection('claimInvites').doc(inviteToken) : null;
+    let requestId = null;
+    await db.runTransaction(async (transaction) => {
+      if (inviteRef) {
+        const inviteSnap = await transaction.get(inviteRef);
+        if (!inviteSnap.exists) {
+          const error = new Error('Invite not found');
+          error.status = 404;
+          throw error;
+        }
+        const inviteData = inviteSnap.data() || {};
+        if (inviteData?.usedAt) {
+          const error = new Error('Invite already used');
+          error.status = 410;
+          throw error;
+        }
+        const inviteExpiresAt = inviteData?.expiresAt instanceof Timestamp ? inviteData.expiresAt : null;
+        if (!inviteExpiresAt || inviteExpiresAt.toMillis() <= Date.now()) {
+          const error = new Error('Invite expired');
+          error.status = 410;
+          throw error;
+        }
+        if (inviteData?.contributorId && inviteData.contributorId !== contributorId) {
+          const error = new Error('Invite does not match contributor');
+          error.status = 409;
+          throw error;
+        }
+      }
+
+      const requestRef = db.collection('claimRequests').doc();
+      requestId = requestRef.id;
+      transaction.set(requestRef, {
+        contributorId,
+        requestedByUid: decoded.uid,
+        mode,
+        status: 'pending',
+        statusReason: null,
+        yesCount: 0,
+        noCount: 0,
+        eligibleVoterUids,
+        inviteToken: inviteToken || null,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        expiresAt,
+      });
+
+      if (inviteRef) {
+        transaction.update(inviteRef, {
+          usedAt: FieldValue.serverTimestamp(),
+          usedByUid: decoded.uid,
+          usedRequestId: requestId,
+        });
+      }
     });
 
-    res.status(200).json({ ok: true, requestId: requestRef.id, eligibleVoterUids });
+    res.status(200).json({ ok: true, requestId, eligibleVoterUids });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create claim request' });

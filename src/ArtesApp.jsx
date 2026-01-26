@@ -36,6 +36,7 @@ import {
   migrateRemoveGeneralTheme,
   getContributorByAlias,
   createContributorWithAliases,
+  CLAIMS_COLLECTIONS,
 } from './firebase';
 import {
   collection,
@@ -1351,6 +1352,9 @@ export default function ArtesApp() {
             posts={posts}
             onClose={() => setShadowProfile(null)}
             onPostClick={setSelectedPost}
+            authUser={authUser}
+            userProfile={userProfile}
+            setView={setView}
           />
         )}
 
@@ -5047,10 +5051,26 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
     </div>
   );
 }
-function ShadowProfileModal({ name, contributorId, posts, onClose, onPostClick }) {
+function ShadowProfileModal({
+  name,
+  contributorId,
+  posts,
+  onClose,
+  onPostClick,
+  authUser,
+  userProfile,
+  setView,
+}) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some((c) => (
       (contributorId && c.contributorId === contributorId) || c.name === name
     )));
+    const [claimPanelOpen, setClaimPanelOpen] = useState(false);
+    const [claimBusy, setClaimBusy] = useState(false);
+    const [claimError, setClaimError] = useState('');
+    const [claimSuccess, setClaimSuccess] = useState('');
+    const [claimRequestId, setClaimRequestId] = useState(null);
+    const [contributorInfo, setContributorInfo] = useState(null);
+    const [loadingContributor, setLoadingContributor] = useState(false);
 
     const normalizeExternalLink = (link) => {
       if (!link) return null;
@@ -5103,6 +5123,141 @@ function ShadowProfileModal({ name, contributorId, posts, onClose, onPostClick }
       return Array.from(collected.values());
     }, [contributorId, name, shadowPosts]);
 
+    useEffect(() => {
+      let isMounted = true;
+      if (!contributorId) {
+        setContributorInfo(null);
+        return () => {};
+      }
+      const loadContributor = async () => {
+        setLoadingContributor(true);
+        try {
+          const db = getFirebaseDbInstance();
+          const snapshot = await getDoc(doc(db, CLAIMS_COLLECTIONS.contributors, contributorId));
+          if (!isMounted) return;
+          setContributorInfo(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+        } catch (error) {
+          if (isMounted) {
+            console.error('[ShadowProfileModal] Failed to load contributor', error);
+            setContributorInfo(null);
+          }
+        } finally {
+          if (isMounted) setLoadingContributor(false);
+        }
+      };
+      loadContributor();
+      return () => {
+        isMounted = false;
+      };
+    }, [contributorId]);
+
+    const isLoggedIn = Boolean(authUser?.uid);
+    const requiresIdCheck = isLoggedIn && (!userProfile?.ageVerified || (userProfile?.onboardingStep ?? 0) < 2);
+    const claimedByUid = contributorInfo?.claimedByUid || contributorInfo?.claimedBy || null;
+    const claimedByOther = Boolean(claimedByUid && claimedByUid !== authUser?.uid);
+
+    const hasInstagramAlias = Boolean(contributorInfo?.instagramHandle)
+      || externalLinks.some((link) => link.type === 'instagram');
+    const hasWebsiteAlias = Boolean(contributorInfo?.website)
+      || externalLinks.some((link) => link.type === 'website');
+    const hasEmailAlias = Boolean(contributorInfo?.email)
+      || externalLinks.some((link) => link.type === 'email');
+
+    const claimMethods = useMemo(() => {
+      const methods = [];
+      if (hasInstagramAlias) {
+        methods.push({
+          key: 'instagramBioToken',
+          title: 'Instagram bio token',
+          description: 'Plaats een token in je bio om eigenaarschap te bewijzen.',
+          placeholder: true,
+        });
+      }
+      if (hasWebsiteAlias) {
+        methods.push({
+          key: 'websiteToken',
+          title: 'Website token',
+          description: 'Voeg een token toe aan je website of domein.',
+          placeholder: true,
+        });
+      }
+      if (hasEmailAlias) {
+        methods.push({
+          key: 'emailLink',
+          title: 'Email link',
+          description: 'Ontvang een bevestigingslink per mail.',
+          placeholder: true,
+        });
+      }
+      methods.push({
+        key: 'vouch',
+        title: 'Vouch via community',
+        description: 'Vraag bestaande members om jouw claim te bevestigen.',
+        placeholder: false,
+      });
+      if (!hasInstagramAlias && !hasWebsiteAlias && !hasEmailAlias) {
+        methods.push({
+          key: 'moderator',
+          title: 'Naar moderator',
+          description: 'Laat een moderator je claim handmatig beoordelen.',
+          placeholder: true,
+        });
+      }
+      return methods;
+    }, [hasInstagramAlias, hasWebsiteAlias, hasEmailAlias]);
+
+    const startClaimRequest = useCallback(async ({ mode, status, method }) => {
+      if (!authUser?.uid) {
+        setClaimError('Log in om te claimen.');
+        return;
+      }
+      setClaimBusy(true);
+      setClaimError('');
+      setClaimSuccess('');
+      try {
+        const db = getFirebaseDbInstance();
+        const payload = {
+          requestedByUid: authUser.uid,
+          contributorId: contributorId || null,
+          contributorName: name || null,
+          mode,
+          status,
+          method,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        const docRef = await addDoc(collection(db, CLAIMS_COLLECTIONS.claimRequests), payload);
+        setClaimRequestId(docRef.id);
+        setClaimSuccess('Claim verzoek verzonden.');
+      } catch (error) {
+        console.error('[ShadowProfileModal] Claim request failed', error);
+        setClaimError(error?.message || 'Claim verzoek mislukt.');
+      } finally {
+        setClaimBusy(false);
+      }
+    }, [authUser?.uid, contributorId, name]);
+
+    const handleStartVouchClaim = () => {
+      startClaimRequest({ mode: 'link', status: 'pending', method: 'vouch' });
+    };
+
+    const handleDisputeClaim = () => {
+      startClaimRequest({ mode: 'dispute', status: 'needsModeration', method: 'dispute' });
+    };
+
+    const handleOpenIdCheck = async () => {
+      if (!authUser?.uid) return;
+      try {
+        await updateUserProfile(authUser.uid, {
+          onboardingStep: 2,
+          onboardingComplete: false,
+        });
+      } catch (error) {
+        console.error('[ShadowProfileModal] Failed to route to ID check', error);
+      }
+      if (setView) setView('onboarding');
+    };
+
     return (
       <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4">
         <div className="bg-slate-900 w-full max-w-4xl h-full rounded-3xl overflow-hidden flex flex-col">
@@ -5126,13 +5281,103 @@ function ShadowProfileModal({ name, contributorId, posts, onClose, onPostClick }
                 ))}
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => {}}
-              className="mt-5 inline-flex items-center justify-center rounded-full bg-white text-indigo-900 px-5 py-2 text-sm font-semibold shadow-sm hover:bg-indigo-50 transition"
-            >
-              Claim dit profiel
-            </button>
+            <div className="mt-5 w-full max-w-2xl">
+              {loadingContributor && (
+                <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm text-white/70">
+                  Claim status laden...
+                </div>
+              )}
+              {!loadingContributor && claimedByOther && (
+                <div className="rounded-2xl bg-white/10 px-4 py-3 text-left space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Dit profiel is al geclaimd</p>
+                    <p className="text-xs text-white/70">Denk je dat dit toch jouw profiel is?</p>
+                  </div>
+                  {!isLoggedIn && (
+                    <p className="text-xs text-white/70">Log in om te claimen.</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleDisputeClaim}
+                    disabled={!isLoggedIn || claimBusy}
+                    className="inline-flex items-center justify-center rounded-full bg-white text-indigo-900 px-5 py-2 text-sm font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                  >
+                    Dit ben ik toch
+                  </button>
+                  {claimError && (
+                    <p className="text-xs text-rose-200">{claimError}</p>
+                  )}
+                  {claimSuccess && (
+                    <p className="text-xs text-emerald-200">{claimSuccess} {claimRequestId && `#${claimRequestId}`}</p>
+                  )}
+                </div>
+              )}
+              {!loadingContributor && !claimedByOther && (
+                <div className="rounded-2xl bg-white/10 px-4 py-3 text-left space-y-3">
+                  {!isLoggedIn && (
+                    <p className="text-sm text-white/80">Log in om te claimen.</p>
+                  )}
+                  {isLoggedIn && requiresIdCheck && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-white/90">Voltooi eerst de ID check.</p>
+                      <button
+                        type="button"
+                        onClick={handleOpenIdCheck}
+                        className="inline-flex items-center justify-center rounded-full bg-white text-indigo-900 px-5 py-2 text-sm font-semibold shadow-sm hover:bg-indigo-50 transition"
+                      >
+                        Ga naar stap 2
+                      </button>
+                    </div>
+                  )}
+                  {isLoggedIn && !requiresIdCheck && (
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setClaimPanelOpen((prev) => !prev)}
+                        className="inline-flex items-center justify-center rounded-full bg-white text-indigo-900 px-5 py-2 text-sm font-semibold shadow-sm hover:bg-indigo-50 transition"
+                      >
+                        Claim dit profiel
+                      </button>
+                      {claimPanelOpen && (
+                        <div className="grid gap-3 text-left">
+                          {claimMethods.map((method) => (
+                            <div
+                              key={method.key}
+                              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-semibold text-white">{method.title}</p>
+                                  <p className="text-xs text-white/70">{method.description}</p>
+                                </div>
+                                {method.placeholder ? (
+                                  <span className="text-[10px] uppercase tracking-wide text-white/60">Binnenkort</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={handleStartVouchClaim}
+                                    disabled={claimBusy}
+                                    className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                                  >
+                                    Start claim
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {claimError && (
+                    <p className="text-xs text-rose-200">{claimError}</p>
+                  )}
+                  {claimSuccess && (
+                    <p className="text-xs text-emerald-200">{claimSuccess} {claimRequestId && `#${claimRequestId}`}</p>
+                  )}
+                </div>
+              )}
+            </div>
             <button onClick={onClose} className="absolute top-4 right-4">
               <X />
             </button>

@@ -1310,6 +1310,10 @@ export default function ArtesApp() {
               functionsBase={functionsBase}
               authUser={authUser}
               isModerator={moderatorAccess}
+              authReady={authReady}
+              isModeratorClient={isModeratorClient}
+              logListenerStart={logListenerStart}
+              handleListenerError={handleListenerError}
               uploads={uploads}
               moderationModal={moderationModal}
               moderationActionPending={moderationActionPending}
@@ -3246,6 +3250,10 @@ function ModerationPortal({
   functionsBase,
   authUser,
   isModerator,
+  authReady,
+  isModeratorClient,
+  logListenerStart,
+  handleListenerError,
   uploads,
   moderationModal,
   moderationActionPending,

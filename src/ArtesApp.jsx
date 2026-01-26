@@ -676,6 +676,12 @@ export default function ArtesApp() {
 
   useEffect(() => {
     if (!authReady) return;
+    if (!authUser) {
+      setCommunityConfig(DEFAULT_COMMUNITY_CONFIG);
+      setChallengeConfig(DEFAULT_CHALLENGE_CONFIG);
+      setConfigLoading(false);
+      return;
+    }
     let active = true;
     const loadConfig = async () => {
       setConfigLoading(true);
@@ -691,7 +697,13 @@ export default function ArtesApp() {
         setCommunityConfig(normalizeCommunityConfig(communityData));
         setChallengeConfig(normalizeChallengeConfig(challengeData));
       } catch (error) {
-        console.error('Failed to load community config', error);
+        if (error?.code === 'permission-denied') {
+          if (import.meta.env.DEV) {
+            console.log('[ArtesApp] Config load skipped, permission denied');
+          }
+        } else {
+          console.error('Failed to load community config', error);
+        }
         if (!active) return;
         setCommunityConfig(DEFAULT_COMMUNITY_CONFIG);
         setChallengeConfig(DEFAULT_CHALLENGE_CONFIG);
@@ -707,7 +719,7 @@ export default function ArtesApp() {
     return () => {
       active = false;
     };
-  }, [authReady]);
+  }, [authReady, authUser]);
 
   useEffect(() => {
     if (!profile?.preferences?.theme) return;

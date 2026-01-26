@@ -1,6 +1,9 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
     function isVerifiedUser() {
       return request.auth != null && request.auth.token.email_verified == true;
     }
@@ -10,6 +13,10 @@ service cloud.firestore {
         && request.auth.token.email != null
         && exists(/databases/$(database)/documents/config/moderation)
         && request.auth.token.email in get(/databases/$(database)/documents/config/moderation).data.moderatorEmails;
+    }
+    function hasClaimEligibility(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.ageVerified == true
+        || get(/databases/$(database)/documents/users/$(uid)).data.onboardingStep >= 2;
     }
 
     match /config/moderation {
@@ -180,6 +187,55 @@ service cloud.firestore {
         allow read: if true;
         allow create, delete: if isVerifiedUser() && request.auth.uid == userId;
       }
+    }
+
+    match /contributors/{contributorId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isModerator()
+        || (isSignedIn()
+          && resource.data.claimedByUid == request.auth.uid
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['bio', 'displayName', 'socials'])
+          && request.resource.data.claimedByUid == resource.data.claimedByUid
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.mergedInto == resource.data.mergedInto);
+      allow delete: if false;
+    }
+
+    match /contributorAliases/{aliasId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isModerator();
+    }
+
+    match /claimRequests/{requestId} {
+      allow create: if isSignedIn()
+        && request.resource.data.claimantUid == request.auth.uid
+        && hasClaimEligibility(request.auth.uid);
+      allow read: if isModerator()
+        || (isSignedIn() && request.auth.uid == resource.data.claimantUid);
+      allow update: if isModerator()
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['status']);
+      allow delete: if false;
+    }
+
+    match /claimVouches/{vouchId} {
+      allow create: if isSignedIn()
+        && request.resource.data.voterUid == request.auth.uid
+        && request.resource.data.claimRequestId is string
+        && request.auth.uid in get(/databases/$(database)/documents/claimRequests/$(request.resource.data.claimRequestId)).data.eligibleVoucherUids;
+      allow read: if isModerator()
+        || (isSignedIn() && request.auth.uid == resource.data.voterUid)
+        || (isSignedIn()
+          && request.auth.uid == get(/databases/$(database)/documents/claimRequests/$(resource.data.claimRequestId)).data.claimantUid);
+      allow update, delete: if false;
+    }
+
+    match /claimInvites/{inviteId} {
+      allow create: if isSignedIn();
+      allow read: if isSignedIn()
+        && (isModerator() || request.auth.uid == resource.data.creatorUid);
+      allow update: if isModerator();
+      allow delete: if false;
     }
   }
 }

@@ -40,6 +40,7 @@ const claimInviteExpiryMs = Number.parseInt(process.env.CLAIM_INVITE_EXPIRY_MS |
 const claimInviteRateLimitPerDay = Number.parseInt(process.env.CLAIM_INVITE_DAILY_LIMIT || '5', 10);
 const claimCodeExpiryMs = 5 * 60 * 1000;
 const claimProofRetentionMs = 30 * 24 * 60 * 60 * 1000;
+const emailProofExpiryMs = Number.parseInt(process.env.EMAIL_PROOF_EXPIRY_MS || `${24 * 60 * 60 * 1000}`, 10);
 const websiteProofExpiryMs = Number.parseInt(process.env.WEBSITE_PROOF_EXPIRY_MS || `${24 * 60 * 60 * 1000}`, 10);
 const websiteProofVerifyLimit = Number.parseInt(process.env.WEBSITE_PROOF_VERIFY_LIMIT || '5', 10);
 const websiteProofVerifyWindowMs = Number.parseInt(process.env.WEBSITE_PROOF_VERIFY_WINDOW_MS || `${10 * 60 * 1000}`, 10);
@@ -476,6 +477,10 @@ const normalizeInstagramHint = (handle) => {
   if (!normalized) return null;
   return `@${normalized}`;
 };
+
+const hashEmailProofToken = (token) => (
+  crypto.createHash('sha256').update(String(token ?? '')).digest('hex')
+);
 
 const fetchContributorWebsiteAlias = async (contributorId) => {
   if (!contributorId) return null;
@@ -2130,6 +2135,7 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
         inviteToken: inviteToken || null,
         proofData: {
           screenshotVerified: false,
+          emailVerified: false,
           websiteVerified: false,
         },
         createdAt: FieldValue.serverTimestamp(),
@@ -2157,6 +2163,70 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create claim request' });
   }
+});
+
+export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  const requestId = request.data?.requestId || null;
+  if (!requestId) {
+    throw new HttpsError('invalid-argument', 'requestId is required');
+  }
+
+  const requestRef = db.collection('claimRequests').doc(requestId);
+  const requestSnap = await requestRef.get();
+  if (!requestSnap.exists) {
+    throw new HttpsError('not-found', 'Claim request not found');
+  }
+
+  const requestData = requestSnap.data() || {};
+  if (requestData?.requestedByUid !== request.auth.uid) {
+    throw new HttpsError('permission-denied', 'Not allowed to start email proof');
+  }
+  if (requestData?.status !== 'pending') {
+    throw new HttpsError('failed-precondition', 'Claim request is not pending');
+  }
+
+  const contributorId = requestData?.contributorId || null;
+  if (!contributorId) {
+    throw new HttpsError('failed-precondition', 'Contributor missing');
+  }
+  const contributorSnap = await db.collection('contributors').doc(contributorId).get();
+  if (!contributorSnap.exists) {
+    throw new HttpsError('not-found', 'Contributor not found');
+  }
+  const contributorData = contributorSnap.data() || {};
+  const email = String(contributorData?.email || '').trim().toLowerCase();
+  if (!email) {
+    throw new HttpsError('failed-precondition', 'No email alias available');
+  }
+
+  const token = crypto.randomBytes(18).toString('hex');
+  const tokenHash = hashEmailProofToken(token);
+  const expiresAt = Timestamp.fromDate(new Date(Date.now() + emailProofExpiryMs));
+  await requestRef.set({
+    proofData: {
+      email: {
+        email,
+        tokenHash,
+        tokenExpiresAt: expiresAt,
+        tokenCreatedAt: FieldValue.serverTimestamp(),
+        lastCheckResult: 'pending',
+        lastCheckedAt: null,
+      },
+      emailVerified: false,
+      emailVerifiedAt: null,
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return {
+    token,
+    emailMasked: maskEmailHint(email),
+    expiresAt: expiresAt.toMillis(),
+    path: `/claim-email?requestId=${requestId}&token=${token}`,
+  };
 });
 
 export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (request) => {
@@ -2215,6 +2285,132 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
     expiresAt: expiresAt.toMillis(),
     instructions: `Plaats een tekstbestand op ${url} met exact deze token als inhoud.`,
   };
+});
+
+export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  const requestId = request.data?.requestId || null;
+  const token = request.data?.token || null;
+  if (!requestId || !token) {
+    throw new HttpsError('invalid-argument', 'requestId and token are required');
+  }
+
+  const requestRef = db.collection('claimRequests').doc(requestId);
+  const requestSnap = await requestRef.get();
+  if (!requestSnap.exists) {
+    throw new HttpsError('not-found', 'Claim request not found');
+  }
+  const requestData = requestSnap.data() || {};
+  if (requestData?.requestedByUid !== request.auth.uid) {
+    throw new HttpsError('permission-denied', 'Not allowed to verify email proof');
+  }
+  if (requestData?.status !== 'pending') {
+    throw new HttpsError('failed-precondition', 'Claim request is not pending');
+  }
+
+  const emailProof = requestData?.proofData?.email || null;
+  if (!emailProof?.tokenHash || !emailProof?.tokenExpiresAt) {
+    throw new HttpsError('failed-precondition', 'Email proof is not initialized');
+  }
+  const tokenHash = hashEmailProofToken(token);
+  const expiresAtMs = emailProof.tokenExpiresAt?.toMillis
+    ? emailProof.tokenExpiresAt.toMillis()
+    : new Date(emailProof.tokenExpiresAt).getTime();
+  const now = Date.now();
+
+  if (!expiresAtMs || Number.isNaN(expiresAtMs) || now > expiresAtMs) {
+    await requestRef.set({
+      proofData: {
+        email: {
+          lastCheckedAt: FieldValue.serverTimestamp(),
+          lastCheckResult: 'expired',
+        },
+        emailVerified: false,
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    throw new HttpsError('failed-precondition', 'Email token is verlopen.');
+  }
+
+  if (tokenHash !== emailProof.tokenHash) {
+    await requestRef.set({
+      proofData: {
+        email: {
+          lastCheckedAt: FieldValue.serverTimestamp(),
+          lastCheckResult: 'invalid',
+        },
+        emailVerified: false,
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    throw new HttpsError('failed-precondition', 'Email token is ongeldig.');
+  }
+
+  let resolvedStatus = 'pending';
+  await db.runTransaction(async (transaction) => {
+    const freshSnap = await transaction.get(requestRef);
+    if (!freshSnap.exists) return;
+    const data = freshSnap.data() || {};
+    const updates = {
+      'proofData.emailVerified': true,
+      'proofData.emailVerifiedAt': FieldValue.serverTimestamp(),
+      'proofData.email.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.email.lastCheckResult': 'verified',
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (data?.status !== 'pending') {
+      transaction.update(requestRef, updates);
+      resolvedStatus = data?.status || 'pending';
+      return;
+    }
+
+    const yesCount = Number(data?.yesCount || 0);
+    const noCount = Number(data?.noCount || 0);
+    const mode = data?.mode === 'merge' ? 'merge' : 'link';
+    if (yesCount >= 1 && noCount < 1 && mode === 'link') {
+      const contributorId = data?.contributorId || null;
+      const requestedByUid = data?.requestedByUid || null;
+      if (contributorId && requestedByUid) {
+        const contributorRef = db.collection('contributors').doc(contributorId);
+        const claimantRef = db.collection('users').doc(requestedByUid);
+        transaction.update(claimantRef, {
+          contributorId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(contributorRef, {
+          claimedByUid: requestedByUid,
+          claimedAt: FieldValue.serverTimestamp(),
+          status: 'claimed',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(requestRef, {
+          ...updates,
+          status: 'approved',
+          statusReason: null,
+          approvedAt: FieldValue.serverTimestamp(),
+        });
+        resolvedStatus = 'approved';
+        return;
+      }
+    }
+
+    if (yesCount >= 1 && (noCount >= 1 || mode === 'merge')) {
+      transaction.update(requestRef, {
+        ...updates,
+        status: 'needsModeration',
+        statusReason: mode === 'merge' ? 'merge requested' : 'vouch conflict',
+      });
+      resolvedStatus = 'needsModeration';
+      return;
+    }
+
+    transaction.update(requestRef, updates);
+    resolvedStatus = 'pending';
+  });
+
+  return { ok: true, verified: true, status: resolvedStatus };
 });
 
 export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (request) => {

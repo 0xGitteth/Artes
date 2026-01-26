@@ -439,6 +439,7 @@ export default function ArtesApp() {
   const [authUser, setAuthUser] = useState(null);
   const [authError, setAuthError] = useState(null);
   const [authPending, setAuthPending] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
@@ -457,10 +458,12 @@ export default function ArtesApp() {
   const [moderationModal, setModerationModal] = useState(null);
   const [moderationActionPending, setModerationActionPending] = useState(false);
   const [moderatorAccess, setModeratorAccess] = useState(null);
+  const [isModeratorClient, setIsModeratorClient] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
   const [supportThreadId, setSupportThreadId] = useState(null);
   const [claimInviteToken, setClaimInviteToken] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
+  const authReadyRef = useRef(false);
   const userProfile = profile;
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
@@ -551,6 +554,34 @@ export default function ArtesApp() {
     setChallengeConfig(normalizedChallenge);
   }, []);
 
+  const logListenerStart = useCallback(
+    (label, options = {}) => {
+      if (!import.meta.env.DEV) return;
+      const {
+        authUser: listenerUser = authUser,
+        authReady: listenerReady = authReady,
+        isModeratorClient: listenerModeratorClient = isModeratorClient,
+      } = options;
+      console.log(`[ArtesApp] Listener start: ${label}`, {
+        authReady: listenerReady,
+        uid: listenerUser?.uid || null,
+        emailVerified: listenerUser?.emailVerified ?? null,
+        isModeratorClient: Boolean(listenerModeratorClient),
+      });
+    },
+    [authReady, authUser, isModeratorClient],
+  );
+
+  const handleListenerError = useCallback((label, error) => {
+    if (error?.code === 'permission-denied' && !authReady) {
+      if (import.meta.env.DEV) {
+        console.log(`[ArtesApp] ${label} skipped, auth not ready`);
+      }
+      return;
+    }
+    console.error('SNAPSHOT ERROR:', error?.code, error?.message, 'LABEL:', label);
+  }, [authReady]);
+
   // Seeding
   useEffect(() => {
      const checkAndSeed = async () => {
@@ -570,6 +601,10 @@ export default function ArtesApp() {
 
     const unsubscribe = observeAuth(async (u) => {
       if (!active) return;
+      if (!authReadyRef.current) {
+        authReadyRef.current = true;
+        setAuthReady(true);
+      }
       setProfileLoading(true);
       setView('loading');
       setUser(u);
@@ -594,7 +629,7 @@ export default function ArtesApp() {
         return;
       }
       try {
-        if (u?.uid && ensuredSupportThreadUidRef.current !== u.uid) {
+        if (authReadyRef.current && u?.uid && ensuredSupportThreadUidRef.current !== u.uid) {
           ensuredSupportThreadUidRef.current = u.uid;
           ensureSupportThreadExists(u.uid).catch((error) => {
             console.error('[ArtesApp] Failed to ensure support thread', error);
@@ -640,6 +675,7 @@ export default function ArtesApp() {
   }, [ensureModerationThread, getClaimTokenFromPath]);
 
   useEffect(() => {
+    if (!authReady) return;
     let active = true;
     const loadConfig = async () => {
       setConfigLoading(true);
@@ -671,7 +707,7 @@ export default function ArtesApp() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [authReady]);
 
   useEffect(() => {
     if (!profile?.preferences?.theme) return;
@@ -738,31 +774,37 @@ export default function ArtesApp() {
 
   // Data Listeners
   useEffect(() => {
-     if (!user) return;
+     if (!authReady || !user) return;
+     logListenerStart('Posts listener (ArtesApp)');
      const unsubPosts = subscribeToPosts(setPosts);
+     logListenerStart('Users listener (ArtesApp)');
      const unsubUsers = subscribeToUsers(setUsers);
      return () => { unsubPosts(); unsubUsers(); };
-  }, [user]);
+  }, [authReady, user, logListenerStart]);
 
   useEffect(() => {
-    if (!authUser?.uid) return;
+    if (!authReady || !authUser?.uid) {
+      setIsModeratorClient(false);
+      return;
+    }
     const db = getFirebaseDbInstance();
     const q = query(
       collection(db, 'uploads'),
       where('userId', '==', authUser.uid),
       orderBy('createdAt', 'desc'),
     );
+    logListenerStart('Uploads listener (ArtesApp)');
     return onSnapshot(
       q,
       (snapshot) => {
         setUploads(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
       },
-      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Uploads listener (ArtesApp)'),
+      (err) => handleListenerError('Uploads listener (ArtesApp)', err),
     );
-  }, [authUser?.uid]);
+  }, [authReady, authUser?.uid, logListenerStart, handleListenerError]);
 
   useEffect(() => {
-    if (!authUser?.uid) return;
+    if (!authReady || !authUser?.uid) return;
     let unsubscribe = null;
     let active = true;
 
@@ -779,9 +821,10 @@ export default function ArtesApp() {
           isModeratorClient: !!(authUser?.email && moderatorEmails.includes(authUser.email)),
         });
         
-        const isModeratorClient = authUser?.email && moderatorEmails.includes(authUser.email);
+        const resolvedIsModeratorClient = authUser?.email && moderatorEmails.includes(authUser.email);
+        setIsModeratorClient(Boolean(resolvedIsModeratorClient));
 
-        if (!isModeratorClient) {
+        if (!authUser?.emailVerified || !resolvedIsModeratorClient) {
           console.log('Moderation unread listener skipped: not a moderator');
           return;
         }
@@ -790,6 +833,9 @@ export default function ArtesApp() {
         const messagesRef = collection(db, 'threads', threadId, 'messages');
         const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
 
+        logListenerStart('Moderation unread listener (ArtesApp)', {
+          isModeratorClient: resolvedIsModeratorClient,
+        });
         unsubscribe = onSnapshot(
           q,
           (snapshot) => {
@@ -799,7 +845,7 @@ export default function ArtesApp() {
             if (moderationModal?.id === docSnap.id) return;
             setModerationModal({ id: docSnap.id, ...docSnap.data() });
           },
-          (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation unread listener (ArtesApp)'),
+          (err) => handleListenerError('Moderation unread listener (ArtesApp)', err),
         );
       } catch (error) {
         console.error('Failed to setup moderation unread listener check', error);
@@ -812,7 +858,7 @@ export default function ArtesApp() {
       active = false;
       if (unsubscribe) unsubscribe();
     };
-  }, [authUser?.uid, moderationModal?.id]);
+  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError]);
 
   useEffect(() => {
     if (view !== 'chat') return;
@@ -827,7 +873,7 @@ export default function ArtesApp() {
     if (view !== 'chat') return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('open') !== 'moderation') return;
-    if (!authUser?.uid || !functionsBase) return;
+    if (!authReady || !authUser?.uid || !functionsBase) return;
     let active = true;
     ensureModerationThread(authUser)
       .then((threadId) => {
@@ -842,10 +888,10 @@ export default function ArtesApp() {
     return () => {
       active = false;
     };
-  }, [view, authUser, functionsBase, ensureModerationThread]);
+  }, [view, authReady, authUser, functionsBase, ensureModerationThread]);
 
   useEffect(() => {
-    if (!authUser) {
+    if (!authReady || !authUser) {
       setModeratorAccess(false);
       return;
     }
@@ -863,7 +909,7 @@ export default function ArtesApp() {
     return () => {
       active = false;
     };
-  }, [authUser?.uid, authUser?.email]);
+  }, [authReady, authUser?.uid, authUser?.email]);
 
   useEffect(() => {
     if (view !== 'moderation' || profileLoading) return;
@@ -882,12 +928,13 @@ export default function ArtesApp() {
   // Live snapshot listener for own profile updates
   // This ensures UI updates immediately when profile is saved, not just on tab switch
   useEffect(() => {
-    if (!authUser?.uid) return;
+    if (!authReady || !authUser?.uid) return;
     
     const db = getFirebaseDbInstance();
     if (import.meta.env.DEV) {
       console.log('[ArtesApp] Setting up live profile listener for uid:', authUser.uid);
     }
+    logListenerStart('Profile listener (ArtesApp)');
     
     const unsubscribe = onSnapshot(
       doc(db, 'users', authUser.uid),
@@ -909,7 +956,7 @@ export default function ArtesApp() {
         setProfile(normalized);
       },
       (error) => {
-        console.error('[ArtesApp] Profile snapshot error:', error.code, error.message);
+        handleListenerError('Profile listener (ArtesApp)', error);
       }
     );
     
@@ -919,10 +966,10 @@ export default function ArtesApp() {
       }
       unsubscribe();
     };
-  }, [authUser?.uid]);
+  }, [authReady, authUser?.uid, logListenerStart, handleListenerError]);
 
   const handleOpenSupportChat = () => {
-    if (!authUser?.uid || !functionsBase) {
+    if (!authReady || !authUser?.uid || !functionsBase) {
       setToastMessage('Support chat is momenteel niet beschikbaar.');
       return;
     }
@@ -1027,7 +1074,7 @@ export default function ArtesApp() {
         theme: profileData.preferences?.theme || 'light',
       },
     };
-    if (authUser?.uid) {
+    if (authReady && authUser?.uid) {
       await updateUserProfile(authUser.uid, finalProfile);
       
       // Create support thread for the user after onboarding
@@ -1218,6 +1265,9 @@ export default function ArtesApp() {
               userProfile={profile}
               functionsBase={functionsBase}
               setView={setView}
+              authReady={authReady}
+              logListenerStart={logListenerStart}
+              handleListenerError={handleListenerError}
             />
           )}
 
@@ -1239,6 +1289,7 @@ export default function ArtesApp() {
               authError={authError}
               profile={profile}
               functionsBase={functionsBase}
+              authReady={authReady}
             />
           )}
           
@@ -1340,6 +1391,9 @@ export default function ArtesApp() {
                 userProfile={userProfile}
                 communities={communityConfig.communities}
                 initialTopicTitle={initialTopicTitle}
+                authReady={authReady}
+                logListenerStart={logListenerStart}
+                handleListenerError={handleListenerError}
               />
             );
           })()}
@@ -1452,6 +1506,9 @@ export default function ArtesApp() {
             userProfile={userProfile}
             functionsBase={functionsBase}
             setView={setView}
+            authReady={authReady}
+            logListenerStart={logListenerStart}
+            handleListenerError={handleListenerError}
           />
         )}
 
@@ -1591,7 +1648,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
   );
 }
 
-function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase }) {
+function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady }) {
     const [step, setStep] = useState(() => Math.max(1, profile?.onboardingStep ?? 1));
     const [roles, setRoles] = useState([]);
     const MATCH_STEP = 1.5;
@@ -1681,6 +1738,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }, [profile?.pendingClaimContributorName]);
 
     const fetchContributorMatches = async (displayName) => {
+      if (!authReady) return [];
       const normalized = normalizeDisplayName(displayName);
       if (!normalized) return [];
       const db = getFirebaseDbInstance();
@@ -2490,7 +2548,7 @@ function UploadStatusPanel({ uploads = [] }) {
   );
 }
 
-function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter }) {
+function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter, authReady, isModeratorClient, logListenerStart, handleListenerError }) {
   const [cases, setCases] = useState([]);
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [selectedCase, setSelectedCase] = useState(null);
@@ -2506,21 +2564,32 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const reviewCasesListenerLogRef = useRef(null);
 
   useEffect(() => {
-    const shouldStart = Boolean(authUser) && isModerator === true;
+    const shouldStart = authReady
+      && Boolean(authUser)
+      && authUser?.emailVerified === true
+      && isModeratorClient === true
+      && isModerator === true;
     if (import.meta.env.DEV) {
-      const reason = !authUser
-        ? 'skip: no auth user'
-        : isModerator === null
-          ? 'skip: moderator check pending'
-          : isModerator === false
-            ? 'skip: not a moderator'
-            : 'start';
+      const reason = !authReady
+        ? 'skip: auth not ready'
+        : !authUser
+          ? 'skip: no auth user'
+          : !authUser?.emailVerified
+            ? 'skip: email not verified'
+            : isModeratorClient !== true
+              ? 'skip: not a moderator client'
+              : isModerator === null
+                ? 'skip: moderator check pending'
+                : isModerator === false
+                  ? 'skip: not a moderator'
+                  : 'start';
       if (reviewCasesListenerLogRef.current !== reason) {
         console.log(`[ModerationPanel] reviewCases listener ${reason}`);
         reviewCasesListenerLogRef.current = reason;
       }
     }
     if (!shouldStart) return;
+    logListenerStart('Moderation reviewCases listener (ArtesApp)', { isModeratorClient });
     const db = getFirebaseDbInstance();
     const q = query(collection(db, 'reviewCases'), where('status', '==', 'inReview'), orderBy('createdAt', 'desc'));
     return onSnapshot(
@@ -2528,9 +2597,9 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       (snapshot) => {
         setCases(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
       },
-      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation reviewCases listener (ArtesApp)'),
+      (err) => handleListenerError('Moderation reviewCases listener (ArtesApp)', err),
     );
-  }, [authUser, isModerator]);
+  }, [authReady, authUser, authUser?.emailVerified, isModeratorClient, isModerator, logListenerStart, handleListenerError]);
 
   const filteredCases = useMemo(() => {
     if (caseTypeFilter === 'report') {
@@ -2556,7 +2625,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   }, [selectedCaseId, filteredCases]);
 
   useEffect(() => {
-    if (!selectedCase) {
+    if (!authReady || !selectedCase) {
       setSelectedUpload(null);
       return;
     }
@@ -2575,7 +2644,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         }
       })
       .catch(() => setSelectedUpload(null));
-  }, [selectedCase]);
+  }, [authReady, selectedCase]);
 
   useEffect(() => {
     if (!selectedCaseId || !authUser || !moderationApiBase) return;
@@ -2947,7 +3016,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   );
 }
 
-function ContributorMergeTool({ authUser, functionsBase }) {
+function ContributorMergeTool({ authUser, functionsBase, authReady }) {
   const [primaryContributorId, setPrimaryContributorId] = useState('');
   const [secondaryContributorId, setSecondaryContributorId] = useState('');
   const [primaryQuery, setPrimaryQuery] = useState('');
@@ -2962,6 +3031,7 @@ function ContributorMergeTool({ authUser, functionsBase }) {
   const normalizeTerm = (value) => String(value || '').trim().toLowerCase();
 
   const searchContributors = useCallback(async (term, setMatches, setLoading) => {
+    if (!authReady) return;
     const normalized = normalizeTerm(term);
     if (!normalized) {
       setMatches([]);
@@ -2986,7 +3056,7 @@ function ContributorMergeTool({ authUser, functionsBase }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authReady]);
 
   const handleSelectMatch = (match, setId, setQuery, setMatches) => {
     setId(match.id);
@@ -3392,6 +3462,10 @@ function ModerationPortal({
             moderationApiBase={moderationApiBase}
             authUser={authUser}
             isModerator={isModerator}
+            authReady={authReady}
+            isModeratorClient={isModeratorClient}
+            logListenerStart={logListenerStart}
+            handleListenerError={handleListenerError}
             caseTypeFilter="upload"
           />
         </div>
@@ -3402,6 +3476,10 @@ function ModerationPortal({
           moderationApiBase={moderationApiBase}
           authUser={authUser}
           isModerator={isModerator}
+          authReady={authReady}
+          isModeratorClient={isModeratorClient}
+          logListenerStart={logListenerStart}
+          handleListenerError={handleListenerError}
           caseTypeFilter="report"
         />
       )}
@@ -3594,7 +3672,7 @@ function ModerationPortal({
       )}
 
       {activeTab === 'merge' && (
-        <ContributorMergeTool authUser={authUser} functionsBase={functionsBase} />
+        <ContributorMergeTool authUser={authUser} functionsBase={functionsBase} authReady={authReady} />
       )}
 
       {moderationModal && (
@@ -4951,7 +5029,7 @@ function CommunityList({ setView, communities, challenge, configLoading, onStart
   );
 }
 
-function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, communities, initialTopicTitle }) {
+function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, communities, initialTopicTitle, authReady, logListenerStart, handleListenerError }) {
   const db = getFirebaseDbInstance();
   const communityList = Array.isArray(communities) && communities.length
     ? communities
@@ -4979,10 +5057,11 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
   const displayName = sanitizeHandle(userProfile?.displayName || userProfile?.username || authUser?.displayName || '');
 
   useEffect(() => {
-    if (!db || !id) return undefined;
+    if (!authReady || !db || !id) return undefined;
     setTopicsLoading(true);
     const topicsRef = collection(db, 'communities', id, 'topics');
     const topicsQuery = query(topicsRef, orderBy('createdAt', 'desc'));
+    logListenerStart('Community topics listener (ArtesApp)');
     return onSnapshot(
       topicsQuery,
       (snapshot) => {
@@ -4994,12 +5073,12 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
         setTopicsLoading(false);
       },
       (error) => {
-        console.error('Failed to load topics', error);
+        handleListenerError('Community topics listener (ArtesApp)', error);
         setTopicError('Topics konden niet worden geladen.');
         setTopicsLoading(false);
       },
     );
-  }, [db, id]);
+  }, [authReady, db, id, logListenerStart, handleListenerError]);
 
   const topicsToRender = topics.length ? topics : fallbackTopics;
 
@@ -5090,6 +5169,9 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
             onBack={() => setActiveTopicId(null)}
             authUser={authUser}
             userProfile={userProfile}
+            authReady={authReady}
+            logListenerStart={logListenerStart}
+            handleListenerError={handleListenerError}
           />
         ) : (
           <>
@@ -5174,7 +5256,7 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
   );
 }
 
-function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProfile }) {
+function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProfile, authReady, logListenerStart, handleListenerError }) {
   const db = getFirebaseDbInstance();
   const [topic, setTopic] = useState(null);
   const [topicLoading, setTopicLoading] = useState(true);
@@ -5187,9 +5269,10 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProf
   );
 
   useEffect(() => {
-    if (!db || !communityId || !topicId) return undefined;
+    if (!authReady || !db || !communityId || !topicId) return undefined;
     setTopicLoading(true);
     const topicRef = doc(db, 'communities', communityId, 'topics', topicId);
+    logListenerStart('Community topic listener (ArtesApp)');
     return onSnapshot(
       topicRef,
       (snapshot) => {
@@ -5197,26 +5280,27 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProf
         setTopicLoading(false);
       },
       (error) => {
-        console.error('Failed to load topic', error);
+        handleListenerError('Community topic listener (ArtesApp)', error);
         setTopicLoading(false);
       },
     );
-  }, [db, communityId, topicId]);
+  }, [authReady, db, communityId, topicId, logListenerStart, handleListenerError]);
 
   useEffect(() => {
-    if (!db || !communityId || !topicId) return undefined;
+    if (!authReady || !db || !communityId || !topicId) return undefined;
     const commentsRef = collection(db, 'communities', communityId, 'topics', topicId, 'comments');
     const commentsQuery = query(commentsRef, orderBy('createdAt', 'desc'));
+    logListenerStart('Community comments listener (ArtesApp)');
     return onSnapshot(
       commentsQuery,
       (snapshot) => {
         setComments(snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() })));
       },
       (error) => {
-        console.error('Failed to load comments', error);
+        handleListenerError('Community comments listener (ArtesApp)', error);
       },
     );
-  }, [db, communityId, topicId]);
+  }, [authReady, db, communityId, topicId, logListenerStart, handleListenerError]);
 
   const handleAddComment = async () => {
     if (!authUser) {
@@ -5702,6 +5786,9 @@ function ShadowProfileModal({
   userProfile,
   functionsBase,
   setView,
+  authReady,
+  logListenerStart,
+  handleListenerError,
 }) {
     const shadowPosts = posts.filter(p => p.credits && p.credits.some((c) => (
       (contributorId && c.contributorId === contributorId) || c.name === name
@@ -5797,7 +5884,7 @@ function ShadowProfileModal({
 
     useEffect(() => {
       let isMounted = true;
-      if (!contributorId) {
+      if (!authReady || !contributorId) {
         setContributorInfo(null);
         return () => {};
       }
@@ -5821,11 +5908,11 @@ function ShadowProfileModal({
       return () => {
         isMounted = false;
       };
-    }, [contributorId]);
+    }, [authReady, contributorId]);
 
     useEffect(() => {
       let active = true;
-      if (!contributorId) {
+      if (!authReady || !contributorId) {
         setWebsiteAlias(null);
         return () => {};
       }
@@ -5858,24 +5945,25 @@ function ShadowProfileModal({
       return () => {
         active = false;
       };
-    }, [contributorId]);
+    }, [authReady, contributorId]);
 
     useEffect(() => {
-      if (!claimRequestId) {
+      if (!authReady || !claimRequestId) {
         setClaimRequestData(null);
         return () => {};
       }
+      logListenerStart('ShadowProfile claim request listener (ArtesApp)');
       const unsubscribe = onSnapshot(
         getClaimRequestRef(claimRequestId),
         (snapshot) => {
           setClaimRequestData(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
         },
         (error) => {
-          console.error('[ShadowProfileModal] Failed to listen to claim request', error);
+          handleListenerError('ShadowProfile claim request listener (ArtesApp)', error);
         }
       );
       return () => unsubscribe();
-    }, [claimRequestId]);
+    }, [authReady, claimRequestId, logListenerStart, handleListenerError]);
 
     const isLoggedIn = Boolean(authUser?.uid);
     const requiresIdCheck = isLoggedIn && (!userProfile?.ageVerified || (userProfile?.onboardingStep ?? 0) < 2);
@@ -6513,6 +6601,9 @@ function ClaimInvitePage({
   userProfile,
   functionsBase,
   setView,
+  authReady,
+  logListenerStart,
+  handleListenerError,
 }) {
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -6585,21 +6676,22 @@ function ClaimInvitePage({
   }, [token, functionsBase]);
 
   useEffect(() => {
-    if (!claimRequestId) {
+    if (!authReady || !claimRequestId) {
       setClaimRequestData(null);
       return () => {};
     }
+    logListenerStart('Claim invite request listener (ArtesApp)');
     const unsubscribe = onSnapshot(
       getClaimRequestRef(claimRequestId),
       (snapshot) => {
         setClaimRequestData(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
       },
       (error) => {
-        console.error('[ClaimInvitePage] Failed to listen to claim request', error);
+        handleListenerError('Claim invite request listener (ArtesApp)', error);
       }
     );
     return () => unsubscribe();
-  }, [claimRequestId]);
+  }, [authReady, claimRequestId, logListenerStart, handleListenerError]);
 
   useEffect(() => {
     if (!preview?.availableProofMethods) return;

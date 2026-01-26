@@ -22,6 +22,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  updateDoc,
   collection,
   addDoc,
   onSnapshot,
@@ -761,6 +762,13 @@ export const ensureSupportThreadExists = async (uid) => {
   try {
     const snap = await getDoc(threadRef);
     if (snap.exists()) {
+      const data = snap.data() || {};
+      if (!data.threadKey) {
+        await updateDoc(threadRef, { threadKey: threadId });
+        if (import.meta.env.DEV) {
+          console.log(`[ensureSupportThreadExists] Patched threadKey for ${threadId}`);
+        }
+      }
       if (import.meta.env.DEV) {
         console.log(`[ensureSupportThreadExists] Thread ${threadId} already exists`);
       }

@@ -7,6 +7,13 @@ import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { logger } from 'firebase-functions';
 import admin from 'firebase-admin';
 import { FieldPath, FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
+import {
+  buildWebsiteClaimUrl,
+  checkWebsiteClaimToken,
+  fetchWebsiteClaimText,
+  hashWebsiteProofToken,
+  normalizeDomain,
+} from './websiteClaimProof.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -33,6 +40,12 @@ const claimInviteExpiryMs = Number.parseInt(process.env.CLAIM_INVITE_EXPIRY_MS |
 const claimInviteRateLimitPerDay = Number.parseInt(process.env.CLAIM_INVITE_DAILY_LIMIT || '5', 10);
 const claimCodeExpiryMs = 5 * 60 * 1000;
 const claimProofRetentionMs = 30 * 24 * 60 * 60 * 1000;
+const websiteProofExpiryMs = Number.parseInt(process.env.WEBSITE_PROOF_EXPIRY_MS || `${24 * 60 * 60 * 1000}`, 10);
+const websiteProofVerifyLimit = Number.parseInt(process.env.WEBSITE_PROOF_VERIFY_LIMIT || '5', 10);
+const websiteProofVerifyWindowMs = Number.parseInt(process.env.WEBSITE_PROOF_VERIFY_WINDOW_MS || `${10 * 60 * 1000}`, 10);
+const websiteProofFetchTimeoutMs = Number.parseInt(process.env.WEBSITE_PROOF_FETCH_TIMEOUT_MS || '8000', 10);
+const websiteProofMaxBytes = Number.parseInt(process.env.WEBSITE_PROOF_MAX_BYTES || `${8 * 1024}`, 10);
+const websiteProofMaxRedirects = Number.parseInt(process.env.WEBSITE_PROOF_MAX_REDIRECTS || '2', 10);
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -462,6 +475,24 @@ const normalizeInstagramHint = (handle) => {
   const normalized = raw.replace(/^@+/, '');
   if (!normalized) return null;
   return `@${normalized}`;
+};
+
+const fetchContributorWebsiteAlias = async (contributorId) => {
+  if (!contributorId) return null;
+  const snapshot = await db.collection('contributorAliases')
+    .where('contributorId', '==', contributorId)
+    .where('type', '==', 'domain')
+    .limit(1)
+    .get();
+  if (snapshot.empty) return null;
+  const docSnap = snapshot.docs[0];
+  const data = docSnap.data() || {};
+  const domain = normalizeDomain(data?.value || '');
+  if (!domain) return null;
+  return {
+    aliasId: docSnap.id,
+    domain,
+  };
 };
 
 const resolveContributorPostAuthorUid = (post) => post?.authorUid || post?.authorId || null;
@@ -1991,13 +2022,13 @@ export const getClaimInvitePreview = onRequest({ cors: true, region: 'europe-wes
     const contributor = contributorSnap.data() || {};
     const availableProofMethods = [];
     if (contributor?.instagramHandle) availableProofMethods.push('instagram');
-    if (contributor?.website) availableProofMethods.push('website');
+    const websiteAlias = await fetchContributorWebsiteAlias(contributorId);
+    if (websiteAlias) availableProofMethods.push('website');
     if (contributor?.email) availableProofMethods.push('email');
     availableProofMethods.push('vouch');
 
     const hints = {};
-    const websiteDomain = extractDomainHint(contributor?.website);
-    if (websiteDomain) hints.websiteDomain = websiteDomain;
+    if (websiteAlias?.domain) hints.websiteDomain = websiteAlias.domain;
     const emailMasked = maskEmailHint(contributor?.email);
     if (emailMasked) hints.emailMasked = emailMasked;
     const instagramHandle = normalizeInstagramHint(contributor?.instagramHandle);
@@ -2099,6 +2130,7 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
         inviteToken: inviteToken || null,
         proofData: {
           screenshotVerified: false,
+          websiteVerified: false,
         },
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -2125,6 +2157,232 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create claim request' });
   }
+});
+
+export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  const requestId = request.data?.requestId || null;
+  if (!requestId) {
+    throw new HttpsError('invalid-argument', 'requestId is required');
+  }
+
+  const requestRef = db.collection('claimRequests').doc(requestId);
+  const requestSnap = await requestRef.get();
+  if (!requestSnap.exists) {
+    throw new HttpsError('not-found', 'Claim request not found');
+  }
+
+  const requestData = requestSnap.data() || {};
+  if (requestData?.requestedByUid !== request.auth.uid) {
+    throw new HttpsError('permission-denied', 'Not allowed to start website proof');
+  }
+  if (requestData?.status !== 'pending') {
+    throw new HttpsError('failed-precondition', 'Claim request is not pending');
+  }
+  const contributorId = requestData?.contributorId || null;
+  const websiteAlias = await fetchContributorWebsiteAlias(contributorId);
+  if (!websiteAlias?.domain) {
+    throw new HttpsError('failed-precondition', 'No website alias available');
+  }
+
+  const token = crypto.randomBytes(18).toString('hex');
+  const tokenHash = hashWebsiteProofToken(token);
+  const expiresAt = Timestamp.fromDate(new Date(Date.now() + websiteProofExpiryMs));
+  await requestRef.set({
+    proofData: {
+      website: {
+        domain: websiteAlias.domain,
+        aliasId: websiteAlias.aliasId,
+        tokenHash,
+        tokenExpiresAt: expiresAt,
+        tokenCreatedAt: FieldValue.serverTimestamp(),
+        verifyAttempts: 0,
+        verifyWindowStart: FieldValue.serverTimestamp(),
+      },
+      websiteVerified: false,
+      websiteVerifiedAt: null,
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const url = buildWebsiteClaimUrl(websiteAlias.domain);
+  return {
+    token,
+    url,
+    domain: websiteAlias.domain,
+    expiresAt: expiresAt.toMillis(),
+    instructions: `Plaats een tekstbestand op ${url} met exact deze token als inhoud.`,
+  };
+});
+
+export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  const requestId = request.data?.requestId || null;
+  if (!requestId) {
+    throw new HttpsError('invalid-argument', 'requestId is required');
+  }
+
+  const requestRef = db.collection('claimRequests').doc(requestId);
+  let proofPayload = null;
+  await db.runTransaction(async (transaction) => {
+    const requestSnap = await transaction.get(requestRef);
+    if (!requestSnap.exists) {
+      throw new HttpsError('not-found', 'Claim request not found');
+    }
+    const data = requestSnap.data() || {};
+    if (data?.requestedByUid !== request.auth.uid) {
+      throw new HttpsError('permission-denied', 'Not allowed to verify website proof');
+    }
+    if (data?.status !== 'pending') {
+      throw new HttpsError('failed-precondition', 'Claim request is not pending');
+    }
+    const websiteProof = data?.proofData?.website || null;
+    if (!websiteProof?.domain || !websiteProof?.tokenHash || !websiteProof?.tokenExpiresAt) {
+      throw new HttpsError('failed-precondition', 'Website proof is not initialized');
+    }
+    const now = Date.now();
+    const windowStart = websiteProof.verifyWindowStart?.toDate?.().getTime() || 0;
+    const windowExpired = !windowStart || now - windowStart > websiteProofVerifyWindowMs;
+    const attempts = windowExpired ? 0 : Number(websiteProof.verifyAttempts || 0);
+    if (attempts >= websiteProofVerifyLimit) {
+      throw new HttpsError('resource-exhausted', 'Too many verification attempts');
+    }
+    const nextWindowStart = windowExpired ? now : windowStart;
+    transaction.update(requestRef, {
+      'proofData.website.verifyAttempts': attempts + 1,
+      'proofData.website.verifyWindowStart': Timestamp.fromDate(new Date(nextWindowStart)),
+      'proofData.website.lastVerifyAttemptAt': FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    proofPayload = {
+      domain: websiteProof.domain,
+      tokenHash: websiteProof.tokenHash,
+      tokenExpiresAt: websiteProof.tokenExpiresAt,
+    };
+  });
+
+  if (!proofPayload) {
+    throw new HttpsError('failed-precondition', 'Website proof is not initialized');
+  }
+
+  const url = buildWebsiteClaimUrl(proofPayload.domain);
+  let responseBody = '';
+  try {
+    responseBody = await fetchWebsiteClaimText({
+      hostname: proofPayload.domain,
+      url,
+      timeoutMs: websiteProofFetchTimeoutMs,
+      maxBytes: websiteProofMaxBytes,
+      maxRedirects: websiteProofMaxRedirects,
+    });
+  } catch (error) {
+    await requestRef.set({
+      proofData: {
+        website: {
+          lastCheckedAt: FieldValue.serverTimestamp(),
+          lastCheckResult: 'fetch_failed',
+          lastCheckMessage: error?.message || 'Fetch failed',
+        },
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    throw new HttpsError('failed-precondition', 'Website verificatie mislukt.');
+  }
+
+  const now = Date.now();
+  const expiresAtMs = proofPayload.tokenExpiresAt?.toMillis ? proofPayload.tokenExpiresAt.toMillis() : null;
+  const tokenCheck = checkWebsiteClaimToken({
+    tokenHash: proofPayload.tokenHash,
+    tokenExpiresAtMs: expiresAtMs,
+    responseBody,
+    now,
+  });
+
+  if (!tokenCheck.ok) {
+    await requestRef.set({
+      proofData: {
+        website: {
+          lastCheckedAt: FieldValue.serverTimestamp(),
+          lastCheckResult: tokenCheck.reason || 'invalid',
+          lastCheckPreview: String(responseBody || '').trim().slice(0, 200),
+        },
+        websiteVerified: false,
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    const errorMessage = tokenCheck.reason === 'expired'
+      ? 'Website token is verlopen.'
+      : 'Website token niet gevonden.';
+    throw new HttpsError('failed-precondition', errorMessage);
+  }
+
+  let resolvedStatus = 'pending';
+  await db.runTransaction(async (transaction) => {
+    const requestSnap = await transaction.get(requestRef);
+    if (!requestSnap.exists) return;
+    const data = requestSnap.data() || {};
+    const updates = {
+      'proofData.websiteVerified': true,
+      'proofData.websiteVerifiedAt': FieldValue.serverTimestamp(),
+      'proofData.website.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.website.lastCheckResult': 'verified',
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (data?.status !== 'pending') {
+      transaction.update(requestRef, updates);
+      resolvedStatus = data?.status || 'pending';
+      return;
+    }
+
+    const yesCount = Number(data?.yesCount || 0);
+    const noCount = Number(data?.noCount || 0);
+    const mode = data?.mode === 'merge' ? 'merge' : 'link';
+    if (yesCount >= 1 && noCount < 1 && mode === 'link') {
+      const contributorId = data?.contributorId || null;
+      const requestedByUid = data?.requestedByUid || null;
+      if (contributorId && requestedByUid) {
+        const contributorRef = db.collection('contributors').doc(contributorId);
+        const claimantRef = db.collection('users').doc(requestedByUid);
+        transaction.update(claimantRef, {
+          contributorId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(contributorRef, {
+          claimedByUid: requestedByUid,
+          claimedAt: FieldValue.serverTimestamp(),
+          status: 'claimed',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(requestRef, {
+          ...updates,
+          status: 'approved',
+          statusReason: null,
+          approvedAt: FieldValue.serverTimestamp(),
+        });
+        resolvedStatus = 'approved';
+        return;
+      }
+    }
+
+    if (yesCount >= 1 && (noCount >= 1 || mode === 'merge')) {
+      transaction.update(requestRef, {
+        ...updates,
+        status: 'needsModeration',
+        statusReason: mode === 'merge' ? 'merge requested' : 'vouch conflict',
+      });
+      resolvedStatus = 'needsModeration';
+      return;
+    }
+
+    transaction.update(requestRef, updates);
+    resolvedStatus = 'pending';
+  });
+
+  return { ok: true, verified: true, status: resolvedStatus };
 });
 
 export const mergeContributors = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
@@ -2393,13 +2651,15 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
       if (yesCount >= 1) {
         const mode = data?.mode === 'merge' ? 'merge' : 'link';
         const screenshotVerified = Boolean(data?.proofData?.screenshotVerified);
-        if (!screenshotVerified) {
+        const websiteVerified = Boolean(data?.proofData?.websiteVerified);
+        const proofVerified = screenshotVerified || websiteVerified;
+        if (!proofVerified) {
           transaction.update(requestRef, {
             status: 'needsModeration',
-            statusReason: 'screenshot required',
+            statusReason: 'proof required',
             updatedAt: FieldValue.serverTimestamp(),
           });
-          responsePayload = { ok: true, status: 'needsModeration', reason: 'screenshot required' };
+          responsePayload = { ok: true, status: 'needsModeration', reason: 'proof required' };
           return;
         }
 

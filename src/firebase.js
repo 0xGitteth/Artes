@@ -99,6 +99,18 @@ export const createClaimInvite = async ({ contributorId, postId = null }) => {
   return result?.data || null;
 };
 
+export const startWebsiteClaimProof = async ({ requestId }) => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'startWebsiteClaimProof');
+  const result = await callable({ requestId });
+  return result?.data || null;
+};
+
+export const verifyWebsiteClaimProof = async ({ requestId }) => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'verifyWebsiteClaimProof');
+  const result = await callable({ requestId });
+  return result?.data || null;
+};
+
 /**
  * Fetch a contributor by alias type/value.
  * @param {'instagram' | 'domain' | 'email'} type

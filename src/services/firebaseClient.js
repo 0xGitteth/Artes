@@ -146,7 +146,7 @@ export const publishPost = async (post) => {
     : [];
 
   logFirestoreOp('WRITE', 'posts/{auto}', 'publishPost');
-  await addDoc(collection(db, 'posts'), {
+  return addDoc(collection(db, 'posts'), {
     ...post,
     contributorIds,
     authorUid: auth.currentUser.uid,

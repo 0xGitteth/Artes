@@ -32,7 +32,9 @@ import {
   updateUserProfile,
   getFirebaseDbInstance,
   createClaimInvite,
+  startEmailClaimProof,
   startWebsiteClaimProof,
+  verifyEmailClaimProof,
   verifyWebsiteClaimProof,
   isModerator,
   ensureSupportThreadExists,
@@ -40,6 +42,7 @@ import {
   getContributorByAlias,
   createContributorWithAliases,
   CLAIMS_COLLECTIONS,
+  getClaimRequestRef,
   getFirebaseStorageInstance,
 } from './firebase';
 import {
@@ -83,6 +86,43 @@ const ROLES = [
   { id: 'company', label: 'Company', desc: 'Merk, studio of bedrijf.' },
   { id: 'fan', label: 'Fan', desc: 'Volg je favoriete makers en bewaar inspiratie.' },
 ];
+
+const PROOF_STATUS_LABELS = {
+  pending: 'In afwachting',
+  verified: 'Geverifieerd',
+  failed: 'Mislukt',
+};
+
+const formatProofTimestamp = (value) => {
+  if (!value) return null;
+  const date = value?.toDate ? value.toDate() : new Date(value);
+  if (!date || Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString('nl-NL', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const getProofStatusSummary = (proofData, method) => {
+  if (!proofData) return null;
+  const methodData = method === 'website' ? proofData.website : proofData.email;
+  if (!methodData && !proofData?.[`${method}Verified`]) return null;
+  const verified = method === 'website' ? proofData.websiteVerified : proofData.emailVerified;
+  const lastCheckedAt = methodData?.lastCheckedAt
+    || methodData?.lastVerifyAttemptAt
+    || methodData?.tokenCreatedAt
+    || (method === 'website' ? proofData.websiteVerifiedAt : proofData.emailVerifiedAt);
+  const lastResult = methodData?.lastCheckResult || null;
+  let status = 'pending';
+  if (verified || lastResult === 'verified') {
+    status = 'verified';
+  } else if (lastResult && lastResult !== 'pending') {
+    status = 'failed';
+  }
+  return { status, lastCheckedAt };
+};
 
 const THEME_STYLES = {
   'Nature': 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800',
@@ -539,6 +579,8 @@ export default function ArtesApp() {
         setClaimInviteToken(claimToken);
         const unauthView = claimToken
           ? 'claim'
+          : path.startsWith('/claim-email')
+            ? 'claimEmail'
           : path.startsWith('/support')
           ? 'support'
           : path.startsWith('/chat') || path.startsWith('/messages')
@@ -566,8 +608,10 @@ export default function ArtesApp() {
         setClaimInviteToken(claimToken);
         const routedView = claimToken
           ? 'claim'
+          : path.startsWith('/claim-email')
+            ? 'claimEmail'
           : path.startsWith('/moderation')
-          ? 'moderation'
+            ? 'moderation'
           : path.startsWith('/vouch')
             ? 'vouch'
           : path.startsWith('/support')
@@ -637,6 +681,8 @@ export default function ArtesApp() {
       if (path.startsWith('/claim/')) {
         setClaimInviteToken(getClaimTokenFromPath(path));
         setView('claim');
+      } else if (path.startsWith('/claim-email')) {
+        setView('claimEmail');
       } else if (path.startsWith('/moderation')) {
         setView('moderation');
       } else if (path.startsWith('/vouch')) {
@@ -654,7 +700,7 @@ export default function ArtesApp() {
   }, [view, getClaimTokenFromPath]);
 
   useEffect(() => {
-    if (view === 'claim') {
+    if (view === 'claim' || view === 'claimEmail') {
       return;
     }
     if (view === 'moderation') {
@@ -1168,6 +1214,13 @@ export default function ArtesApp() {
               authUser={authUser}
               userProfile={profile}
               functionsBase={functionsBase}
+              setView={setView}
+            />
+          )}
+
+          {!profileLoading && view === 'claimEmail' && (
+            <ClaimEmailPage
+              authUser={authUser}
               setView={setView}
             />
           )}
@@ -5631,12 +5684,21 @@ function ShadowProfileModal({
     const [claimProofUploading, setClaimProofUploading] = useState(false);
     const [claimProofError, setClaimProofError] = useState('');
     const [claimProofSuccess, setClaimProofSuccess] = useState('');
+    const [claimRequestData, setClaimRequestData] = useState(null);
     const [websiteProofState, setWebsiteProofState] = useState({
       token: '',
       url: '',
       expiresAt: null,
       loading: false,
       verifying: false,
+      error: '',
+      success: '',
+    });
+    const [emailProofState, setEmailProofState] = useState({
+      path: '',
+      emailMasked: '',
+      expiresAt: null,
+      loading: false,
       error: '',
       success: '',
     });
@@ -5764,6 +5826,23 @@ function ShadowProfileModal({
       };
     }, [contributorId]);
 
+    useEffect(() => {
+      if (!claimRequestId) {
+        setClaimRequestData(null);
+        return () => {};
+      }
+      const unsubscribe = onSnapshot(
+        getClaimRequestRef(claimRequestId),
+        (snapshot) => {
+          setClaimRequestData(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+        },
+        (error) => {
+          console.error('[ShadowProfileModal] Failed to listen to claim request', error);
+        }
+      );
+      return () => unsubscribe();
+    }, [claimRequestId]);
+
     const isLoggedIn = Boolean(authUser?.uid);
     const requiresIdCheck = isLoggedIn && (!userProfile?.ageVerified || (userProfile?.onboardingStep ?? 0) < 2);
     const claimedByUid = contributorInfo?.claimedByUid || contributorInfo?.claimedBy || null;
@@ -5795,10 +5874,10 @@ function ShadowProfileModal({
       }
       if (hasEmailAlias) {
         methods.push({
-          key: 'emailLink',
-          title: 'Email link',
-          description: 'Ontvang een bevestigingslink per mail.',
-          placeholder: true,
+          key: 'email',
+          title: 'Email verificatie',
+          description: 'Ontvang een verificatielink op het emailadres dat al aan dit profiel hangt.',
+          placeholder: false,
         });
       }
       methods.push({
@@ -5838,6 +5917,14 @@ function ShadowProfileModal({
         expiresAt: null,
         loading: false,
         verifying: false,
+        error: '',
+        success: '',
+      });
+      setEmailProofState({
+        path: '',
+        emailMasked: '',
+        expiresAt: null,
+        loading: false,
         error: '',
         success: '',
       });
@@ -5910,6 +5997,61 @@ function ShadowProfileModal({
           loading: false,
           verifying: false,
           error: error?.message || 'Website token genereren mislukt.',
+        }));
+      }
+    };
+
+    const handleStartEmailClaim = async () => {
+      const data = await startClaimRequest({ mode: 'link', method: 'email' });
+      if (!data?.requestId) return;
+      setEmailProofState((prev) => ({
+        ...prev,
+        loading: true,
+        error: '',
+        success: '',
+      }));
+      try {
+        const result = await startEmailClaimProof({ requestId: data.requestId });
+        setEmailProofState({
+          path: result?.path || '',
+          emailMasked: result?.emailMasked || '',
+          expiresAt: result?.expiresAt || null,
+          loading: false,
+          error: '',
+          success: 'Verificatielink verstuurd. Check je mailbox.',
+        });
+      } catch (error) {
+        setEmailProofState((prev) => ({
+          ...prev,
+          loading: false,
+          error: error?.message || 'Email verificatie starten mislukt.',
+        }));
+      }
+    };
+
+    const handleResendEmailProof = async () => {
+      if (!claimRequestId) return;
+      setEmailProofState((prev) => ({
+        ...prev,
+        loading: true,
+        error: '',
+        success: '',
+      }));
+      try {
+        const result = await startEmailClaimProof({ requestId: claimRequestId });
+        setEmailProofState({
+          path: result?.path || '',
+          emailMasked: result?.emailMasked || '',
+          expiresAt: result?.expiresAt || null,
+          loading: false,
+          error: '',
+          success: 'Verificatielink opnieuw verstuurd.',
+        });
+      } catch (error) {
+        setEmailProofState((prev) => ({
+          ...prev,
+          loading: false,
+          error: error?.message || 'Email opnieuw versturen mislukt.',
         }));
       }
     };
@@ -6130,121 +6272,176 @@ function ShadowProfileModal({
                       </button>
                       {claimPanelOpen && (
                         <div className="grid gap-3 text-left">
-                          {claimMethods.map((method) => (
-                            <div
-                              key={method.key}
-                              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <div>
-                                  <p className="text-sm font-semibold text-white">{method.title}</p>
-                                  <p className="text-xs text-white/70">{method.description}</p>
+                          {claimMethods.map((method) => {
+                            const proofSummary = method.key === 'website' || method.key === 'email'
+                              ? getProofStatusSummary(claimRequestData?.proofData, method.key)
+                              : null;
+                            const statusTone = proofSummary?.status === 'verified'
+                              ? 'text-emerald-200'
+                              : proofSummary?.status === 'failed'
+                                ? 'text-rose-200'
+                                : 'text-amber-200';
+                            const statusTimestamp = formatProofTimestamp(proofSummary?.lastCheckedAt);
+                            return (
+                              <div
+                                key={method.key}
+                                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-semibold text-white">{method.title}</p>
+                                    <p className="text-xs text-white/70">{method.description}</p>
+                                    {proofSummary && (
+                                      <p className={`mt-1 text-[11px] ${statusTone}`}>
+                                        Status: {PROOF_STATUS_LABELS[proofSummary.status]}
+                                        {statusTimestamp ? ` · Laatste check ${statusTimestamp}` : ''}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {method.placeholder ? (
+                                    <span className="text-[10px] uppercase tracking-wide text-white/60">Binnenkort</span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (method.key === 'instagramScreenshot') {
+                                          handleStartInstagramScreenshotClaim();
+                                        } else if (method.key === 'email') {
+                                          handleStartEmailClaim();
+                                        } else if (method.key === 'website') {
+                                          handleStartWebsiteClaim();
+                                        } else {
+                                          handleStartVouchClaim();
+                                        }
+                                      }}
+                                      disabled={claimBusy}
+                                      className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                                    >
+                                      Start claim
+                                    </button>
+                                  )}
                                 </div>
-                                {method.placeholder ? (
-                                  <span className="text-[10px] uppercase tracking-wide text-white/60">Binnenkort</span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (method.key === 'instagramScreenshot') {
-                                        handleStartInstagramScreenshotClaim();
-                                      } else if (method.key === 'website') {
-                                        handleStartWebsiteClaim();
-                                      } else {
-                                        handleStartVouchClaim();
-                                      }
-                                    }}
-                                    disabled={claimBusy}
-                                    className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
-                                  >
-                                    Start claim
-                                  </button>
+                                {method.key === 'instagramScreenshot' && claimCode && claimMethod === 'instagramScreenshot' && (
+                                  <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs text-white/80 space-y-2">
+                                    <p className="font-semibold text-white">Plaats deze code in je Instagram bio:</p>
+                                    <div className="flex items-center gap-2">
+                                      <span className="rounded-full bg-white text-indigo-900 px-3 py-1 text-xs font-semibold">
+                                        {claimCode}
+                                      </span>
+                                      {claimCodeExpiryLabel && (
+                                        <span className="text-[11px] text-white/70">Geldig tot {claimCodeExpiryLabel}</span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-white/70">
+                                      Maak daarna een screenshot van je bio en upload deze hieronder.
+                                    </p>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(event) => {
+                                          const file = event.target.files?.[0] || null;
+                                          setClaimProofFile(file);
+                                        }}
+                                        className="w-full text-xs text-white"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={handleUploadClaimProof}
+                                        disabled={claimProofUploading || !claimProofFile}
+                                        className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                                      >
+                                        {claimProofUploading ? 'Uploaden...' : 'Upload screenshot'}
+                                      </button>
+                                    </div>
+                                    {claimProofError && (
+                                      <p className="text-[11px] text-rose-200">{claimProofError}</p>
+                                    )}
+                                    {claimProofSuccess && (
+                                      <p className="text-[11px] text-emerald-200">{claimProofSuccess}</p>
+                                    )}
+                                  </div>
+                                )}
+                                {method.key === 'email' && claimMethod === 'email' && (
+                                  <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs text-white/80 space-y-2">
+                                    <p className="font-semibold text-white">Bevestig via email</p>
+                                    <p className="text-[11px] text-white/70">
+                                      We sturen een verificatielink naar {emailProofState.emailMasked || 'het bekende emailadres'}.
+                                      Open de link om je claim te bevestigen.
+                                    </p>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={handleResendEmailProof}
+                                        disabled={emailProofState.loading}
+                                        className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                                      >
+                                        {emailProofState.loading ? 'Versturen...' : 'Stuur verificatielink opnieuw'}
+                                      </button>
+                                      {emailProofState.path && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            window.location.href = emailProofState.path;
+                                          }}
+                                          className="rounded-full border border-white/40 text-white px-4 py-2 text-xs font-semibold shadow-sm hover:bg-white/10 transition"
+                                        >
+                                          Open verificatielink
+                                        </button>
+                                      )}
+                                    </div>
+                                    {emailProofState.error && (
+                                      <p className="text-[11px] text-rose-200">{emailProofState.error}</p>
+                                    )}
+                                    {emailProofState.success && (
+                                      <p className="text-[11px] text-emerald-200">{emailProofState.success}</p>
+                                    )}
+                                  </div>
+                                )}
+                                {method.key === 'website' && claimMethod === 'website' && (
+                                  <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs text-white/80 space-y-2">
+                                    <p className="font-semibold text-white">Plaats dit bestand op je website</p>
+                                    {websiteProofState.url && (
+                                      <p className="break-all text-[11px] text-white/70">{websiteProofState.url}</p>
+                                    )}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="rounded-full bg-white text-indigo-900 px-3 py-1 text-xs font-semibold">
+                                        {websiteProofState.token || 'Token wordt gegenereerd...'}
+                                      </span>
+                                      {websiteProofState.expiresAt && (
+                                        <span className="text-[11px] text-white/70">
+                                          Geldig tot {new Date(websiteProofState.expiresAt).toLocaleTimeString('nl-NL', {
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                          })}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-white/70">
+                                      Maak een tekstbestand met exact deze token als inhoud en zet het op
+                                      <span className="font-semibold text-white"> /.well-known/artes-claim.txt</span>.
+                                    </p>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={handleVerifyWebsiteClaim}
+                                        disabled={websiteProofState.verifying || websiteProofState.loading}
+                                        className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                                      >
+                                        {websiteProofState.verifying ? 'Controleren...' : 'Controleer verificatie'}
+                                      </button>
+                                    </div>
+                                    {websiteProofState.error && (
+                                      <p className="text-[11px] text-rose-200">{websiteProofState.error}</p>
+                                    )}
+                                    {websiteProofState.success && (
+                                      <p className="text-[11px] text-emerald-200">{websiteProofState.success}</p>
+                                    )}
+                                  </div>
                                 )}
                               </div>
-                              {method.key === 'instagramScreenshot' && claimCode && claimMethod === 'instagramScreenshot' && (
-                                <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs text-white/80 space-y-2">
-                                  <p className="font-semibold text-white">Plaats deze code in je Instagram bio:</p>
-                                  <div className="flex items-center gap-2">
-                                    <span className="rounded-full bg-white text-indigo-900 px-3 py-1 text-xs font-semibold">
-                                      {claimCode}
-                                    </span>
-                                    {claimCodeExpiryLabel && (
-                                      <span className="text-[11px] text-white/70">Geldig tot {claimCodeExpiryLabel}</span>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] text-white/70">
-                                    Maak daarna een screenshot van je bio en upload deze hieronder.
-                                  </p>
-                                  <div className="flex flex-col sm:flex-row gap-2">
-                                    <input
-                                      type="file"
-                                      accept="image/*"
-                                      onChange={(event) => {
-                                        const file = event.target.files?.[0] || null;
-                                        setClaimProofFile(file);
-                                      }}
-                                      className="w-full text-xs text-white"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={handleUploadClaimProof}
-                                      disabled={claimProofUploading || !claimProofFile}
-                                      className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
-                                    >
-                                      {claimProofUploading ? 'Uploaden...' : 'Upload screenshot'}
-                                    </button>
-                                  </div>
-                                  {claimProofError && (
-                                    <p className="text-[11px] text-rose-200">{claimProofError}</p>
-                                  )}
-                                  {claimProofSuccess && (
-                                    <p className="text-[11px] text-emerald-200">{claimProofSuccess}</p>
-                                  )}
-                                </div>
-                              )}
-                              {method.key === 'website' && claimMethod === 'website' && (
-                                <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs text-white/80 space-y-2">
-                                  <p className="font-semibold text-white">Plaats dit bestand op je website</p>
-                                  {websiteProofState.url && (
-                                    <p className="break-all text-[11px] text-white/70">{websiteProofState.url}</p>
-                                  )}
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="rounded-full bg-white text-indigo-900 px-3 py-1 text-xs font-semibold">
-                                      {websiteProofState.token || 'Token wordt gegenereerd...'}
-                                    </span>
-                                    {websiteProofState.expiresAt && (
-                                      <span className="text-[11px] text-white/70">
-                                        Geldig tot {new Date(websiteProofState.expiresAt).toLocaleTimeString('nl-NL', {
-                                          hour: '2-digit',
-                                          minute: '2-digit',
-                                        })}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] text-white/70">
-                                    Maak een tekstbestand met exact deze token als inhoud en zet het op
-                                    <span className="font-semibold text-white"> /.well-known/artes-claim.txt</span>.
-                                  </p>
-                                  <div className="flex flex-col sm:flex-row gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={handleVerifyWebsiteClaim}
-                                      disabled={websiteProofState.verifying || websiteProofState.loading}
-                                      className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
-                                    >
-                                      {websiteProofState.verifying ? 'Controleren...' : 'Controleer verificatie'}
-                                    </button>
-                                  </div>
-                                  {websiteProofState.error && (
-                                    <p className="text-[11px] text-rose-200">{websiteProofState.error}</p>
-                                  )}
-                                  {websiteProofState.success && (
-                                    <p className="text-[11px] text-emerald-200">{websiteProofState.success}</p>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -6297,12 +6494,21 @@ function ClaimInvitePage({
   const [claimProofError, setClaimProofError] = useState('');
   const [claimProofSuccess, setClaimProofSuccess] = useState('');
   const [claimMethod, setClaimMethod] = useState('vouch');
+  const [claimRequestData, setClaimRequestData] = useState(null);
   const [websiteProofState, setWebsiteProofState] = useState({
     token: '',
     url: '',
     expiresAt: null,
     loading: false,
     verifying: false,
+    error: '',
+    success: '',
+  });
+  const [emailProofState, setEmailProofState] = useState({
+    path: '',
+    emailMasked: '',
+    expiresAt: null,
+    loading: false,
     error: '',
     success: '',
   });
@@ -6345,14 +6551,35 @@ function ClaimInvitePage({
   }, [token, functionsBase]);
 
   useEffect(() => {
+    if (!claimRequestId) {
+      setClaimRequestData(null);
+      return () => {};
+    }
+    const unsubscribe = onSnapshot(
+      getClaimRequestRef(claimRequestId),
+      (snapshot) => {
+        setClaimRequestData(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+      },
+      (error) => {
+        console.error('[ClaimInvitePage] Failed to listen to claim request', error);
+      }
+    );
+    return () => unsubscribe();
+  }, [claimRequestId]);
+
+  useEffect(() => {
     if (!preview?.availableProofMethods) return;
     const available = preview.availableProofMethods;
     const hasInstagram = available.includes('instagram');
     const hasWebsite = available.includes('website');
+    const hasEmail = available.includes('email');
     if (claimMethod === 'instagramScreenshot' && !hasInstagram) {
       setClaimMethod('vouch');
     }
     if (claimMethod === 'website' && !hasWebsite) {
+      setClaimMethod('vouch');
+    }
+    if (claimMethod === 'email' && !hasEmail) {
       setClaimMethod('vouch');
     }
   }, [preview, claimMethod]);
@@ -6390,6 +6617,14 @@ function ClaimInvitePage({
       expiresAt: null,
       loading: false,
       verifying: false,
+      error: '',
+      success: '',
+    });
+    setEmailProofState({
+      path: '',
+      emailMasked: '',
+      expiresAt: null,
+      loading: false,
       error: '',
       success: '',
     });
@@ -6440,6 +6675,31 @@ function ClaimInvitePage({
             loading: false,
             verifying: false,
             error: error?.message || 'Website token genereren mislukt.',
+          }));
+        }
+      }
+      if (claimMethod === 'email' && data?.requestId) {
+        setEmailProofState((prev) => ({
+          ...prev,
+          loading: true,
+          error: '',
+          success: '',
+        }));
+        try {
+          const result = await startEmailClaimProof({ requestId: data.requestId });
+          setEmailProofState({
+            path: result?.path || '',
+            emailMasked: result?.emailMasked || '',
+            expiresAt: result?.expiresAt || null,
+            loading: false,
+            error: '',
+            success: 'Verificatielink verstuurd. Check je mailbox.',
+          });
+        } catch (error) {
+          setEmailProofState((prev) => ({
+            ...prev,
+            loading: false,
+            error: error?.message || 'Email verificatie starten mislukt.',
           }));
         }
       }
@@ -6535,6 +6795,13 @@ function ClaimInvitePage({
         description: 'Plaats een token op je bestaande website om eigenaarschap te bewijzen.',
       });
     }
+    if (preview?.availableProofMethods?.includes('email')) {
+      options.push({
+        key: 'email',
+        title: 'Email verificatie',
+        description: 'Ontvang een verificatielink op het emailadres dat al aan het profiel hangt.',
+      });
+    }
     return options;
   }, [preview]);
 
@@ -6596,25 +6863,42 @@ function ClaimInvitePage({
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Kies verificatiemethode</p>
                 <div className="grid gap-2">
-                  {claimMethodOptions.map((option) => (
-                    <label
-                      key={option.key}
-                      className="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 text-sm text-slate-600 dark:text-slate-300"
-                    >
-                      <input
-                        type="radio"
-                        name="claim-method"
-                        value={option.key}
-                        checked={claimMethod === option.key}
-                        onChange={() => setClaimMethod(option.key)}
-                        className="mt-1"
-                      />
-                      <span>
-                        <span className="font-semibold text-slate-700 dark:text-slate-200">{option.title}</span>
-                        <span className="block text-xs text-slate-500 dark:text-slate-400">{option.description}</span>
-                      </span>
-                    </label>
-                  ))}
+                  {claimMethodOptions.map((option) => {
+                    const proofSummary = option.key === 'email' || option.key === 'website'
+                      ? getProofStatusSummary(claimRequestData?.proofData, option.key)
+                      : null;
+                    const statusTone = proofSummary?.status === 'verified'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : proofSummary?.status === 'failed'
+                        ? 'text-rose-500 dark:text-rose-400'
+                        : 'text-amber-600 dark:text-amber-400';
+                    const statusTimestamp = formatProofTimestamp(proofSummary?.lastCheckedAt);
+                    return (
+                      <label
+                        key={option.key}
+                        className="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 text-sm text-slate-600 dark:text-slate-300"
+                      >
+                        <input
+                          type="radio"
+                          name="claim-method"
+                          value={option.key}
+                          checked={claimMethod === option.key}
+                          onChange={() => setClaimMethod(option.key)}
+                          className="mt-1"
+                        />
+                        <span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">{option.title}</span>
+                          <span className="block text-xs text-slate-500 dark:text-slate-400">{option.description}</span>
+                          {proofSummary && (
+                            <span className={`mt-1 block text-[11px] ${statusTone}`}>
+                              Status: {PROOF_STATUS_LABELS[proofSummary.status]}
+                              {statusTimestamp ? ` · Laatste check ${statusTimestamp}` : ''}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -6703,6 +6987,67 @@ function ClaimInvitePage({
                 )}
               </div>
             )}
+            {claimSuccess && claimMethod === 'email' && (
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
+                <p className="font-semibold text-slate-700 dark:text-slate-200">Bevestig via email</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  We sturen een verificatielink naar {emailProofState.emailMasked || 'het bekende emailadres'}.
+                  Open de link om je claim te bevestigen.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!claimRequestId) return;
+                      setEmailProofState((prev) => ({
+                        ...prev,
+                        loading: true,
+                        error: '',
+                        success: '',
+                      }));
+                      try {
+                        const result = await startEmailClaimProof({ requestId: claimRequestId });
+                        setEmailProofState({
+                          path: result?.path || '',
+                          emailMasked: result?.emailMasked || '',
+                          expiresAt: result?.expiresAt || null,
+                          loading: false,
+                          error: '',
+                          success: 'Verificatielink opnieuw verstuurd.',
+                        });
+                      } catch (error) {
+                        setEmailProofState((prev) => ({
+                          ...prev,
+                          loading: false,
+                          error: error?.message || 'Email opnieuw versturen mislukt.',
+                        }));
+                      }
+                    }}
+                    disabled={emailProofState.loading || !claimRequestId}
+                    className="rounded-full bg-emerald-600 text-white px-4 py-2 text-xs font-semibold hover:bg-emerald-700 transition disabled:opacity-60"
+                  >
+                    {emailProofState.loading ? 'Versturen...' : 'Stuur verificatielink opnieuw'}
+                  </button>
+                  {emailProofState.path && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.href = emailProofState.path;
+                      }}
+                      className="rounded-full border border-emerald-600 text-emerald-700 dark:text-emerald-300 px-4 py-2 text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition"
+                    >
+                      Open verificatielink
+                    </button>
+                  )}
+                </div>
+                {emailProofState.error && (
+                  <p className="text-xs text-rose-500">{emailProofState.error}</p>
+                )}
+                {emailProofState.success && (
+                  <p className="text-xs text-emerald-500">{emailProofState.success}</p>
+                )}
+              </div>
+            )}
             {claimSuccess && claimMethod === 'website' && (
               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
                 <p className="font-semibold text-slate-700 dark:text-slate-200">Plaats dit bestand op je website</p>
@@ -6741,6 +7086,113 @@ function ClaimInvitePage({
                   <p className="text-xs text-emerald-500">{websiteProofState.success}</p>
                 )}
               </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ClaimEmailPage({ authUser, setView }) {
+  const [verifyState, setVerifyState] = useState({
+    loading: false,
+    error: '',
+    success: '',
+    status: '',
+  });
+  const params = useMemo(() => new URLSearchParams(window.location.search), []);
+  const requestId = params.get('requestId');
+  const token = params.get('token');
+
+  const handleLogin = () => {
+    if (setView) setView('login');
+  };
+
+  useEffect(() => {
+    let active = true;
+    if (!authUser || !requestId || !token) return () => {};
+    const verify = async () => {
+      setVerifyState({
+        loading: true,
+        error: '',
+        success: '',
+        status: '',
+      });
+      try {
+        const result = await verifyEmailClaimProof({ requestId, token });
+        if (!active) return;
+        const status = result?.status || 'pending';
+        const successMessage = status === 'approved'
+          ? 'Email verificatie gelukt. Je claim is goedgekeurd.'
+          : status === 'needsModeration'
+            ? 'Email verificatie gelukt. We wachten op een moderator.'
+            : 'Email verificatie gelukt. We wachten nog op een community vouch.';
+        setVerifyState({
+          loading: false,
+          error: '',
+          success: successMessage,
+          status,
+        });
+      } catch (error) {
+        if (!active) return;
+        setVerifyState({
+          loading: false,
+          error: error?.message || 'Email verificatie mislukt.',
+          success: '',
+          status: '',
+        });
+      }
+    };
+    verify();
+    return () => {
+      active = false;
+    };
+  }, [authUser, requestId, token]);
+
+  return (
+    <div className="max-w-xl mx-auto px-4 py-10">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Email claim</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Bevestig je claim</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-300 mt-2">
+            Open deze pagina vanuit je mailbox om te bevestigen dat je toegang hebt tot het emailadres.
+          </p>
+        </div>
+
+        {!requestId || !token ? (
+          <p className="text-sm text-rose-500">De verificatielink is ongeldig of onvolledig.</p>
+        ) : null}
+
+        {!authUser && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Log in om de email verificatie te voltooien.
+            </p>
+            <button
+              type="button"
+              onClick={handleLogin}
+              className="w-full rounded-full bg-blue-600 text-white px-6 py-3 text-sm font-semibold hover:bg-blue-700 transition"
+            >
+              Inloggen of account maken
+            </button>
+          </div>
+        )}
+
+        {authUser && requestId && token && (
+          <div className="space-y-2">
+            {verifyState.loading && (
+              <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Verificatie controleren...
+              </div>
+            )}
+            {verifyState.error && (
+              <p className="text-sm text-rose-500">{verifyState.error}</p>
+            )}
+            {verifyState.success && (
+              <p className="text-sm text-emerald-600 dark:text-emerald-400">{verifyState.success}</p>
             )}
           </div>
         )}

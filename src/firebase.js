@@ -99,6 +99,12 @@ export const createClaimInvite = async ({ contributorId, postId = null }) => {
   return result?.data || null;
 };
 
+export const startEmailClaimProof = async ({ requestId }) => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'startEmailClaimProof');
+  const result = await callable({ requestId });
+  return result?.data || null;
+};
+
 export const startWebsiteClaimProof = async ({ requestId }) => {
   const callable = httpsCallable(getFirebaseFunctions(), 'startWebsiteClaimProof');
   const result = await callable({ requestId });
@@ -108,6 +114,12 @@ export const startWebsiteClaimProof = async ({ requestId }) => {
 export const verifyWebsiteClaimProof = async ({ requestId }) => {
   const callable = httpsCallable(getFirebaseFunctions(), 'verifyWebsiteClaimProof');
   const result = await callable({ requestId });
+  return result?.data || null;
+};
+
+export const verifyEmailClaimProof = async ({ requestId, token }) => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'verifyEmailClaimProof');
+  const result = await callable({ requestId, token });
   return result?.data || null;
 };
 

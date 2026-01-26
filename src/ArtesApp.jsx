@@ -32,6 +32,8 @@ import {
   updateUserProfile,
   getFirebaseDbInstance,
   createClaimInvite,
+  startWebsiteClaimProof,
+  verifyWebsiteClaimProof,
   isModerator,
   ensureSupportThreadExists,
   migrateRemoveGeneralTheme,
@@ -5629,12 +5631,22 @@ function ShadowProfileModal({
     const [claimProofUploading, setClaimProofUploading] = useState(false);
     const [claimProofError, setClaimProofError] = useState('');
     const [claimProofSuccess, setClaimProofSuccess] = useState('');
+    const [websiteProofState, setWebsiteProofState] = useState({
+      token: '',
+      url: '',
+      expiresAt: null,
+      loading: false,
+      verifying: false,
+      error: '',
+      success: '',
+    });
     const [contributorInfo, setContributorInfo] = useState(null);
     const [loadingContributor, setLoadingContributor] = useState(false);
     const [inviteLink, setInviteLink] = useState('');
     const [inviteLoading, setInviteLoading] = useState(false);
     const [inviteError, setInviteError] = useState('');
     const [inviteCopied, setInviteCopied] = useState(false);
+    const [websiteAlias, setWebsiteAlias] = useState(null);
 
     const normalizeExternalLink = (link) => {
       if (!link) return null;
@@ -5715,6 +5727,43 @@ function ShadowProfileModal({
       };
     }, [contributorId]);
 
+    useEffect(() => {
+      let active = true;
+      if (!contributorId) {
+        setWebsiteAlias(null);
+        return () => {};
+      }
+      const loadWebsiteAlias = async () => {
+        try {
+          const db = getFirebaseDbInstance();
+          const aliasQuery = query(
+            collection(db, CLAIMS_COLLECTIONS.contributorAliases),
+            where('contributorId', '==', contributorId),
+            where('type', '==', 'domain'),
+            limit(1)
+          );
+          const snapshot = await getDocs(aliasQuery);
+          if (!active) return;
+          if (snapshot.empty) {
+            setWebsiteAlias(null);
+            return;
+          }
+          const docSnap = snapshot.docs[0];
+          const data = docSnap.data() || {};
+          setWebsiteAlias({
+            aliasId: docSnap.id,
+            domain: data.value || '',
+          });
+        } catch (error) {
+          if (active) setWebsiteAlias(null);
+        }
+      };
+      loadWebsiteAlias();
+      return () => {
+        active = false;
+      };
+    }, [contributorId]);
+
     const isLoggedIn = Boolean(authUser?.uid);
     const requiresIdCheck = isLoggedIn && (!userProfile?.ageVerified || (userProfile?.onboardingStep ?? 0) < 2);
     const claimedByUid = contributorInfo?.claimedByUid || contributorInfo?.claimedBy || null;
@@ -5722,8 +5771,7 @@ function ShadowProfileModal({
 
     const hasInstagramAlias = Boolean(contributorInfo?.instagramHandle)
       || externalLinks.some((link) => link.type === 'instagram');
-    const hasWebsiteAlias = Boolean(contributorInfo?.website)
-      || externalLinks.some((link) => link.type === 'website');
+    const hasWebsiteAlias = Boolean(websiteAlias?.domain);
     const hasEmailAlias = Boolean(contributorInfo?.email)
       || externalLinks.some((link) => link.type === 'email');
 
@@ -5739,10 +5787,10 @@ function ShadowProfileModal({
       }
       if (hasWebsiteAlias) {
         methods.push({
-          key: 'websiteToken',
-          title: 'Website token',
-          description: 'Voeg een token toe aan je website of domein.',
-          placeholder: true,
+          key: 'website',
+          title: 'Verifieer via website',
+          description: 'Plaats een token op je bestaande website om te bewijzen dat je eigenaar bent.',
+          placeholder: false,
         });
       }
       if (hasEmailAlias) {
@@ -5784,6 +5832,15 @@ function ShadowProfileModal({
       setClaimSuccess('');
       setClaimProofError('');
       setClaimProofSuccess('');
+      setWebsiteProofState({
+        token: '',
+        url: '',
+        expiresAt: null,
+        loading: false,
+        verifying: false,
+        error: '',
+        success: '',
+      });
       try {
         const authToken = await authUser.getIdToken();
         const response = await fetch(`${functionsBase}/createClaimRequest`, {
@@ -5809,9 +5866,11 @@ function ShadowProfileModal({
         setClaimCodeExpiresAt(data?.claimCodeExpiresAt || null);
         setClaimMethod(method || '');
         setClaimSuccess('Claim verzoek verzonden.');
+        return data;
       } catch (error) {
         console.error('[ShadowProfileModal] Claim request failed', error);
         setClaimError(error?.message || 'Claim verzoek mislukt.');
+        return null;
       } finally {
         setClaimBusy(false);
       }
@@ -5823,6 +5882,64 @@ function ShadowProfileModal({
 
     const handleStartInstagramScreenshotClaim = () => {
       startClaimRequest({ mode: 'link', method: 'instagramScreenshot' });
+    };
+
+    const handleStartWebsiteClaim = async () => {
+      const data = await startClaimRequest({ mode: 'link', method: 'website' });
+      if (!data?.requestId) return;
+      setWebsiteProofState((prev) => ({
+        ...prev,
+        loading: true,
+        error: '',
+        success: '',
+      }));
+      try {
+        const result = await startWebsiteClaimProof({ requestId: data.requestId });
+        setWebsiteProofState({
+          token: result?.token || '',
+          url: result?.url || '',
+          expiresAt: result?.expiresAt || null,
+          loading: false,
+          verifying: false,
+          error: '',
+          success: 'Token gegenereerd. Plaats het bestand en controleer daarna.',
+        });
+      } catch (error) {
+        setWebsiteProofState((prev) => ({
+          ...prev,
+          loading: false,
+          verifying: false,
+          error: error?.message || 'Website token genereren mislukt.',
+        }));
+      }
+    };
+
+    const handleVerifyWebsiteClaim = async () => {
+      if (!claimRequestId) return;
+      setWebsiteProofState((prev) => ({
+        ...prev,
+        verifying: true,
+        error: '',
+        success: '',
+      }));
+      try {
+        const result = await verifyWebsiteClaimProof({ requestId: claimRequestId });
+        const status = result?.status || 'pending';
+        const successText = status === 'approved'
+          ? 'Website verificatie gelukt. Je claim is goedgekeurd.'
+          : 'Website verificatie gelukt. We wachten nog op een community vouch.';
+        setWebsiteProofState((prev) => ({
+          ...prev,
+          verifying: false,
+          success: successText,
+        }));
+      } catch (error) {
+        setWebsiteProofState((prev) => ({
+          ...prev,
+          verifying: false,
+          error: error?.message || 'Website verificatie mislukt.',
+        }));
+      }
     };
 
     const handleDisputeClaim = () => {
@@ -6028,7 +6145,15 @@ function ShadowProfileModal({
                                 ) : (
                                   <button
                                     type="button"
-                                    onClick={method.key === 'instagramScreenshot' ? handleStartInstagramScreenshotClaim : handleStartVouchClaim}
+                                    onClick={() => {
+                                      if (method.key === 'instagramScreenshot') {
+                                        handleStartInstagramScreenshotClaim();
+                                      } else if (method.key === 'website') {
+                                        handleStartWebsiteClaim();
+                                      } else {
+                                        handleStartVouchClaim();
+                                      }
+                                    }}
                                     disabled={claimBusy}
                                     className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
                                   >
@@ -6074,6 +6199,47 @@ function ShadowProfileModal({
                                   )}
                                   {claimProofSuccess && (
                                     <p className="text-[11px] text-emerald-200">{claimProofSuccess}</p>
+                                  )}
+                                </div>
+                              )}
+                              {method.key === 'website' && claimMethod === 'website' && (
+                                <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs text-white/80 space-y-2">
+                                  <p className="font-semibold text-white">Plaats dit bestand op je website</p>
+                                  {websiteProofState.url && (
+                                    <p className="break-all text-[11px] text-white/70">{websiteProofState.url}</p>
+                                  )}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="rounded-full bg-white text-indigo-900 px-3 py-1 text-xs font-semibold">
+                                      {websiteProofState.token || 'Token wordt gegenereerd...'}
+                                    </span>
+                                    {websiteProofState.expiresAt && (
+                                      <span className="text-[11px] text-white/70">
+                                        Geldig tot {new Date(websiteProofState.expiresAt).toLocaleTimeString('nl-NL', {
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                        })}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-white/70">
+                                    Maak een tekstbestand met exact deze token als inhoud en zet het op
+                                    <span className="font-semibold text-white"> /.well-known/artes-claim.txt</span>.
+                                  </p>
+                                  <div className="flex flex-col sm:flex-row gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={handleVerifyWebsiteClaim}
+                                      disabled={websiteProofState.verifying || websiteProofState.loading}
+                                      className="rounded-full bg-white text-indigo-900 px-4 py-2 text-xs font-semibold shadow-sm hover:bg-indigo-50 transition disabled:opacity-60"
+                                    >
+                                      {websiteProofState.verifying ? 'Controleren...' : 'Controleer verificatie'}
+                                    </button>
+                                  </div>
+                                  {websiteProofState.error && (
+                                    <p className="text-[11px] text-rose-200">{websiteProofState.error}</p>
+                                  )}
+                                  {websiteProofState.success && (
+                                    <p className="text-[11px] text-emerald-200">{websiteProofState.success}</p>
                                   )}
                                 </div>
                               )}
@@ -6130,7 +6296,16 @@ function ClaimInvitePage({
   const [claimProofUploading, setClaimProofUploading] = useState(false);
   const [claimProofError, setClaimProofError] = useState('');
   const [claimProofSuccess, setClaimProofSuccess] = useState('');
-  const [useInstagramProof, setUseInstagramProof] = useState(false);
+  const [claimMethod, setClaimMethod] = useState('vouch');
+  const [websiteProofState, setWebsiteProofState] = useState({
+    token: '',
+    url: '',
+    expiresAt: null,
+    loading: false,
+    verifying: false,
+    error: '',
+    success: '',
+  });
 
   const requiresIdCheck = Boolean(authUser?.uid && (!userProfile?.ageVerified || (userProfile?.onboardingStep ?? 0) < 2));
 
@@ -6169,6 +6344,19 @@ function ClaimInvitePage({
     };
   }, [token, functionsBase]);
 
+  useEffect(() => {
+    if (!preview?.availableProofMethods) return;
+    const available = preview.availableProofMethods;
+    const hasInstagram = available.includes('instagram');
+    const hasWebsite = available.includes('website');
+    if (claimMethod === 'instagramScreenshot' && !hasInstagram) {
+      setClaimMethod('vouch');
+    }
+    if (claimMethod === 'website' && !hasWebsite) {
+      setClaimMethod('vouch');
+    }
+  }, [preview, claimMethod]);
+
   const handleLogin = () => {
     if (setView) setView('login');
   };
@@ -6194,6 +6382,17 @@ function ClaimInvitePage({
     setClaimBusy(true);
     setClaimError('');
     setClaimSuccess('');
+    setClaimProofError('');
+    setClaimProofSuccess('');
+    setWebsiteProofState({
+      token: '',
+      url: '',
+      expiresAt: null,
+      loading: false,
+      verifying: false,
+      error: '',
+      success: '',
+    });
     try {
       const authToken = await authUser.getIdToken();
       const response = await fetch(`${functionsBase}/createClaimRequest`, {
@@ -6206,7 +6405,7 @@ function ClaimInvitePage({
           contributorId: preview.contributorId,
           mode: 'link',
           inviteToken: token,
-          method: useInstagramProof ? 'instagramScreenshot' : 'vouch',
+          method: claimMethod,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -6217,6 +6416,33 @@ function ClaimInvitePage({
       setClaimCode(data?.claimCode || '');
       setClaimCodeExpiresAt(data?.claimCodeExpiresAt || null);
       setClaimSuccess('Claim verzoek verzonden.');
+      if (claimMethod === 'website' && data?.requestId) {
+        setWebsiteProofState((prev) => ({
+          ...prev,
+          loading: true,
+          error: '',
+          success: '',
+        }));
+        try {
+          const result = await startWebsiteClaimProof({ requestId: data.requestId });
+          setWebsiteProofState({
+            token: result?.token || '',
+            url: result?.url || '',
+            expiresAt: result?.expiresAt || null,
+            loading: false,
+            verifying: false,
+            error: '',
+            success: 'Token gegenereerd. Plaats het bestand en controleer daarna.',
+          });
+        } catch (error) {
+          setWebsiteProofState((prev) => ({
+            ...prev,
+            loading: false,
+            verifying: false,
+            error: error?.message || 'Website token genereren mislukt.',
+          }));
+        }
+      }
     } catch (error) {
       setClaimError(error?.message || 'Claim verzoek mislukt.');
     } finally {
@@ -6245,6 +6471,34 @@ function ClaimInvitePage({
     }
   };
 
+  const handleVerifyWebsiteClaim = async () => {
+    if (!claimRequestId) return;
+    setWebsiteProofState((prev) => ({
+      ...prev,
+      verifying: true,
+      error: '',
+      success: '',
+    }));
+    try {
+      const result = await verifyWebsiteClaimProof({ requestId: claimRequestId });
+      const status = result?.status || 'pending';
+      const successText = status === 'approved'
+        ? 'Website verificatie gelukt. Je claim is goedgekeurd.'
+        : 'Website verificatie gelukt. We wachten nog op een community vouch.';
+      setWebsiteProofState((prev) => ({
+        ...prev,
+        verifying: false,
+        success: successText,
+      }));
+    } catch (error) {
+      setWebsiteProofState((prev) => ({
+        ...prev,
+        verifying: false,
+        error: error?.message || 'Website verificatie mislukt.',
+      }));
+    }
+  };
+
   const claimCodeExpiryLabel = useMemo(() => {
     if (!claimCodeExpiresAt) return null;
     const date = claimCodeExpiresAt?.toDate ? claimCodeExpiresAt.toDate() : new Date(claimCodeExpiresAt);
@@ -6258,6 +6512,31 @@ function ClaimInvitePage({
     email: 'Email',
     vouch: 'Vouch',
   };
+
+  const claimMethodOptions = useMemo(() => {
+    const options = [
+      {
+        key: 'vouch',
+        title: 'Community vouch',
+        description: 'Vraag bestaande members om jouw claim te bevestigen.',
+      },
+    ];
+    if (preview?.availableProofMethods?.includes('instagram')) {
+      options.push({
+        key: 'instagramScreenshot',
+        title: 'Instagram screenshot',
+        description: 'Plaats een code in je bio en upload daarna een screenshot.',
+      });
+    }
+    if (preview?.availableProofMethods?.includes('website')) {
+      options.push({
+        key: 'website',
+        title: 'Verifieer via website',
+        description: 'Plaats een token op je bestaande website om eigenaarschap te bewijzen.',
+      });
+    }
+    return options;
+  }, [preview]);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-10">
@@ -6313,18 +6592,31 @@ function ClaimInvitePage({
                 <p>Geen publieke hints beschikbaar.</p>
               )}
             </div>
-            {authUser && preview.availableProofMethods?.includes('instagram') && (
-              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 text-sm text-slate-600 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={useInstagramProof}
-                  onChange={(event) => setUseInstagramProof(event.target.checked)}
-                  className="mt-1"
-                />
-                <span>
-                  Voeg optioneel Instagram screenshot bewijs toe. We genereren een code die je in je bio zet en daarna upload je een screenshot.
-                </span>
-              </label>
+            {authUser && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Kies verificatiemethode</p>
+                <div className="grid gap-2">
+                  {claimMethodOptions.map((option) => (
+                    <label
+                      key={option.key}
+                      className="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 text-sm text-slate-600 dark:text-slate-300"
+                    >
+                      <input
+                        type="radio"
+                        name="claim-method"
+                        value={option.key}
+                        checked={claimMethod === option.key}
+                        onChange={() => setClaimMethod(option.key)}
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{option.title}</span>
+                        <span className="block text-xs text-slate-500 dark:text-slate-400">{option.description}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -6370,7 +6662,7 @@ function ClaimInvitePage({
                 {claimSuccess} {claimRequestId && `#${claimRequestId}`}
               </p>
             )}
-            {claimSuccess && useInstagramProof && claimCode && (
+            {claimSuccess && claimMethod === 'instagramScreenshot' && claimCode && (
               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
                 <p className="font-semibold text-slate-700 dark:text-slate-200">Zet deze code in je Instagram bio</p>
                 <div className="flex items-center gap-3">
@@ -6408,6 +6700,45 @@ function ClaimInvitePage({
                 )}
                 {claimProofSuccess && (
                   <p className="text-xs text-emerald-500">{claimProofSuccess}</p>
+                )}
+              </div>
+            )}
+            {claimSuccess && claimMethod === 'website' && (
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
+                <p className="font-semibold text-slate-700 dark:text-slate-200">Plaats dit bestand op je website</p>
+                {websiteProofState.url && (
+                  <p className="break-all text-xs text-slate-500 dark:text-slate-400">{websiteProofState.url}</p>
+                )}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="rounded-full bg-emerald-600 text-white px-3 py-1 text-xs font-semibold">
+                    {websiteProofState.token || 'Token wordt gegenereerd...'}
+                  </span>
+                  {websiteProofState.expiresAt && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      Geldig tot {new Date(websiteProofState.expiresAt).toLocaleTimeString('nl-NL', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Maak een tekstbestand met exact deze token als inhoud en zet het op
+                  <span className="font-semibold text-slate-700 dark:text-slate-200"> /.well-known/artes-claim.txt</span>.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleVerifyWebsiteClaim}
+                  disabled={websiteProofState.verifying || websiteProofState.loading}
+                  className="rounded-full bg-emerald-600 text-white px-4 py-2 text-xs font-semibold hover:bg-emerald-700 transition disabled:opacity-60"
+                >
+                  {websiteProofState.verifying ? 'Controleren...' : 'Controleer verificatie'}
+                </button>
+                {websiteProofState.error && (
+                  <p className="text-xs text-rose-500">{websiteProofState.error}</p>
+                )}
+                {websiteProofState.success && (
+                  <p className="text-xs text-emerald-500">{websiteProofState.success}</p>
                 )}
               </div>
             )}

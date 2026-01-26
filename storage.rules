@@ -17,6 +17,11 @@ service firebase.storage {
       allow write: if isVerifiedUser() && request.auth.uid == userId;
     }
 
+    match /claimProofs/{requestId}/{userId}.png {
+      allow read: if isModerator() || (request.auth != null && request.auth.uid == userId);
+      allow write: if isVerifiedUser() && request.auth.uid == userId;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

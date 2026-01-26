@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { VertexAI } from '@google-cloud/vertexai';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
+import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { logger } from 'firebase-functions';
 import admin from 'firebase-admin';
 import { FieldPath, FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
@@ -30,6 +31,8 @@ const falseAppealThreshold = Number.parseInt(process.env.FALSE_APPEAL_THRESHOLD 
 const cooldownDays = Number.parseInt(process.env.REVIEW_COOLDOWN_DAYS || '7', 10);
 const claimInviteExpiryMs = Number.parseInt(process.env.CLAIM_INVITE_EXPIRY_MS || `${14 * 24 * 60 * 60 * 1000}`, 10);
 const claimInviteRateLimitPerDay = Number.parseInt(process.env.CLAIM_INVITE_DAILY_LIMIT || '5', 10);
+const claimCodeExpiryMs = 5 * 60 * 1000;
+const claimProofRetentionMs = 30 * 24 * 60 * 60 * 1000;
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -37,6 +40,9 @@ if (!admin.apps.length) {
 
 const db = getFirestore();
 const lockDurationMs = 10 * 60 * 1000;
+const visionClient = new ImageAnnotatorClient();
+
+const generateClaimCode = () => `ARTES-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
 const setCorsHeaders = (req, res) => {
   const allowedOrigins = [
@@ -2021,6 +2027,8 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
     const contributorId = body?.contributorId || null;
     const inviteToken = body?.inviteToken || null;
     const mode = body?.mode === 'merge' ? 'merge' : 'link';
+    const status = body?.status === 'needsModeration' ? 'needsModeration' : 'pending';
+    const statusReason = status === 'needsModeration' ? (body?.statusReason || 'manual review requested') : null;
     if (!contributorId) {
       res.status(400).json({ error: 'contributorId is required' });
       return;
@@ -2041,6 +2049,9 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
     const eligibleVoterUids = await buildEligibleVouchers({ contributorId, claimantUid: decoded.uid });
     const now = Date.now();
     const expiresAt = Timestamp.fromDate(new Date(now + claimTimeoutMs));
+    const claimCode = generateClaimCode();
+    const claimCodeExpiresAt = Timestamp.fromDate(new Date(now + claimCodeExpiryMs));
+    const proofMethod = body?.method || 'vouch';
 
     const inviteRef = inviteToken ? db.collection('claimInvites').doc(inviteToken) : null;
     let requestId = null;
@@ -2077,12 +2088,18 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
         contributorId,
         requestedByUid: decoded.uid,
         mode,
-        status: 'pending',
-        statusReason: null,
+        proofMethod,
+        claimCode,
+        claimCodeExpiresAt,
+        status,
+        statusReason,
         yesCount: 0,
         noCount: 0,
         eligibleVoterUids,
         inviteToken: inviteToken || null,
+        proofData: {
+          screenshotVerified: false,
+        },
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
         expiresAt,
@@ -2097,7 +2114,13 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
       }
     });
 
-    res.status(200).json({ ok: true, requestId, eligibleVoterUids });
+    res.status(200).json({
+      ok: true,
+      requestId,
+      eligibleVoterUids,
+      claimCode,
+      claimCodeExpiresAt: claimCodeExpiresAt.toMillis(),
+    });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create claim request' });
@@ -2367,8 +2390,19 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
         return;
       }
 
-      if (yesCount >= 2) {
+      if (yesCount >= 1) {
         const mode = data?.mode === 'merge' ? 'merge' : 'link';
+        const screenshotVerified = Boolean(data?.proofData?.screenshotVerified);
+        if (!screenshotVerified) {
+          transaction.update(requestRef, {
+            status: 'needsModeration',
+            statusReason: 'screenshot required',
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          responsePayload = { ok: true, status: 'needsModeration', reason: 'screenshot required' };
+          return;
+        }
+
         if (mode === 'merge') {
           transaction.update(requestRef, {
             status: 'needsModeration',
@@ -2448,6 +2482,130 @@ export const expireClaimRequests = onRequest({ cors: true, region: 'europe-west4
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to expire claim requests' });
+  }
+});
+
+export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-west4' }, async (event) => {
+  const object = event.data;
+  const name = object?.name || '';
+  if (!name.startsWith('claimProofs/')) return;
+  const parts = name.split('/');
+  if (parts.length < 3) return;
+  const requestId = parts[1];
+  const uidSegment = parts[2];
+  if (!requestId || !uidSegment) return;
+  const bucketName = object?.bucket;
+  if (!bucketName) return;
+
+  const requestRef = db.collection('claimRequests').doc(requestId);
+  const requestSnap = await requestRef.get();
+  if (!requestSnap.exists) {
+    logger.warn('Claim proof upload without request', { requestId, name });
+    return;
+  }
+
+  const requestData = requestSnap.data() || {};
+  const claimCode = requestData?.claimCode ? String(requestData.claimCode) : null;
+  const claimCodeExpiresAt = requestData?.claimCodeExpiresAt instanceof Timestamp
+    ? requestData.claimCodeExpiresAt
+    : null;
+  const contributorId = requestData?.contributorId || null;
+
+  let extractedText = '';
+  try {
+    const [result] = await visionClient.textDetection({
+      image: { source: { imageUri: `gs://${bucketName}/${name}` } },
+    });
+    extractedText = result?.fullTextAnnotation?.text || '';
+  } catch (error) {
+    logger.error('OCR failed for claim proof', { error, name });
+  }
+
+  const normalizedText = extractedText.toLowerCase();
+  const codeMatch = claimCode ? normalizedText.includes(claimCode.toLowerCase()) : false;
+  let handleMatch = true;
+  let handleChecked = false;
+  if (contributorId) {
+    const contributorSnap = await db.collection('contributors').doc(contributorId).get();
+    if (contributorSnap.exists) {
+      const contributor = contributorSnap.data() || {};
+      const instagramHandle = contributor?.instagramHandle ? String(contributor.instagramHandle) : '';
+      if (instagramHandle) {
+        handleChecked = true;
+        const normalizedHandle = instagramHandle.replace(/^@+/, '').toLowerCase();
+        handleMatch = normalizedText.includes(normalizedHandle);
+      }
+    }
+  }
+
+  const isWithinExpiry = Boolean(claimCodeExpiresAt && claimCodeExpiresAt.toMillis() >= Date.now());
+  const screenshotVerified = Boolean(codeMatch && handleMatch && isWithinExpiry);
+
+  await requestRef.set({
+    proofData: {
+      screenshotVerified,
+      screenshotVerifiedAt: FieldValue.serverTimestamp(),
+      screenshotStoragePath: name,
+      screenshotClaimCodeMatched: codeMatch,
+      screenshotHandleMatched: handleMatch,
+      screenshotHandleChecked: handleChecked,
+      screenshotExpired: !isWithinExpiry,
+      screenshotTextPreview: extractedText.slice(0, 300),
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const shouldAutoResolve = requestData?.status === 'pending' && Number(requestData?.yesCount || 0) >= 1;
+  if (shouldAutoResolve) {
+    const mode = requestData?.mode === 'merge' ? 'merge' : 'link';
+    if (screenshotVerified && mode === 'link' && Number(requestData?.noCount || 0) < 1) {
+      await db.runTransaction(async (transaction) => {
+        const freshSnap = await transaction.get(requestRef);
+        if (!freshSnap.exists) return;
+        const data = freshSnap.data() || {};
+        if (data?.status !== 'pending') return;
+        const contributorIdInner = data?.contributorId || null;
+        const requestedByUid = data?.requestedByUid || null;
+        if (!contributorIdInner || !requestedByUid) return;
+        const contributorRef = db.collection('contributors').doc(contributorIdInner);
+        const claimantRef = db.collection('users').doc(requestedByUid);
+        transaction.update(claimantRef, {
+          contributorId: contributorIdInner,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(contributorRef, {
+          claimedByUid: requestedByUid,
+          claimedAt: FieldValue.serverTimestamp(),
+          status: 'claimed',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(requestRef, {
+          status: 'approved',
+          statusReason: null,
+          approvedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+    } else {
+      await requestRef.set({
+        status: 'needsModeration',
+        statusReason: screenshotVerified ? 'manual review required' : 'screenshot required',
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+  }
+
+  try {
+    const retentionDate = new Date(Date.now() + claimProofRetentionMs);
+    await admin.storage().bucket(bucketName).file(name).setMetadata({
+      customTime: retentionDate.toISOString(),
+      metadata: {
+        cleanupAfter: retentionDate.toISOString(),
+        cleanupReason: 'claimProofRetention',
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to set claim proof retention metadata', { error, name });
   }
 });
 

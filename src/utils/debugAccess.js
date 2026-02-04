@@ -17,6 +17,11 @@ export function debugAllowed() {
   // Always allow localhost
   if (hostname === 'localhost') return true;
 
+  const configuredHosts = parseDebugHosts(import.meta.env.VITE_DEBUG_HOSTS);
+  if (configuredHosts.length > 0) {
+    return configuredHosts.includes(hostname);
+  }
+
   // Otherwise fall back to Vite dev flag
   return import.meta.env.DEV === true;
 }

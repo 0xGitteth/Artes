@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   Image as ImageIcon, Search, Users, Plus, Hand, Cloud, Bookmark,
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
@@ -33,6 +33,7 @@ import {
   signInWithGoogle,
   updateUserProfile,
   getFirebaseDbInstance,
+  getFirebaseAuthInstance,
   createClaimInvite,
   startEmailClaimProof,
   startWebsiteClaimProof,
@@ -47,6 +48,7 @@ import {
   getClaimRequestRef,
   getFirebaseStorageInstance,
 } from './firebase';
+import { signInAnonymously } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -1542,23 +1544,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
   const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
   const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
-  const navigate = useNavigate();
-
-  const handleDevLogin = useCallback(async () => {
-    try {
-      setLocalError(null);
-      const credential = await ensureUserSignedIn();
-      const uid = credential?.user?.uid;
-      console.log('[DEV AUTH] signed in anonymously:', uid);
-      if (debugAllowed()) {
-        navigate('/debug', { replace: true });
-      } else {
-        navigate('/', { replace: true });
-      }
-    } catch (devError) {
-      setLocalError(devError?.message || 'Dev login mislukt.');
-    }
-  }, [navigate]);
+  const auth = getFirebaseAuthInstance();
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900">
        <div className="max-w-md w-full text-center">
@@ -1630,13 +1616,13 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
               >
                 Continue with Apple {enableApple ? '' : '(soon)'}
               </button>
-              {import.meta.env.DEV && (
+              {debugAllowed() && (
                 <button
                   type="button"
-                  onClick={handleDevLogin}
+                  onClick={() => signInAnonymously(auth)}
                   className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
                 >
-                  Dev login (anoniem)
+                  Dev login
                 </button>
               )}
              </div>

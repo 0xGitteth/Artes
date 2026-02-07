@@ -124,6 +124,18 @@ export const verifyEmailClaimProof = async ({ requestId, token }) => {
   return result?.data || null;
 };
 
+export const createDiditSession = async () => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'createDiditSession');
+  const result = await callable({});
+  return result?.data || null;
+};
+
+export const refreshDiditSession = async (sessionId) => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'refreshDiditSession');
+  const result = await callable({ sessionId });
+  return result?.data || null;
+};
+
 /**
  * Fetch a contributor by alias type/value.
  * @param {'instagram' | 'domain' | 'email'} type
@@ -750,62 +762,34 @@ export const ensureThreadExists = async (threadId, type = 'support', userProfile
   }
 };
 
-export const ensureSupportThreadExists = async (uid) => {
+export const ensureSupportThreadExists = async (uid, authUser = null) => {
   if (!uid) {
     throw new Error('uid is required to ensure support thread');
   }
 
-  const db = getFirebaseDb();
-  const threadId = `support_${uid}`;
-  const threadRef = doc(db, 'threads', threadId);
-
-  try {
-    const snap = await getDoc(threadRef);
-    if (snap.exists()) {
-      const data = snap.data() || {};
-      if (!data.threadKey) {
-        await updateDoc(threadRef, { threadKey: threadId });
-        if (import.meta.env.DEV) {
-          console.log(`[ensureSupportThreadExists] Patched threadKey for ${threadId}`);
-        }
-      }
-      if (import.meta.env.DEV) {
-        console.log(`[ensureSupportThreadExists] Thread ${threadId} already exists`);
-      }
-      return threadId;
-    }
-
-    await setDoc(threadRef, {
-      type: 'support',
-      threadKey: threadId,
-      userUid: uid,
-      participants: [uid],
-      participantUids: [uid],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      lastMessagePreview: SUPPORT_INTRO_TEXT,
-      lastMessageAt: serverTimestamp(),
-      userCanSend: true,
-      userMessageAllowance: 1,
-    });
-
-    await addDoc(collection(db, 'threads', threadId, 'messages'), {
-      text: SUPPORT_INTRO_TEXT,
-      createdAt: serverTimestamp(),
-      senderRole: 'system',
-      senderUid: null,
-      senderId: uid,
-    });
-
-    if (import.meta.env.DEV) {
-      console.log(`[ensureSupportThreadExists] Created support thread ${threadId} with intro message`);
-    }
-
-    return threadId;
-  } catch (error) {
-    console.error(`[ensureSupportThreadExists] Error ensuring support thread ${threadId}:`, error);
-    throw error;
+  const functionsBase = import.meta.env.VITE_FUNCTIONS_BASE_URL;
+  if (!functionsBase) {
+    throw new Error('VITE_FUNCTIONS_BASE_URL is required');
   }
+
+  const token = authUser ? await authUser.getIdToken() : null;
+  const response = await fetch(`${functionsBase}/ensureSupportThread`, {
+    method: 'POST',
+    headers: token
+      ? {
+        Authorization: `Bearer ${token}`,
+      }
+      : undefined,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data?.error || 'Support thread creation failed';
+    throw new Error(message);
+  }
+  if (import.meta.env.DEV) {
+    console.log('[ensureSupportThreadExists] Ensured support thread via function', data?.threadId);
+  }
+  return data?.threadId || `support_${uid}`;
 };
 
 /**

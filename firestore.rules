@@ -29,6 +29,11 @@ service cloud.firestore {
       allow create: if request.auth != null && request.auth.uid == userId;
       allow update, delete: if isVerifiedUser() && request.auth.uid == userId;
 
+      match /idv/{idvDoc} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
       match /threadIndex/{threadId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }

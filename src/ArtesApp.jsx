@@ -39,6 +39,8 @@ import {
   startWebsiteClaimProof,
   verifyEmailClaimProof,
   verifyWebsiteClaimProof,
+  createDiditSession,
+  refreshDiditSession,
   isModerator,
   ensureSupportThreadExists,
   migrateRemoveGeneralTheme,
@@ -633,8 +635,14 @@ export default function ArtesApp() {
       try {
         if (authReadyRef.current && u?.uid && ensuredSupportThreadUidRef.current !== u.uid) {
           ensuredSupportThreadUidRef.current = u.uid;
-          ensureSupportThreadExists(u.uid).catch((error) => {
-            console.error('[ArtesApp] Failed to ensure support thread', error);
+          ensureSupportThreadExists(u.uid, u).catch((error) => {
+            if (error?.message?.includes('permission')) {
+              if (import.meta.env.DEV) {
+                console.log('[ArtesApp] Support thread creation deferred');
+              }
+            } else {
+              console.error('[ArtesApp] Failed to ensure support thread', error);
+            }
           });
         }
         await migrateArtifactsUserData(u);
@@ -1093,7 +1101,7 @@ export default function ArtesApp() {
       
       // Create support thread for the user after onboarding
       try {
-        await ensureSupportThreadExists(authUser.uid);
+        await ensureSupportThreadExists(authUser.uid, authUser);
         if (import.meta.env.DEV) {
           console.log('[ArtesApp] Created support thread after onboarding');
         }
@@ -1673,6 +1681,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [error, setError] = useState(null);
     const [diditPending, setDiditPending] = useState(false);
     const [diditError, setDiditError] = useState(null);
+    const [diditStatus, setDiditStatus] = useState(null);
+    const [diditSessionId, setDiditSessionId] = useState(null);
     const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
     const [contributorMatches, setContributorMatches] = useState([]);
     const [matchLoading, setMatchLoading] = useState(false);
@@ -1686,6 +1696,16 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const normalizeDisplayName = (value) => String(value || '').trim().toLowerCase();
     const resolvedPendingClaimContributorId = pendingClaimContributorId || profile?.pendingClaimContributorId || null;
     const resolvedPendingClaimContributorName = pendingClaimContributorName || profile?.pendingClaimContributorName || null;
+    const profileIdvRef = useMemo(() => {
+      if (!authUser?.uid) return null;
+      const db = getFirebaseDbInstance();
+      return doc(db, 'users', authUser.uid, 'idv', 'status');
+    }, [authUser?.uid]);
+    const shouldHandleDiditReturn = useMemo(() => {
+      if (typeof window === 'undefined') return false;
+      const url = new URL(window.location.href);
+      return url.searchParams.get('diditReturn') === '1';
+    }, []);
 
     useEffect(() => {
       if (!accountCreated && step > 1) {
@@ -1703,9 +1723,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     useEffect(() => {
       if (profile?.onboardingStep && profile.onboardingStep > step) {
         if (step === MATCH_STEP && profile.onboardingStep === 2) return;
+        if (step === 2 && shouldHandleDiditReturn) return;
         setStep(profile.onboardingStep);
       }
-    }, [profile?.onboardingStep, step]);
+    }, [profile?.onboardingStep, step, shouldHandleDiditReturn]);
 
     useEffect(() => {
       if (!authUser) return;
@@ -1738,6 +1759,67 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (!profile?.pendingClaimContributorName) return;
       setPendingClaimContributorName(profile.pendingClaimContributorName);
     }, [profile?.pendingClaimContributorName]);
+
+    useEffect(() => {
+      if (!authUser?.uid || !profileIdvRef) return;
+      if (step !== 2) return;
+      if (!shouldHandleDiditReturn && !profile?.ageVerified) return;
+      setDiditPending(true);
+      if (import.meta.env.DEV) {
+        console.log('[Onboarding] Listening for Didit status updates');
+      }
+      const unsubscribe = onSnapshot(
+        profileIdvRef,
+        (snap) => {
+          if (!snap.exists()) return;
+          const data = snap.data() || {};
+          const status = data.status || null;
+          setDiditStatus(status);
+          setDiditSessionId(data.sessionId || null);
+          if (import.meta.env.DEV) {
+            console.log('[Onboarding] Didit status update', data);
+          }
+          if (status === 'verified') {
+            setDiditPending(false);
+            setDiditError(null);
+            setStep(3);
+          } else if (status === 'rejected') {
+            setDiditPending(false);
+            setDiditError(data.reason || 'Je verificatie is afgewezen. Probeer het opnieuw.');
+          } else {
+            setDiditPending(true);
+          }
+        },
+        (err) => {
+          console.error('[Onboarding] Didit status listener failed', err);
+          setDiditPending(false);
+          setDiditError('Kon de verificatiestatus niet laden.');
+        },
+      );
+      return () => unsubscribe();
+    }, [authUser?.uid, profileIdvRef, step, profile?.ageVerified, shouldHandleDiditReturn]);
+
+    useEffect(() => {
+      if (!shouldHandleDiditReturn || !diditSessionId) return;
+      let active = true;
+      const run = async () => {
+        try {
+          if (import.meta.env.DEV) {
+            console.log('[Onboarding] Refreshing Didit session after return', diditSessionId);
+          }
+          await refreshDiditSession(diditSessionId);
+        } catch (error) {
+          if (active) {
+            console.error('[Onboarding] Failed to refresh Didit session', error);
+          }
+        }
+      };
+      const timer = setTimeout(run, 1000);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
+    }, [shouldHandleDiditReturn, diditSessionId]);
 
     const fetchContributorMatches = async (displayName) => {
       if (!authReady) return [];
@@ -1971,9 +2053,42 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border dark:border-slate-700 space-y-6">
            <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Artes staan respect en consent centraal.</p></div>
            <div className="flex gap-3"><CheckCircle className="text-green-500"/><p className="text-sm dark:text-slate-300">Identificatie via Didit is verplicht voor veiligheid.</p></div>
+           {diditPending && (
+             <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-300">
+               <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+               We wachten op je verificatiestatus...
+             </div>
+           )}
+           {diditStatus && !diditError && (
+             <p className="text-xs text-slate-500 dark:text-slate-400">Status: {diditStatus}</p>
+           )}
            {diditError && <p className="text-sm text-red-500">{diditError}</p>}
            <div className="flex flex-col gap-3">
-             <Button onClick={() => setStep(3)} className="w-full" disabled={diditPending}>Start Didit Verificatie</Button>
+             <Button
+               onClick={async () => {
+                 if (!authUser?.uid) return;
+                 try {
+                   setDiditPending(true);
+                   setDiditError(null);
+                   const session = await createDiditSession();
+                   if (!session?.verificationUrl) {
+                     throw new Error('Geen verificatielink ontvangen.');
+                   }
+                   if (import.meta.env.DEV) {
+                     console.log('[Onboarding] Didit session created', session);
+                   }
+                   window.location.assign(session.verificationUrl);
+                 } catch (error) {
+                   console.error('[Onboarding] Failed to start Didit session', error);
+                   setDiditPending(false);
+                   setDiditError(error?.message || 'Didit verificatie starten mislukt.');
+                 }
+               }}
+               className="w-full"
+               disabled={diditPending}
+             >
+               Start Didit Verificatie
+             </Button>
              <Button
                variant="danger"
                onClick={async () => {
@@ -1993,6 +2108,19 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
              >
                Niet akkoord, verwijder mijn account
              </Button>
+             {diditStatus === 'rejected' && (
+               <Button
+                 variant="secondary"
+                 onClick={() => {
+                   setDiditError(null);
+                   setDiditStatus(null);
+                 }}
+                 className="w-full"
+                 disabled={diditPending}
+               >
+                 Opnieuw proberen
+               </Button>
+             )}
            </div>
         </div>
       </div>

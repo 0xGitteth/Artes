@@ -14,6 +14,7 @@ import {
   hashWebsiteProofToken,
   normalizeDomain,
 } from './websiteClaimProof.js';
+import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -3070,4 +3071,5 @@ export const config = {
 };
 
 export { ensureSupportThread, ensureModerationThread } from "./supportChat.js";
+export { createDiditSession, refreshDiditSession, diditWebhook };
 export { deleteOnboardingAccount } from "./accountLifecycle.js";

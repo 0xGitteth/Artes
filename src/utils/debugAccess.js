@@ -1,3 +1,13 @@
+// Functie om de hostnamen uit VITE_DEBUG_HOSTS te parsen
+export const parseDebugHosts = (value) => {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean);
+};
+
+// Debugfunctie: bepaalt of debug/login zichtbaar mag zijn
 export function debugAllowed() {
   // Geen debug tijdens server-side rendering
   if (typeof window === 'undefined') return false;

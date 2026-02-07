@@ -1,27 +1,18 @@
-export const parseDebugHosts = (value) => {
-  if (!value) return [];
-  return value
-    .split(',')
-    .map((host) => host.trim())
-    .filter(Boolean);
-};
-
 export function debugAllowed() {
+  // Geen debug tijdens server-side rendering
   if (typeof window === 'undefined') return false;
 
+  // Alleen toestaan als je in dev draait (npm run dev)
+  const isDev = import.meta.env.DEV === true;
+  if (!isDev) return false;
+
+  // Host moet lokaal, Codespaces of in VITE_DEBUG_HOSTS staan
   const hostname = window.location.hostname;
-
-  // Always allow Codespaces
-  if (hostname.endsWith('.app.github.dev')) return true;
-
-  // Always allow localhost
-  if (hostname === 'localhost') return true;
-
   const configuredHosts = parseDebugHosts(import.meta.env.VITE_DEBUG_HOSTS);
-  if (configuredHosts.length > 0) {
-    return configuredHosts.includes(hostname);
-  }
 
-  // Otherwise fall back to Vite dev flag
-  return import.meta.env.DEV === true;
+  return (
+    hostname === 'localhost' ||
+    hostname.endsWith('.app.github.dev') ||
+    configuredHosts.includes(hostname)
+  );
 }

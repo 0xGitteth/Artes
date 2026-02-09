@@ -9,7 +9,14 @@ if (!admin.apps.length) {
 }
 
 const db = getFirestore();
-const DIDIT_API_BASE = process.env.DIDIT_API_BASE_URL || 'https://verification.didit.me/v3';
+
+/**
+ * Didit v2 base
+ * Docs and examples use v2:
+ * - POST  https://verification.didit.me/v2/session/
+ * - GET   https://verification.didit.me/v2/session/{sessionId}/decision/
+ */
+const DIDIT_API_BASE = process.env.DIDIT_API_BASE_URL || 'https://verification.didit.me/v2';
 
 const getDiditHeaders = () => {
   const apiKey = process.env.DIDIT_API_KEY;
@@ -17,7 +24,7 @@ const getDiditHeaders = () => {
     throw new HttpsError('failed-precondition', 'Missing DIDIT_API_KEY');
   }
   return {
-    Authorization: `Bearer ${apiKey}`,
+    'x-api-key': apiKey,
     'Content-Type': 'application/json',
   };
 };
@@ -50,47 +57,69 @@ const resolveDiditAge = (session) => {
     .find((value) => Number.isFinite(value));
   if (Number.isFinite(directAge)) return directAge;
 
-  const dob = session?.dateOfBirth
-    || session?.date_of_birth
-    || session?.document?.dateOfBirth
-    || session?.document?.date_of_birth
-    || session?.person?.dateOfBirth
-    || session?.person?.date_of_birth
-    || session?.data?.dateOfBirth
-    || session?.data?.date_of_birth;
+  const dob =
+    session?.dateOfBirth ||
+    session?.date_of_birth ||
+    session?.document?.dateOfBirth ||
+    session?.document?.date_of_birth ||
+    session?.person?.dateOfBirth ||
+    session?.person?.date_of_birth ||
+    session?.data?.dateOfBirth ||
+    session?.data?.date_of_birth;
+
   return calculateAgeFromDob(dob);
 };
 
-const resolveDiditReference = (payload) => (
-  payload?.reference
-  || payload?.session?.reference
-  || payload?.data?.reference
-  || payload?.session?.metadata?.uid
-  || payload?.session?.metadata?.reference
-  || payload?.metadata?.uid
-  || payload?.metadata?.reference
-  || payload?.data?.metadata?.uid
-  || payload?.data?.metadata?.reference
-);
+const resolveDiditReference = (payload) =>
+  payload?.reference ||
+  payload?.vendor_data ||
+  payload?.session?.reference ||
+  payload?.session?.vendor_data ||
+  payload?.data?.reference ||
+  payload?.data?.vendor_data ||
+  payload?.session?.metadata?.uid ||
+  payload?.session?.metadata?.reference ||
+  payload?.metadata?.uid ||
+  payload?.metadata?.reference ||
+  payload?.data?.metadata?.uid ||
+  payload?.data?.metadata?.reference;
 
 const resolveDiditSession = (payload) => payload?.session || payload?.data || payload;
 
 const resolveDiditStatus = (payload) => {
   const session = resolveDiditSession(payload);
-  const status = normalizeStatus(session?.status || payload?.status || session?.result?.status);
+
+  const raw =
+    session?.status ||
+    payload?.status ||
+    session?.result?.status ||
+    session?.decision?.status ||
+    payload?.decision?.status;
+
+  const status = normalizeStatus(raw);
+
   if (status === 'approved') return 'verified';
   if (status === 'rejected') return 'rejected';
+
   return status;
 };
 
 const resolveDiditReason = (payload) => {
   const session = resolveDiditSession(payload);
-  return session?.reason || session?.status_reason || payload?.reason || payload?.status_reason || null;
+  return (
+    session?.reason ||
+    session?.status_reason ||
+    session?.decision?.reason ||
+    payload?.reason ||
+    payload?.status_reason ||
+    payload?.decision?.reason ||
+    null
+  );
 };
 
 const resolveDiditSessionId = (payload) => {
   const session = resolveDiditSession(payload);
-  return session?.id || payload?.sessionId || payload?.session_id || null;
+  return session?.id || session?.session_id || payload?.sessionId || payload?.session_id || null;
 };
 
 const isApprovedStatus = (status) => ['approved', 'verified', 'completed', 'success'].includes(status);
@@ -106,6 +135,7 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
   const now = FieldValue.serverTimestamp();
   const normalizedStatus = normalizeStatus(status);
   const isAdult = Number.isFinite(age) ? age >= 18 : null;
+
   const updates = {
     status: normalizedStatus || 'unknown',
     sessionId: sessionId || null,
@@ -182,11 +212,15 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
     throw new HttpsError('failed-precondition', 'Missing APP_BASE_URL');
   }
 
-  const redirectUrl = `${appBaseUrl.replace(/\/$/, '')}/onboarding?step=2&diditReturn=1`;
+  // Je callback is waar Didit de gebruiker na afloop heenstuurt.
+  // Dit hoeft niet direct stap 3 te zijn. Stap 2 kan de return afhandelen en daarna doorzetten.
+  const callback = `${appBaseUrl.replace(/\/$/, '')}/onboarding?step=2&diditReturn=1`;
+
+  // Didit v2 verwacht workflow_id + callback + vendor_data (je eigen user id) + metadata.
   const payload = {
-    workflowId,
-    reference: request.auth.uid,
-    redirectUrl,
+    workflow_id: workflowId,
+    callback,
+    vendor_data: request.auth.uid,
     metadata: {
       uid: request.auth.uid,
     },
@@ -195,12 +229,12 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
   logger.info('Creating Didit session', {
     uid: request.auth.uid,
     workflowId,
-    redirectUrl,
+    callback,
   });
 
   let response;
   try {
-    response = await fetch(`${DIDIT_API_BASE}/sessions`, {
+    response = await fetch(`${DIDIT_API_BASE}/session/`, {
       method: 'POST',
       headers: getDiditHeaders(),
       body: JSON.stringify(payload),
@@ -211,30 +245,38 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
   }
 
   const data = await response.json().catch(() => ({}));
+
   if (!response.ok) {
+    // Laat de Didit error door in logs zodat je exact ziet wat er fout gaat.
     logger.error('Didit session create failed', { status: response.status, data });
-    throw new HttpsError('internal', 'Didit session create failed');
+    const detail =
+      data?.detail ||
+      data?.message ||
+      data?.error ||
+      'Didit session create failed';
+    throw new HttpsError('permission-denied', detail);
   }
 
-  const sessionId = data?.id || data?.sessionId || data?.session_id || null;
-  const verificationUrl = data?.verificationUrl
-    || data?.verification_url
-    || data?.url
-    || data?.link
-    || null;
+  const sessionId = data?.session_id || data?.sessionId || data?.id || null;
+  const verificationUrl = data?.url || data?.verificationUrl || data?.verification_url || null;
 
-  await db.collection('users').doc(request.auth.uid).collection('idv').doc('status').set(
-    {
-      status: 'pending',
-      sessionId,
-      workflowId,
-      verificationUrl,
-      redirectUrl,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+  await db
+    .collection('users')
+    .doc(request.auth.uid)
+    .collection('idv')
+    .doc('status')
+    .set(
+      {
+        status: 'pending',
+        sessionId,
+        workflowId,
+        verificationUrl,
+        callback,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 
   logger.info('Didit session created', {
     uid: request.auth.uid,
@@ -256,7 +298,7 @@ export const refreshDiditSession = onCall({ region: 'europe-west4' }, async (req
 
   let response;
   try {
-    response = await fetch(`${DIDIT_API_BASE}/sessions/${sessionId}`, {
+    response = await fetch(`${DIDIT_API_BASE}/session/${sessionId}/decision/`, {
       headers: getDiditHeaders(),
     });
   } catch (error) {
@@ -318,9 +360,10 @@ const verifyWebhookSecret = (req) => {
     }
   }
 
-  const headerSecret = req.get('x-didit-webhook-secret')
-    || req.get('x-didit-secret')
-    || req.get('x-webhook-secret');
+  const headerSecret =
+    req.get('x-didit-webhook-secret') ||
+    req.get('x-didit-secret') ||
+    req.get('x-webhook-secret');
 
   return headerSecret === secret;
 };

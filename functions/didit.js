@@ -30,6 +30,18 @@ const getDiditHeaders = () => {
 };
 
 const normalizeStatus = (status) => String(status || '').trim().toLowerCase();
+const normalizeReason = (reason) => {
+  if (reason == null) return null;
+  if (typeof reason === 'string') {
+    const trimmed = reason.trim();
+    return trimmed || null;
+  }
+  try {
+    return JSON.stringify(reason);
+  } catch (error) {
+    return String(reason);
+  }
+};
 
 const calculateAgeFromDob = (dobValue) => {
   if (!dobValue) return null;
@@ -106,7 +118,7 @@ const resolveDiditStatus = (payload) => {
 
 const resolveDiditReason = (payload) => {
   const session = resolveDiditSession(payload);
-  return (
+  return normalizeReason(
     session?.reason ||
     session?.status_reason ||
     session?.decision?.reason ||
@@ -134,6 +146,7 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
   const userRef = db.collection('users').doc(uid);
   const now = FieldValue.serverTimestamp();
   const normalizedStatus = normalizeStatus(status);
+  const normalizedReason = normalizeReason(reason);
   const isAdult = Number.isFinite(age) ? age >= 18 : null;
 
   const updates = {
@@ -141,7 +154,7 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
     sessionId: sessionId || null,
     age: Number.isFinite(age) ? age : null,
     isAdult: isAdult ?? null,
-    reason: reason || null,
+    reason: normalizedReason,
     updatedAt: now,
     lastSource: source || 'unknown',
   };
@@ -162,12 +175,10 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
         ageVerified: isAdult === true,
         ageVerifiedAt: now,
         isAdult: isAdult === true,
+        onboardingStep: isAdult === true ? 3 : 2,
       },
       { merge: true }
     );
-    if (isAdult === true) {
-      await userRef.set({ onboardingStep: 3 }, { merge: true });
-    }
   }
 
   if (isRejectedStatus(normalizedStatus)) {
@@ -175,6 +186,7 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
       {
         ageVerified: false,
         isAdult: false,
+        onboardingStep: 2,
       },
       { merge: true }
     );
@@ -319,11 +331,14 @@ export const refreshDiditSession = onCall({ region: 'europe-west4' }, async (req
   const reference = resolveDiditReference(data);
   const resolvedUid = reference || request.auth.uid;
 
-  logger.info('Didit session refreshed', {
+  logger.info('Didit session refresh response', {
     uid: resolvedUid,
     sessionId,
     status,
     age,
+    reason,
+    responseStatus: response.status,
+    hasSession: Boolean(session),
   });
 
   const result = await updateIdvStatus({

@@ -1587,6 +1587,17 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
   const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
   const auth = getFirebaseAuthInstance();
+
+  const handleDevLogin = async () => {
+    try {
+      await signInAnonymously(auth);
+      console.log('Anonymous login successful');
+    } catch (err) {
+      const code = err?.code ?? 'unknown';
+      const message = err?.message ?? String(err);
+      alert(`Dev login failed:\nCode: ${code}\nMessage: ${message}`);
+    }
+  };
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900">
        <div className="max-w-md w-full text-center">
@@ -1661,7 +1672,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
               {debugAllowed() && (
                 <button
                   type="button"
-                  onClick={() => signInAnonymously(auth)}
+                  onClick={handleDevLogin}
                   className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
                 >
                   Dev login

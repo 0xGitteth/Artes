@@ -95,6 +95,25 @@ const ROLES = [
 ];
 
 const DIDIT_SUPPORT_EMAIL = 'support@artes.app';
+const DIDIT_APPROVED_STATUSES = ['verified', 'approved', 'completed', 'success'];
+const DIDIT_REJECTED_STATUSES = ['rejected', 'denied', 'declined', 'failed'];
+
+const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().toLowerCase() || null;
+
+const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
+  if (!authIsReady) return null;
+  if (!authUserData) return 1;
+
+  const statusFromProfile = normalizeDiditStatus(profileData?.idv?.status || profileData?.diditStatus);
+  const ageVerified = profileData?.ageVerified;
+  const isAdult = profileData?.isAdult;
+  const requestedStep = Number.parseInt(queryParams?.get('step') || '', 10);
+
+  if (ageVerified === true && isAdult === true) return 3;
+  if (ageVerified === false || DIDIT_REJECTED_STATUSES.includes(statusFromProfile || '')) return 2;
+  if (Number.isFinite(requestedStep) && requestedStep === 1 && !authUserData?.uid) return 1;
+  return 2;
+};
 
 const PROOF_STATUS_LABELS = {
   pending: 'In afwachting',
@@ -833,50 +852,58 @@ export default function ArtesApp() {
   }, [authReady, authUser?.uid, logListenerStart, handleListenerError]);
 
   useEffect(() => {
-    if (!authReady || !authUser?.uid || profile?.ageVerified !== true) return;
     let unsubscribe = null;
     let active = true;
 
+    const stopModeration = () => {
+      setIsModeratorClient(false);
+      if (unsubscribe) {
+        unsubscribe();
+        unsubscribe = null;
+      }
+    };
+
     const setup = async () => {
+      if (!authReady || !authUser?.uid || profile?.ageVerified !== true || !authUser?.emailVerified) {
+        stopModeration();
+        return;
+      }
+
       const db = getFirebaseDbInstance();
       try {
         const moderationDoc = await getDoc(doc(db, 'config', 'moderation'));
         const moderatorEmails = moderationDoc.exists() ? (moderationDoc.data().moderatorEmails || []) : [];
-        
-        console.log("MOD CHECK:", {
-          email: authUser?.email,
-          emailVerified: authUser?.emailVerified,
-          moderatorEmailsCount: moderatorEmails?.length || 0,
-          isModeratorClient: !!(authUser?.email && moderatorEmails.includes(authUser.email)),
-        });
-        
-        const resolvedIsModeratorClient = authUser?.email && moderatorEmails.includes(authUser.email);
-        setIsModeratorClient(Boolean(resolvedIsModeratorClient));
+        const resolvedIsModeratorClient = Boolean(authUser?.email && moderatorEmails.includes(authUser.email));
 
-        if (!authUser?.emailVerified || !resolvedIsModeratorClient) {
-          console.log('Moderation unread listener skipped: not a moderator');
+        if (!resolvedIsModeratorClient) {
+          stopModeration();
           return;
         }
+
+        setIsModeratorClient(true);
 
         const threadId = `moderation_${authUser.uid}`;
         const messagesRef = collection(db, 'threads', threadId, 'messages');
         const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
 
         logListenerStart('Moderation unread listener (ArtesApp)', {
-          isModeratorClient: resolvedIsModeratorClient,
+          isModeratorClient: true,
         });
         unsubscribe = onSnapshot(
           q,
           (snapshot) => {
-            if (!active) return;
-            if (snapshot.empty) return;
+            if (!active || snapshot.empty) return;
             const docSnap = snapshot.docs[0];
             if (moderationModal?.id === docSnap.id) return;
             setModerationModal({ id: docSnap.id, ...docSnap.data() });
           },
-          (err) => handleListenerError('Moderation unread listener (ArtesApp)', err),
+          (err) => {
+            stopModeration();
+            handleListenerError('Moderation unread listener (ArtesApp)', err);
+          },
         );
       } catch (error) {
+        stopModeration();
         console.error('Failed to setup moderation unread listener check', error);
       }
     };
@@ -885,7 +912,7 @@ export default function ArtesApp() {
 
     return () => {
       active = false;
-      if (unsubscribe) unsubscribe();
+      stopModeration();
     };
   }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError, profile?.ageVerified]);
 
@@ -1666,7 +1693,11 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
 }
 
 function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady }) {
-    const [step, setStep] = useState(() => Math.max(1, profile?.onboardingStep ?? 1));
+    const onboardingQueryParams = useMemo(() => {
+      if (typeof window === 'undefined') return new URLSearchParams();
+      return new URLSearchParams(window.location.search || '');
+    }, []);
+    const [step, setStep] = useState(() => computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady) ?? 1);
     const [roles, setRoles] = useState([]);
     const MATCH_STEP = 1.5;
     const [profileData, setProfileData] = useState(() => ({
@@ -1711,14 +1742,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       const db = getFirebaseDbInstance();
       return doc(db, 'users', authUser.uid, 'idv', 'status');
     }, [authUser?.uid]);
-    const diditReturnContext = useMemo(() => {
-      if (typeof window === 'undefined') return { shouldHandle: false, sessionIdFromUrl: null };
-      const url = new URL(window.location.href);
-      return {
-        shouldHandle: url.searchParams.get('diditReturn') === '1',
-        sessionIdFromUrl: url.searchParams.get('sessionId') || null,
-      };
-    }, []);
+    const diditReturnContext = useMemo(() => ({
+      shouldHandle: onboardingQueryParams.get('diditReturn') === '1',
+      sessionIdFromUrl: onboardingQueryParams.get('sessionId') || null,
+    }), [onboardingQueryParams]);
     const shouldHandleDiditReturn = diditReturnContext.shouldHandle;
 
     useEffect(() => {
@@ -1730,17 +1757,17 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     useEffect(() => {
       if (authUser && !accountCreated) {
         setAccountCreated(true);
-        setStep(2);
       }
     }, [authUser, accountCreated]);
 
     useEffect(() => {
-      if (profile?.onboardingStep && profile.onboardingStep > step) {
-        if (step === MATCH_STEP && profile.onboardingStep === 2) return;
-        if (step === 2 && shouldHandleDiditReturn) return;
-        setStep(profile.onboardingStep);
+      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
+      if (!resolvedStep) return;
+      if (step === MATCH_STEP && resolvedStep === 2) return;
+      if (step !== resolvedStep) {
+        setStep(resolvedStep);
       }
-    }, [profile?.onboardingStep, step, shouldHandleDiditReturn]);
+    }, [authReady, authUser, onboardingQueryParams, profile, step]);
 
     useEffect(() => {
       if (!authUser) return;
@@ -1795,7 +1822,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         (snap) => {
           if (!snap.exists()) return;
           const data = snap.data() || {};
-          const status = String(data.status || '').trim().toLowerCase() || null;
+          const status = normalizeDiditStatus(data.status);
           const isAdult = typeof data.isAdult === 'boolean' ? data.isAdult : null;
           setDiditStatus(status);
           setDiditSessionId(data.sessionId || null);
@@ -1805,8 +1832,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
             console.log('[Onboarding] Didit status update', data);
           }
 
-          const isApproved = ['verified', 'approved', 'completed', 'success'].includes(status || '');
-          const isRejected = ['rejected', 'denied', 'declined', 'failed'].includes(status || '');
+          const isApproved = DIDIT_APPROVED_STATUSES.includes(status || '');
+          const isRejected = DIDIT_REJECTED_STATUSES.includes(status || '');
           if (isApproved && isAdult === true) {
             setDiditPending(false);
             setDiditError(null);
@@ -1825,9 +1852,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           }
         },
         (err) => {
-          console.error('[Onboarding] Didit status listener failed', err);
           setDiditPending(false);
-          setDiditError('Kon de verificatiestatus niet laden.');
+          setDiditError(err?.message || 'Kon de verificatiestatus niet laden.');
         },
       );
       return () => unsubscribe();
@@ -1845,7 +1871,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           const currentData = currentSnap.data() || {};
           resolvedSessionId = currentData.sessionId || null;
           if (typeof currentData.isAdult === 'boolean') setDiditIsAdult(currentData.isAdult);
-          if (currentData.status) setDiditStatus(String(currentData.status).trim().toLowerCase());
+          if (currentData.status) setDiditStatus(normalizeDiditStatus(currentData.status));
           setDiditRejectReason(currentData.reason || '');
         }
 
@@ -1859,8 +1885,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
         await refreshDiditSession(resolvedSessionId);
       } catch (refreshError) {
-        console.error('[Onboarding] Failed to refresh Didit session', refreshError);
-        setDiditError('Technische fout bij controleren van Didit. Probeer opnieuw of neem contact op met support.');
+        setDiditError(refreshError?.message || 'Technische fout bij controleren van Didit. Probeer opnieuw of neem contact op met support.');
       } finally {
         setDiditRefreshAttempted(true);
         clearDiditReturnParam();
@@ -1869,10 +1894,20 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }, [authUser?.uid, clearDiditReturnParam, diditReturnContext.sessionIdFromUrl, diditSessionId, profileIdvRef]);
 
     useEffect(() => {
-      if (!authReady || !authUser?.uid) return;
-      if (step !== 2 || !shouldHandleDiditReturn || diditRefreshAttempted) return;
+      if (!authReady || !authUser?.uid || !shouldHandleDiditReturn || diditRefreshAttempted) return;
+      const hasKnownSession = Boolean(diditSessionId || diditReturnContext.sessionIdFromUrl || profile?.idv?.sessionId);
+      if (!hasKnownSession) return;
       handleRefreshDiditStatus();
-    }, [authReady, authUser?.uid, diditRefreshAttempted, handleRefreshDiditStatus, shouldHandleDiditReturn, step]);
+    }, [
+      authReady,
+      authUser?.uid,
+      diditRefreshAttempted,
+      diditReturnContext.sessionIdFromUrl,
+      diditSessionId,
+      handleRefreshDiditStatus,
+      profile?.idv?.sessionId,
+      shouldHandleDiditReturn,
+    ]);
 
     const fetchContributorMatches = async (displayName) => {
       if (!authReady) return [];
@@ -2099,8 +2134,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       </div>
     );
 
-    const diditApproved = ['verified', 'approved', 'completed', 'success'].includes(diditStatus || '');
-    const diditRejected = ['rejected', 'denied', 'declined', 'failed'].includes(diditStatus || '');
+    const diditApproved = DIDIT_APPROVED_STATUSES.includes(diditStatus || '');
+    const diditRejected = DIDIT_REJECTED_STATUSES.includes(diditStatus || '');
     const diditRejectedOrMinor = diditRejected || (diditApproved && diditIsAdult === false);
 
     if (step === 2 && diditRejectedOrMinor) return (
@@ -2114,7 +2149,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
               Reden: <span className="font-semibold">{diditRejectReason || 'Je verificatie is niet goedgekeurd. Neem contact op met moderatie voor hulp.'}</span>
             </p>
           </div>
-          <p className="text-sm text-slate-600 dark:text-slate-300">Ik ben het niet eens met deze uitkomst.</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Toegang tot Artes is niet mogelijk bij afwijzing of wanneer je niet 18+ bent. Denk je dat dit niet klopt? Neem contact op met moderatie.</p>
           <div className="flex flex-col gap-3">
             <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}`)} className="w-full">
               Mail moderatie
@@ -2136,7 +2171,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
            <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Artes staan respect en consent centraal.</p></div>
            <div className="flex gap-3"><CheckCircle className="text-green-500"/><p className="text-sm dark:text-slate-300">Identificatie via Didit is verplicht voor veiligheid.</p></div>
            {(diditStatus === 'pending' || diditStatus === 'unknown' || shouldHandleDiditReturn) && !diditError && (
-             <p className="text-sm text-slate-600 dark:text-slate-300">Verificatie is nog in behandeling. Even geduld of probeer opnieuw.</p>
+             <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
+               <p className="font-semibold">Verificatie loopt</p>
+               <p>Didit verwerkt je controle nog. Klik op ‘Opnieuw controleren’ om de nieuwste status op te halen.</p>
+             </div>
            )}
            {diditPending && (
              <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-300">
@@ -2167,7 +2205,6 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                    }
                    window.location.assign(session.verificationUrl);
                  } catch (error) {
-                   console.error('[Onboarding] Failed to start Didit session', error);
                    setDiditPending(false);
                    setDiditError(error?.message || 'Didit verificatie starten mislukt.');
                  }

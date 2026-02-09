@@ -767,7 +767,7 @@ export const ensureSupportThreadExists = async (uid, authUser = null) => {
     throw new Error('uid is required to ensure support thread');
   }
 
-  const functionsBase = import.meta.env.VITE_FUNCTIONS_BASE_URL;
+  const functionsBase = import.meta.env.VITE_FUNCTIONS_BASE_URL || import.meta.env.VITE_FUNCTIONS_BASE;
   if (!functionsBase) {
     throw new Error('VITE_FUNCTIONS_BASE_URL is required');
   }

@@ -469,6 +469,7 @@ export default function ArtesApp() {
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
   const userProfile = profile;
+  const onboardingLocked = Boolean(authUser?.uid && profile && profile.onboardingComplete !== true);
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
   const [configLoading, setConfigLoading] = useState(true);
@@ -667,7 +668,7 @@ export default function ArtesApp() {
             : path.startsWith('/chat') || path.startsWith('/messages')
               ? 'chat'
               : baseView;
-        setView(routedView);
+        setView(onboardingComplete ? routedView : 'onboarding');
         ensureModerationThread(u).catch((error) => {
           console.error('Failed to ensure support thread', error);
         });
@@ -739,6 +740,10 @@ export default function ArtesApp() {
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname || '/';
+      if (onboardingLocked) {
+        setView('onboarding');
+        return;
+      }
       if (path.startsWith('/claim/')) {
         setClaimInviteToken(getClaimTokenFromPath(path));
         setView('claim');
@@ -758,7 +763,7 @@ export default function ArtesApp() {
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [view, getClaimTokenFromPath]);
+  }, [view, getClaimTokenFromPath, onboardingLocked]);
 
   useEffect(() => {
     if (view === 'claim' || view === 'claimEmail') {
@@ -1261,7 +1266,7 @@ export default function ArtesApp() {
         `}} />
 
         {/* Nav visible if profile loaded */}
-        {profile && (
+        {profile && !onboardingLocked && (
           <NavBar 
              view={view} 
              setView={setView} 
@@ -1683,6 +1688,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditError, setDiditError] = useState(null);
     const [diditStatus, setDiditStatus] = useState(null);
     const [diditSessionId, setDiditSessionId] = useState(null);
+    const [diditRejectReason, setDiditRejectReason] = useState('');
     const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
     const [contributorMatches, setContributorMatches] = useState([]);
     const [matchLoading, setMatchLoading] = useState(false);
@@ -1779,13 +1785,16 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           if (import.meta.env.DEV) {
             console.log('[Onboarding] Didit status update', data);
           }
-          if (status === 'verified') {
+          if (status === 'verified' || status === 'approved') {
             setDiditPending(false);
             setDiditError(null);
+            setDiditRejectReason('');
             setStep(3);
-          } else if (status === 'rejected') {
+          } else if (status === 'rejected' || status === 'denied') {
+            const reason = data.reason || data.decisionReason || 'Onbekende reden';
             setDiditPending(false);
-            setDiditError(data.reason || 'Je verificatie is afgewezen. Probeer het opnieuw.');
+            setDiditRejectReason(reason);
+            setDiditError(`Je verificatie is afgewezen: ${reason}`);
           } else {
             setDiditPending(true);
           }
@@ -2046,6 +2055,66 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       </div>
     );
 
+    if (step === 2 && (diditStatus === 'rejected' || diditStatus === 'denied')) return (
+      <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
+        <h2 className="text-sm font-bold text-red-600 uppercase mb-1">Verificatie mislukt</h2>
+        <h1 className="text-3xl font-bold dark:text-white mb-6">Je verificatie is niet goedgekeurd</h1>
+        <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-red-200 dark:border-red-500/40 space-y-5">
+          <div className="flex gap-3">
+            <AlertTriangle className="text-red-500" />
+            <p className="text-sm dark:text-slate-300">
+              Reden: <span className="font-semibold">{diditRejectReason || 'Onbekende reden'}</span>
+            </p>
+          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Ben je het niet eens met deze uitkomst? Mail dan naar{' '}
+            <a href="mailto:admin@artes.app" className="text-blue-600 dark:text-blue-300 underline">admin@artes.app</a>.
+          </p>
+          <div className="flex flex-col gap-3">
+            <Button
+              onClick={async () => {
+                if (!authUser?.uid) return;
+                try {
+                  setDiditPending(true);
+                  setDiditError(null);
+                  const session = await createDiditSession();
+                  if (!session?.verificationUrl) throw new Error('Geen verificatielink ontvangen.');
+                  window.location.assign(session.verificationUrl);
+                } catch (retryError) {
+                  setDiditPending(false);
+                  setDiditError(retryError?.message || 'Didit verificatie starten mislukt.');
+                }
+              }}
+              className="w-full"
+              disabled={diditPending}
+            >
+              Opnieuw verifieren via Didit
+            </Button>
+            <Button
+              variant="danger"
+              onClick={async () => {
+                if (!window.confirm('Weet je zeker dat je niet akkoord gaat? Je account wordt verwijderd.')) return;
+                try {
+                  setDiditPending(true);
+                  setDiditError(null);
+                  await onDeclineDidit?.();
+                } catch (e) {
+                  setDiditError(e.message || 'Account verwijderen is mislukt.');
+                } finally {
+                  setDiditPending(false);
+                }
+              }}
+              className="w-full"
+              disabled={diditPending}
+            >
+              Niet akkoord, verwijder mijn account
+            </Button>
+            {diditError && <p className="text-sm text-red-500">{diditError}</p>}
+          </div>
+        </div>
+      </div>
+    );
+
     if (step === 2) return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
         <h2 className="text-sm font-bold text-blue-600 uppercase mb-1">Stap 2/5</h2>
@@ -2108,12 +2177,13 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
              >
                Niet akkoord, verwijder mijn account
              </Button>
-             {diditStatus === 'rejected' && (
+             {(diditStatus === 'rejected' || diditStatus === 'denied') && (
                <Button
                  variant="secondary"
                  onClick={() => {
                    setDiditError(null);
                    setDiditStatus(null);
+                   setDiditRejectReason('');
                  }}
                  className="w-full"
                  disabled={diditPending}

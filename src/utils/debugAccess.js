@@ -16,13 +16,10 @@ export function debugAllowed() {
   const isDev = import.meta.env.DEV === true;
   if (!isDev) return false;
 
-  // Host moet lokaal, Codespaces of in VITE_DEBUG_HOSTS staan
+  // Host moet lokaal of expliciet in VITE_DEBUG_HOSTS staan
   const hostname = window.location.hostname;
   const configuredHosts = parseDebugHosts(import.meta.env.VITE_DEBUG_HOSTS);
+  const isLoopbackHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 
-  return (
-    hostname === 'localhost' ||
-    hostname.endsWith('.app.github.dev') ||
-    configuredHosts.includes(hostname)
-  );
+  return isLoopbackHost || configuredHosts.includes(hostname);
 }

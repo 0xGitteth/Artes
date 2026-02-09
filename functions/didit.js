@@ -302,7 +302,10 @@ export const refreshDiditSession = onCall({ region: 'europe-west4' }, async (req
 
 const verifyWebhookSecret = (req) => {
   const secret = process.env.DIDIT_WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) {
+    logger.error('Didit webhook secret is not configured');
+    return false;
+  }
 
   const signature = req.get('x-didit-signature');
   if (signature) {

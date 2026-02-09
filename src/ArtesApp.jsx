@@ -1720,6 +1720,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditPending, setDiditPending] = useState(false);
     const [diditError, setDiditError] = useState(null);
     const [diditStatus, setDiditStatus] = useState(null);
+    const [diditUiState, setDiditUiState] = useState('idle');
     const [diditSessionId, setDiditSessionId] = useState(null);
     const [diditRejectReason, setDiditRejectReason] = useState('');
     const [diditIsAdult, setDiditIsAdult] = useState(null);
@@ -1765,9 +1766,18 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (!resolvedStep) return;
       if (step === MATCH_STEP && resolvedStep === 2) return;
       if (step !== resolvedStep) {
-        setStep(resolvedStep);
+        setStep((prevStep) => {
+          if (prevStep === MATCH_STEP && resolvedStep === 2) return prevStep;
+          return Math.max(prevStep, resolvedStep);
+        });
       }
     }, [authReady, authUser, onboardingQueryParams, profile, step]);
+
+    useEffect(() => {
+      if (step !== 2) return;
+      setDiditUiState('idle');
+      setDiditError(null);
+    }, [step]);
 
     useEffect(() => {
       if (!authUser) return;
@@ -1837,22 +1847,31 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           if (isApproved && isAdult === true) {
             setDiditPending(false);
             setDiditError(null);
+            setDiditUiState('idle');
             clearDiditReturnParam();
-            setStep(3);
+            setStep((prevStep) => Math.max(prevStep, 3));
             return;
           }
 
           if (isRejected || (isApproved && isAdult === false)) {
             setDiditPending(false);
+            setDiditUiState(isApproved && isAdult === false ? 'underage' : 'rejected');
             return;
           }
 
           if (status === 'pending' || status === 'unknown' || !status) {
             setDiditPending(false);
+            setDiditUiState('pending');
           }
         },
         (err) => {
           setDiditPending(false);
+          if (err?.code === 'permission-denied' || err?.code === 'failed-precondition') {
+            if (import.meta.env.DEV) {
+              console.log('[Onboarding] Didit status listener skipped', err?.code);
+            }
+            return;
+          }
           setDiditError(err?.message || 'Kon de verificatiestatus niet laden.');
         },
       );
@@ -1864,6 +1883,12 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       try {
         setDiditPending(true);
         setDiditError(null);
+        if (import.meta.env.DEV) {
+          console.log('[Onboarding] Refreshing Didit session after return', {
+            diditReturn: shouldHandleDiditReturn,
+            hasSession: Boolean(diditSessionId || diditReturnContext.sessionIdFromUrl),
+          });
+        }
 
         let resolvedSessionId = null;
         const currentSnap = await getDoc(profileIdvRef);
@@ -1885,13 +1910,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
         await refreshDiditSession(resolvedSessionId);
       } catch (refreshError) {
+        setDiditUiState('error');
         setDiditError(refreshError?.message || 'Technische fout bij controleren van Didit. Probeer opnieuw of neem contact op met support.');
       } finally {
         setDiditRefreshAttempted(true);
         clearDiditReturnParam();
         setDiditPending(false);
       }
-    }, [authUser?.uid, clearDiditReturnParam, diditReturnContext.sessionIdFromUrl, diditSessionId, profileIdvRef]);
+    }, [authUser?.uid, clearDiditReturnParam, diditReturnContext.sessionIdFromUrl, diditSessionId, profileIdvRef, shouldHandleDiditReturn]);
 
     useEffect(() => {
       if (!authReady || !authUser?.uid || !shouldHandleDiditReturn || diditRefreshAttempted) return;
@@ -2134,46 +2160,35 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       </div>
     );
 
-    const diditApproved = DIDIT_APPROVED_STATUSES.includes(diditStatus || '');
-    const diditRejected = DIDIT_REJECTED_STATUSES.includes(diditStatus || '');
-    const diditRejectedOrMinor = diditRejected || (diditApproved && diditIsAdult === false);
-
-    if (step === 2 && diditRejectedOrMinor) return (
-      <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
-        <h2 className="text-sm font-bold text-red-600 uppercase mb-1">Stap 2/5</h2>
-        <h1 className="text-3xl font-bold dark:text-white mb-6">{diditIsAdult === false ? 'Niet voldaan aan de leeftijdseis' : 'Verificatie afgewezen'}</h1>
-        <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-red-200 dark:border-red-500/40 space-y-5">
-          <div className="flex gap-3">
-            <AlertTriangle className="text-red-500" />
-            <p className="text-sm dark:text-slate-300">
-              Reden: <span className="font-semibold">{diditRejectReason || 'Je verificatie is niet goedgekeurd. Neem contact op met moderatie voor hulp.'}</span>
-            </p>
-          </div>
-          <p className="text-sm text-slate-600 dark:text-slate-300">Toegang tot Artes is niet mogelijk bij afwijzing of wanneer je niet 18+ bent. Denk je dat dit niet klopt? Neem contact op met moderatie.</p>
-          <div className="flex flex-col gap-3">
-            <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}`)} className="w-full">
-              Mail moderatie
-            </Button>
-            <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending}>
-              Opnieuw controleren
-            </Button>
-            {diditError && <p className="text-sm text-red-500">{diditError}</p>}
-          </div>
-        </div>
-      </div>
-    );
-
     if (step === 2) return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
-        <h2 className="text-sm font-bold text-blue-600 uppercase mb-1">Stap 2/5</h2>
-        <h1 className="text-3xl font-bold dark:text-white mb-6">Veiligheid & Waarden</h1>
-        <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border dark:border-slate-700 space-y-6">
+        <h2 className={`text-sm font-bold uppercase mb-1 ${diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error' ? 'text-red-600' : 'text-blue-600'}`}>Stap 2/5</h2>
+        <h1 className="text-3xl font-bold dark:text-white mb-6">
+          {diditUiState === 'underage'
+            ? 'Niet voldaan aan de leeftijdseis'
+            : diditUiState === 'rejected'
+              ? 'Verificatie afgewezen'
+              : diditUiState === 'error'
+                ? 'Verificatie controleren mislukt'
+                : 'Veiligheid & Waarden'}
+        </h1>
+        <div className={`bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border space-y-6 ${(diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error') ? 'border-red-200 dark:border-red-500/40' : 'dark:border-slate-700'}`}>
            <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Artes staan respect en consent centraal.</p></div>
            <div className="flex gap-3"><CheckCircle className="text-green-500"/><p className="text-sm dark:text-slate-300">Identificatie via Didit is verplicht voor veiligheid.</p></div>
-           {(diditStatus === 'pending' || diditStatus === 'unknown' || shouldHandleDiditReturn) && !diditError && (
+           {(diditUiState === 'pending' || shouldHandleDiditReturn) && !diditError && (
              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
                <p className="font-semibold">Verificatie loopt</p>
                <p>Didit verwerkt je controle nog. Klik op ‘Opnieuw controleren’ om de nieuwste status op te halen.</p>
+             </div>
+           )}
+           {(diditUiState === 'rejected' || diditUiState === 'underage') && (
+             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+               <div className="flex gap-3">
+                 <AlertTriangle className="text-red-500" />
+                 <p>
+                   Reden: <span className="font-semibold">{diditRejectReason || 'Je verificatie is niet goedgekeurd. Neem contact op met support voor hulp.'}</span>
+                 </p>
+               </div>
              </div>
            )}
            {diditPending && (
@@ -2187,15 +2202,18 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
            )}
            {diditError && <p className="text-sm text-red-500">{diditError}</p>}
            <div className="flex flex-col gap-3">
-             <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending}>
-               Opnieuw controleren
-             </Button>
+             {(diditUiState === 'pending' || diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error') && (
+               <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending}>
+                 Opnieuw controleren
+               </Button>
+             )}
              <Button
                onClick={async () => {
                  if (!authUser?.uid) return;
                  try {
                    setDiditPending(true);
                    setDiditError(null);
+                   setDiditUiState('idle');
                    const session = await createDiditSession();
                    if (!session?.verificationUrl) {
                      throw new Error('Geen verificatielink ontvangen.');
@@ -2205,6 +2223,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                    }
                    window.location.assign(session.verificationUrl);
                  } catch (error) {
+                   setDiditUiState('error');
                    setDiditPending(false);
                    setDiditError(error?.message || 'Didit verificatie starten mislukt.');
                  }
@@ -2233,9 +2252,9 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
              >
                Niet akkoord, verwijder mijn account
              </Button>
-             {diditError && (
+             {(diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error') && (
                <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}`)} className="w-full">
-                 Mail moderatie
+                 Mail support
                </Button>
              )}
            </div>

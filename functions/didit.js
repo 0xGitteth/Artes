@@ -226,7 +226,7 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
 
   // Je callback is waar Didit de gebruiker na afloop heenstuurt.
   // Dit hoeft niet direct stap 3 te zijn. Stap 2 kan de return afhandelen en daarna doorzetten.
-  const callback = `${appBaseUrl.replace(/\/$/, '')}/onboarding?step=2&diditReturn=1`;
+  const callback = `${appBaseUrl.replace(/\/$/, '')}/onboarding?diditReturn=1`; // frontend bepaalt zelf de juiste stap
 
   // Didit v2 verwacht workflow_id + callback + vendor_data (je eigen user id) + metadata.
   const payload = {

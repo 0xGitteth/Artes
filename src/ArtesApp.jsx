@@ -94,6 +94,8 @@ const ROLES = [
   { id: 'fan', label: 'Fan', desc: 'Volg je favoriete makers en bewaar inspiratie.' },
 ];
 
+const DIDIT_SUPPORT_EMAIL = 'support@artes.app';
+
 const PROOF_STATUS_LABELS = {
   pending: 'In afwachting',
   verified: 'Geverifieerd',
@@ -831,7 +833,7 @@ export default function ArtesApp() {
   }, [authReady, authUser?.uid, logListenerStart, handleListenerError]);
 
   useEffect(() => {
-    if (!authReady || !authUser?.uid) return;
+    if (!authReady || !authUser?.uid || profile?.ageVerified !== true) return;
     let unsubscribe = null;
     let active = true;
 
@@ -885,7 +887,7 @@ export default function ArtesApp() {
       active = false;
       if (unsubscribe) unsubscribe();
     };
-  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError]);
+  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError, profile?.ageVerified]);
 
   useEffect(() => {
     if (view !== 'chat') return;
@@ -1689,6 +1691,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditStatus, setDiditStatus] = useState(null);
     const [diditSessionId, setDiditSessionId] = useState(null);
     const [diditRejectReason, setDiditRejectReason] = useState('');
+    const [diditIsAdult, setDiditIsAdult] = useState(null);
+    const [diditRefreshAttempted, setDiditRefreshAttempted] = useState(false);
     const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
     const [contributorMatches, setContributorMatches] = useState([]);
     const [matchLoading, setMatchLoading] = useState(false);
@@ -1707,11 +1711,15 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       const db = getFirebaseDbInstance();
       return doc(db, 'users', authUser.uid, 'idv', 'status');
     }, [authUser?.uid]);
-    const shouldHandleDiditReturn = useMemo(() => {
-      if (typeof window === 'undefined') return false;
+    const diditReturnContext = useMemo(() => {
+      if (typeof window === 'undefined') return { shouldHandle: false, sessionIdFromUrl: null };
       const url = new URL(window.location.href);
-      return url.searchParams.get('diditReturn') === '1';
+      return {
+        shouldHandle: url.searchParams.get('diditReturn') === '1',
+        sessionIdFromUrl: url.searchParams.get('sessionId') || null,
+      };
     }, []);
+    const shouldHandleDiditReturn = diditReturnContext.shouldHandle;
 
     useEffect(() => {
       if (!accountCreated && step > 1) {
@@ -1766,11 +1774,19 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       setPendingClaimContributorName(profile.pendingClaimContributorName);
     }, [profile?.pendingClaimContributorName]);
 
+    const clearDiditReturnParam = useCallback(() => {
+      if (typeof window === 'undefined') return;
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('diditReturn') !== '1') return;
+      url.searchParams.delete('diditReturn');
+      url.searchParams.delete('sessionId');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }, []);
+
     useEffect(() => {
       if (!authUser?.uid || !profileIdvRef) return;
       if (step !== 2) return;
-      if (!shouldHandleDiditReturn && !profile?.ageVerified) return;
-      setDiditPending(true);
+      if (!authReady) return;
       if (import.meta.env.DEV) {
         console.log('[Onboarding] Listening for Didit status updates');
       }
@@ -1779,24 +1795,33 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         (snap) => {
           if (!snap.exists()) return;
           const data = snap.data() || {};
-          const status = data.status || null;
+          const status = String(data.status || '').trim().toLowerCase() || null;
+          const isAdult = typeof data.isAdult === 'boolean' ? data.isAdult : null;
           setDiditStatus(status);
           setDiditSessionId(data.sessionId || null);
+          setDiditIsAdult(isAdult);
+          setDiditRejectReason(data.reason || '');
           if (import.meta.env.DEV) {
             console.log('[Onboarding] Didit status update', data);
           }
-          if (status === 'verified' || status === 'approved') {
+
+          const isApproved = ['verified', 'approved', 'completed', 'success'].includes(status || '');
+          const isRejected = ['rejected', 'denied', 'declined', 'failed'].includes(status || '');
+          if (isApproved && isAdult === true) {
             setDiditPending(false);
             setDiditError(null);
-            setDiditRejectReason('');
+            clearDiditReturnParam();
             setStep(3);
-          } else if (status === 'rejected' || status === 'denied') {
-            const reason = data.reason || data.decisionReason || 'Onbekende reden';
+            return;
+          }
+
+          if (isRejected || (isApproved && isAdult === false)) {
             setDiditPending(false);
-            setDiditRejectReason(reason);
-            setDiditError(`Je verificatie is afgewezen: ${reason}`);
-          } else {
-            setDiditPending(true);
+            return;
+          }
+
+          if (status === 'pending' || status === 'unknown' || !status) {
+            setDiditPending(false);
           }
         },
         (err) => {
@@ -1806,29 +1831,48 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         },
       );
       return () => unsubscribe();
-    }, [authUser?.uid, profileIdvRef, step, profile?.ageVerified, shouldHandleDiditReturn]);
+    }, [authReady, authUser?.uid, clearDiditReturnParam, profileIdvRef, step]);
+
+    const handleRefreshDiditStatus = useCallback(async () => {
+      if (!authUser?.uid || !profileIdvRef) return;
+      try {
+        setDiditPending(true);
+        setDiditError(null);
+
+        let resolvedSessionId = null;
+        const currentSnap = await getDoc(profileIdvRef);
+        if (currentSnap.exists()) {
+          const currentData = currentSnap.data() || {};
+          resolvedSessionId = currentData.sessionId || null;
+          if (typeof currentData.isAdult === 'boolean') setDiditIsAdult(currentData.isAdult);
+          if (currentData.status) setDiditStatus(String(currentData.status).trim().toLowerCase());
+          setDiditRejectReason(currentData.reason || '');
+        }
+
+        if (!resolvedSessionId) {
+          resolvedSessionId = diditSessionId || diditReturnContext.sessionIdFromUrl || null;
+        }
+
+        if (!resolvedSessionId) {
+          throw new Error('Technische fout: Didit sessie ontbreekt. Neem contact op met support.');
+        }
+
+        await refreshDiditSession(resolvedSessionId);
+      } catch (refreshError) {
+        console.error('[Onboarding] Failed to refresh Didit session', refreshError);
+        setDiditError('Technische fout bij controleren van Didit. Probeer opnieuw of neem contact op met support.');
+      } finally {
+        setDiditRefreshAttempted(true);
+        clearDiditReturnParam();
+        setDiditPending(false);
+      }
+    }, [authUser?.uid, clearDiditReturnParam, diditReturnContext.sessionIdFromUrl, diditSessionId, profileIdvRef]);
 
     useEffect(() => {
-      if (!shouldHandleDiditReturn || !diditSessionId) return;
-      let active = true;
-      const run = async () => {
-        try {
-          if (import.meta.env.DEV) {
-            console.log('[Onboarding] Refreshing Didit session after return', diditSessionId);
-          }
-          await refreshDiditSession(diditSessionId);
-        } catch (error) {
-          if (active) {
-            console.error('[Onboarding] Failed to refresh Didit session', error);
-          }
-        }
-      };
-      const timer = setTimeout(run, 1000);
-      return () => {
-        active = false;
-        clearTimeout(timer);
-      };
-    }, [shouldHandleDiditReturn, diditSessionId]);
+      if (!authReady || !authUser?.uid) return;
+      if (step !== 2 || !shouldHandleDiditReturn || diditRefreshAttempted) return;
+      handleRefreshDiditStatus();
+    }, [authReady, authUser?.uid, diditRefreshAttempted, handleRefreshDiditStatus, shouldHandleDiditReturn, step]);
 
     const fetchContributorMatches = async (displayName) => {
       if (!authReady) return [];
@@ -2055,59 +2099,28 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       </div>
     );
 
-    if (step === 2 && (diditStatus === 'rejected' || diditStatus === 'denied')) return (
+    const diditApproved = ['verified', 'approved', 'completed', 'success'].includes(diditStatus || '');
+    const diditRejected = ['rejected', 'denied', 'declined', 'failed'].includes(diditStatus || '');
+    const diditRejectedOrMinor = diditRejected || (diditApproved && diditIsAdult === false);
+
+    if (step === 2 && diditRejectedOrMinor) return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
-        <h2 className="text-sm font-bold text-red-600 uppercase mb-1">Verificatie mislukt</h2>
-        <h1 className="text-3xl font-bold dark:text-white mb-6">Je verificatie is niet goedgekeurd</h1>
+        <h2 className="text-sm font-bold text-red-600 uppercase mb-1">Stap 2/5</h2>
+        <h1 className="text-3xl font-bold dark:text-white mb-6">{diditIsAdult === false ? 'Niet voldaan aan de leeftijdseis' : 'Verificatie afgewezen'}</h1>
         <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-red-200 dark:border-red-500/40 space-y-5">
           <div className="flex gap-3">
             <AlertTriangle className="text-red-500" />
             <p className="text-sm dark:text-slate-300">
-              Reden: <span className="font-semibold">{diditRejectReason || 'Onbekende reden'}</span>
+              Reden: <span className="font-semibold">{diditRejectReason || 'Je verificatie is niet goedgekeurd. Neem contact op met moderatie voor hulp.'}</span>
             </p>
           </div>
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            Ben je het niet eens met deze uitkomst? Mail dan naar{' '}
-            <a href="mailto:admin@artes.app" className="text-blue-600 dark:text-blue-300 underline">admin@artes.app</a>.
-          </p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Ik ben het niet eens met deze uitkomst.</p>
           <div className="flex flex-col gap-3">
-            <Button
-              onClick={async () => {
-                if (!authUser?.uid) return;
-                try {
-                  setDiditPending(true);
-                  setDiditError(null);
-                  const session = await createDiditSession();
-                  if (!session?.verificationUrl) throw new Error('Geen verificatielink ontvangen.');
-                  window.location.assign(session.verificationUrl);
-                } catch (retryError) {
-                  setDiditPending(false);
-                  setDiditError(retryError?.message || 'Didit verificatie starten mislukt.');
-                }
-              }}
-              className="w-full"
-              disabled={diditPending}
-            >
-              Opnieuw verifieren via Didit
+            <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}`)} className="w-full">
+              Mail moderatie
             </Button>
-            <Button
-              variant="danger"
-              onClick={async () => {
-                if (!window.confirm('Weet je zeker dat je niet akkoord gaat? Je account wordt verwijderd.')) return;
-                try {
-                  setDiditPending(true);
-                  setDiditError(null);
-                  await onDeclineDidit?.();
-                } catch (e) {
-                  setDiditError(e.message || 'Account verwijderen is mislukt.');
-                } finally {
-                  setDiditPending(false);
-                }
-              }}
-              className="w-full"
-              disabled={diditPending}
-            >
-              Niet akkoord, verwijder mijn account
+            <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending}>
+              Opnieuw controleren
             </Button>
             {diditError && <p className="text-sm text-red-500">{diditError}</p>}
           </div>
@@ -2122,10 +2135,13 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border dark:border-slate-700 space-y-6">
            <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Artes staan respect en consent centraal.</p></div>
            <div className="flex gap-3"><CheckCircle className="text-green-500"/><p className="text-sm dark:text-slate-300">Identificatie via Didit is verplicht voor veiligheid.</p></div>
+           {(diditStatus === 'pending' || diditStatus === 'unknown' || shouldHandleDiditReturn) && !diditError && (
+             <p className="text-sm text-slate-600 dark:text-slate-300">Verificatie is nog in behandeling. Even geduld of probeer opnieuw.</p>
+           )}
            {diditPending && (
              <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-300">
                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-               We wachten op je verificatiestatus...
+               We controleren je verificatiestatus...
              </div>
            )}
            {diditStatus && !diditError && (
@@ -2133,6 +2149,9 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
            )}
            {diditError && <p className="text-sm text-red-500">{diditError}</p>}
            <div className="flex flex-col gap-3">
+             <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending}>
+               Opnieuw controleren
+             </Button>
              <Button
                onClick={async () => {
                  if (!authUser?.uid) return;
@@ -2177,18 +2196,9 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
              >
                Niet akkoord, verwijder mijn account
              </Button>
-             {(diditStatus === 'rejected' || diditStatus === 'denied') && (
-               <Button
-                 variant="secondary"
-                 onClick={() => {
-                   setDiditError(null);
-                   setDiditStatus(null);
-                   setDiditRejectReason('');
-                 }}
-                 className="w-full"
-                 disabled={diditPending}
-               >
-                 Opnieuw proberen
+             {diditError && (
+               <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}`)} className="w-full">
+                 Mail moderatie
                </Button>
              )}
            </div>

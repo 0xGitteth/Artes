@@ -17,6 +17,7 @@ const db = getFirestore();
  * - GET   https://verification.didit.me/v2/session/{sessionId}/decision/
  */
 const DIDIT_API_BASE = process.env.DIDIT_API_BASE_URL || 'https://verification.didit.me/v2';
+const DIDIT_ASSUME_ADULT_ON_VERIFIED = String(process.env.DIDIT_ASSUME_ADULT_ON_VERIFIED || '').trim().toLowerCase() === 'true';
 
 const getDiditHeaders = () => {
   const apiKey = process.env.DIDIT_API_KEY;
@@ -180,6 +181,16 @@ const resolveDiditSessionId = (payload) => {
 const isApprovedStatus = (status) => ['approved', 'verified', 'completed', 'success'].includes(status);
 const isRejectedStatus = (status) => ['rejected', 'declined', 'failed', 'denied'].includes(status);
 
+const toSafeDiditErrorBody = (data) => {
+  if (data == null) return null;
+  if (typeof data === 'string') return data.slice(0, 2000);
+  try {
+    return JSON.stringify(data).slice(0, 2000);
+  } catch (error) {
+    return String(data).slice(0, 2000);
+  }
+};
+
 const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) => {
   if (!uid) {
     throw new Error('Missing uid for idv update');
@@ -190,12 +201,14 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
   const now = FieldValue.serverTimestamp();
   const normalizedStatus = normalizeStatus(status);
   const normalizedReason = normalizeReason(reason);
-  const isAdult = Number.isFinite(age) ? age >= 18 : null;
+  const ageIsNumber = Number.isFinite(age);
+  const assumeAdultOnVerified = isApprovedStatus(normalizedStatus) && DIDIT_ASSUME_ADULT_ON_VERIFIED;
+  const isAdult = ageIsNumber ? age >= 18 : assumeAdultOnVerified ? true : null;
 
   const updates = {
     status: normalizedStatus || 'unknown',
     sessionId: sessionId || null,
-    age: Number.isFinite(age) ? age : null,
+    age: ageIsNumber ? age : null,
     isAdult: isAdult ?? null,
     reason: normalizedReason,
     updatedAt: now,
@@ -203,11 +216,15 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
   };
 
   if (isApprovedStatus(normalizedStatus)) {
-    updates.verifiedAt = now;
+    if (isAdult === true) {
+      updates.verifiedAt = now;
+      updates.isAdult = true;
+    }
   }
 
   if (isRejectedStatus(normalizedStatus)) {
     updates.rejectedAt = now;
+    updates.isAdult = false;
   }
 
   await idvRef.set(updates, { merge: true });
@@ -216,9 +233,13 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
     await userRef.set(
       {
         ageVerified: isAdult === true,
-        ageVerifiedAt: now,
         isAdult: isAdult === true,
-        onboardingStep: isAdult === true ? 3 : 2,
+        ...(isAdult === true
+          ? {
+            ageVerifiedAt: now,
+            onboardingStep: 3,
+          }
+          : {}),
       },
       { merge: true }
     );
@@ -311,8 +332,11 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    // Laat de Didit error door in logs zodat je exact ziet wat er fout gaat.
-    logger.error('Didit session create failed', { status: response.status, data });
+    logger.error('Didit session create failed', {
+      status: response.status,
+      body: toSafeDiditErrorBody(data),
+      uid: request.auth.uid,
+    });
     const detail =
       data?.detail ||
       data?.message ||
@@ -372,7 +396,11 @@ export const refreshDiditSession = onCall({ region: 'europe-west4' }, async (req
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    logger.error('Didit session retrieve error', { status: response.status, data });
+    logger.error('Didit session retrieve error', {
+      status: response.status,
+      body: toSafeDiditErrorBody(data),
+      sessionId,
+    });
     throw new HttpsError('internal', 'Didit session retrieve failed');
   }
 

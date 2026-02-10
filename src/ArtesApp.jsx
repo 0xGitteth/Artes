@@ -492,6 +492,7 @@ export default function ArtesApp() {
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
   const userProfile = profile;
+  const profileAgeVerified = profile?.ageVerified === true;
   const onboardingLocked = Boolean(authUser?.uid && profile && profile.onboardingComplete !== true);
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
@@ -866,6 +867,7 @@ export default function ArtesApp() {
     };
 
     const setup = async () => {
+      setIsModeratorClient(false);
       if (!authReady || !authUser?.uid || profile?.ageVerified !== true || !authUser?.emailVerified) {
         stopModeration();
         return;
@@ -1370,6 +1372,7 @@ export default function ArtesApp() {
               isModerator={moderatorAccess}
               authReady={authReady}
               isModeratorClient={isModeratorClient}
+              profileAgeVerified={profileAgeVerified}
               logListenerStart={logListenerStart}
               handleListenerError={handleListenerError}
               uploads={uploads}
@@ -1738,6 +1741,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditRejectReason, setDiditRejectReason] = useState('');
     const [diditIsAdult, setDiditIsAdult] = useState(null);
     const [diditRefreshAttempted, setDiditRefreshAttempted] = useState(false);
+    const [diditDebugResult, setDiditDebugResult] = useState('');
     const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
     const [contributorMatches, setContributorMatches] = useState([]);
     const [matchLoading, setMatchLoading] = useState(false);
@@ -1777,19 +1781,18 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     useEffect(() => {
       const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
       if (!resolvedStep) return;
-      if (step === MATCH_STEP && resolvedStep === 2) return;
-      if (step !== resolvedStep) {
-        setStep((prevStep) => {
-          if (prevStep === MATCH_STEP && resolvedStep === 2) return prevStep;
-          return Math.max(prevStep, resolvedStep);
-        });
-      }
-    }, [authReady, authUser, onboardingQueryParams, profile, step]);
+      setStep((prevStep) => {
+        if (prevStep === MATCH_STEP && resolvedStep === 2) return prevStep;
+        if (resolvedStep <= prevStep) return prevStep;
+        return resolvedStep;
+      });
+    }, [authReady, authUser, onboardingQueryParams, profile]);
 
     useEffect(() => {
       if (step !== 2) return;
       setDiditUiState('idle');
       setDiditError(null);
+      setDiditDebugResult('');
     }, [step]);
 
     useEffect(() => {
@@ -1843,10 +1846,20 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       const unsubscribe = onSnapshot(
         profileIdvRef,
         (snap) => {
-          if (!snap.exists()) return;
+          if (!snap.exists()) {
+            setDiditStatus(null);
+            setDiditSessionId(null);
+            setDiditIsAdult(null);
+            setDiditRejectReason('');
+            setDiditPending(false);
+            setDiditUiState('no_session');
+            return;
+          }
+
           const data = snap.data() || {};
           const status = normalizeDiditStatus(data.status);
           const isAdult = typeof data.isAdult === 'boolean' ? data.isAdult : null;
+          const hasSession = Boolean(data.sessionId);
           setDiditStatus(status);
           setDiditSessionId(data.sessionId || null);
           setDiditIsAdult(isAdult);
@@ -1857,6 +1870,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
           const isApproved = DIDIT_APPROVED_STATUSES.includes(status || '');
           const isRejected = DIDIT_REJECTED_STATUSES.includes(status || '');
+
           if (isApproved && isAdult === true) {
             setDiditPending(false);
             setDiditError(null);
@@ -1866,15 +1880,41 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
             return;
           }
 
+          if (!hasSession && !status) {
+            setDiditPending(false);
+            setDiditUiState('no_session');
+            return;
+          }
+
           if (isRejected || (isApproved && isAdult === false)) {
             setDiditPending(false);
             setDiditUiState(isApproved && isAdult === false ? 'underage' : 'rejected');
             return;
           }
 
+          if (isApproved && isAdult == null) {
+            setDiditPending(false);
+            setDiditUiState('verified_missing_age');
+            if (import.meta.env.DEV) {
+              console.log('[Onboarding] Verified status without adult flag', {
+                status,
+                isAdult,
+                age: data.age ?? null,
+                sessionId: data.sessionId || null,
+              });
+            }
+            return;
+          }
+
+          if (status === 'in_review' || status === 'review' || status === 'manual_review') {
+            setDiditPending(false);
+            setDiditUiState('in_review');
+            return;
+          }
+
           if (status === 'pending' || status === 'unknown' || !status) {
             setDiditPending(false);
-            setDiditUiState('pending');
+            setDiditUiState(hasSession ? 'pending' : 'no_session');
           }
         },
         (err) => {
@@ -1934,6 +1974,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
     const handleDebugRefreshDiditStatus = useCallback(async () => {
       if (!import.meta.env.DEV || !authUser?.uid) return;
+      setDiditDebugResult('');
       try {
         const db = getFirebaseDbInstance();
         const statusRef = doc(db, 'users', authUser.uid, 'idv', 'status');
@@ -1941,15 +1982,19 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         const sessionId = statusSnap.exists() ? statusSnap.data()?.sessionId || null : null;
 
         if (!sessionId) {
-          console.log('Geen sessionId gevonden');
+          setDiditDebugResult('DEBUG: geen sessionId gevonden in users/{uid}/idv/status.');
           return;
         }
 
         const functions = getFirebaseFunctionsInstance();
         const refreshDiditCallable = httpsCallable(functions, 'refreshDiditSession');
         const response = await refreshDiditCallable({ sessionId });
-        console.log('[Onboarding][DEBUG] refreshDiditSession response', response?.data ?? response);
+        const payload = response?.data ?? response;
+        setDiditDebugResult(`DEBUG result: ${JSON.stringify(payload)}`);
+        console.log('[Onboarding][DEBUG] refreshDiditSession response', payload);
       } catch (debugError) {
+        const message = debugError?.message || 'Onbekende fout';
+        setDiditDebugResult(`DEBUG error: ${message}`);
         console.error('[Onboarding][DEBUG] refreshDiditSession error', debugError);
       }
     }, [authUser?.uid]);
@@ -2195,9 +2240,20 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       </div>
     );
 
+
+    const hasDiditSession = Boolean(diditSessionId);
+    const canRefreshDidit = diditUiState === 'pending'
+      || diditUiState === 'in_review'
+      || diditUiState === 'verified_missing_age'
+      || diditUiState === 'rejected'
+      || diditUiState === 'underage'
+      || diditUiState === 'error';
+    const showSupportActions = diditUiState === 'rejected' || diditUiState === 'underage';
+    const showDeleteAction = diditUiState === 'no_session' || showSupportActions;
+
     if (step === 2) return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
-        <h2 className={`text-sm font-bold uppercase mb-1 ${diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error' ? 'text-red-600' : 'text-blue-600'}`}>Stap 2/5</h2>
+        <h2 className={`text-sm font-bold uppercase mb-1 ${showSupportActions || diditUiState === 'error' ? 'text-red-600' : 'text-blue-600'}`}>Stap 2/5</h2>
         <h1 className="text-3xl font-bold dark:text-white mb-6">
           {diditUiState === 'underage'
             ? 'Niet voldaan aan de leeftijdseis'
@@ -2205,12 +2261,16 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
               ? 'Verificatie afgewezen'
               : diditUiState === 'error'
                 ? 'Verificatie controleren mislukt'
-                : 'Veiligheid & Waarden'}
+                : diditUiState === 'verified_missing_age'
+                  ? 'Leeftijd nog niet vastgesteld'
+                  : diditUiState === 'in_review'
+                    ? 'Verificatie in review'
+                    : 'Veiligheid & Waarden'}
         </h1>
-        <div className={`bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border space-y-6 ${(diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error') ? 'border-red-200 dark:border-red-500/40' : 'dark:border-slate-700'}`}>
+        <div className={`bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border space-y-6 ${(showSupportActions || diditUiState === 'error') ? 'border-red-200 dark:border-red-500/40' : 'dark:border-slate-700'}`}>
            <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Artes staan respect en consent centraal.</p></div>
            <div className="flex gap-3"><CheckCircle className="text-green-500"/><p className="text-sm dark:text-slate-300">Identificatie via Didit is verplicht voor veiligheid.</p></div>
-           {(diditUiState === 'pending' || shouldHandleDiditReturn) && !diditError && (
+           {(diditUiState === 'pending' || diditUiState === 'in_review' || shouldHandleDiditReturn) && !diditError && (
              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
                <p className="font-semibold">Verificatie loopt</p>
                <p>Didit verwerkt je controle nog. Klik op ‘Opnieuw controleren’ om de nieuwste status op te halen.</p>
@@ -2226,6 +2286,11 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                </div>
              </div>
            )}
+           {diditUiState === 'verified_missing_age' && (
+             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+               Didit gaf &quot;verified&quot; terug, maar leeftijd kon nog niet worden vastgesteld. Probeer opnieuw te controleren.
+             </div>
+           )}
            {diditPending && (
              <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-300">
                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
@@ -2236,8 +2301,11 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
              <p className="text-xs text-slate-500 dark:text-slate-400">Status: {diditStatus}</p>
            )}
            {diditError && <p className="text-sm text-red-500">{diditError}</p>}
+           {diditUiState === 'no_session' && !hasDiditSession && (
+             <p className="text-sm text-slate-600 dark:text-slate-300">Nog geen Didit sessie gevonden. Start de verificatie om verder te gaan.</p>
+           )}
            <div className="flex flex-col gap-3">
-             {(diditUiState === 'pending' || diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error') && (
+             {canRefreshDidit && (
                <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending}>
                  Opnieuw controleren
                </Button>
@@ -2268,36 +2336,41 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                className="w-full"
                disabled={diditPending}
              >
-               Start Didit Verificatie
+               {showSupportActions ? 'Start opnieuw' : 'Start Didit Verificatie'}
              </Button>
-             <Button
-               variant="danger"
-               onClick={async () => {
-                 if (!window.confirm('Weet je zeker dat je niet akkoord gaat? Je account wordt verwijderd.')) return;
-                 try {
-                   setDiditPending(true);
-                   setDiditError(null);
-                   await onDeclineDidit?.();
-                 } catch (e) {
-                   setDiditError(e.message || 'Account verwijderen is mislukt.');
-                 } finally {
-                   setDiditPending(false);
-                 }
-               }}
-               className="w-full"
-               disabled={diditPending}
-             >
-               Niet akkoord, verwijder mijn account
-             </Button>
-             {(diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error') && (
+             {showDeleteAction && (
+               <Button
+                 variant="danger"
+                 onClick={async () => {
+                   if (!window.confirm('Weet je zeker dat je niet akkoord gaat? Je account wordt verwijderd.')) return;
+                   try {
+                     setDiditPending(true);
+                     setDiditError(null);
+                     await onDeclineDidit?.();
+                   } catch (e) {
+                     setDiditError(e.message || 'Account verwijderen is mislukt.');
+                   } finally {
+                     setDiditPending(false);
+                   }
+                 }}
+                 className="w-full"
+                 disabled={diditPending}
+               >
+                 Niet akkoord, verwijder mijn account
+               </Button>
+             )}
+             {showSupportActions && (
                <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}`)} className="w-full">
                  Mail support
                </Button>
              )}
              {import.meta.env.DEV === true && (
-               <Button variant="secondary" onClick={handleDebugRefreshDiditStatus} className="w-full" disabled={diditPending}>
-                 DEBUG: refresh Didit status
-               </Button>
+               <>
+                 <Button variant="secondary" onClick={handleDebugRefreshDiditStatus} className="w-full" disabled={diditPending}>
+                   DEBUG: refresh Didit status
+                 </Button>
+                 {diditDebugResult && <p className="text-xs text-slate-500 dark:text-slate-400">{diditDebugResult}</p>}
+               </>
              )}
            </div>
         </div>
@@ -2856,7 +2929,7 @@ function UploadStatusPanel({ uploads = [] }) {
   );
 }
 
-function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter, authReady, isModeratorClient, logListenerStart, handleListenerError }) {
+function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter, authReady, isModeratorClient, profileAgeVerified, logListenerStart, handleListenerError }) {
   const [cases, setCases] = useState([]);
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [selectedCase, setSelectedCase] = useState(null);
@@ -2873,17 +2946,20 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
 
   useEffect(() => {
     const shouldStart = authReady
-      && Boolean(authUser)
+      && Boolean(authUser?.uid)
+      && profileAgeVerified === true
       && authUser?.emailVerified === true
       && isModeratorClient === true
       && isModerator === true;
     if (import.meta.env.DEV) {
       const reason = !authReady
         ? 'skip: auth not ready'
-        : !authUser
+        : !authUser?.uid
           ? 'skip: no auth user'
-          : !authUser?.emailVerified
-            ? 'skip: email not verified'
+          : profileAgeVerified !== true
+            ? 'skip: profile age not verified'
+            : !authUser?.emailVerified
+              ? 'skip: email not verified'
             : isModeratorClient !== true
               ? 'skip: not a moderator client'
               : isModerator === null
@@ -2907,7 +2983,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       },
       (err) => handleListenerError('Moderation reviewCases listener (ArtesApp)', err),
     );
-  }, [authReady, authUser, authUser?.emailVerified, isModeratorClient, isModerator, logListenerStart, handleListenerError]);
+  }, [authReady, authUser, authUser?.emailVerified, isModeratorClient, isModerator, profileAgeVerified, logListenerStart, handleListenerError]);
 
   const filteredCases = useMemo(() => {
     if (caseTypeFilter === 'report') {
@@ -2952,7 +3028,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         }
       })
       .catch(() => setSelectedUpload(null));
-  }, [authReady, selectedCase]);
+  }, [authReady, selectedCase, profileAgeVerified]);
 
   useEffect(() => {
     if (!selectedCaseId || !authUser || !moderationApiBase) return;
@@ -3556,6 +3632,7 @@ function ModerationPortal({
   isModerator,
   authReady,
   isModeratorClient,
+  profileAgeVerified,
   logListenerStart,
   handleListenerError,
   uploads,
@@ -3776,6 +3853,7 @@ function ModerationPortal({
             isModerator={isModerator}
             authReady={authReady}
             isModeratorClient={isModeratorClient}
+            profileAgeVerified={profileAgeVerified}
             logListenerStart={logListenerStart}
             handleListenerError={handleListenerError}
             caseTypeFilter="upload"
@@ -3790,6 +3868,7 @@ function ModerationPortal({
           isModerator={isModerator}
           authReady={authReady}
           isModeratorClient={isModeratorClient}
+          profileAgeVerified={profileAgeVerified}
           logListenerStart={logListenerStart}
           handleListenerError={handleListenerError}
           caseTypeFilter="report"

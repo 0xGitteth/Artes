@@ -116,6 +116,49 @@ const resolveDiditStatus = (payload) => {
   return status;
 };
 
+
+const normalizeOrigin = (value) => {
+  const trimmed = String(value || '').trim().toLowerCase();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = new URL(trimmed);
+    const origin = parsed.origin.toLowerCase().replace(/\/$/, '');
+    return origin === 'null' ? null : origin;
+  } catch (error) {
+    return null;
+  }
+};
+
+const isAllowedDiditOrigin = (origin, allowedOrigins) => {
+  if (!origin || !allowedOrigins.has(origin)) return false;
+
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol === 'https:') return true;
+    return parsed.protocol === 'http:' && parsed.hostname === 'localhost';
+  } catch (error) {
+    return false;
+  }
+};
+
+const resolveAllowedDiditOrigins = (appBaseOrigin) => {
+  const configuredOrigins = String(process.env.DIDIT_ALLOWED_RETURN_ORIGINS || '')
+    .split(',')
+    .map((origin) => normalizeOrigin(origin))
+    .filter(Boolean);
+
+  if (configuredOrigins.length > 0) {
+    return new Set(configuredOrigins);
+  }
+
+  const fallback = [appBaseOrigin];
+  if (process.env.NODE_ENV !== 'production') {
+    fallback.push('http://localhost:5173');
+  }
+  return new Set(fallback.filter(Boolean));
+};
+
 const resolveDiditReason = (payload) => {
   const session = resolveDiditSession(payload);
   return normalizeReason(
@@ -224,14 +267,23 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
     throw new HttpsError('failed-precondition', 'Missing APP_BASE_URL');
   }
 
-  // Je callback is waar Didit de gebruiker na afloop heenstuurt.
-  // Dit hoeft niet direct stap 3 te zijn. Stap 2 kan de return afhandelen en daarna doorzetten.
-  const callback = `${appBaseUrl.replace(/\/$/, '')}/onboarding?diditReturn=1`; // frontend bepaalt zelf de juiste stap
+  const appBaseOrigin = normalizeOrigin(appBaseUrl);
+  if (!appBaseOrigin) {
+    throw new HttpsError('failed-precondition', 'Invalid APP_BASE_URL');
+  }
+
+  const requestedOrigin = normalizeOrigin(request.data?.returnToOrigin);
+  const allowedOrigins = resolveAllowedDiditOrigins(appBaseOrigin);
+  const finalBaseOrigin = isAllowedDiditOrigin(requestedOrigin, allowedOrigins)
+    ? requestedOrigin
+    : appBaseOrigin;
+
+  const redirectUrl = `${finalBaseOrigin.replace(/\/$/, '')}/onboarding?step=2&diditReturn=1`;
 
   // Didit v2 verwacht workflow_id + callback + vendor_data (je eigen user id) + metadata.
   const payload = {
     workflow_id: workflowId,
-    callback,
+    callback: redirectUrl,
     vendor_data: request.auth.uid,
     metadata: {
       uid: request.auth.uid,
@@ -241,7 +293,7 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
   logger.info('Creating Didit session', {
     uid: request.auth.uid,
     workflowId,
-    callback,
+    finalBaseOrigin,
   });
 
   let response;
@@ -283,7 +335,7 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
         sessionId,
         workflowId,
         verificationUrl,
-        callback,
+        callback: redirectUrl,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       },

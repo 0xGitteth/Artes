@@ -124,9 +124,9 @@ export const verifyEmailClaimProof = async ({ requestId, token }) => {
   return result?.data || null;
 };
 
-export const createDiditSession = async () => {
+export const createDiditSession = async ({ returnToOrigin } = {}) => {
   const callable = httpsCallable(getFirebaseFunctions(), 'createDiditSession');
-  const result = await callable({});
+  const result = await callable({ returnToOrigin });
   return result?.data || null;
 };
 

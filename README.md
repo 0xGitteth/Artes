@@ -59,3 +59,13 @@ docker run -p 5000:5000 \
 3. Build stap: `npm ci && npm run build`.
 4. Run stap: `npm ci --omit=dev && node server/index.js` (container luistert op `$PORT`).
 5. Optioneel: deploy Firestore rules met de Firebase CLI voordat je live gaat.
+
+## Didit callback origins (Cloud Run / Functions)
+Voor `createDiditSession` kun je meerdere veilige return-origins toestaan via:
+- `DIDIT_ALLOWED_RETURN_ORIGINS` (comma-separated), bijvoorbeeld:
+  - `https://artis.sliplane.app,https://artis-dev.sliplane.app,http://localhost:5173`
+
+Gedrag:
+- `returnToOrigin` van de client wordt alleen gebruikt bij een exacte match met de allowlist.
+- Ongeldige of ontbrekende `returnToOrigin` valt terug op `APP_BASE_URL`.
+- `APP_BASE_URL` blijft dus verplicht als fallback.

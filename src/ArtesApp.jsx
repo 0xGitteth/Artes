@@ -49,7 +49,9 @@ import {
   CLAIMS_COLLECTIONS,
   getClaimRequestRef,
   getFirebaseStorageInstance,
+  getFirebaseFunctionsInstance,
 } from './firebase';
+import { httpsCallable } from 'firebase/functions';
 import { signInAnonymously } from 'firebase/auth';
 import {
   collection,
@@ -1919,6 +1921,28 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       }
     }, [authUser?.uid, clearDiditReturnParam, diditReturnContext.sessionIdFromUrl, diditSessionId, profileIdvRef, shouldHandleDiditReturn]);
 
+    const handleDebugRefreshDiditStatus = useCallback(async () => {
+      if (!import.meta.env.DEV || !authUser?.uid) return;
+      try {
+        const db = getFirebaseDbInstance();
+        const statusRef = doc(db, 'users', authUser.uid, 'idv', 'status');
+        const statusSnap = await getDoc(statusRef);
+        const sessionId = statusSnap.exists() ? statusSnap.data()?.sessionId || null : null;
+
+        if (!sessionId) {
+          console.log('Geen sessionId gevonden');
+          return;
+        }
+
+        const functions = getFirebaseFunctionsInstance();
+        const refreshDiditCallable = httpsCallable(functions, 'refreshDiditSession');
+        const response = await refreshDiditCallable({ sessionId });
+        console.log('[Onboarding][DEBUG] refreshDiditSession response', response?.data ?? response);
+      } catch (debugError) {
+        console.error('[Onboarding][DEBUG] refreshDiditSession error', debugError);
+      }
+    }, [authUser?.uid]);
+
     useEffect(() => {
       if (!authReady || !authUser?.uid || !shouldHandleDiditReturn || diditRefreshAttempted) return;
       const hasKnownSession = Boolean(diditSessionId || diditReturnContext.sessionIdFromUrl || profile?.idv?.sessionId);
@@ -2255,6 +2279,11 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
              {(diditUiState === 'rejected' || diditUiState === 'underage' || diditUiState === 'error') && (
                <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}`)} className="w-full">
                  Mail support
+               </Button>
+             )}
+             {import.meta.env.DEV === true && (
+               <Button variant="secondary" onClick={handleDebugRefreshDiditStatus} className="w-full" disabled={diditPending}>
+                 DEBUG: refresh Didit status
                </Button>
              )}
            </div>

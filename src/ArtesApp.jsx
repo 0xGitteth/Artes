@@ -2249,7 +2249,9 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                    setDiditPending(true);
                    setDiditError(null);
                    setDiditUiState('idle');
-                   const session = await createDiditSession();
+                   const session = await createDiditSession({
+                     returnToOrigin: window.location.origin,
+                   });
                    if (!session?.verificationUrl) {
                      throw new Error('Geen verificatielink ontvangen.');
                    }

@@ -181,6 +181,19 @@ const resolveDiditSessionId = (payload) => {
 const isApprovedStatus = (status) => ['approved', 'verified', 'completed', 'success'].includes(status);
 const isRejectedStatus = (status) => ['rejected', 'declined', 'failed', 'denied'].includes(status);
 
+const resolveDiditAdultDecision = (status, age) => {
+  const normalizedStatus = normalizeStatus(status);
+  const ageIsNumber = Number.isFinite(age);
+  const assumeAdultOnVerified = isApprovedStatus(normalizedStatus) && DIDIT_ASSUME_ADULT_ON_VERIFIED;
+  const isAdult = ageIsNumber ? age >= 18 : assumeAdultOnVerified ? true : null;
+  return {
+    normalizedStatus,
+    ageIsNumber,
+    assumeAdultOnVerified,
+    isAdult,
+  };
+};
+
 const toSafeDiditErrorBody = (data) => {
   if (data == null) return null;
   if (typeof data === 'string') return data.slice(0, 2000);
@@ -199,11 +212,8 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
   const idvRef = db.collection('users').doc(uid).collection('idv').doc('status');
   const userRef = db.collection('users').doc(uid);
   const now = FieldValue.serverTimestamp();
-  const normalizedStatus = normalizeStatus(status);
+  const { normalizedStatus, ageIsNumber, isAdult } = resolveDiditAdultDecision(status, age);
   const normalizedReason = normalizeReason(reason);
-  const ageIsNumber = Number.isFinite(age);
-  const assumeAdultOnVerified = isApprovedStatus(normalizedStatus) && DIDIT_ASSUME_ADULT_ON_VERIFIED;
-  const isAdult = ageIsNumber ? age >= 18 : assumeAdultOnVerified ? true : null;
 
   const updates = {
     status: normalizedStatus || 'unknown',
@@ -273,7 +283,7 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
   return { status: normalizedStatus, isAdult };
 };
 
-export const createDiditSession = onCall({ region: 'europe-west4' }, async (request) => {
+export const createDiditSession = onCall({ region: 'europe-west4', secrets: ['DIDIT_API_KEY'] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
@@ -374,7 +384,7 @@ export const createDiditSession = onCall({ region: 'europe-west4' }, async (requ
   return { sessionId, verificationUrl };
 });
 
-export const refreshDiditSession = onCall({ region: 'europe-west4' }, async (request) => {
+export const refreshDiditSession = onCall({ region: 'europe-west4', secrets: ['DIDIT_API_KEY', 'DIDIT_ASSUME_ADULT_ON_VERIFIED'] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
@@ -410,6 +420,7 @@ export const refreshDiditSession = onCall({ region: 'europe-west4' }, async (req
   const reason = resolveDiditReason(data);
   const reference = resolveDiditReference(data);
   const resolvedUid = reference || request.auth.uid;
+  const decision = resolveDiditAdultDecision(status, age);
 
   logger.info('Didit session refresh response', {
     uid: resolvedUid,
@@ -419,6 +430,15 @@ export const refreshDiditSession = onCall({ region: 'europe-west4' }, async (req
     reason,
     responseStatus: response.status,
     hasSession: Boolean(session),
+  });
+
+  logger.info('Didit refresh resolved decision for idv update', {
+    sessionId,
+    resolvedUid,
+    resolvedStatus: decision.normalizedStatus || 'unknown',
+    resolvedAge: decision.ageIsNumber ? age : null,
+    diditAssumeAdultOnVerified: DIDIT_ASSUME_ADULT_ON_VERIFIED,
+    isAdultForUpdate: decision.isAdult,
   });
 
   const result = await updateIdvStatus({
@@ -463,7 +483,7 @@ const verifyWebhookSecret = (req) => {
   return headerSecret === secret;
 };
 
-export const diditWebhook = onRequest({ region: 'europe-west4' }, async (req, res) => {
+export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT_API_KEY', 'DIDIT_WEBHOOK_SECRET', 'DIDIT_ASSUME_ADULT_ON_VERIFIED'] }, async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

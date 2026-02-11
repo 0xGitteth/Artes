@@ -109,8 +109,10 @@ const computeOnboardingStep = (profileData, authUserData, queryParams, authIsRea
   const statusFromProfile = normalizeDiditStatus(profileData?.idv?.status || profileData?.diditStatus);
   const ageVerified = profileData?.ageVerified;
   const isAdult = profileData?.isAdult;
+  const storedStep = Number(profileData?.onboardingStep || 0);
   const requestedStep = Number.parseInt(queryParams?.get('step') || '', 10);
 
+  if (storedStep >= 3) return 3;
   if (ageVerified === true && isAdult === true) return 3;
   if (ageVerified === false || DIDIT_REJECTED_STATUSES.includes(statusFromProfile || '')) return 2;
   if (Number.isFinite(requestedStep) && requestedStep === 1 && !authUserData?.uid) return 1;
@@ -492,7 +494,7 @@ export default function ArtesApp() {
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
   const userProfile = profile;
-  const profileAgeVerified = profile?.ageVerified === true;
+  const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
   const onboardingLocked = Boolean(authUser?.uid && profile && profile.onboardingComplete !== true);
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
@@ -868,7 +870,9 @@ export default function ArtesApp() {
 
     const setup = async () => {
       setIsModeratorClient(false);
-      if (!authReady || !authUser?.uid || profile?.ageVerified !== true || !authUser?.emailVerified) {
+      const hasAdultVerification = profile?.ageVerified === true || profile?.isAdult === true;
+      if (!authReady || !authUser?.uid || hasAdultVerification !== true || !authUser?.emailVerified) {
+        setIsModeratorClient(false);
         stopModeration();
         return;
       }
@@ -880,6 +884,7 @@ export default function ArtesApp() {
         const resolvedIsModeratorClient = Boolean(authUser?.email && moderatorEmails.includes(authUser.email));
 
         if (!resolvedIsModeratorClient) {
+          setIsModeratorClient(false);
           stopModeration();
           return;
         }
@@ -918,7 +923,7 @@ export default function ArtesApp() {
       active = false;
       stopModeration();
     };
-  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError, profile?.ageVerified]);
+  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError, profile?.ageVerified, profile?.isAdult]);
 
   useEffect(() => {
     if (view !== 'chat') return;
@@ -1741,6 +1746,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditRejectReason, setDiditRejectReason] = useState('');
     const [diditIsAdult, setDiditIsAdult] = useState(null);
     const [diditRefreshAttempted, setDiditRefreshAttempted] = useState(false);
+    const [diditRefreshAttempts, setDiditRefreshAttempts] = useState(0);
     const [diditDebugResult, setDiditDebugResult] = useState('');
     const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
     const [contributorMatches, setContributorMatches] = useState([]);
@@ -1871,7 +1877,9 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           const isApproved = DIDIT_APPROVED_STATUSES.includes(status || '');
           const isRejected = DIDIT_REJECTED_STATUSES.includes(status || '');
 
-          if (isApproved && isAdult === true) {
+          const adultResolved = isAdult === true || profile?.isAdult === true;
+
+          if (isApproved && adultResolved) {
             setDiditPending(false);
             setDiditError(null);
             setDiditUiState('idle');
@@ -1929,7 +1937,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         },
       );
       return () => unsubscribe();
-    }, [authReady, authUser?.uid, clearDiditReturnParam, profileIdvRef, step]);
+    }, [authReady, authUser?.uid, clearDiditReturnParam, profile?.isAdult, profileIdvRef, step]);
 
     const handleRefreshDiditStatus = useCallback(async () => {
       if (!authUser?.uid || !profileIdvRef) return;
@@ -1966,6 +1974,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         setDiditUiState('error');
         setDiditError(refreshError?.message || 'Technische fout bij controleren van Didit. Probeer opnieuw of neem contact op met support.');
       } finally {
+        setDiditRefreshAttempts((previous) => previous + 1);
         setDiditRefreshAttempted(true);
         clearDiditReturnParam();
         setDiditPending(false);
@@ -2242,14 +2251,13 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
 
     const hasDiditSession = Boolean(diditSessionId);
-    const canRefreshDidit = diditUiState === 'pending'
-      || diditUiState === 'in_review'
-      || diditUiState === 'verified_missing_age'
-      || diditUiState === 'rejected'
-      || diditUiState === 'underage'
-      || diditUiState === 'error';
-    const showSupportActions = diditUiState === 'rejected' || diditUiState === 'underage';
-    const showDeleteAction = diditUiState === 'no_session' || showSupportActions;
+    const isPendingStatus = diditStatus === 'pending';
+    const isReviewStatus = diditStatus === 'in_review' || diditStatus === 'review' || diditStatus === 'manual_review';
+    const isRejectedState = diditUiState === 'rejected' || diditUiState === 'underage';
+    const canRefreshDidit = hasDiditSession && (isPendingStatus || isReviewStatus);
+    const showStartDiditAction = !isReviewStatus;
+    const showSupportActions = isRejectedState || (diditUiState === 'verified_missing_age' && diditRefreshAttempts >= 2);
+    const showDeleteAction = diditUiState === 'no_session' || diditUiState === 'idle';
 
     if (step === 2) return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
@@ -2310,34 +2318,36 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                  Opnieuw controleren
                </Button>
              )}
-             <Button
-               onClick={async () => {
-                 if (!authUser?.uid) return;
-                 try {
-                   setDiditPending(true);
-                   setDiditError(null);
-                   setDiditUiState('idle');
-                   const session = await createDiditSession({
-                     returnToOrigin: window.location.origin,
-                   });
-                   if (!session?.verificationUrl) {
-                     throw new Error('Geen verificatielink ontvangen.');
+             {showStartDiditAction && (
+               <Button
+                 onClick={async () => {
+                   if (!authUser?.uid) return;
+                   try {
+                     setDiditPending(true);
+                     setDiditError(null);
+                     setDiditUiState('idle');
+                     const session = await createDiditSession({
+                       returnToOrigin: window.location.origin,
+                     });
+                     if (!session?.verificationUrl) {
+                       throw new Error('Geen verificatielink ontvangen.');
+                     }
+                     if (import.meta.env.DEV) {
+                       console.log('[Onboarding] Didit session created', session);
+                     }
+                     window.location.assign(session.verificationUrl);
+                   } catch (error) {
+                     setDiditUiState('error');
+                     setDiditPending(false);
+                     setDiditError(error?.message || 'Didit verificatie starten mislukt.');
                    }
-                   if (import.meta.env.DEV) {
-                     console.log('[Onboarding] Didit session created', session);
-                   }
-                   window.location.assign(session.verificationUrl);
-                 } catch (error) {
-                   setDiditUiState('error');
-                   setDiditPending(false);
-                   setDiditError(error?.message || 'Didit verificatie starten mislukt.');
-                 }
-               }}
-               className="w-full"
-               disabled={diditPending}
-             >
-               {showSupportActions ? 'Start opnieuw' : 'Start Didit Verificatie'}
-             </Button>
+                 }}
+                 className="w-full"
+                 disabled={diditPending}
+               >
+                 {showSupportActions ? 'Start opnieuw' : 'Start Didit verificatie'}
+               </Button>
+             )}
              {showDeleteAction && (
                <Button
                  variant="danger"

@@ -19,12 +19,15 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/config/app)
         && get(/databases/$(database)/documents/config/app).data[flagName] == true;
     }
-    function isDevAnon() {
+    function isAnonymousOnboardingUser() {
       return signInProvider() == 'anonymous'
-        && devConfigEnabled('allowDevAnonymous');
+        && devConfigEnabled('allowAnonymousOnboarding');
+    }
+    function isDevAnon() {
+      return isAnonymousOnboardingUser();
     }
     function isVerifiedOrDev() {
-      return isVerifiedUser() || isDevAnon();
+      return isVerifiedUser() || isAnonymousOnboardingUser();
     }
     function noClientGateFieldWrites() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
@@ -52,9 +55,12 @@ service cloud.firestore {
         'authProvider',
         'username'
       ];
-      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let docDiff = request.resource.data.diff(resource.data);
+      let affected = docDiff.affectedKeys();
 
       return affected.hasOnly(allowedOnboardingUpdateKeys)
+        && docDiff.addedKeys().size() == 0
+        && docDiff.removedKeys().size() == 0
         && (!('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid)
         && noClientGateFieldWrites()
         && (!affected.hasAny(['email'])
@@ -101,8 +107,8 @@ service cloud.firestore {
         && noClientGateFieldWrites()
         && (
           isVerifiedUser()
-          // Dev-only: anonymous onboarding writes require /config/app.allowDevAnonymous == true.
-          || (isDevAnon() && devAnonUserUpdateAllowed())
+          // Dev-only: anonymous onboarding writes require /config/app.allowAnonymousOnboarding == true.
+          || (isAnonymousOnboardingUser() && devAnonUserUpdateAllowed())
         );
       allow delete: if isVerifiedUser() && request.auth.uid == userId;
 

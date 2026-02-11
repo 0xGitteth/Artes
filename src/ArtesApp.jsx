@@ -634,6 +634,18 @@ export default function ArtesApp() {
 
     const unsubscribe = observeAuth(async (u) => {
       if (!active) return;
+      if (import.meta.env.DEV) {
+        const providers = Array.isArray(u?.providerData)
+          ? u.providerData.map((provider) => provider?.providerId).filter(Boolean)
+          : [];
+        console.log('[ArtesApp] Auth state changed', {
+          uid: u?.uid || null,
+          isAnonymous: u?.isAnonymous ?? false,
+          email: u?.email || null,
+          emailVerified: u?.emailVerified ?? false,
+          provider: providers,
+        });
+      }
       if (!authReadyRef.current) {
         authReadyRef.current = true;
         setAuthReady(true);
@@ -1343,7 +1355,15 @@ export default function ArtesApp() {
           )}
           
           {!profileLoading && view === 'login' && (
-            <LoginScreen setView={setView} onLogin={handleLogin} error={authError} loading={authPending} authUser={authUser} />
+            <LoginScreen
+              setView={setView}
+              onLogin={handleLogin}
+              error={authError}
+              loading={authPending}
+              authUser={authUser}
+              appConfig={appConfig}
+              onDevConfigLoaded={setAppConfig}
+            />
           )}
 
           {!profileLoading && view === 'claim' && (
@@ -1613,7 +1633,7 @@ export default function ArtesApp() {
 
 // --- SUB COMPONENTS ---
 
-function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig }) {
+function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, onDevConfigLoaded }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState(null);
@@ -1622,13 +1642,16 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig }) 
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
   const auth = getFirebaseAuthInstance();
 
-  const devAnonymousEnabled = appConfig?.allowDevAnonymous === true;
+  const devAnonymousEnabled = import.meta.env.DEV
+    ? true
+    : appConfig?.allowDevAnonymous === true;
 
   const handleDevLogin = async () => {
     try {
       setLocalError(null);
       const result = await signInAnonymously(auth);
       const refreshedConfig = await getAppConfig({ forceRefresh: true });
+      onDevConfigLoaded?.(refreshedConfig || null);
       if (refreshedConfig?.allowDevAnonymous !== true) {
         await firebaseLogout();
         setLocalError('Dev anonymous login staat server-side uit (config/app.allowDevAnonymous).');
@@ -1720,7 +1743,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig }) 
                   disabled={!devAnonymousEnabled}
                   className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
                 >
-                  {devAnonymousEnabled ? 'Dev login' : 'Dev login (server flag uit)'}
+                  Dev login
                 </button>
               )}
              </div>
@@ -2163,6 +2186,58 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       handleStartPendingClaim();
     }, [resolvedPendingClaimContributorId, profile?.ageVerified, handleStartPendingClaim]);
 
+    const hasDiditSession = Boolean(diditSessionId);
+    const isPendingStatus = diditStatus === 'pending';
+    const isReviewStatus = diditStatus === 'in_review' || diditStatus === 'review' || diditStatus === 'manual_review';
+    const isRejectedState = diditUiState === 'rejected' || diditUiState === 'underage';
+    const canRefreshDidit = hasDiditSession && (isPendingStatus || isReviewStatus || diditUiState === 'verified_missing_age');
+    const showStartDiditAction = !isReviewStatus;
+    const showSupportActions = isRejectedState || (diditUiState === 'verified_missing_age' && diditRefreshAttempts >= 2);
+    const showDeleteAction = diditUiState === 'no_session' || diditUiState === 'idle' || isRejectedState;
+
+
+    const handleResendVerificationEmail = useCallback(async () => {
+      try {
+        setEmailVerificationPending(true);
+        setEmailVerificationMessage(null);
+        await resendVerificationEmail();
+        setEmailVerificationMessage('Verificatiemail opnieuw verstuurd.');
+      } catch (verificationError) {
+        setEmailVerificationMessage(verificationError?.message || 'Opnieuw versturen is mislukt.');
+      } finally {
+        setEmailVerificationPending(false);
+      }
+    }, []);
+
+    const handleRefreshEmailVerification = useCallback(async () => {
+      try {
+        setEmailVerificationPending(true);
+        setEmailVerificationMessage(null);
+        const refreshed = await reloadCurrentUser();
+        if (!refreshed?.emailVerified) {
+          setEmailVerificationMessage('Je email is nog niet geverifieerd.');
+          return;
+        }
+        if (authUser?.uid) {
+          await ensureUserProfile(refreshed);
+        }
+        setEmailVerificationMessage('Email geverifieerd. Je kunt nu door.');
+      } catch (verificationError) {
+        setEmailVerificationMessage(verificationError?.message || 'Status verversen is mislukt.');
+      } finally {
+        setEmailVerificationPending(false);
+      }
+    }, [authUser?.uid]);
+
+    const handleDevSkipDidit = useCallback(async () => {
+      if (!authUser?.uid || !allowDevSkipIdv) return;
+      setDiditUiState('dev_skipped');
+      setDiditError(null);
+      await updateUserProfile(authUser.uid, { onboardingStep: 3 });
+      setStep(3);
+    }, [allowDevSkipIdv, authUser?.uid]);
+
+
     if (!enableEmail && !authUser) {
       return (
         <div className="max-w-md mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
@@ -2293,57 +2368,6 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       </div>
     );
 
-
-    const hasDiditSession = Boolean(diditSessionId);
-    const isPendingStatus = diditStatus === 'pending';
-    const isReviewStatus = diditStatus === 'in_review' || diditStatus === 'review' || diditStatus === 'manual_review';
-    const isRejectedState = diditUiState === 'rejected' || diditUiState === 'underage';
-    const canRefreshDidit = hasDiditSession && (isPendingStatus || isReviewStatus || diditUiState === 'verified_missing_age');
-    const showStartDiditAction = !isReviewStatus;
-    const showSupportActions = isRejectedState || (diditUiState === 'verified_missing_age' && diditRefreshAttempts >= 2);
-    const showDeleteAction = diditUiState === 'no_session' || diditUiState === 'idle' || isRejectedState;
-
-
-    const handleResendVerificationEmail = useCallback(async () => {
-      try {
-        setEmailVerificationPending(true);
-        setEmailVerificationMessage(null);
-        await resendVerificationEmail();
-        setEmailVerificationMessage('Verificatiemail opnieuw verstuurd.');
-      } catch (verificationError) {
-        setEmailVerificationMessage(verificationError?.message || 'Opnieuw versturen is mislukt.');
-      } finally {
-        setEmailVerificationPending(false);
-      }
-    }, []);
-
-    const handleRefreshEmailVerification = useCallback(async () => {
-      try {
-        setEmailVerificationPending(true);
-        setEmailVerificationMessage(null);
-        const refreshed = await reloadCurrentUser();
-        if (!refreshed?.emailVerified) {
-          setEmailVerificationMessage('Je email is nog niet geverifieerd.');
-          return;
-        }
-        if (authUser?.uid) {
-          await ensureUserProfile(refreshed);
-        }
-        setEmailVerificationMessage('Email geverifieerd. Je kunt nu door.');
-      } catch (verificationError) {
-        setEmailVerificationMessage(verificationError?.message || 'Status verversen is mislukt.');
-      } finally {
-        setEmailVerificationPending(false);
-      }
-    }, [authUser?.uid]);
-
-    const handleDevSkipDidit = useCallback(async () => {
-      if (!authUser?.uid || !allowDevSkipIdv) return;
-      setDiditUiState('dev_skipped');
-      setDiditError(null);
-      await updateUserProfile(authUser.uid, { onboardingStep: 3 });
-      setStep(3);
-    }, [allowDevSkipIdv, authUser?.uid]);
 
     if (step === 2) return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">

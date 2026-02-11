@@ -7,6 +7,28 @@ service cloud.firestore {
     function isVerifiedUser() {
       return request.auth != null && request.auth.token.email_verified == true;
     }
+    function signInProvider() {
+      return request.auth != null ? request.auth.token.firebase.sign_in_provider : null;
+    }
+    function allowAnonOnboarding() {
+      return signInProvider() == 'anonymous'
+        && exists(/databases/$(database)/documents/config/app)
+        && get(/databases/$(database)/documents/config/app).data.allowAnonymousOnboarding == true;
+    }
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    function onboardingFieldsOnly() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'onboardingStep',
+          'sensitivity',
+          'updatedAt',
+          'sensitivityUpdatedAt'
+        ])
+        && !('ageVerified' in request.resource.data)
+        && !('isAdult' in request.resource.data)
+        && !('ageVerifiedAt' in request.resource.data);
+    }
     function isModerator() {
       return request.auth != null
         && request.auth.token.email_verified == true
@@ -32,7 +54,13 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null && request.auth.uid == userId;
-      allow update, delete: if isVerifiedUser() && request.auth.uid == userId;
+      allow update: if isOwner(userId)
+        && (
+          isVerifiedUser()
+          // Anonymous onboarding writes are only allowed when config/app.allowAnonymousOnboarding is true.
+          || (allowAnonOnboarding() && onboardingFieldsOnly())
+        );
+      allow delete: if isVerifiedUser() && request.auth.uid == userId;
 
       match /idv/{docId} {
         allow read: if request.auth != null && request.auth.uid == userId;

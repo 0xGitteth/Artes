@@ -18,8 +18,8 @@ service cloud.firestore {
     function isOwner(userId) {
       return request.auth != null && request.auth.uid == userId;
     }
-    function devAnonUserUpdateAllowed(userId) {
-      let allowedKeys = [
+    function devAnonUserUpdateAllowed() {
+      let allowedOnboardingUpdateKeys = [
         'uid',
         'displayName',
         'bio',
@@ -33,10 +33,10 @@ service cloud.firestore {
         'linkedCompanyName',
         'updatedAt'
       ];
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
 
-      return request.resource.data.keys().hasOnly(allowedKeys)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedKeys)
-        && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
+      return affected.hasOnly(allowedOnboardingUpdateKeys)
+        && (!('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid)
         && (
           !('onboardingStep' in request.resource.data)
           || request.resource.data.onboardingStep == resource.data.onboardingStep
@@ -87,7 +87,7 @@ service cloud.firestore {
         && (
           isVerifiedUser()
           // Dev-only: anonymous onboarding writes require /config/app.allowAnonymousOnboarding == true.
-          || (allowAnonOnboarding() && devAnonUserUpdateAllowed(userId))
+          || (allowAnonOnboarding() && devAnonUserUpdateAllowed())
         );
       allow delete: if isVerifiedUser() && request.auth.uid == userId;
 

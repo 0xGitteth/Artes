@@ -260,6 +260,7 @@ export const observeAuth = (cb) => onAuthStateChanged(getFirebaseAuth(), async (
       email: user?.email ?? null,
       emailVerified: user?.emailVerified ?? false,
       provider,
+      signInProvider: provider,
     });
   }
 

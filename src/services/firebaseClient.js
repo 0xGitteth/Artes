@@ -73,6 +73,7 @@ export const subscribeToAuth = (callback) =>
         email: user?.email ?? null,
         emailVerified: user?.emailVerified ?? false,
         provider,
+        signInProvider: provider,
       });
     }
 

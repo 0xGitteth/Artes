@@ -50,6 +50,7 @@ import {
   getClaimRequestRef,
   getFirebaseStorageInstance,
   getFirebaseFunctionsInstance,
+  getAppConfig,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { signInAnonymously } from 'firebase/auth';
@@ -474,6 +475,7 @@ export default function ArtesApp() {
   const [showTour, setShowTour] = useState(false);
   const [verificationNote, setVerificationNote] = useState(null);
   const [verificationPending, setVerificationPending] = useState(false);
+  const [appConfig, setAppConfig] = useState(null);
   
   // Modals & States
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -1085,6 +1087,27 @@ export default function ArtesApp() {
     return usesPasswordProvider && !authUser.emailVerified;
   }, [authUser]);
 
+  useEffect(() => {
+    if (!authReady || !authUser?.uid) {
+      setAppConfig(null);
+      return;
+    }
+    let active = true;
+    getAppConfig()
+      .then((config) => {
+        if (active) setAppConfig(config);
+      })
+      .catch((error) => {
+        if (import.meta.env.DEV) {
+          console.log('[ArtesApp] config/app unavailable', error?.code || error?.message || error);
+        }
+        if (active) setAppConfig(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authReady, authUser?.uid]);
+
   const handleTourComplete = (targetView) => {
     setShowTour(false);
     if(typeof targetView === 'string') setView(targetView);
@@ -1355,6 +1378,7 @@ export default function ArtesApp() {
               profile={profile}
               functionsBase={functionsBase}
               authReady={authReady}
+              appConfig={appConfig}
             />
           )}
           
@@ -1589,7 +1613,7 @@ export default function ArtesApp() {
 
 // --- SUB COMPONENTS ---
 
-function LoginScreen({ setView, onLogin, error, loading, authUser }) {
+function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState(null);
@@ -1598,9 +1622,19 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
   const auth = getFirebaseAuthInstance();
 
+  const devAnonymousEnabled = appConfig?.allowDevAnonymous === true;
+
   const handleDevLogin = async () => {
     try {
-      await signInAnonymously(auth);
+      setLocalError(null);
+      const result = await signInAnonymously(auth);
+      const refreshedConfig = await getAppConfig({ forceRefresh: true });
+      if (refreshedConfig?.allowDevAnonymous !== true) {
+        await firebaseLogout();
+        setLocalError('Dev anonymous login staat server-side uit (config/app.allowDevAnonymous).');
+        return;
+      }
+      await ensureUserProfile(result?.user || auth.currentUser);
       console.log('Anonymous login successful');
     } catch (err) {
       const code = err?.code ?? 'unknown';
@@ -1618,7 +1652,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
              <div className="space-y-4">
                {import.meta.env.DEV && !authUser && (
                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
-                   Je bent niet ingelogd. Gebruik Dev login (anoniem).
+                   Je bent niet ingelogd. Gebruik Dev login (anoniem) alleen met config/app.allowDevAnonymous.
                  </div>
                )}
                <Input label="E-mailadres" placeholder="naam@voorbeeld.nl" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -1683,9 +1717,10 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
                 <button
                   type="button"
                   onClick={handleDevLogin}
+                  disabled={!devAnonymousEnabled}
                   className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
                 >
-                  Dev login
+                  {devAnonymousEnabled ? 'Dev login' : 'Dev login (server flag uit)'}
                 </button>
               )}
              </div>
@@ -1713,7 +1748,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser }) {
   );
 }
 
-function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady }) {
+function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady, appConfig }) {
     const onboardingQueryParams = useMemo(() => {
       if (typeof window === 'undefined') return new URLSearchParams();
       return new URLSearchParams(window.location.search || '');
@@ -1758,6 +1793,12 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const enableEmail = import.meta.env.VITE_ENABLE_EMAIL_SIGNIN !== 'false';
     const isGoogleUser = authUser?.providerData?.some((provider) => provider?.providerId === 'google.com')
       || profile?.authProvider === 'google.com';
+    const usesPasswordProvider = authUser?.providerData?.some((provider) => provider?.providerId === 'password')
+      || profile?.authProvider === 'password';
+    const requiresEmailVerificationForIdv = Boolean(authUser?.uid && usesPasswordProvider && !authUser?.emailVerified);
+    const allowDevSkipIdv = Boolean(import.meta.env.DEV && authUser?.isAnonymous && appConfig?.allowDevSkipIdv === true);
+    const [emailVerificationPending, setEmailVerificationPending] = useState(false);
+    const [emailVerificationMessage, setEmailVerificationMessage] = useState(null);
     const normalizeDisplayName = (value) => String(value || '').trim().toLowerCase();
     const resolvedPendingClaimContributorId = pendingClaimContributorId || profile?.pendingClaimContributorId || null;
     const resolvedPendingClaimContributorName = pendingClaimContributorName || profile?.pendingClaimContributorName || null;
@@ -1843,9 +1884,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }, []);
 
     useEffect(() => {
-      if (!authUser?.uid || !profileIdvRef) return;
+      if (!authUser?.uid || !profileIdvRef || allowDevSkipIdv) return;
       if (step !== 2) return;
       if (!authReady) return;
+      if (allowDevSkipIdv) return;
       if (import.meta.env.DEV) {
         console.log('[Onboarding] Listening for Didit status updates');
       }
@@ -1880,6 +1922,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           const adultResolved = isAdult === true || profile?.isAdult === true;
 
           if (isApproved && adultResolved) {
+            if (requiresEmailVerificationForIdv) return;
             setDiditPending(false);
             setDiditError(null);
             setDiditUiState('idle');
@@ -1937,10 +1980,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         },
       );
       return () => unsubscribe();
-    }, [authReady, authUser?.uid, clearDiditReturnParam, profile?.isAdult, profileIdvRef, step]);
+    }, [allowDevSkipIdv, authReady, authUser?.uid, clearDiditReturnParam, profile?.isAdult, profileIdvRef, requiresEmailVerificationForIdv, step]);
 
     const handleRefreshDiditStatus = useCallback(async () => {
-      if (!authUser?.uid || !profileIdvRef) return;
+      if (!authUser?.uid || !profileIdvRef || allowDevSkipIdv) return;
       try {
         setDiditPending(true);
         setDiditError(null);
@@ -1979,7 +2022,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         clearDiditReturnParam();
         setDiditPending(false);
       }
-    }, [authUser?.uid, clearDiditReturnParam, diditReturnContext.sessionIdFromUrl, diditSessionId, profileIdvRef, shouldHandleDiditReturn]);
+    }, [allowDevSkipIdv, authUser?.uid, clearDiditReturnParam, diditReturnContext.sessionIdFromUrl, diditSessionId, profileIdvRef, shouldHandleDiditReturn]);
 
     const handleDebugRefreshDiditStatus = useCallback(async () => {
       if (!import.meta.env.DEV || !authUser?.uid) return;
@@ -2009,7 +2052,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }, [authUser?.uid]);
 
     useEffect(() => {
-      if (!authReady || !authUser?.uid || !shouldHandleDiditReturn || diditRefreshAttempted) return;
+      if (!authReady || !authUser?.uid || !shouldHandleDiditReturn || diditRefreshAttempted || allowDevSkipIdv) return;
       const hasKnownSession = Boolean(diditSessionId || diditReturnContext.sessionIdFromUrl || profile?.idv?.sessionId);
       if (!hasKnownSession) return;
       handleRefreshDiditStatus();
@@ -2022,6 +2065,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       handleRefreshDiditStatus,
       profile?.idv?.sessionId,
       shouldHandleDiditReturn,
+      allowDevSkipIdv,
     ]);
 
     const fetchContributorMatches = async (displayName) => {
@@ -2259,6 +2303,48 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const showSupportActions = isRejectedState || (diditUiState === 'verified_missing_age' && diditRefreshAttempts >= 2);
     const showDeleteAction = diditUiState === 'no_session' || diditUiState === 'idle' || isRejectedState;
 
+
+    const handleResendVerificationEmail = useCallback(async () => {
+      try {
+        setEmailVerificationPending(true);
+        setEmailVerificationMessage(null);
+        await resendVerificationEmail();
+        setEmailVerificationMessage('Verificatiemail opnieuw verstuurd.');
+      } catch (verificationError) {
+        setEmailVerificationMessage(verificationError?.message || 'Opnieuw versturen is mislukt.');
+      } finally {
+        setEmailVerificationPending(false);
+      }
+    }, []);
+
+    const handleRefreshEmailVerification = useCallback(async () => {
+      try {
+        setEmailVerificationPending(true);
+        setEmailVerificationMessage(null);
+        const refreshed = await reloadCurrentUser();
+        if (!refreshed?.emailVerified) {
+          setEmailVerificationMessage('Je email is nog niet geverifieerd.');
+          return;
+        }
+        if (authUser?.uid) {
+          await ensureUserProfile(refreshed);
+        }
+        setEmailVerificationMessage('Email geverifieerd. Je kunt nu door.');
+      } catch (verificationError) {
+        setEmailVerificationMessage(verificationError?.message || 'Status verversen is mislukt.');
+      } finally {
+        setEmailVerificationPending(false);
+      }
+    }, [authUser?.uid]);
+
+    const handleDevSkipDidit = useCallback(async () => {
+      if (!authUser?.uid || !allowDevSkipIdv) return;
+      setDiditUiState('dev_skipped');
+      setDiditError(null);
+      await updateUserProfile(authUser.uid, { onboardingStep: 3 });
+      setStep(3);
+    }, [allowDevSkipIdv, authUser?.uid]);
+
     if (step === 2) return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
         <h2 className={`text-sm font-bold uppercase mb-1 ${showSupportActions || diditUiState === 'error' ? 'text-red-600' : 'text-blue-600'}`}>Stap 2/5</h2>
@@ -2278,6 +2364,30 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         <div className={`bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border space-y-6 ${(showSupportActions || diditUiState === 'error') ? 'border-red-200 dark:border-red-500/40' : 'dark:border-slate-700'}`}>
            <div className="flex gap-3"><Shield className="text-blue-500"/><p className="text-sm dark:text-slate-300">Bij Artes staan respect en consent centraal.</p></div>
            <div className="flex gap-3"><CheckCircle className="text-green-500"/><p className="text-sm dark:text-slate-300">Identificatie via Didit is verplicht voor veiligheid.</p></div>
+           {requiresEmailVerificationForIdv && (
+             <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-500/50 dark:bg-blue-500/10 dark:text-blue-200">
+               <p className="font-semibold mb-1">Verifieer eerst je email</p>
+               <p>Accounts met email/wachtwoord moeten emailverificatie afronden vóór stap 2.</p>
+               {emailVerificationMessage && <p className="mt-2 text-xs">{emailVerificationMessage}</p>}
+               <div className="mt-3 flex flex-col gap-2">
+                 <Button className="w-full" onClick={handleResendVerificationEmail} disabled={emailVerificationPending}>
+                   Opnieuw verificatiemail sturen
+                 </Button>
+                 <Button variant="secondary" className="w-full" onClick={handleRefreshEmailVerification} disabled={emailVerificationPending}>
+                   Status verversen
+                 </Button>
+               </div>
+             </div>
+           )}
+           {allowDevSkipIdv && !requiresEmailVerificationForIdv && (
+             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+               <p className="font-semibold mb-1">Dev bypass actief</p>
+               <p>Didit mag worden overgeslagen omdat config/app.allowDevSkipIdv aan staat.</p>
+               <Button variant="secondary" className="w-full mt-3" onClick={handleDevSkipDidit}>
+                 Sla Didit over en ga verder
+               </Button>
+             </div>
+           )}
            {(diditUiState === 'pending' || diditUiState === 'in_review' || shouldHandleDiditReturn) && !diditError && (
              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
                <p className="font-semibold">Verificatie loopt</p>
@@ -2314,7 +2424,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
            )}
            <div className="flex flex-col gap-3">
              {canRefreshDidit && (
-               <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending}>
+               <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending || requiresEmailVerificationForIdv || allowDevSkipIdv}>
                  Opnieuw controleren
                </Button>
              )}
@@ -2343,7 +2453,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                    }
                  }}
                  className="w-full"
-                 disabled={diditPending}
+                 disabled={diditPending || requiresEmailVerificationForIdv || allowDevSkipIdv}
                >
                  {showSupportActions ? 'Start opnieuw' : 'Start Didit verificatie'}
                </Button>

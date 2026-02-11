@@ -18,16 +18,44 @@ service cloud.firestore {
     function isOwner(userId) {
       return request.auth != null && request.auth.uid == userId;
     }
-    function onboardingFieldsOnly() {
-      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
-          'onboardingStep',
-          'sensitivity',
-          'updatedAt',
-          'sensitivityUpdatedAt'
-        ])
+    function devAnonUserUpdateAllowed(userId) {
+      let allowedKeys = [
+        'uid',
+        'displayName',
+        'bio',
+        'avatar',
+        'themes',
+        'roles',
+        'preferences',
+        'onboardingStep',
+        'onboardingComplete',
+        'linkedAgencyName',
+        'linkedCompanyName',
+        'updatedAt'
+      ];
+
+      return request.resource.data.keys().hasOnly(allowedKeys)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedKeys)
+        && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
+        && (
+          !('onboardingStep' in request.resource.data)
+          || request.resource.data.onboardingStep == resource.data.onboardingStep
+          || (
+            request.resource.data.onboardingStep is int
+            && request.resource.data.onboardingStep >= 0
+            && request.resource.data.onboardingStep <= 10
+          )
+        )
         && !('ageVerified' in request.resource.data)
         && !('isAdult' in request.resource.data)
         && !('ageVerifiedAt' in request.resource.data);
+    }
+    function noClientGateFieldWrites() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'ageVerified',
+        'isAdult',
+        'ageVerifiedAt'
+      ]);
     }
     function isModerator() {
       return request.auth != null
@@ -55,10 +83,11 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null && request.auth.uid == userId;
       allow update: if isOwner(userId)
+        && noClientGateFieldWrites()
         && (
           isVerifiedUser()
-          // Anonymous onboarding writes are only allowed when config/app.allowAnonymousOnboarding is true.
-          || (allowAnonOnboarding() && onboardingFieldsOnly())
+          // Dev-only: anonymous onboarding writes require /config/app.allowAnonymousOnboarding == true.
+          || (allowAnonOnboarding() && devAnonUserUpdateAllowed(userId))
         );
       allow delete: if isVerifiedUser() && request.auth.uid == userId;
 

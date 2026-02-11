@@ -241,7 +241,30 @@ export const initAuth = async () => {
   return auth;
 };
 
-export const observeAuth = (cb) => onAuthStateChanged(getFirebaseAuth(), cb);
+export const observeAuth = (cb) => onAuthStateChanged(getFirebaseAuth(), async (user) => {
+  if (import.meta.env.DEV) {
+    let provider = null;
+
+    if (user) {
+      try {
+        const tokenResult = await user.getIdTokenResult();
+        provider = tokenResult?.claims?.firebase?.sign_in_provider ?? null;
+      } catch (error) {
+        console.warn('[Auth Debug] Failed to read token claims:', error);
+      }
+    }
+
+    console.log('[Auth Debug]', {
+      uid: user?.uid ?? null,
+      isAnonymous: user?.isAnonymous ?? false,
+      email: user?.email ?? null,
+      emailVerified: user?.emailVerified ?? false,
+      provider,
+    });
+  }
+
+  cb(user);
+});
 
 export const registerWithEmail = async (email, password, displayName) => {
   const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);

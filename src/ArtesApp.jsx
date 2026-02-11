@@ -1644,7 +1644,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
 
   const devAnonymousEnabled = import.meta.env.DEV
     ? true
-    : appConfig?.allowDevAnonymous === true;
+    : appConfig?.allowAnonymousOnboarding === true;
 
   const handleDevLogin = async () => {
     try {
@@ -1652,9 +1652,9 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
       const result = await signInAnonymously(auth);
       const refreshedConfig = await getAppConfig({ forceRefresh: true });
       onDevConfigLoaded?.(refreshedConfig || null);
-      if (refreshedConfig?.allowDevAnonymous !== true) {
+      if (refreshedConfig?.allowAnonymousOnboarding !== true) {
         await firebaseLogout();
-        setLocalError('Dev anonymous login staat server-side uit (config/app.allowDevAnonymous).');
+        setLocalError('Dev anonymous login staat server-side uit (config/app.allowAnonymousOnboarding).');
         return;
       }
       await ensureUserProfile(result?.user || auth.currentUser);
@@ -1675,7 +1675,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
              <div className="space-y-4">
                {import.meta.env.DEV && !authUser && (
                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
-                   Je bent niet ingelogd. Gebruik Dev login (anoniem) alleen met config/app.allowDevAnonymous.
+                   Je bent niet ingelogd. Gebruik Dev login (anoniem) alleen met config/app.allowAnonymousOnboarding.
                  </div>
                )}
                <Input label="E-mailadres" placeholder="naam@voorbeeld.nl" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -1740,7 +1740,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
                 <button
                   type="button"
                   onClick={handleDevLogin}
-                  disabled={!devAnonymousEnabled}
+                  disabled={!import.meta.env.DEV && !devAnonymousEnabled}
                   className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
                 >
                   Dev login

@@ -441,37 +441,65 @@ export const createUserProfile = async (uid, profile) => {
   
   await setDoc(doc(getFirebaseDb(), 'users', uid), payload);
 };
-
 export const updateUserProfile = async (uid, data) => {
   const safeData = stripClientGateFields(data);
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
-  
+
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
     updatePayload.themes = sanitizeThemes(updatePayload.themes);
   }
-  
+
   if (import.meta.env.DEV) {
     console.log('[updateUserProfile] Writing to users/' + uid, updatePayload);
+    console.log('[updateUserProfile] payload keys', Object.keys(updatePayload).sort());
   }
-  
-  await setDoc(
-    doc(getFirebaseDb(), 'users', uid),
-    updatePayload,
-    { merge: true },
-  );
-  const shouldSyncPublic = PUBLIC_PROFILE_FIELDS.some((field) => field in safeData)
-    || safeData.displayName !== undefined
-    || safeData.username !== undefined
-    || safeData.photoURL !== undefined
-    || safeData.avatar !== undefined;
+
+  try {
+    await setDoc(
+      doc(getFirebaseDb(), 'users', uid),
+      updatePayload,
+      { merge: true },
+    );
+  } catch (e) {
+    console.error(
+      '[updateUserProfile] USERS WRITE FAILED',
+      e.code,
+      e.message,
+      Object.keys(updatePayload).sort()
+    );
+    throw e;
+  }
+
+  const shouldSyncPublic =
+    PUBLIC_PROFILE_FIELDS.some((field) => field in safeData) ||
+    safeData.displayName !== undefined ||
+    safeData.username !== undefined ||
+    safeData.photoURL !== undefined ||
+    safeData.avatar !== undefined;
+
   if (shouldSyncPublic) {
-    let existingPublic = {};
-    if (safeData.displayName !== undefined && safeData.username === undefined) {
-      const publicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', uid));
-      existingPublic = publicSnap.exists() ? publicSnap.data() : {};
+    try {
+      let existingPublic = {};
+
+      if (safeData.displayName !== undefined && safeData.username === undefined) {
+        const publicSnap = await getDoc(
+          doc(getFirebaseDb(), 'publicUsers', uid)
+        );
+        existingPublic = publicSnap.exists() ? publicSnap.data() : {};
+      }
+
+      await writePublicUserProfile(uid, safeData, existingPublic);
+
+    } catch (e) {
+      console.error(
+        '[updateUserProfile] PUBLIC USERS WRITE FAILED',
+        e.code,
+        e.message,
+        Object.keys(safeData).sort()
+      );
+      throw e;
     }
-    await writePublicUserProfile(uid, safeData, existingPublic);
   }
 };
 

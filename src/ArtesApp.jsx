@@ -2254,10 +2254,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const isPendingStatus = diditStatus === 'pending';
     const isReviewStatus = diditStatus === 'in_review' || diditStatus === 'review' || diditStatus === 'manual_review';
     const isRejectedState = diditUiState === 'rejected' || diditUiState === 'underage';
-    const canRefreshDidit = hasDiditSession && (isPendingStatus || isReviewStatus);
+    const canRefreshDidit = hasDiditSession && (isPendingStatus || isReviewStatus || diditUiState === 'verified_missing_age');
     const showStartDiditAction = !isReviewStatus;
     const showSupportActions = isRejectedState || (diditUiState === 'verified_missing_age' && diditRefreshAttempts >= 2);
-    const showDeleteAction = diditUiState === 'no_session' || diditUiState === 'idle';
+    const showDeleteAction = diditUiState === 'no_session' || diditUiState === 'idle' || isRejectedState;
 
     if (step === 2) return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">

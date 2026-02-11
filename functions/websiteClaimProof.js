@@ -77,9 +77,13 @@ const readResponseTextWithLimit = async (response, maxBytes) => {
   const decoder = new TextDecoder();
   let totalBytes = 0;
   let text = '';
-  while (true) {
+  let hasMore = true;
+  while (hasMore) {
     const { value, done } = await reader.read();
-    if (done) break;
+    if (done) {
+      hasMore = false;
+      continue;
+    }
     totalBytes += value.byteLength;
     if (totalBytes > maxBytes) {
       throw new Error('Response too large');

@@ -316,7 +316,8 @@ const buildContributorMergePostUpdate = (postData, primaryContributorId, seconda
 const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId) => {
   let updatedPosts = 0;
   let lastDoc = null;
-  while (true) {
+  let hasMore = true;
+  while (hasMore) {
     let queryRef = db.collection('posts')
       .where('contributorIds', 'array-contains', secondaryContributorId)
       .orderBy(FieldPath.documentId())
@@ -325,7 +326,10 @@ const updatePostsForContributorMerge = async (primaryContributorId, secondaryCon
       queryRef = queryRef.startAfter(lastDoc);
     }
     const snapshot = await queryRef.get();
-    if (snapshot.empty) break;
+    if (snapshot.empty) {
+      hasMore = false;
+      continue;
+    }
     const batch = db.batch();
     snapshot.docs.forEach((docSnap) => {
       const { changed, updates } = buildContributorMergePostUpdate(docSnap.data(), primaryContributorId, secondaryContributorId);
@@ -335,7 +339,7 @@ const updatePostsForContributorMerge = async (primaryContributorId, secondaryCon
     });
     await batch.commit();
     lastDoc = snapshot.docs[snapshot.docs.length - 1];
-    if (snapshot.size < 200) break;
+    hasMore = snapshot.size === 200;
   }
   return updatedPosts;
 };
@@ -344,7 +348,8 @@ const moveContributorAliases = async (primaryContributorId, secondaryContributor
   let movedAliases = 0;
   let skippedAliases = 0;
   let lastDoc = null;
-  while (true) {
+  let hasMore = true;
+  while (hasMore) {
     let queryRef = db.collection('contributorAliases')
       .where('contributorId', '==', secondaryContributorId)
       .orderBy(FieldPath.documentId())
@@ -353,7 +358,10 @@ const moveContributorAliases = async (primaryContributorId, secondaryContributor
       queryRef = queryRef.startAfter(lastDoc);
     }
     const snapshot = await queryRef.get();
-    if (snapshot.empty) break;
+    if (snapshot.empty) {
+      hasMore = false;
+      continue;
+    }
     const batch = db.batch();
     snapshot.docs.forEach((docSnap) => {
       const data = docSnap.data();
@@ -366,7 +374,7 @@ const moveContributorAliases = async (primaryContributorId, secondaryContributor
     });
     await batch.commit();
     lastDoc = snapshot.docs[snapshot.docs.length - 1];
-    if (snapshot.size < 200) break;
+    hasMore = snapshot.size === 200;
   }
   return { movedAliases, skippedAliases };
 };

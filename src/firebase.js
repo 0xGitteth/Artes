@@ -318,6 +318,23 @@ const generateUsername = (displayName, uid) => {
   return `${base.slice(0, maxBaseLength)}${suffix}`;
 };
 
+const CLIENT_GATE_FIELDS = ['ageVerified', 'isAdult', 'ageVerifiedAt'];
+
+const stripClientGateFields = (payload = {}) => {
+  const cleaned = { ...payload };
+  const removed = [];
+  CLIENT_GATE_FIELDS.forEach((field) => {
+    if (field in cleaned) {
+      delete cleaned[field];
+      removed.push(field);
+    }
+  });
+  if (import.meta.env.DEV && removed.length > 0) {
+    console.warn('[profile-write] blocked client gate fields:', removed.join(', '));
+  }
+  return cleaned;
+};
+
 const PUBLIC_PROFILE_FIELDS = [
   'bio',
   'roles',
@@ -406,8 +423,9 @@ export const sanitizeThemes = (themes) => {
 // Profile payload fields we store (subset used by UI):
 // avatar, headerImage, headerPosition, quickProfilePreviewMode, quickProfilePostIds.
 export const createUserProfile = async (uid, profile) => {
+  const safeProfile = stripClientGateFields(profile);
   const payload = {
-    ...profile,
+    ...safeProfile,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -425,7 +443,8 @@ export const createUserProfile = async (uid, profile) => {
 };
 
 export const updateUserProfile = async (uid, data) => {
-  const updatePayload = { ...data, updatedAt: serverTimestamp() };
+  const safeData = stripClientGateFields(data);
+  const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
   
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -441,22 +460,55 @@ export const updateUserProfile = async (uid, data) => {
     updatePayload,
     { merge: true },
   );
-  const shouldSyncPublic = PUBLIC_PROFILE_FIELDS.some((field) => field in data)
-    || data.displayName !== undefined
-    || data.username !== undefined
-    || data.photoURL !== undefined
-    || data.avatar !== undefined;
+  const shouldSyncPublic = PUBLIC_PROFILE_FIELDS.some((field) => field in safeData)
+    || safeData.displayName !== undefined
+    || safeData.username !== undefined
+    || safeData.photoURL !== undefined
+    || safeData.avatar !== undefined;
   if (shouldSyncPublic) {
     let existingPublic = {};
-    if (data.displayName !== undefined && data.username === undefined) {
+    if (safeData.displayName !== undefined && safeData.username === undefined) {
       const publicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', uid));
       existingPublic = publicSnap.exists() ? publicSnap.data() : {};
     }
-    await writePublicUserProfile(uid, data, existingPublic);
+    await writePublicUserProfile(uid, safeData, existingPublic);
   }
 };
 
 export const fetchUserProfile = (uid) => getDoc(doc(getFirebaseDb(), 'users', uid));
+
+let appConfigCache = {
+  fetchedAt: 0,
+  data: null,
+  promise: null,
+};
+
+const APP_CONFIG_CACHE_TTL = 30 * 1000;
+
+export const getAppConfig = async ({ forceRefresh = false } = {}) => {
+  const now = Date.now();
+  if (!forceRefresh && appConfigCache.data && now - appConfigCache.fetchedAt < APP_CONFIG_CACHE_TTL) {
+    return appConfigCache.data;
+  }
+  if (!forceRefresh && appConfigCache.promise) {
+    return appConfigCache.promise;
+  }
+  appConfigCache.promise = getDoc(doc(getFirebaseDb(), 'config', 'app'))
+    .then((snapshot) => {
+      const data = snapshot.exists() ? snapshot.data() : null;
+      appConfigCache = {
+        fetchedAt: Date.now(),
+        data,
+        promise: null,
+      };
+      return data;
+    })
+    .catch((error) => {
+      appConfigCache.promise = null;
+      throw error;
+    });
+  return appConfigCache.promise;
+};
 
 let moderationConfigCache = {
   fetchedAt: 0,

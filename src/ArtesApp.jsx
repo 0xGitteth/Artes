@@ -1157,6 +1157,10 @@ export default function ArtesApp() {
   };
 
   const handleCompleteProfile = async (profileData, roles) => {
+    if (!authReady || !authUser?.uid) {
+      throw new Error('Je sessie is verlopen. Log opnieuw in en probeer het nogmaals.');
+    }
+
     const finalProfile = {
       uid: authUser?.uid,
       displayName: profileData.displayName || 'Nieuwe Maker',
@@ -1174,20 +1178,19 @@ export default function ArtesApp() {
         theme: profileData.preferences?.theme || 'light',
       },
     };
-    if (authReady && authUser?.uid) {
-      await updateUserProfile(authUser.uid, finalProfile);
-      
-      // Create support thread for the user after onboarding
-      try {
-        await ensureSupportThreadExists(authUser.uid, authUser);
-        if (import.meta.env.DEV) {
-          console.log('[ArtesApp] Created support thread after onboarding');
-        }
-      } catch (error) {
-        console.error('[ArtesApp] Error creating support thread:', error);
-        // Don't block onboarding if thread creation fails
+    await updateUserProfile(authUser.uid, finalProfile);
+
+    // Create support thread for the user after onboarding
+    try {
+      await ensureSupportThreadExists(authUser.uid, authUser);
+      if (import.meta.env.DEV) {
+        console.log('[ArtesApp] Created support thread after onboarding');
       }
+    } catch (error) {
+      console.error('[ArtesApp] Error creating support thread:', error);
+      // Don't block onboarding if thread creation fails
     }
+
     const normalized = normalizeProfileData(finalProfile, authUser?.uid);
     setProfile(normalized);
     setDarkMode(finalProfile?.preferences?.theme === 'dark');
@@ -2680,6 +2683,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                   setPending(true);
                   setError(null);
                   await onCompleteProfile?.(profileData, roles);
+                  setError(null);
                 } catch (e) {
                   setError(e.message);
                 } finally {

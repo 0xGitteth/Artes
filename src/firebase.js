@@ -335,46 +335,43 @@ const stripClientGateFields = (payload = {}) => {
   return cleaned;
 };
 
-const PUBLIC_PROFILE_FIELDS = [
-  'bio',
-  'roles',
-  'themes',
-  'linkedAgencyName',
-  'linkedCompanyName',
-  'linkedAgencyLink',
-  'linkedCompanyLink',
-  'headerImage',
-  'headerPosition',
-  'quickProfilePreviewMode',
-  'quickProfilePostIds',
-  'avatar',
-];
+const PUBLIC_USER_ALLOWED_FIELDS = ['uid', 'username', 'displayName', 'photoURL'];
 
 const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
+  const hasRequestedPublicField = ['uid', 'displayName', 'username', 'photoURL', 'avatar']
+    .some((field) => data[field] !== undefined);
+  if (!hasRequestedPublicField) return {};
+
   const payload = {};
-  PUBLIC_PROFILE_FIELDS.forEach((field) => {
-    if (data[field] !== undefined) {
-      payload[field] = data[field];
-    }
-  });
-  const hasDisplayName = data.displayName !== undefined;
-  const hasUsername = data.username !== undefined;
-  if (hasDisplayName) {
-    payload.displayName = data.displayName;
-    payload.displayNameLower = String(data.displayName || '').toLowerCase();
+  if (data.uid !== undefined) {
+    payload.uid = data.uid;
   }
-  if (hasUsername) {
+  if (data.displayName !== undefined) {
+    payload.displayName = data.displayName;
+  }
+  if (data.username !== undefined) {
     payload.username = normalizeUsername(data.username);
   }
   if (data.photoURL !== undefined || data.avatar !== undefined) {
     payload.photoURL = data.photoURL ?? data.avatar ?? null;
   }
-  if ((hasDisplayName || hasUsername) && !payload.username) {
-    const fallbackUsername = existingPublic.username || (hasDisplayName ? generateUsername(data.displayName, uid) : null);
-    if (fallbackUsername) {
-      payload.username = fallbackUsername;
-    }
+
+  const hasUsername = typeof payload.username === 'string' && payload.username.length > 0;
+  if (!hasUsername) {
+    const existingUsername = normalizeUsername(existingPublic?.username);
+    payload.username = existingUsername || generateUsername(payload.displayName || existingPublic?.displayName, uid);
   }
+
+  if (payload.displayName === undefined && existingPublic?.displayName !== undefined) {
+    payload.displayName = existingPublic.displayName;
+  }
+
+  Object.keys(payload).forEach((key) => {
+    if (!PUBLIC_USER_ALLOWED_FIELDS.includes(key)) {
+      delete payload[key];
+    }
+  });
+
   return payload;
 };
 
@@ -382,11 +379,20 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   if (!uid) return;
   const payload = buildPublicProfilePayload(data, uid, existingPublic);
   if (!Object.keys(payload).length) return;
-  
-  // Sanitize themes: remove "General" which should never be auto-added
-  if (payload.themes && Array.isArray(payload.themes)) {
-    payload.themes = sanitizeThemes(payload.themes);
+
+  if (payload.displayName === undefined || payload.displayName === null) {
+    payload.displayName = existingPublic?.displayName || '';
   }
+
+  const normalizedUsername = normalizeUsername(payload.username);
+  if (!normalizedUsername || !/^[a-z0-9]{3,20}$/.test(normalizedUsername)) {
+    payload.username = normalizeUsername(existingPublic?.username)
+      || generateUsername(payload.displayName || existingPublic?.displayName, uid);
+  } else {
+    payload.username = normalizedUsername;
+  }
+
+  payload.displayNameLower = String(payload.displayName || '').toLowerCase();
   
   const finalPayload = {
     uid,
@@ -444,6 +450,7 @@ export const createUserProfile = async (uid, profile) => {
 export const updateUserProfile = async (uid, data) => {
   const safeData = stripClientGateFields(data);
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
+  const publicPatch = buildPublicProfilePayload(safeData, uid);
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -471,12 +478,11 @@ export const updateUserProfile = async (uid, data) => {
     throw e;
   }
 
-  const shouldSyncPublic =
-    PUBLIC_PROFILE_FIELDS.some((field) => field in safeData) ||
-    safeData.displayName !== undefined ||
-    safeData.username !== undefined ||
-    safeData.photoURL !== undefined ||
-    safeData.avatar !== undefined;
+  const shouldSyncPublic = Object.keys(publicPatch).length > 0;
+
+  if (import.meta.env.DEV) {
+    console.log('[updateUserProfile] publicUsers patch keys', Object.keys(publicPatch).sort());
+  }
 
   if (shouldSyncPublic) {
     try {
@@ -489,7 +495,7 @@ export const updateUserProfile = async (uid, data) => {
         existingPublic = publicSnap.exists() ? publicSnap.data() : {};
       }
 
-      await writePublicUserProfile(uid, safeData, existingPublic);
+      await writePublicUserProfile(uid, publicPatch, existingPublic);
 
     } catch (e) {
       console.error(

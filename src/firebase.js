@@ -450,7 +450,8 @@ export const createUserProfile = async (uid, profile) => {
 export const updateUserProfile = async (uid, data) => {
   const safeData = stripClientGateFields(data);
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
-  const publicPatch = buildPublicProfilePayload(safeData, uid);
+  const requestedPublicSync = ['uid', 'displayName', 'username', 'photoURL', 'avatar']
+    .some((field) => safeData[field] !== undefined);
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -478,34 +479,32 @@ export const updateUserProfile = async (uid, data) => {
     throw e;
   }
 
-  const shouldSyncPublic = Object.keys(publicPatch).length > 0;
+  if (!requestedPublicSync) return;
 
-  if (import.meta.env.DEV) {
-    console.log('[updateUserProfile] publicUsers patch keys', Object.keys(publicPatch).sort());
-  }
+  try {
+    const publicSnap = await getDoc(
+      doc(getFirebaseDb(), 'publicUsers', uid)
+    );
+    const existingPublic = publicSnap.exists() ? publicSnap.data() : {};
+    const publicPatch = buildPublicProfilePayload(safeData, uid, existingPublic);
 
-  if (shouldSyncPublic) {
-    try {
-      let existingPublic = {};
-
-      if (safeData.displayName !== undefined && safeData.username === undefined) {
-        const publicSnap = await getDoc(
-          doc(getFirebaseDb(), 'publicUsers', uid)
-        );
-        existingPublic = publicSnap.exists() ? publicSnap.data() : {};
-      }
-
-      await writePublicUserProfile(uid, publicPatch, existingPublic);
-
-    } catch (e) {
-      console.error(
-        '[updateUserProfile] PUBLIC USERS WRITE FAILED',
-        e.code,
-        e.message,
-        Object.keys(safeData).sort()
-      );
-      throw e;
+    if (import.meta.env.DEV) {
+      console.log('[updateUserProfile] publicUsers patch keys', Object.keys(publicPatch).sort());
     }
+
+    if (!Object.keys(publicPatch).length) {
+      return;
+    }
+
+    await writePublicUserProfile(uid, publicPatch, existingPublic);
+  } catch (e) {
+    console.error(
+      '[updateUserProfile] PUBLIC USERS WRITE FAILED',
+      e.code,
+      e.message,
+      Object.keys(safeData).sort()
+    );
+    throw e;
   }
 };
 

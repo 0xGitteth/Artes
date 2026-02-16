@@ -86,5 +86,5 @@ export const ensureSupportThread = onRequest({ region: "europe-west1" }, (req, r
   });
 });
 
-// ✅ Alias: jouw frontend roept deze naam aan
+// ✅ Alias: moderation endpoint, maar retourneert bewust support-thread IDs (support_<uid>).
 export const ensureModerationThread = ensureSupportThread;

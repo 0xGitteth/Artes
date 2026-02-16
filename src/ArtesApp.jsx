@@ -567,7 +567,8 @@ export default function ArtesApp() {
       throw new Error('Failed to ensure moderation thread');
     }
     const data = await response.json();
-    return data?.threadId || `moderation_${user.uid}`;
+    // Backend endpoint returns support-thread ids (support_<uid>).
+    return data?.threadId || `support_${user.uid}`;
   }, [functionsBase]);
 
   const handleDeleteOnboardingAccount = useCallback(async () => {

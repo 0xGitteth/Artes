@@ -932,7 +932,7 @@ export default function ArtesApp() {
 
         setIsModeratorClient(true);
 
-        const moderationThreadId = resolvedModerationThreadId || `moderation_${authUser.uid}`;
+        const moderationThreadId = resolvedModerationThreadId || `support_${authUser.uid}`;
 
         const messagesRef = collection(db, 'threads', moderationThreadId, 'messages');
         const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));

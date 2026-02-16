@@ -510,6 +510,13 @@ export default function ArtesApp() {
   const unsubRef = useRef(null);
   const userProfile = profile;
   const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
+  const canReadFirestore = authReady && !!authUser?.uid;
+  const moderatorResolvedTrue = isModeratorClient === true;
+  const canStartModerationUnread = canReadFirestore
+    && authUser?.emailVerified
+    && profileAgeVerified
+    && moderatorResolvedTrue
+    && !!resolvedModerationThreadId;
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
@@ -779,7 +786,7 @@ export default function ArtesApp() {
 
   useEffect(() => {
     if (!authReady) return;
-    if (!authUser) {
+    if (!canReadFirestore) {
       setCommunityConfig(DEFAULT_COMMUNITY_CONFIG);
       setChallengeConfig(DEFAULT_CHALLENGE_CONFIG);
       setConfigLoading(false);
@@ -822,7 +829,7 @@ export default function ArtesApp() {
     return () => {
       active = false;
     };
-  }, [authReady, authUser]);
+  }, [authReady, canReadFirestore]);
 
   useEffect(() => {
     if (!profile?.preferences?.theme) return;
@@ -892,6 +899,7 @@ export default function ArtesApp() {
   }, [view, supportThreadId]);
 
   // Data Listeners
+  // No Firestore listeners before authReady.
   useEffect(() => {
      if (!authReady || !user) return;
      logListenerStart('Posts listener (ArtesApp)');
@@ -902,7 +910,7 @@ export default function ArtesApp() {
   }, [authReady, user, logListenerStart]);
 
   useEffect(() => {
-    if (!authReady || !authUser?.uid) {
+    if (!canReadFirestore) {
       setIsModeratorClient(false);
       return;
     }
@@ -920,98 +928,111 @@ export default function ArtesApp() {
       },
       (err) => handleListenerError('Uploads listener (ArtesApp)', err),
     );
-  }, [authReady, authUser?.uid, logListenerStart, handleListenerError]);
+  }, [canReadFirestore, authUser?.uid, logListenerStart, handleListenerError]);
 
   useEffect(() => {
     let active = true;
 
-    const setup = async () => {
-      cleanupModerationListener();
+    const resolveModeratorStatus = async () => {
       setIsModeratorClient(false);
-      const hasAdultVerification = profile?.ageVerified === true || profile?.isAdult === true;
-      if (!authReady || !authUser?.uid || hasAdultVerification !== true || !authUser?.emailVerified) {
-        setIsModeratorClient(false);
-        setModerationUnreadBlocked(false);
-        moderationUnreadBlockedGateRef.current = null;
+      if (!canReadFirestore || !authUser?.emailVerified || !profileAgeVerified) {
         return;
       }
 
       const db = getFirebaseDbInstance();
       try {
         const moderationDoc = await getDoc(doc(db, 'config', 'moderation'));
+        if (!active) return;
         const moderatorEmails = moderationDoc.exists() ? (moderationDoc.data().moderatorEmails || []) : [];
         const resolvedIsModeratorClient = Boolean(authUser?.email && moderatorEmails.includes(authUser.email));
-
-        if (!resolvedIsModeratorClient) {
-          setIsModeratorClient(false);
-          setModerationUnreadBlocked(false);
-          moderationUnreadBlockedGateRef.current = null;
-          return;
-        }
-
-        setIsModeratorClient(true);
-
-        if (!resolvedModerationThreadId) {
-          setModerationUnreadBlocked(false);
-          moderationUnreadBlockedGateRef.current = null;
-          return;
-        }
-
-        const moderationGate = [
-          authUser.uid,
-          authUser.emailVerified ? '1' : '0',
-          hasAdultVerification ? '1' : '0',
-          resolvedIsModeratorClient ? '1' : '0',
-          resolvedModerationThreadId,
-        ].join('|');
-        const isBlockedForSameGate = moderationUnreadBlockedRef.current
-          && moderationUnreadBlockedGateRef.current === moderationGate;
-        if (isBlockedForSameGate) {
-          return;
-        }
-        setModerationUnreadBlocked(false);
-        moderationUnreadBlockedGateRef.current = null;
-
-        const messagesRef = collection(db, 'threads', resolvedModerationThreadId, 'messages');
-        const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
-
-        logListenerStart('Moderation unread listener (ArtesApp)', {
-          isModeratorClient: true,
-        });
-        unsubRef.current = onSnapshot(
-          q,
-          (snapshot) => {
-            if (!active || snapshot.empty) return;
-            const docSnap = snapshot.docs[0];
-            if (moderationModalIdRef.current === docSnap.id) return;
-            setModerationModal({ id: docSnap.id, ...docSnap.data() });
-          },
-          (err) => {
-            cleanupModerationListener();
-            if (err?.code === 'permission-denied') {
-              if (moderationUnreadBlockedGateRef.current !== moderationGate) {
-                console.error('[ArtesApp] Moderation unread listener blocked (permission-denied).');
-              }
-              moderationUnreadBlockedGateRef.current = moderationGate;
-              setModerationUnreadBlocked(true);
-              return;
-            }
-            handleListenerError('Moderation unread listener (ArtesApp)', err);
-          },
-        );
+        setIsModeratorClient(resolvedIsModeratorClient);
       } catch (error) {
-        cleanupModerationListener();
-        console.error('Failed to setup moderation unread listener check', error);
+        if (!active) return;
+        setIsModeratorClient(false);
+        console.error('Failed to resolve moderator status', error);
       }
     };
 
-    setup();
+    resolveModeratorStatus();
+
+    return () => {
+      active = false;
+    };
+  }, [canReadFirestore, authUser?.email, authUser?.emailVerified, profileAgeVerified]);
+
+  useEffect(() => {
+    let active = true;
+
+    const setupModerationUnreadListener = () => {
+      cleanupModerationListener();
+      if (!canStartModerationUnread) {
+        setModerationUnreadBlocked(false);
+        moderationUnreadBlockedGateRef.current = null;
+        return;
+      }
+
+      const db = getFirebaseDbInstance();
+      const moderationGate = [
+        authUser.uid,
+        authUser.emailVerified ? '1' : '0',
+        profileAgeVerified ? '1' : '0',
+        moderatorResolvedTrue ? '1' : '0',
+        resolvedModerationThreadId,
+      ].join('|');
+      const isBlockedForSameGate = moderationUnreadBlockedRef.current
+        && moderationUnreadBlockedGateRef.current === moderationGate;
+      if (isBlockedForSameGate) {
+        return;
+      }
+      setModerationUnreadBlocked(false);
+      moderationUnreadBlockedGateRef.current = null;
+
+      const messagesRef = collection(db, 'threads', resolvedModerationThreadId, 'messages');
+      const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
+
+      logListenerStart('Moderation unread listener (ArtesApp)', {
+        isModeratorClient: true,
+      });
+      unsubRef.current = onSnapshot(
+        q,
+        (snapshot) => {
+          if (!active || snapshot.empty) return;
+          const docSnap = snapshot.docs[0];
+          if (moderationModalIdRef.current === docSnap.id) return;
+          setModerationModal({ id: docSnap.id, ...docSnap.data() });
+        },
+        (err) => {
+          cleanupModerationListener();
+          if (err?.code === 'permission-denied') {
+            if (moderationUnreadBlockedGateRef.current !== moderationGate) {
+              console.error('[ArtesApp] Moderation unread listener blocked (permission-denied).');
+            }
+            moderationUnreadBlockedGateRef.current = moderationGate;
+            setModerationUnreadBlocked(true);
+            return;
+          }
+          handleListenerError('Moderation unread listener (ArtesApp)', err);
+        },
+      );
+    };
+
+    setupModerationUnreadListener();
 
     return () => {
       active = false;
       cleanupModerationListener();
     };
-  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, logListenerStart, handleListenerError, profile?.ageVerified, profile?.isAdult, resolvedModerationThreadId, cleanupModerationListener]);
+  }, [
+    canStartModerationUnread,
+    authUser?.uid,
+    authUser?.emailVerified,
+    logListenerStart,
+    handleListenerError,
+    profileAgeVerified,
+    moderatorResolvedTrue,
+    resolvedModerationThreadId,
+    cleanupModerationListener,
+  ]);
 
   useEffect(() => {
     if (view !== 'chat') return;

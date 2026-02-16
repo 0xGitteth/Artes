@@ -676,15 +676,29 @@ const resolveAuthProvider = (user) => {
   return user?.providerData?.[0]?.providerId ?? null;
 };
 
+const canWriteUserProfile = (user, providerId) => {
+  if (!user?.uid) return false;
+  if (user.emailVerified === true) return true;
+  const isAnonymous = providerId === 'anonymous' || user?.isAnonymous === true;
+  return Boolean(import.meta.env.DEV && isAnonymous);
+};
+
 export const ensureUserProfile = async (user) => {
   if (!user?.uid) return null;
   const providerId = resolveAuthProvider(user);
   const defaultOnboardingStep = providerId === 'google.com' ? 2 : 1;
   const resolvedDisplayName = resolveDisplayName(user);
   const resolvedEmail = user.email ?? null;
+  const writeAllowed = canWriteUserProfile(user, providerId);
   const snapshot = await fetchUserProfile(user.uid);
   if (snapshot.exists()) {
     const data = snapshot.data();
+    if (!writeAllowed) {
+      if (import.meta.env.DEV) {
+        console.log('ensureUserProfile skipped write: unverified user');
+      }
+      return data;
+    }
     const updates = {};
     if (!data.displayName && resolvedDisplayName) updates.displayName = resolvedDisplayName;
     if (!data.email && resolvedEmail) updates.email = resolvedEmail;
@@ -711,6 +725,19 @@ export const ensureUserProfile = async (user) => {
     );
     return { ...data, ...updates };
   }
+
+  if (!writeAllowed) {
+    if (import.meta.env.DEV) {
+      console.log('ensureUserProfile skipped write: unverified user');
+    }
+    return {
+      uid: user.uid,
+      displayName: resolvedDisplayName,
+      email: resolvedEmail,
+      onboardingStep: defaultOnboardingStep,
+    };
+  }
+
   const profile = {
     uid: user.uid,
     displayName: resolvedDisplayName,

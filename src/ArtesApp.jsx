@@ -718,8 +718,23 @@ export default function ArtesApp() {
           console.error('Failed to ensure support thread', error);
         });
       } catch (e) {
-        console.error('Failed to load profile', e);
-        setView('onboarding');
+        if (e?.code === 'permission-denied') {
+          if (import.meta.env.DEV) {
+            console.log('[ArtesApp] Profile init permission denied, continuing with fallback profile');
+          }
+          const fallbackProfile = normalizeProfileData({
+            uid: u.uid,
+            displayName: u.displayName || u.email?.split('@')?.[0] || 'Nieuwe gebruiker',
+            email: u.email ?? null,
+            onboardingStep: 1,
+            onboardingComplete: false,
+          }, u.uid);
+          setProfile(fallbackProfile);
+          setView('onboarding');
+        } else {
+          console.error('Failed to load profile', e);
+          setView('onboarding');
+        }
       } finally {
         setProfileLoading(false);
       }

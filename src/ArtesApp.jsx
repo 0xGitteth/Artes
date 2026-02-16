@@ -497,6 +497,7 @@ export default function ArtesApp() {
   const [isModeratorClient, setIsModeratorClient] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
   const [supportThreadId, setSupportThreadId] = useState(null);
+  const [resolvedModerationThreadId, setResolvedModerationThreadId] = useState('');
   const [claimInviteToken, setClaimInviteToken] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
@@ -659,6 +660,7 @@ export default function ArtesApp() {
       setView('loading');
       setUser(u);
       setAuthUser(u);
+      setResolvedModerationThreadId('');
       if (!u) {
         setProfile(null);
         ensuredSupportThreadUidRef.current = null;
@@ -714,9 +716,14 @@ export default function ArtesApp() {
               ? 'chat'
               : baseView;
         setView(onboardingComplete ? routedView : 'onboarding');
-        ensureModerationThread(u).catch((error) => {
-          console.error('Failed to ensure support thread', error);
-        });
+        ensureModerationThread(u)
+          .then((threadId) => {
+            if (!threadId) return;
+            setResolvedModerationThreadId(threadId);
+          })
+          .catch((error) => {
+            console.error('Failed to ensure support thread', error);
+          });
       } catch (e) {
         if (e?.code === 'permission-denied') {
           if (import.meta.env.DEV) {
@@ -925,8 +932,12 @@ export default function ArtesApp() {
 
         setIsModeratorClient(true);
 
-        const threadId = `moderation_${authUser.uid}`;
-        const messagesRef = collection(db, 'threads', threadId, 'messages');
+        if (!resolvedModerationThreadId) {
+          stopModeration();
+          return;
+        }
+
+        const messagesRef = collection(db, 'threads', resolvedModerationThreadId, 'messages');
         const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
 
         logListenerStart('Moderation unread listener (ArtesApp)', {
@@ -957,7 +968,7 @@ export default function ArtesApp() {
       active = false;
       stopModeration();
     };
-  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError, profile?.ageVerified, profile?.isAdult]);
+  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError, profile?.ageVerified, profile?.isAdult, resolvedModerationThreadId]);
 
   useEffect(() => {
     if (view !== 'chat') return;
@@ -977,7 +988,9 @@ export default function ArtesApp() {
     ensureModerationThread(authUser)
       .then((threadId) => {
         if (!active) return;
-        setSupportThreadId(threadId || `moderation_${authUser.uid}`);
+        if (!threadId) return;
+        setResolvedModerationThreadId(threadId);
+        setSupportThreadId(threadId);
       })
       .catch((error) => {
         if (!active) return;
@@ -1072,12 +1085,11 @@ export default function ArtesApp() {
       setToastMessage('Support chat is momenteel niet beschikbaar.');
       return;
     }
-    const fallbackThreadId = `moderation_${authUser.uid}`;
-    setSupportThreadId(fallbackThreadId);
     setView('chat');
     ensureModerationThread(authUser)
       .then((threadId) => {
         if (threadId) {
+          setResolvedModerationThreadId(threadId);
           setSupportThreadId(threadId);
         }
       })

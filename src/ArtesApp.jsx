@@ -103,6 +103,11 @@ const DIDIT_REJECTED_STATUSES = ['rejected', 'denied', 'declined', 'failed'];
 
 const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().toLowerCase() || null;
 
+const hasCompletedOnboarding = (profileData) => (
+  profileData?.onboardingComplete === true
+  || Number(profileData?.onboardingStep || 0) >= 5
+);
+
 const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
   if (!authIsReady) return null;
   if (!authUserData) return 1;
@@ -497,7 +502,7 @@ export default function ArtesApp() {
   const authReadyRef = useRef(false);
   const userProfile = profile;
   const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
-  const onboardingLocked = Boolean(authUser?.uid && profile && profile.onboardingComplete !== true);
+  const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
   const [configLoading, setConfigLoading] = useState(true);
@@ -690,7 +695,7 @@ export default function ArtesApp() {
         const profileData = await ensureUserProfile(u);
         const normalized = normalizeProfileData(profileData, u.uid);
         setProfile(normalized);
-        const onboardingComplete = profileData?.onboardingComplete === true;
+        const onboardingComplete = hasCompletedOnboarding(profileData);
         const baseView = onboardingComplete ? 'gallery' : 'onboarding';
         const path = window.location.pathname || '/';
         const claimToken = getClaimTokenFromPath(path);
@@ -1172,6 +1177,7 @@ export default function ArtesApp() {
       linkedCompanyName: profileData.linkedCompanyName,
       onboardingComplete: true,
       onboardingStep: 5,
+      onboardingCompletedAt: serverTimestamp(),
       preferences: {
         ...profileData.preferences,
         triggerVisibility: normalizeTriggerPreferences(profileData.preferences?.triggerVisibility),
@@ -1226,7 +1232,7 @@ export default function ArtesApp() {
       const profileData = await ensureUserProfile(refreshed);
       const normalized = normalizeProfileData(profileData, refreshed?.uid);
       setProfile(normalized);
-      const onboardingComplete = profileData?.onboardingComplete === true;
+      const onboardingComplete = hasCompletedOnboarding(profileData);
       setView(onboardingComplete ? 'gallery' : 'onboarding');
     } catch (error) {
       console.error('Failed to refresh verification state', error);

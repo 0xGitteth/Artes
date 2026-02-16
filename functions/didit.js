@@ -239,7 +239,12 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
 
   await idvRef.set(updates, { merge: true });
 
+  const existingUserSnapshot = await userRef.get();
+  const existingStepRaw = existingUserSnapshot.exists ? existingUserSnapshot.get('onboardingStep') : null;
+  const existingStep = Number.isFinite(Number(existingStepRaw)) ? Number(existingStepRaw) : 0;
+
   if (isApprovedStatus(normalizedStatus)) {
+    const approvedStep = Math.max(existingStep, 3);
     await userRef.set(
       {
         ageVerified: isAdult === true,
@@ -247,7 +252,7 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
         ...(isAdult === true
           ? {
             ageVerifiedAt: now,
-            onboardingStep: 3,
+            onboardingStep: approvedStep,
           }
           : {}),
       },
@@ -256,11 +261,12 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
   }
 
   if (isRejectedStatus(normalizedStatus)) {
+    const rejectedStep = Math.max(existingStep, 2);
     await userRef.set(
       {
         ageVerified: false,
         isAdult: false,
-        onboardingStep: 2,
+        onboardingStep: rejectedStep,
       },
       { merge: true }
     );

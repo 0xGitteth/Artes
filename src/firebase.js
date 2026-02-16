@@ -411,6 +411,74 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   );
 };
 
+const ONBOARDING_WRITE_KEYS = ['onboardingStep', 'onboardingComplete'];
+
+const hasOnboardingWriteKeys = (patch = {}) => ONBOARDING_WRITE_KEYS.some((key) => key in patch);
+
+const toOnboardingStepNumber = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const logOnboardingWrite = ({ uid, label, patch, prevStep, prevComplete, nextStep, nextComplete }) => {
+  if (!import.meta.env.DEV) return;
+  console.log(
+    '[onboarding-write]',
+    {
+      uid,
+      label,
+      patchKeys: Object.keys(patch).sort(),
+      prevStep,
+      prevComplete,
+      nextStep,
+      nextComplete,
+    },
+  );
+};
+
+export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = {}) => {
+  if (!uid || !patch || typeof patch !== 'object') return;
+  const userRef = doc(getFirebaseDb(), 'users', uid);
+  const nextPatch = { ...patch };
+
+  if (!hasOnboardingWriteKeys(nextPatch)) {
+    await setDoc(userRef, nextPatch, { merge: true });
+    return;
+  }
+
+  const snapshot = await getDoc(userRef);
+  const existing = snapshot.exists() ? snapshot.data() : {};
+  const prevStep = toOnboardingStepNumber(existing?.onboardingStep);
+  const prevComplete = existing?.onboardingComplete === true;
+
+  const requestedStep = toOnboardingStepNumber(nextPatch.onboardingStep);
+  let nextStep = prevStep;
+
+  if (requestedStep != null) {
+    nextStep = prevStep == null ? requestedStep : Math.max(prevStep, requestedStep);
+    nextPatch.onboardingStep = nextStep;
+  }
+
+  const requestedComplete = nextPatch.onboardingComplete === true;
+  const nextComplete = prevComplete || requestedComplete;
+
+  if ('onboardingComplete' in nextPatch && nextPatch.onboardingComplete !== nextComplete) {
+    nextPatch.onboardingComplete = nextComplete;
+  }
+
+  logOnboardingWrite({
+    uid,
+    label,
+    patch: nextPatch,
+    prevStep,
+    prevComplete,
+    nextStep,
+    nextComplete,
+  });
+
+  await setDoc(userRef, nextPatch, { merge: true });
+};
+
 /**
  * Sanitizes themes array by removing "General" (which should never be auto-added).
  * Use this before storing theme data.
@@ -444,8 +512,19 @@ export const createUserProfile = async (uid, profile) => {
   if (import.meta.env.DEV) {
     console.log('[createUserProfile] Writing to users/' + uid, payload);
   }
-  
-  await setDoc(doc(getFirebaseDb(), 'users', uid), payload);
+
+  const userRef = doc(getFirebaseDb(), 'users', uid);
+  const existingSnapshot = await getDoc(userRef);
+
+  if (existingSnapshot.exists()) {
+    if (import.meta.env.DEV) {
+      console.log('[createUserProfile] users/' + uid + ' already exists, applying merge patch instead');
+    }
+    await patchUserProfile(uid, payload, { label: 'createUserProfile(existing)' });
+    return;
+  }
+
+  await patchUserProfile(uid, payload, { label: 'createUserProfile(new)' });
 };
 export const updateUserProfile = async (uid, data) => {
   const safeData = stripClientGateFields(data);
@@ -463,11 +542,7 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   try {
-    await setDoc(
-      doc(getFirebaseDb(), 'users', uid),
-      updatePayload,
-      { merge: true },
-    );
+    await patchUserProfile(uid, updatePayload, { label: 'updateUserProfile' });
   } catch (e) {
     console.error(
       '[updateUserProfile] USERS WRITE FAILED',
@@ -669,7 +744,6 @@ export const migrateArtifactsUserData = async (user) => {
   let migratedProfile = false;
   if (profileSnap.exists()) {
     const data = profileSnap.data();
-    const targetRef = doc(db, 'users', user.uid);
     
     // Sanitize themes in migrated data
     if (data.themes && Array.isArray(data.themes)) {
@@ -680,10 +754,10 @@ export const migrateArtifactsUserData = async (user) => {
       if (import.meta.env.DEV) {
         console.log('[migrateArtifactsUserData] Creating users/' + user.uid + ' from artifacts', data);
       }
-      migrations.push(setDoc(
-        targetRef,
+      migrations.push(patchUserProfile(
+        user.uid,
         { ...data, updatedAt: serverTimestamp() },
-        { merge: true },
+        { label: 'migrateArtifactsUserData(create)' },
       ));
       migratedProfile = true;
     } else {
@@ -700,10 +774,10 @@ export const migrateArtifactsUserData = async (user) => {
         if (import.meta.env.DEV) {
           console.log('[migrateArtifactsUserData] Updating users/' + user.uid + ' from artifacts', updates);
         }
-        migrations.push(setDoc(
-          targetRef,
+        migrations.push(patchUserProfile(
+          user.uid,
           { ...updates, updatedAt: serverTimestamp() },
-          { merge: true },
+          { label: 'migrateArtifactsUserData(update)' },
         ));
         migratedProfile = true;
       }

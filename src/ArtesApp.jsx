@@ -495,12 +495,19 @@ export default function ArtesApp() {
   const [moderationActionPending, setModerationActionPending] = useState(false);
   const [moderatorAccess, setModeratorAccess] = useState(null);
   const [isModeratorClient, setIsModeratorClient] = useState(false);
+  const [moderationUnreadBlocked, setModerationUnreadBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
   const [supportThreadId, setSupportThreadId] = useState(null);
   const [resolvedModerationThreadId, setResolvedModerationThreadId] = useState('');
   const [claimInviteToken, setClaimInviteToken] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
+  const authUserRef = useRef(null);
+  const isModeratorClientRef = useRef(false);
+  const moderationModalIdRef = useRef(null);
+  const moderationUnreadBlockedRef = useRef(false);
+  const moderationUnreadBlockedGateRef = useRef(null);
+  const unsubRef = useRef(null);
   const userProfile = profile;
   const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
@@ -593,23 +600,41 @@ export default function ArtesApp() {
     setChallengeConfig(normalizedChallenge);
   }, []);
 
-  const logListenerStart = useCallback(
-    (label, options = {}) => {
-      if (!import.meta.env.DEV) return;
-      const {
-        authUser: listenerUser = authUser,
-        authReady: listenerReady = authReady,
-        isModeratorClient: listenerModeratorClient = isModeratorClient,
-      } = options;
-      console.log(`[ArtesApp] Listener start: ${label}`, {
-        authReady: listenerReady,
-        uid: listenerUser?.uid || null,
-        emailVerified: listenerUser?.emailVerified ?? null,
-        isModeratorClient: Boolean(listenerModeratorClient),
-      });
-    },
-    [authReady, authUser, isModeratorClient],
-  );
+  const logListenerStart = useCallback((label, options = {}) => {
+    if (!import.meta.env.DEV) return;
+    const listenerUser = options.authUser ?? authUserRef.current;
+    const listenerReady = options.authReady ?? authReadyRef.current;
+    const listenerModeratorClient = options.isModeratorClient ?? isModeratorClientRef.current;
+    console.log(`[ArtesApp] Listener start: ${label}`, {
+      authReady: listenerReady,
+      uid: listenerUser?.uid || null,
+      emailVerified: listenerUser?.emailVerified ?? null,
+      isModeratorClient: Boolean(listenerModeratorClient),
+    });
+  }, []);
+
+  const cleanupModerationListener = useCallback(() => {
+    if (!unsubRef.current) return;
+    const unsubscribe = unsubRef.current;
+    unsubRef.current = null;
+    unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    authUserRef.current = authUser;
+  }, [authUser]);
+
+  useEffect(() => {
+    isModeratorClientRef.current = isModeratorClient;
+  }, [isModeratorClient]);
+
+  useEffect(() => {
+    moderationModalIdRef.current = moderationModal?.id || null;
+  }, [moderationModal?.id]);
+
+  useEffect(() => {
+    moderationUnreadBlockedRef.current = moderationUnreadBlocked;
+  }, [moderationUnreadBlocked]);
 
   const handleListenerError = useCallback((label, error) => {
     if (error?.code === 'permission-denied' && !authReady) {
@@ -898,23 +923,16 @@ export default function ArtesApp() {
   }, [authReady, authUser?.uid, logListenerStart, handleListenerError]);
 
   useEffect(() => {
-    let unsubscribe = null;
     let active = true;
 
-    const stopModeration = () => {
-      setIsModeratorClient(false);
-      if (unsubscribe) {
-        unsubscribe();
-        unsubscribe = null;
-      }
-    };
-
     const setup = async () => {
+      cleanupModerationListener();
       setIsModeratorClient(false);
       const hasAdultVerification = profile?.ageVerified === true || profile?.isAdult === true;
       if (!authReady || !authUser?.uid || hasAdultVerification !== true || !authUser?.emailVerified) {
         setIsModeratorClient(false);
-        stopModeration();
+        setModerationUnreadBlocked(false);
+        moderationUnreadBlockedGateRef.current = null;
         return;
       }
 
@@ -926,16 +944,33 @@ export default function ArtesApp() {
 
         if (!resolvedIsModeratorClient) {
           setIsModeratorClient(false);
-          stopModeration();
+          setModerationUnreadBlocked(false);
+          moderationUnreadBlockedGateRef.current = null;
           return;
         }
 
         setIsModeratorClient(true);
 
         if (!resolvedModerationThreadId) {
-          stopModeration();
+          setModerationUnreadBlocked(false);
+          moderationUnreadBlockedGateRef.current = null;
           return;
         }
+
+        const moderationGate = [
+          authUser.uid,
+          authUser.emailVerified ? '1' : '0',
+          hasAdultVerification ? '1' : '0',
+          resolvedIsModeratorClient ? '1' : '0',
+          resolvedModerationThreadId,
+        ].join('|');
+        const isBlockedForSameGate = moderationUnreadBlockedRef.current
+          && moderationUnreadBlockedGateRef.current === moderationGate;
+        if (isBlockedForSameGate) {
+          return;
+        }
+        setModerationUnreadBlocked(false);
+        moderationUnreadBlockedGateRef.current = null;
 
         const messagesRef = collection(db, 'threads', resolvedModerationThreadId, 'messages');
         const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
@@ -943,21 +978,29 @@ export default function ArtesApp() {
         logListenerStart('Moderation unread listener (ArtesApp)', {
           isModeratorClient: true,
         });
-        unsubscribe = onSnapshot(
+        unsubRef.current = onSnapshot(
           q,
           (snapshot) => {
             if (!active || snapshot.empty) return;
             const docSnap = snapshot.docs[0];
-            if (moderationModal?.id === docSnap.id) return;
+            if (moderationModalIdRef.current === docSnap.id) return;
             setModerationModal({ id: docSnap.id, ...docSnap.data() });
           },
           (err) => {
-            stopModeration();
+            cleanupModerationListener();
+            if (err?.code === 'permission-denied') {
+              if (moderationUnreadBlockedGateRef.current !== moderationGate) {
+                console.error('[ArtesApp] Moderation unread listener blocked (permission-denied).');
+              }
+              moderationUnreadBlockedGateRef.current = moderationGate;
+              setModerationUnreadBlocked(true);
+              return;
+            }
             handleListenerError('Moderation unread listener (ArtesApp)', err);
           },
         );
       } catch (error) {
-        stopModeration();
+        cleanupModerationListener();
         console.error('Failed to setup moderation unread listener check', error);
       }
     };
@@ -966,9 +1009,9 @@ export default function ArtesApp() {
 
     return () => {
       active = false;
-      stopModeration();
+      cleanupModerationListener();
     };
-  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, moderationModal?.id, logListenerStart, handleListenerError, profile?.ageVerified, profile?.isAdult, resolvedModerationThreadId]);
+  }, [authReady, authUser?.uid, authUser?.email, authUser?.emailVerified, logListenerStart, handleListenerError, profile?.ageVerified, profile?.isAdult, resolvedModerationThreadId, cleanupModerationListener]);
 
   useEffect(() => {
     if (view !== 'chat') return;

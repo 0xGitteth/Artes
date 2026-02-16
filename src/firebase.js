@@ -691,6 +691,7 @@ export const ensureUserProfile = async (user) => {
   const resolvedEmail = user.email ?? null;
   const writeAllowed = canWriteUserProfile(user, providerId);
   const snapshot = await fetchUserProfile(user.uid);
+  const isPermissionDenied = (error) => error?.code === 'permission-denied';
   if (snapshot.exists()) {
     const data = snapshot.data();
     if (!writeAllowed) {
@@ -709,20 +710,35 @@ export const ensureUserProfile = async (user) => {
       updates.onboardingComplete = hasRoles;
     }
     if (Object.keys(updates).length) {
-      await updateUserProfile(user.uid, updates);
+      try {
+        await updateUserProfile(user.uid, updates);
+      } catch (error) {
+        if (!isPermissionDenied(error)) throw error;
+        if (import.meta.env.DEV) {
+          console.log('ensureUserProfile skipped update: permission denied');
+        }
+        return data;
+      }
     }
     const displayName = updates.displayName || data.displayName || resolvedDisplayName;
     const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
-    await writePublicUserProfile(
-      user.uid,
-      {
-        ...data,
-        displayName,
-        username,
-        photoURL: data.photoURL ?? user.photoURL ?? null,
-      },
-      {},
-    );
+    try {
+      await writePublicUserProfile(
+        user.uid,
+        {
+          ...data,
+          displayName,
+          username,
+          photoURL: data.photoURL ?? user.photoURL ?? null,
+        },
+        {},
+      );
+    } catch (error) {
+      if (!isPermissionDenied(error)) throw error;
+      if (import.meta.env.DEV) {
+        console.log('ensureUserProfile skipped public profile sync: permission denied');
+      }
+    }
     return { ...data, ...updates };
   }
 
@@ -747,13 +763,28 @@ export const ensureUserProfile = async (user) => {
     onboardingStep: defaultOnboardingStep,
     onboardingComplete: false,
   };
-  await createUserProfile(user.uid, profile);
+  try {
+    await createUserProfile(user.uid, profile);
+  } catch (error) {
+    if (!isPermissionDenied(error)) throw error;
+    if (import.meta.env.DEV) {
+      console.log('ensureUserProfile skipped create: permission denied');
+    }
+    return profile;
+  }
   const username = generateUsername(resolvedDisplayName, user.uid);
-  await writePublicUserProfile(user.uid, {
-    username,
-    displayName: resolvedDisplayName,
-    photoURL: user.photoURL ?? null,
-  });
+  try {
+    await writePublicUserProfile(user.uid, {
+      username,
+      displayName: resolvedDisplayName,
+      photoURL: user.photoURL ?? null,
+    });
+  } catch (error) {
+    if (!isPermissionDenied(error)) throw error;
+    if (import.meta.env.DEV) {
+      console.log('ensureUserProfile skipped public profile create: permission denied');
+    }
+  }
   return profile;
 };
 

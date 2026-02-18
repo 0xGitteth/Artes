@@ -41,6 +41,7 @@ import {
   normalizeEmail,
   normalizeInstagram,
 } from './utils/contributorClaims';
+import { canAccessFirestore, devLog, isOnboardingComplete } from './utils/firestoreGate';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -65,6 +66,9 @@ const getFirebaseAuth = () => getAuth(getFirebaseApp());
 const getFirebaseDb = () => getFirestore(getFirebaseApp());
 const getFirebaseFunctions = () => getFunctions(getFirebaseApp(), 'europe-west4');
 const getFirebaseStorage = () => getStorage(getFirebaseApp());
+
+let authStateReady = false;
+let authStateUser = null;
 
 export const getFirebaseAuthInstance = () => getFirebaseAuth();
 export const getFirebaseDbInstance = () => getFirebaseDb();
@@ -242,6 +246,8 @@ export const initAuth = async () => {
 };
 
 export const observeAuth = (cb) => onAuthStateChanged(getFirebaseAuth(), async (user) => {
+  authStateReady = true;
+  authStateUser = user ?? null;
   if (import.meta.env.DEV) {
     let provider = null;
 
@@ -479,6 +485,28 @@ export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = 
   await setDoc(userRef, nextPatch, { merge: true });
 };
 
+export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
+  if (!uid || !patch || typeof patch !== 'object') return null;
+  const user = userOverride ?? authStateUser;
+  const canWrite = user?.emailVerified === true || Boolean(import.meta.env.DEV && user?.isAnonymous === true);
+
+  if (!canWrite) {
+    devLog('[firestore-gate]', { action: 'write-skip', uid, reason: 'user-not-verified' });
+    return null;
+  }
+
+  try {
+    await patchUserProfile(uid, patch, { label: 'safeUserWrite' });
+    return true;
+  } catch (error) {
+    if (error?.code === 'permission-denied') {
+      devLog('[firestore-gate]', { action: 'write-blocked', uid, reason: 'permission-denied' });
+      return null;
+    }
+    throw error;
+  }
+};
+
 /**
  * Sanitizes themes array by removing "General" (which should never be auto-added).
  * Use this before storing theme data.
@@ -520,11 +548,11 @@ export const createUserProfile = async (uid, profile) => {
     if (import.meta.env.DEV) {
       console.log('[createUserProfile] users/' + uid + ' already exists, applying merge patch instead');
     }
-    await patchUserProfile(uid, payload, { label: 'createUserProfile(existing)' });
+    await safeUserWrite(uid, payload);
     return;
   }
 
-  await patchUserProfile(uid, payload, { label: 'createUserProfile(new)' });
+  await safeUserWrite(uid, payload);
 };
 export const updateUserProfile = async (uid, data) => {
   const safeData = stripClientGateFields(data);
@@ -541,8 +569,9 @@ export const updateUserProfile = async (uid, data) => {
     console.log('[updateUserProfile] payload keys', Object.keys(updatePayload).sort());
   }
 
+  let didWriteUser = false;
   try {
-    await patchUserProfile(uid, updatePayload, { label: 'updateUserProfile' });
+    didWriteUser = (await safeUserWrite(uid, updatePayload)) === true;
   } catch (e) {
     console.error(
       '[updateUserProfile] USERS WRITE FAILED',
@@ -554,6 +583,12 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const shouldSyncPublic = Object.keys(publicPatch).length > 0;
+  if (!didWriteUser) {
+    if (import.meta.env.DEV) {
+      devLog('[firestore-gate]', { action: 'public-write-skip', uid, reason: 'user-write-not-allowed-or-blocked' });
+    }
+    return;
+  }
 
   if (import.meta.env.DEV) {
     console.log('[updateUserProfile] publicUsers patch keys', Object.keys(publicPatch).sort());
@@ -584,7 +619,15 @@ export const updateUserProfile = async (uid, data) => {
   }
 };
 
-export const fetchUserProfile = (uid) => getDoc(doc(getFirebaseDb(), 'users', uid));
+export const fetchUserProfile = (uid, gate = {}) => {
+  const ready = gate?.authReady ?? authStateReady;
+  const user = gate?.user ?? authStateUser;
+  if (!canAccessFirestore({ authReady: ready, user }) || !uid) {
+    devLog('[firestore-gate]', { action: 'read-skip', path: `users/${uid || 'unknown'}` });
+    return null;
+  }
+  return getDoc(doc(getFirebaseDb(), 'users', uid));
+};
 
 let appConfigCache = {
   fetchedAt: 0,
@@ -663,11 +706,19 @@ export const isModerator = async (user) => {
   }
 };
 
-export const subscribeToProfile = (uid, cb) => onSnapshot(
-  doc(getFirebaseDb(), 'users', uid),
-  cb,
-  (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Profile listener users/${uid}`),
-);
+export const subscribeToProfile = (uid, cb, gate = {}) => {
+  const ready = gate?.authReady ?? authStateReady;
+  const user = gate?.user ?? authStateUser;
+  if (!canAccessFirestore({ authReady: ready, user }) || !uid) {
+    devLog('[firestore-gate]', { action: 'listener-skip', path: `users/${uid || 'unknown'}` });
+    return null;
+  }
+  return onSnapshot(
+    doc(getFirebaseDb(), 'users', uid),
+    cb,
+    (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Profile listener users/${uid}`),
+  );
+};
 
 const resolveAuthProvider = (user) => {
   if (user?.providerData?.some((provider) => provider?.providerId === 'google.com')) {
@@ -684,16 +735,22 @@ const canWriteUserProfile = (user, providerId) => {
 };
 
 export const ensureUserProfile = async (user) => {
-  if (!user?.uid) return null;
+  if (!canAccessFirestore({ authReady: authStateReady, user }) || !user?.uid) return null;
   const providerId = resolveAuthProvider(user);
   const defaultOnboardingStep = providerId === 'google.com' ? 2 : 1;
   const resolvedDisplayName = resolveDisplayName(user);
   const resolvedEmail = user.email ?? null;
   const writeAllowed = canWriteUserProfile(user, providerId);
-  const snapshot = await fetchUserProfile(user.uid);
+  const snapshot = await fetchUserProfile(user.uid, { authReady: authStateReady, user });
+  if (!snapshot) return null;
   const isPermissionDenied = (error) => error?.code === 'permission-denied';
   if (snapshot.exists()) {
     const data = snapshot.data();
+    if (isOnboardingComplete(data) && Number(data?.onboardingStep || 0) < 5) {
+      await safeUserWrite(user.uid, { onboardingStep: 5 }, user);
+      data.onboardingStep = 5;
+      devLog('[onboarding-state]', { uid: user.uid, action: 'repair-step-to-5' });
+    }
     if (!writeAllowed) {
       if (import.meta.env.DEV) {
         console.log('ensureUserProfile skipped write: unverified user');
@@ -711,7 +768,7 @@ export const ensureUserProfile = async (user) => {
     }
     if (Object.keys(updates).length) {
       try {
-        await updateUserProfile(user.uid, updates);
+        await safeUserWrite(user.uid, updates, user);
       } catch (error) {
         if (!isPermissionDenied(error)) throw error;
         if (import.meta.env.DEV) {
@@ -764,7 +821,11 @@ export const ensureUserProfile = async (user) => {
     onboardingComplete: false,
   };
   try {
-    await createUserProfile(user.uid, profile);
+    await safeUserWrite(user.uid, {
+      ...profile,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, user);
   } catch (error) {
     if (!isPermissionDenied(error)) throw error;
     if (import.meta.env.DEV) {
@@ -941,10 +1002,10 @@ export const subscribeToLikes = (postId, cb) =>
   );
 
 /**
- * Ensures a support or moderation thread exists for a user.
+ * Ensures a support thread exists for a user.
  * Creates the thread with base fields if it doesn't exist.
  * 
- * @param {string} threadId - The thread ID (e.g., 'support_uid' or 'moderation_uid')
+ * @param {string} threadId - The thread ID (e.g., 'support_uid')
  * @param {string} type - Thread type: 'support' or 'moderation'
  * @param {Object} userProfile - Optional user profile data { displayName, photoURL, username }
  * @returns {Promise<string>} - The threadId
@@ -970,7 +1031,7 @@ export const ensureThreadExists = async (threadId, type = 'support', userProfile
 
       // Thread doesn't exist, create it
       const { displayName = 'Artes gebruiker', photoURL = null, username = '' } = userProfile;
-      const uid = threadId.split('_')[1]; // Extract uid from 'support_uid' or 'moderation_uid'
+      const uid = threadId.split('_')[1]; // Extract uid from 'support_uid'
 
       transaction.set(threadRef, {
         type,

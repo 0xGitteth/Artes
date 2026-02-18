@@ -167,7 +167,7 @@ const SUPPORT_INTRO_TEXTS = [SUPPORT_INTRO_MESSAGE, LEGACY_SUPPORT_INTRO_MESSAGE
 
 const ensureModerationThreadForUser = async (uid) => {
   if (!uid) return null;
-  const threadId = `moderation_${uid}`;
+  const threadId = `support_${uid}`;
   const threadRef = db.collection('threads').doc(threadId);
   const threadIndexRef = db.collection('users').doc(uid).collection('threadIndex').doc(threadId);
   const publicProfile = await fetchPublicUser(uid);
@@ -1366,7 +1366,7 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west1
     logger.info('sendSupportMessage: Token verified', { uid: decoded.uid });
     
     const body = parseJsonBody(req);
-    const threadId = body?.threadId || `moderation_${decoded.uid}`;
+    const threadId = body?.threadId || `support_${decoded.uid}`;
     const text = String(body?.text || '').trim();
     
     if (!threadId || !text) {
@@ -1858,7 +1858,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       return;
     }
     const userId = decoded.uid;
-    const threadId = `moderation_${userId}`;
+    const threadId = `support_${userId}`;
     const threadRef = db.collection('threads').doc(threadId);
     const messageRef = threadRef.collection('messages').doc(messageId);
     const uploadRef = db.collection('uploads').doc(uploadId);

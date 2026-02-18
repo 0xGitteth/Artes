@@ -77,6 +77,7 @@ import ModerationSupportChat from './components/ModerationSupportChat';
 import SupportLanding from './components/SupportLanding';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { debugAllowed } from './utils/debugAccess';
+import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 
 // --- Constants & Styling ---
 
@@ -103,22 +104,20 @@ const DIDIT_REJECTED_STATUSES = ['rejected', 'denied', 'declined', 'failed'];
 
 const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().toLowerCase() || null;
 
-const hasCompletedOnboarding = (profileData) => (
-  profileData?.onboardingComplete === true
-  || Number(profileData?.onboardingStep || 0) >= 5
-);
+const hasCompletedOnboarding = isOnboardingComplete;
 
 const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
   if (!authIsReady) return null;
   if (!authUserData) return 1;
 
+  if (isOnboardingComplete(profileData)) return 5;
   const statusFromProfile = normalizeDiditStatus(profileData?.idv?.status || profileData?.diditStatus);
   const ageVerified = profileData?.ageVerified;
   const isAdult = profileData?.isAdult;
   const storedStep = Number(profileData?.onboardingStep || 0);
   const requestedStep = Number.parseInt(queryParams?.get('step') || '', 10);
 
-  if (storedStep >= 3) return 3;
+  if (storedStep >= 3) return Math.min(storedStep, 4);
   if (ageVerified === true && isAdult === true) return 3;
   if (ageVerified === false || DIDIT_REJECTED_STATUSES.includes(statusFromProfile || '')) return 2;
   if (Number.isFinite(requestedStep) && requestedStep === 1 && !authUserData?.uid) return 1;
@@ -505,18 +504,23 @@ export default function ArtesApp() {
   const authUserRef = useRef(null);
   const isModeratorClientRef = useRef(false);
   const moderationModalIdRef = useRef(null);
-  const moderationUnreadBlockedRef = useRef(false);
-  const moderationUnreadBlockedGateRef = useRef(null);
   const unsubRef = useRef(null);
+  const moderationListenerKeyRef = useRef(null);
+  const moderationBlockedKeysRef = useRef(new Set());
+  const profileUnsubscribeRef = useRef(null);
+  const profileActiveKeyRef = useRef(null);
+  const profileBlockedKeysRef = useRef(new Set());
   const userProfile = profile;
   const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
-  const canReadFirestore = authReady && !!authUser?.uid;
+  const profileAgeVerifiedStrict = profile?.ageVerified === true;
+  const canReadFirestore = canAccessFirestore({ authReady, user: authUser });
   const moderatorResolvedTrue = isModeratorClient === true;
-  const canStartModerationUnread = canReadFirestore
-    && authUser?.emailVerified
-    && profileAgeVerified
-    && moderatorResolvedTrue
-    && !!resolvedModerationThreadId;
+  const canStartModerationUnread = canStartModeration({
+    authReady,
+    user: { ...authUser, isModerator: moderatorResolvedTrue },
+    profile,
+    config: appConfig,
+  }) && !!resolvedModerationThreadId;
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
@@ -613,7 +617,7 @@ export default function ArtesApp() {
     const listenerUser = options.authUser ?? authUserRef.current;
     const listenerReady = options.authReady ?? authReadyRef.current;
     const listenerModeratorClient = options.isModeratorClient ?? isModeratorClientRef.current;
-    console.log(`[ArtesApp] Listener start: ${label}`, {
+    devLog('[listener-start]', { label,
       authReady: listenerReady,
       uid: listenerUser?.uid || null,
       emailVerified: listenerUser?.emailVerified ?? null,
@@ -640,15 +644,15 @@ export default function ArtesApp() {
     moderationModalIdRef.current = moderationModal?.id || null;
   }, [moderationModal?.id]);
 
-  useEffect(() => {
-    moderationUnreadBlockedRef.current = moderationUnreadBlocked;
-  }, [moderationUnreadBlocked]);
-
   const handleListenerError = useCallback((label, error) => {
     if (error?.code === 'permission-denied' && !authReady) {
       if (import.meta.env.DEV) {
         console.log(`[ArtesApp] ${label} skipped, auth not ready`);
       }
+      return;
+    }
+    if (error?.code === 'permission-denied') {
+      devLog('[listener-blocked]', { label, code: error?.code });
       return;
     }
     console.error('SNAPSHOT ERROR:', error?.code, error?.message, 'LABEL:', label);
@@ -902,12 +906,12 @@ export default function ArtesApp() {
   // Data Listeners
   // No Firestore listeners before authReady.
   useEffect(() => {
-     if (!authReady || !user) return;
+     if (!canAccessFirestore({ authReady, user })) return;
      logListenerStart('Posts listener (ArtesApp)');
-     const unsubPosts = subscribeToPosts(setPosts);
+     const unsubPosts = subscribeToPosts(setPosts, { authReady, user });
      logListenerStart('Users listener (ArtesApp)');
-     const unsubUsers = subscribeToUsers(setUsers);
-     return () => { unsubPosts(); unsubUsers(); };
+     const unsubUsers = subscribeToUsers(setUsers, { authReady, user });
+     return () => { if (typeof unsubPosts === 'function') unsubPosts(); if (typeof unsubUsers === 'function') unsubUsers(); };
   }, [authReady, user, logListenerStart]);
 
   useEffect(() => {
@@ -965,29 +969,26 @@ export default function ArtesApp() {
     let active = true;
 
     const setupModerationUnreadListener = () => {
+      const listenerKey = `${authUser?.uid || 'none'}|${resolvedModerationThreadId || 'none'}`;
+
       cleanupModerationListener();
       if (!canStartModerationUnread) {
         setModerationUnreadBlocked(false);
-        moderationUnreadBlockedGateRef.current = null;
+        moderationListenerKeyRef.current = null;
         return;
       }
+
+      if (moderationBlockedKeysRef.current.has(listenerKey)) {
+        devLog('[listener-blocked]', { label: 'Moderation unread listener (ArtesApp)', key: listenerKey });
+        return;
+      }
+
+      if (moderationListenerKeyRef.current === listenerKey) {
+        return;
+      }
+      moderationListenerKeyRef.current = listenerKey;
 
       const db = getFirebaseDbInstance();
-      const moderationGate = [
-        authUser.uid,
-        authUser.emailVerified ? '1' : '0',
-        profileAgeVerified ? '1' : '0',
-        moderatorResolvedTrue ? '1' : '0',
-        resolvedModerationThreadId,
-      ].join('|');
-      const isBlockedForSameGate = moderationUnreadBlockedRef.current
-        && moderationUnreadBlockedGateRef.current === moderationGate;
-      if (isBlockedForSameGate) {
-        return;
-      }
-      setModerationUnreadBlocked(false);
-      moderationUnreadBlockedGateRef.current = null;
-
       const messagesRef = collection(db, 'threads', resolvedModerationThreadId, 'messages');
       const q = query(messagesRef, where('unread', '==', true), orderBy('createdAt', 'desc'), limit(1));
 
@@ -1005,11 +1006,9 @@ export default function ArtesApp() {
         (err) => {
           cleanupModerationListener();
           if (err?.code === 'permission-denied') {
-            if (moderationUnreadBlockedGateRef.current !== moderationGate) {
-              console.error('[ArtesApp] Moderation unread listener blocked (permission-denied).');
-            }
-            moderationUnreadBlockedGateRef.current = moderationGate;
+            moderationBlockedKeysRef.current.add(listenerKey);
             setModerationUnreadBlocked(true);
+            devLog('[listener-blocked]', { label: 'Moderation unread listener (ArtesApp)', key: listenerKey, code: err?.code });
             return;
           }
           handleListenerError('Moderation unread listener (ArtesApp)', err);
@@ -1026,11 +1025,8 @@ export default function ArtesApp() {
   }, [
     canStartModerationUnread,
     authUser?.uid,
-    authUser?.emailVerified,
     logListenerStart,
     handleListenerError,
-    profileAgeVerified,
-    moderatorResolvedTrue,
     resolvedModerationThreadId,
     cleanupModerationListener,
   ]);
@@ -1105,43 +1101,66 @@ export default function ArtesApp() {
   // Live snapshot listener for own profile updates
   // This ensures UI updates immediately when profile is saved, not just on tab switch
   useEffect(() => {
-    if (!authReady || !authUser?.uid) return;
-    
-    const db = getFirebaseDbInstance();
-    if (import.meta.env.DEV) {
-      console.log('[ArtesApp] Setting up live profile listener for uid:', authUser.uid);
+    const key = authUser?.uid ? `profile:${authUser.uid}` : null;
+
+    if (!canAccessFirestore({ authReady, user: authUser }) || !key) {
+      if (profileUnsubscribeRef.current) {
+        profileUnsubscribeRef.current();
+        profileUnsubscribeRef.current = null;
+      }
+      profileActiveKeyRef.current = null;
+      return;
     }
+
+    if (profileBlockedKeysRef.current.has(key)) {
+      devLog('[listener-blocked]', { label: 'Profile listener (ArtesApp)', key });
+      return;
+    }
+
+    if (profileActiveKeyRef.current === key && profileUnsubscribeRef.current) {
+      return;
+    }
+
+    if (profileUnsubscribeRef.current) {
+      profileUnsubscribeRef.current();
+      profileUnsubscribeRef.current = null;
+    }
+
+    const db = getFirebaseDbInstance();
+    profileActiveKeyRef.current = key;
     logListenerStart('Profile listener (ArtesApp)');
-    
-    const unsubscribe = onSnapshot(
+
+    profileUnsubscribeRef.current = onSnapshot(
       doc(db, 'users', authUser.uid),
       (snapshot) => {
-        if (!snapshot.exists()) {
-          if (import.meta.env.DEV) {
-            console.log('[ArtesApp] Profile snapshot: doc does not exist');
-          }
-          return;
-        }
+        if (!snapshot.exists()) return;
         const normalized = normalizeProfileData(snapshot.data(), authUser.uid);
-        if (import.meta.env.DEV) {
-          console.log('[ArtesApp] Profile snapshot update received:', {
-            themes: normalized.themes,
-            displayName: normalized.displayName,
-            bio: normalized.bio?.substring(0, 30),
-          });
-        }
+        devLog('[onboarding-state]', {
+          uid: authUser.uid,
+          onboardingStep: normalized?.onboardingStep,
+          onboardingComplete: normalized?.onboardingComplete === true,
+        });
         setProfile(normalized);
       },
       (error) => {
+        if (error?.code === 'permission-denied') {
+          if (profileUnsubscribeRef.current) {
+            profileUnsubscribeRef.current();
+            profileUnsubscribeRef.current = null;
+          }
+          profileBlockedKeysRef.current.add(key);
+          devLog('[listener-blocked]', { label: 'Profile listener (ArtesApp)', key, code: error?.code });
+          return;
+        }
         handleListenerError('Profile listener (ArtesApp)', error);
       }
     );
-    
+
     return () => {
-      if (import.meta.env.DEV) {
-        console.log('[ArtesApp] Cleaning up profile listener for uid:', authUser.uid);
+      if (profileUnsubscribeRef.current) {
+        profileUnsubscribeRef.current();
+        profileUnsubscribeRef.current = null;
       }
-      unsubscribe();
     };
   }, [authReady, authUser?.uid, logListenerStart, handleListenerError]);
 
@@ -1523,6 +1542,8 @@ export default function ArtesApp() {
               authReady={authReady}
               isModeratorClient={isModeratorClient}
               profileAgeVerified={profileAgeVerified}
+              profileAgeVerifiedStrict={profileAgeVerifiedStrict}
+              profileIsAdult={profile?.isAdult === true}
               logListenerStart={logListenerStart}
               handleListenerError={handleListenerError}
               uploads={uploads}
@@ -3175,7 +3196,7 @@ function UploadStatusPanel({ uploads = [] }) {
   );
 }
 
-function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter, authReady, isModeratorClient, profileAgeVerified, logListenerStart, handleListenerError }) {
+function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter, authReady, isModeratorClient, profileAgeVerified, profileAgeVerifiedStrict, profileIsAdult, logListenerStart, handleListenerError }) {
   const [cases, setCases] = useState([]);
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [selectedCase, setSelectedCase] = useState(null);
@@ -3191,12 +3212,15 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const reviewCasesListenerLogRef = useRef(null);
 
   useEffect(() => {
-    const shouldStart = authReady
-      && Boolean(authUser?.uid)
-      && profileAgeVerified === true
-      && authUser?.emailVerified === true
-      && isModeratorClient === true
-      && isModerator === true;
+    const shouldStart = canStartModeration({
+      authReady,
+      user: { ...authUser, isModerator: isModeratorClient === true && isModerator === true },
+      profile: {
+        ageVerified: profileAgeVerifiedStrict === true,
+        isAdult: profileIsAdult === true,
+      },
+      config: null,
+    });
     if (import.meta.env.DEV) {
       const reason = !authReady
         ? 'skip: auth not ready'
@@ -3204,6 +3228,8 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
           ? 'skip: no auth user'
           : profileAgeVerified !== true
             ? 'skip: profile age not verified'
+          : profileIsAdult !== true
+            ? 'skip: profile not adult'
             : !authUser?.emailVerified
               ? 'skip: email not verified'
             : isModeratorClient !== true
@@ -3229,7 +3255,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       },
       (err) => handleListenerError('Moderation reviewCases listener (ArtesApp)', err),
     );
-  }, [authReady, authUser, authUser?.emailVerified, isModeratorClient, isModerator, profileAgeVerified, logListenerStart, handleListenerError]);
+  }, [authReady, authUser, isModeratorClient, isModerator, profileAgeVerified, profileAgeVerifiedStrict, profileIsAdult, logListenerStart, handleListenerError]);
 
   const filteredCases = useMemo(() => {
     if (caseTypeFilter === 'report') {
@@ -4100,6 +4126,8 @@ function ModerationPortal({
             authReady={authReady}
             isModeratorClient={isModeratorClient}
             profileAgeVerified={profileAgeVerified}
+            profileAgeVerifiedStrict={profileAgeVerifiedStrict}
+            profileIsAdult={profile?.isAdult === true}
             logListenerStart={logListenerStart}
             handleListenerError={handleListenerError}
             caseTypeFilter="upload"
@@ -4115,6 +4143,7 @@ function ModerationPortal({
           authReady={authReady}
           isModeratorClient={isModeratorClient}
           profileAgeVerified={profileAgeVerified}
+          profileIsAdult={profile?.isAdult === true}
           logListenerStart={logListenerStart}
           handleListenerError={handleListenerError}
           caseTypeFilter="report"

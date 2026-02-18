@@ -6,6 +6,7 @@ import {
   signInWithCustomToken,
   signOut,
 } from 'firebase/auth';
+import { canAccessFirestore, devLog } from '../utils/firestoreGate';
 import {
   getFirestore,
   collection,
@@ -80,7 +81,13 @@ export const subscribeToAuth = (callback) =>
     callback(user);
   });
 
-export const subscribeToProfile = (uid, callback) => {
+export const subscribeToProfile = (uid, callback, gate = {}) => {
+  const authReady = gate?.authReady ?? true;
+  const user = gate?.user ?? auth.currentUser;
+  if (!canAccessFirestore({ authReady, user }) || !uid) {
+    devLog('[firestore-gate]', { action: 'listener-skip', path: `users/${uid || 'unknown'}` });
+    return null;
+  }
   logFirestoreOp('SUBSCRIBE', `users/${uid}`, 'profile');
 
   return onSnapshot(
@@ -90,7 +97,13 @@ export const subscribeToProfile = (uid, callback) => {
   );
 };
 
-export const subscribeToPosts = (callback) => {
+export const subscribeToPosts = (callback, gate = {}) => {
+  const authReady = gate?.authReady ?? true;
+  const user = gate?.user ?? auth.currentUser;
+  if (!canAccessFirestore({ authReady, user })) {
+    devLog('[firestore-gate]', { action: 'listener-skip', path: 'posts' });
+    return null;
+  }
   logFirestoreOp('SUBSCRIBE', 'posts', 'all posts ordered by createdAt');
 
   return onSnapshot(
@@ -100,7 +113,13 @@ export const subscribeToPosts = (callback) => {
   );
 };
 
-export const subscribeToUsers = (callback) => {
+export const subscribeToUsers = (callback, gate = {}) => {
+  const authReady = gate?.authReady ?? true;
+  const user = gate?.user ?? auth.currentUser;
+  if (!canAccessFirestore({ authReady, user })) {
+    devLog('[firestore-gate]', { action: 'listener-skip', path: 'publicUsers' });
+    return null;
+  }
   logFirestoreOp('SUBSCRIBE', 'publicUsers', 'all public users');
 
   return onSnapshot(
@@ -189,7 +208,13 @@ export const deletePost = async (postId) => {
   await deleteDoc(doc(db, 'posts', postId));
 };
 
-export const fetchUserIndex = async (userId) => {
+export const fetchUserIndex = async (userId, gate = {}) => {
+  const authReady = gate?.authReady ?? true;
+  const user = gate?.user ?? auth.currentUser;
+  if (!canAccessFirestore({ authReady, user }) || !userId) {
+    devLog('[firestore-gate]', { action: 'read-skip', path: `publicUsers/${userId || 'unknown'}` });
+    return null;
+  }
   const snapshot = await getDoc(doc(db, 'publicUsers', userId));
   return snapshot.exists() ? snapshot.data() : null;
 };

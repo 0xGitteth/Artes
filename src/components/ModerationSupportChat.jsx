@@ -93,7 +93,7 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation threads listener (reviewCases)'),
     );
-  }, [authUser, isModerator, activeThreadId]);
+  }, [authUser, isModerator]);
 
   useEffect(() => {
     if (!activeThreadId) {

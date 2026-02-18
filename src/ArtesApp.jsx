@@ -507,6 +507,7 @@ export default function ArtesApp() {
   const unsubRef = useRef(null);
   const moderationListenerKeyRef = useRef(null);
   const moderationBlockedKeysRef = useRef(new Set());
+  const lastUidRef = useRef(null);
   const profileUnsubscribeRef = useRef(null);
   const profileActiveKeyRef = useRef(null);
   const profileBlockedKeysRef = useRef(new Set());
@@ -522,6 +523,15 @@ export default function ArtesApp() {
     config: appConfig,
   }) && !!resolvedModerationThreadId;
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
+  useEffect(() => {
+    const uid = authUser?.uid || null;
+    if (lastUidRef.current && lastUidRef.current !== uid) {
+      moderationBlockedKeysRef.current?.clear?.();
+      profileBlockedKeysRef.current?.clear?.();
+    }
+    lastUidRef.current = uid;
+  }, [authUser?.uid]);
+
   const [communityConfig, setCommunityConfig] = useState(DEFAULT_COMMUNITY_CONFIG);
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
   const [configLoading, setConfigLoading] = useState(true);
@@ -4109,7 +4119,7 @@ function ModerationPortal({
       {activeTab === 'chat' && (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900 min-h-[60vh]">
           {authUser ? (
-            <ModerationSupportChat authUser={authUser} isModerator={isModerator} />
+            <ModerationSupportChat authReady={authReady} authUser={authUser} isModerator={isModerator} />
           ) : (
             <div className="p-6 text-sm text-slate-500 dark:text-slate-400">Log in om de chat te openen.</div>
           )}

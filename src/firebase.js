@@ -486,13 +486,13 @@ export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = 
 };
 
 export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
-  if (!uid || !patch || typeof patch !== 'object') return null;
+  if (!uid || !patch || typeof patch !== 'object') return false;
   const user = userOverride ?? authStateUser;
   const canWrite = user?.emailVerified === true || Boolean(import.meta.env.DEV && user?.isAnonymous === true);
 
   if (!canWrite) {
     devLog('[firestore-gate]', { action: 'write-skip', uid, reason: 'user-not-verified' });
-    return null;
+    return false;
   }
 
   try {
@@ -501,7 +501,7 @@ export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
   } catch (error) {
     if (error?.code === 'permission-denied') {
       devLog('[firestore-gate]', { action: 'write-blocked', uid, reason: 'permission-denied' });
-      return null;
+      return false;
     }
     throw error;
   }

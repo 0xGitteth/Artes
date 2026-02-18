@@ -12,6 +12,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { getFirebaseDbInstance } from '../firebase';
+import { canAccessFirestore } from '../utils/firestoreGate';
 import SearchWithAutocomplete from './SearchWithAutocomplete';
 import { normalizeSupportMessage } from '../utils/supportChat';
 
@@ -49,7 +50,7 @@ const resolveThreadDisplay = (thread, userProfile) => {
   return { displayName, username, photoURL };
 };
 
-export default function ModerationSupportChat({ authUser, isModerator }) {
+export default function ModerationSupportChat({ authReady, authUser, isModerator }) {
   const [threads, setThreads] = useState([]);
   const [activeThreadId, setActiveThreadId] = useState(null);
   const [activeThread, setActiveThread] = useState(null);
@@ -61,6 +62,7 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
   const moderationThreadsLogRef = useRef(null);
 
   useEffect(() => {
+    if (!canAccessFirestore({ authReady, user: authUser })) return undefined;
     const shouldStart = Boolean(authUser) && isModerator === true;
     if (import.meta.env.DEV) {
       const reason = !authUser
@@ -93,9 +95,10 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Moderation threads listener (reviewCases)'),
     );
-  }, [authUser, isModerator]);
+  }, [authReady, authUser, isModerator]);
 
   useEffect(() => {
+    if (!canAccessFirestore({ authReady, user: authUser })) return undefined;
     if (!activeThreadId) {
       setActiveThread(null);
       return undefined;
@@ -112,9 +115,10 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Moderation active thread listener threads/${activeThreadId}`),
     );
-  }, [activeThreadId]);
+  }, [activeThreadId, authReady, authUser]);
 
   useEffect(() => {
+    if (!canAccessFirestore({ authReady, user: authUser })) return undefined;
     if (!activeThreadId) {
       setMessages([]);
       return undefined;
@@ -130,7 +134,7 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Moderation thread messages listener threads/${activeThreadId}/messages`),
     );
-  }, [activeThreadId]);
+  }, [activeThreadId, authReady, authUser]);
 
   useEffect(() => {
     if (!activeThreadId || !isModerator) return;
@@ -149,6 +153,7 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
   }, [activeThreadId, isModerator]);
 
   useEffect(() => {
+    if (!canAccessFirestore({ authReady, user: authUser })) return;
     if (threads.length === 0) return;
     const db = getFirebaseDbInstance();
     const missingUids = threads
@@ -167,7 +172,7 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
         setUserProfiles(next);
       })
       .catch(() => {});
-  }, [threads, userProfiles]);
+  }, [threads, userProfiles, authReady, authUser]);
 
   const filteredThreads = useMemo(() => {
     const normalized = searchValue.trim().toLowerCase();
@@ -236,6 +241,8 @@ export default function ModerationSupportChat({ authUser, isModerator }) {
           <p className="text-xs text-slate-500">Support chats</p>
           <div className="mt-3">
             <SearchWithAutocomplete
+              authReady={authReady}
+              authUser={authUser}
               value={searchValue}
               onChange={(val) => {
                 setSearchValue(val);

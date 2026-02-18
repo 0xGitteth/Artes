@@ -9,6 +9,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { getFirebaseDbInstance } from '../firebase';
+import { canAccessFirestore } from '../utils/firestoreGate';
 
 const normalizeQuery = (value) => value.trim().toLowerCase();
 
@@ -24,6 +25,8 @@ const Avatar = ({ photoURL, name }) => {
 };
 
 export default function SearchWithAutocomplete({
+  authReady,
+  authUser,
   value,
   onChange,
   onSelect,
@@ -35,6 +38,10 @@ export default function SearchWithAutocomplete({
   const normalizedQuery = useMemo(() => normalizeQuery(value), [value]);
 
   useEffect(() => {
+    if (!canAccessFirestore({ authReady, user: authUser })) {
+      setResults([]);
+      return;
+    }
     if (!normalizedQuery) {
       setResults([]);
       return;
@@ -95,7 +102,7 @@ export default function SearchWithAutocomplete({
       active = false;
       clearTimeout(timer);
     };
-  }, [normalizedQuery]);
+  }, [normalizedQuery, authReady, authUser]);
 
   return (
     <div className="relative">

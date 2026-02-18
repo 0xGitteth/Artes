@@ -10,6 +10,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { getFirebaseDbInstance } from '../firebase';
+import { canAccessFirestore } from '../utils/firestoreGate';
 import { normalizeSupportMessage, SUPPORT_INTRO_TEXT } from '../utils/supportChat';
 
 const MESSAGE_LIMIT = 80;
@@ -37,7 +38,7 @@ const resolveUserLabel = (userProfile, authUser) => {
   return name?.trim() || 'Jij';
 };
 
-export default function SupportChatPanel({ authUser, userProfile }) {
+export default function SupportChatPanel({ authReady, authUser, userProfile }) {
   const [thread, setThread] = useState(null);
   const [messages, setMessages] = useState([]);
   const [composerText, setComposerText] = useState('');
@@ -46,6 +47,7 @@ export default function SupportChatPanel({ authUser, userProfile }) {
   const threadId = useMemo(() => (authUser?.uid ? `support_${authUser.uid}` : null), [authUser?.uid]);
 
   useEffect(() => {
+    if (!canAccessFirestore({ authReady, user: authUser })) return;
     if (!threadId || !authUser) return;
     const db = getFirebaseDbInstance();
     const threadRef = doc(db, 'threads', threadId);
@@ -89,9 +91,10 @@ export default function SupportChatPanel({ authUser, userProfile }) {
     return () => {
       active = false;
     };
-  }, [threadId, authUser]);
+  }, [threadId, authReady, authUser]);
 
   useEffect(() => {
+    if (!canAccessFirestore({ authReady, user: authUser })) return undefined;
     if (!threadId) {
       setThread(null);
       return undefined;
@@ -108,9 +111,10 @@ export default function SupportChatPanel({ authUser, userProfile }) {
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Thread listener threads/${threadId}`),
     );
-  }, [threadId]);
+  }, [threadId, authReady, authUser]);
 
   useEffect(() => {
+    if (!canAccessFirestore({ authReady, user: authUser })) return undefined;
     if (!threadId) {
       setMessages([]);
       return undefined;
@@ -126,7 +130,7 @@ export default function SupportChatPanel({ authUser, userProfile }) {
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Thread messages listener threads/${threadId}/messages`),
     );
-  }, [threadId]);
+  }, [threadId, authReady, authUser]);
 
   const normalizedMessages = useMemo(
     () => messages.map((message) => normalizeSupportMessage(message, thread)).filter(Boolean),

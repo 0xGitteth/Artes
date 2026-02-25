@@ -1797,6 +1797,14 @@ export default function ArtesApp() {
             posts={posts}
             users={users}
             onOpenQuickProfile={() => setQuickProfileId(user?.uid || null)}
+            onProfileUpdated={(nextProfile) => {
+              setProfile(nextProfile);
+              setUsers((prev) => (Array.isArray(prev)
+                ? prev.map((entry) => (entry?.uid === nextProfile?.uid
+                  ? normalizeUserForCollections({ ...entry, ...nextProfile })
+                  : entry))
+                : prev));
+            }}
           />
         )}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
@@ -5359,7 +5367,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
   );
 }
 
-function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQuickProfile }) {
+function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQuickProfile, onProfileUpdated }) {
   const [formData, setFormData] = useState({ ...profile });
   const [agencySearch, setAgencySearch] = useState(profile?.linkedAgencyName || '');
   const [companySearch, setCompanySearch] = useState(profile?.linkedCompanyName || '');
@@ -5428,6 +5436,8 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
          });
        }
        await updateUserProfile(user.uid, payload);
+       const normalized = normalizeProfileData({ ...profile, ...payload, uid: user.uid }, user.uid);
+       onProfileUpdated?.(normalized);
        if (import.meta.env.DEV) {
          console.log('[EditProfileModal] Profile save completed, snapshot listener will update UI');
        }
@@ -6658,9 +6668,9 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   }
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-6">
-      <div className="bg-white dark:bg-slate-900 rounded-[32px] w-full max-w-4xl shadow-2xl overflow-hidden border border-white/10">
-        <div className="relative h-80 w-full">
+    <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4 md:p-6">
+      <div className="bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-3xl xl:max-w-4xl max-h-[calc(100vh-2rem)] shadow-2xl overflow-hidden border border-white/10 flex flex-col">
+        <div className="relative h-56 md:h-72 w-full shrink-0">
           <img src={headerImage} className="w-full h-full object-cover scale-105" />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
           <div className="absolute inset-x-0 bottom-0 p-8 text-white">
@@ -6690,7 +6700,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
           </button>
         </div>
 
-        <div className="p-8 space-y-6">
+        <div className="p-5 md:p-8 space-y-6 overflow-y-auto">
           <div className="flex flex-wrap gap-2">
             {themes && themes.length > 0 ? (
               themes.map((theme) => (

@@ -53,6 +53,14 @@ service cloud.firestore {
         'onboardingComplete',
         'linkedAgencyName',
         'linkedCompanyName',
+        'linkedAgencyId',
+        'linkedCompanyId',
+        'linkedAgencyLink',
+        'linkedCompanyLink',
+        'headerImage',
+        'headerPosition',
+        'quickProfilePreviewMode',
+        'quickProfilePostIds',
         'updatedAt',
         'email',
         'authProvider',
@@ -72,6 +80,33 @@ service cloud.firestore {
         && (!affected.hasAny(['photoURL'])
           || request.resource.data.photoURL is string
           || request.resource.data.photoURL == null)
+        && (!affected.hasAny(['headerImage'])
+          || request.resource.data.headerImage is string
+          || request.resource.data.headerImage == null)
+        && (!affected.hasAny(['headerPosition'])
+          || request.resource.data.headerPosition is string)
+        && (!affected.hasAny(['linkedAgencyName'])
+          || request.resource.data.linkedAgencyName is string
+          || request.resource.data.linkedAgencyName == null)
+        && (!affected.hasAny(['linkedCompanyName'])
+          || request.resource.data.linkedCompanyName is string
+          || request.resource.data.linkedCompanyName == null)
+        && (!affected.hasAny(['linkedAgencyId'])
+          || request.resource.data.linkedAgencyId is string
+          || request.resource.data.linkedAgencyId == null)
+        && (!affected.hasAny(['linkedCompanyId'])
+          || request.resource.data.linkedCompanyId is string
+          || request.resource.data.linkedCompanyId == null)
+        && (!affected.hasAny(['linkedAgencyLink'])
+          || request.resource.data.linkedAgencyLink is string
+          || request.resource.data.linkedAgencyLink == null)
+        && (!affected.hasAny(['linkedCompanyLink'])
+          || request.resource.data.linkedCompanyLink is string
+          || request.resource.data.linkedCompanyLink == null)
+        && (!affected.hasAny(['quickProfilePreviewMode'])
+          || request.resource.data.quickProfilePreviewMode is string)
+        && (!affected.hasAny(['quickProfilePostIds'])
+          || request.resource.data.quickProfilePostIds is list)
         && (!affected.hasAny(['onboardingStep'])
           || (
             request.resource.data.onboardingStep is int
@@ -160,7 +195,7 @@ service cloud.firestore {
         && request.resource.data.username.matches('^[a-z0-9]+$')
         && request.resource.data.displayName is string
         && request.resource.data.displayNameLower is string
-        && request.resource.data.displayNameLower.matches('^[a-z0-9\s@._-]+$')
+        && request.resource.data.displayNameLower.size() <= 200
         && (!('roles' in request.resource.data) || request.resource.data.roles is list)
         && (!('themes' in request.resource.data) || request.resource.data.themes is list)
         && (!('bio' in request.resource.data) || request.resource.data.bio is string)

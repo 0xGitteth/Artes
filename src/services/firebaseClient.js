@@ -124,7 +124,14 @@ export const subscribeToUsers = (callback, gate = {}) => {
 
   return onSnapshot(
     collection(db, 'publicUsers'),
-    (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
+    (snapshot) => callback(snapshot.docs.map((docSnap) => {
+      const data = docSnap.data() || {};
+      return {
+        id: docSnap.id,
+        ...data,
+        uid: data.uid || docSnap.id,
+      };
+    })),
     (err) => console.error('PUBLICUSERS LISTENER ERROR:', err.code, err.message, 'path=publicUsers')
   );
 };

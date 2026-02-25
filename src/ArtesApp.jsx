@@ -378,12 +378,14 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options 
 
   return {
     ...profileData,
-    uid: profileData?.uid ?? null,
+    uid: profileData?.uid ?? profileData?.id ?? null,
     displayName: profileData?.displayName || 'Onbekende maker',
     bio: profileData?.bio || 'Nog geen bio toegevoegd.',
     roles,
     themes,
     avatar: profileData?.avatar || profileData?.photoURL || buildDefaultAvatar(seed),
+    headerImage: profileData?.headerImage || '',
+    headerPosition: profileData?.headerPosition || 'center',
     quickProfilePreviewMode,
     quickProfilePostIds,
     linkedAgencyName: profileData?.linkedAgencyName ?? null,
@@ -409,16 +411,42 @@ const resolveLinkedProfileName = (linkedId, fallbackName, allUsers = []) => {
 };
 
 const normalizeUserForCollections = (userData = {}) => {
+  const canonicalUid = userData?.uid || userData?.id || null;
   const normalizedProfile = normalizeProfileData(
-    userData,
-    userData?.uid || userData?.displayName || 'artes-user',
+    { ...userData, uid: canonicalUid },
+    canonicalUid || userData?.displayName || 'artes-user',
     { fallbackRoles: [] },
   );
   return {
     ...normalizedProfile,
+    uid: canonicalUid,
     roles: Array.isArray(userData?.roles) ? userData.roles.filter(Boolean) : normalizedProfile.roles,
     themes: Array.isArray(userData?.themes) ? userData.themes.filter(Boolean) : [],
   };
+};
+
+const resolveProfileFromCollections = ({ userId, allUsers = [], currentUserId, currentProfile }) => {
+  const normalizedAllUsers = Array.isArray(allUsers)
+    ? allUsers.map((entry) => normalizeUserForCollections(entry))
+    : [];
+  const existing = normalizedAllUsers.find((u) => u.uid === userId || u.id === userId) || null;
+
+  if (existing) {
+    if (currentUserId && userId === currentUserId && currentProfile) {
+      return normalizeProfileData(
+        { ...existing, ...currentProfile, uid: currentUserId },
+        currentUserId,
+        { fallbackRoles: [] },
+      );
+    }
+    return normalizeProfileData(existing, userId, { fallbackRoles: [] });
+  }
+
+  if (currentUserId && userId === currentUserId && currentProfile) {
+    return normalizeProfileData({ ...currentProfile, uid: currentUserId }, userId, { fallbackRoles: [] });
+  }
+
+  return null;
 };
 
 
@@ -1715,6 +1743,8 @@ export default function ArtesApp() {
                onPostClick={setSelectedPost}
                allUsers={users}
                setView={setView}
+               currentUserId={user?.uid}
+               currentProfile={profile}
             />
           )}
         </main>
@@ -1765,6 +1795,7 @@ export default function ArtesApp() {
             profile={profile}
             user={user}
             posts={posts}
+            users={users}
             onOpenQuickProfile={() => setQuickProfileId(user?.uid || null)}
           />
         )}
@@ -1782,6 +1813,8 @@ export default function ArtesApp() {
             onFullProfile={() => { setView(`profile_${quickProfileId}`); setQuickProfileId(null); }}
             posts={posts}
             allUsers={users}
+            currentUserId={user?.uid}
+            currentProfile={profile}
           />
         )}
         {selectedPost && (
@@ -3080,8 +3113,8 @@ function Discover({ users, posts, currentUserId, onUserClick, onPostClick, setVi
     [normalizedUsers, currentUserId]
   );
   const visiblePosts = useMemo(
-    () => posts.filter((p) => !currentUserId || p.authorId !== currentUserId),
-    [posts, currentUserId]
+    () => posts,
+    [posts]
   );
 
   const displayedThemes = showAllThemes ? THEMES : THEMES.slice(0, 5);
@@ -3288,7 +3321,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
         
         <div className="max-w-6xl mx-auto px-6 py-8 relative z-20">
            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {posts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-[4/5] bg-slate-200 rounded-sm overflow-hidden cursor-pointer relative">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => onChallengeClick?.()}>Challenge</Badge></div>}<img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}
+              {posts.map((p) => <div key={p.id} onClick={() => onPostClick(p)} className={`aspect-[4/5] bg-slate-200 rounded-sm overflow-hidden cursor-pointer relative ${p.isChallenge ? 'ring-2 ring-amber-400' : ''}`}><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}
            </div>
            {posts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
         </div>
@@ -5326,7 +5359,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
   );
 }
 
-function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile }) {
+function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQuickProfile }) {
   const [formData, setFormData] = useState({ ...profile });
   const [agencySearch, setAgencySearch] = useState(profile?.linkedAgencyName || '');
   const [companySearch, setCompanySearch] = useState(profile?.linkedCompanyName || '');
@@ -5351,6 +5384,21 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
     () => [...userPosts].sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a)),
     [userPosts]
   );
+  const searchableUsers = useMemo(() => (Array.isArray(users) ? users.map((entry) => normalizeUserForCollections(entry)) : []), [users]);
+  const agencySuggestions = useMemo(() => {
+    const term = String(agencySearch || '').trim().toLowerCase();
+    if (!term) return [];
+    return searchableUsers
+      .filter((entry) => (entry.displayName || '').toLowerCase().includes(term))
+      .slice(0, 5);
+  }, [searchableUsers, agencySearch]);
+  const companySuggestions = useMemo(() => {
+    const term = String(companySearch || '').trim().toLowerCase();
+    if (!term) return [];
+    return searchableUsers
+      .filter((entry) => (entry.displayName || '').toLowerCase().includes(term))
+      .slice(0, 5);
+  }, [searchableUsers, companySearch]);
 
   const handleSave = async () => {
      setSaveError(null);
@@ -5886,13 +5934,13 @@ function CommunityList({ setView, communities, challenge, configLoading, onStart
             <div className="flex flex-col sm:flex-row gap-2">
               <Button
                 type="button"
-                className="bg-white/80 hover:bg-white text-amber-900 border border-amber-200 shadow-sm"
+                className="bg-amber-600 hover:bg-amber-700 text-white border border-amber-700 shadow-sm"
                 onClick={(event) => {
                   event.stopPropagation();
                   onStartChallengeUpload?.();
                 }}
               >
-                Upload challenge
+                Doe mee
               </Button>
               <Button className="bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/20">
                 Bekijk inzendingen
@@ -6317,19 +6365,24 @@ function ChallengeDetail({ setView, posts, onPostClick, challenge }) {
    );
 }
 
-function FetchedProfile({ userId, posts, onPostClick, allUsers, setView }) {
+function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, currentUserId, currentProfile }) {
   const [fetchedUser, setFetchedUser] = useState(null);
   useEffect(() => {
-    const existing = allUsers.find(u => u.uid === userId);
-    if (existing) {
-      setFetchedUser(normalizeProfileData(existing, userId, { fallbackRoles: [] }));
+    const resolved = resolveProfileFromCollections({ userId, allUsers, currentUserId, currentProfile });
+    if (resolved) {
+      setFetchedUser(resolved);
     }
+
     fetchUserIndex(userId).then((data) => {
       if (data) {
-        setFetchedUser(normalizeProfileData(data, userId, { fallbackRoles: [] }));
+        setFetchedUser((prev) => normalizeProfileData(
+          { ...(prev || {}), ...data, uid: data?.uid || userId },
+          userId,
+          { fallbackRoles: [] },
+        ));
       }
     });
-  }, [userId, allUsers]);
+  }, [userId, allUsers, currentUserId, currentProfile]);
   if (!fetchedUser) return <div>Loading...</div>;
   return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} onChallengeClick={() => setView('challenge_timeline')} />;
 }
@@ -6540,20 +6593,25 @@ function PhotoDetailModal({ post, onClose, authUser, moderationApiBase, onChalle
     </div>
   );
 }
-function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
+function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile }) {
   const [userProfile, setUserProfile] = useState(null);
 
   useEffect(() => {
-    const existing = allUsers.find((u) => u.uid === userId);
-    if (existing) {
-      setUserProfile(normalizeProfileData(existing, userId, { fallbackRoles: [] }));
+    const resolved = resolveProfileFromCollections({ userId, allUsers, currentUserId, currentProfile });
+    if (resolved) {
+      setUserProfile(resolved);
     }
+
     fetchUserIndex(userId).then((data) => {
       if (data) {
-        setUserProfile(normalizeProfileData(data, userId, { fallbackRoles: [] }));
+        setUserProfile((prev) => normalizeProfileData(
+          { ...(prev || {}), ...data, uid: data?.uid || userId },
+          userId,
+          { fallbackRoles: [] },
+        ));
       }
     });
-  }, [userId, allUsers]);
+  }, [userId, allUsers, currentUserId, currentProfile]);
 
   // All hooks must be called in the same order on every render
   // Moved BEFORE the early return to prevent "Rendered more hooks" error
@@ -6585,7 +6643,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
       .sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a))
       .slice(0, 3);
   }, [manualIds, previewMode, userPosts]);
-  const headerImage = userProfile?.avatar;
+  const headerImage = userProfile?.headerImage || userProfile?.avatar;
 
   // Early return after all hooks
   if (!userProfile) {

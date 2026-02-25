@@ -358,6 +358,8 @@ const PUBLIC_USER_ALLOWED_FIELDS = [
   'headerPosition',
   'linkedAgencyName',
   'linkedCompanyName',
+  'linkedAgencyId',
+  'linkedCompanyId',
   'linkedAgencyLink',
   'linkedCompanyLink',
 ];
@@ -389,6 +391,8 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     'headerPosition',
     'linkedAgencyName',
     'linkedCompanyName',
+    'linkedAgencyId',
+    'linkedCompanyId',
     'linkedAgencyLink',
     'linkedCompanyLink',
   ]
@@ -419,6 +423,8 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     'headerPosition',
     'linkedAgencyName',
     'linkedCompanyName',
+    'linkedAgencyId',
+    'linkedCompanyId',
     'linkedAgencyLink',
     'linkedCompanyLink',
   ];
@@ -695,7 +701,9 @@ export const updateUserProfile = async (uid, data) => {
         e.message,
         Object.keys(safeData).sort()
       );
-      throw e;
+      if (import.meta.env.DEV) {
+        console.warn('[updateUserProfile] Continuing despite publicUsers sync failure');
+      }
     }
   }
 };

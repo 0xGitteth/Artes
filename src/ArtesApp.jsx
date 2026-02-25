@@ -880,6 +880,23 @@ export default function ArtesApp() {
   }, [view, getClaimTokenFromPath, onboardingLocked]);
 
   useEffect(() => {
+    if (profileLoading || !authUser?.uid || !profile) return;
+    if (view !== 'onboarding' || !hasCompletedOnboarding(profile)) return;
+    const path = window.location.pathname || '/';
+    const nextView = path.startsWith('/claim/') ? 'claim'
+      : path.startsWith('/claim-email') ? 'claimEmail'
+      : path.startsWith('/moderation') ? 'moderation'
+      : path.startsWith('/vouch') ? 'vouch'
+      : path.startsWith('/support') ? 'support'
+      : (path.startsWith('/chat') || path.startsWith('/messages')) ? 'chat'
+      : 'gallery';
+    if (nextView === 'claim') {
+      setClaimInviteToken(getClaimTokenFromPath(path));
+    }
+    setView(nextView);
+  }, [profileLoading, authUser?.uid, profile, view, getClaimTokenFromPath]);
+
+  useEffect(() => {
     if (view === 'claim' || view === 'claimEmail') {
       return;
     }

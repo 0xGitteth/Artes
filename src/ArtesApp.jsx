@@ -355,7 +355,7 @@ const getPostContentPreference = (post, triggerVisibility) => {
   return 'show';
 };
 
-const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
+const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options = {}) => {
   // Profile expectations:
   // avatar: string (data URL or https) for the profile avatar.
   // headerImage: string (data URL or https) for header/hero usage.
@@ -363,7 +363,10 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
   // quickProfilePreviewMode: "latest" | "best" | "manual".
   // quickProfilePostIds: array of post IDs to preview when mode is "manual".
   const seed = profileData?.uid || profileData?.displayName || fallbackSeed;
-  const roles = Array.isArray(profileData?.roles) && profileData.roles.length ? profileData.roles : ['fan'];
+  const fallbackRoles = Array.isArray(options?.fallbackRoles) ? options.fallbackRoles : ['fan'];
+  const roles = Array.isArray(profileData?.roles) && profileData.roles.length
+    ? profileData.roles
+    : fallbackRoles;
   const themes = Array.isArray(profileData?.themes) ? profileData.themes : [];
   const triggerVisibility = normalizeTriggerPreferences(profileData?.preferences?.triggerVisibility);
   const themePreference = profileData?.preferences?.theme || 'light';
@@ -381,7 +384,7 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
     bio: profileData?.bio || 'Nog geen bio toegevoegd.',
     roles,
     themes,
-    avatar: profileData?.avatar || buildDefaultAvatar(seed),
+    avatar: profileData?.avatar || profileData?.photoURL || buildDefaultAvatar(seed),
     headerImage: profileData?.headerImage || '',
     headerPosition: profileData?.headerPosition || 'center',
     quickProfilePreviewMode,
@@ -399,10 +402,14 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
 };
 
 const normalizeUserForCollections = (userData = {}) => {
-  const normalizedProfile = normalizeProfileData(userData, userData?.uid || userData?.displayName || 'artes-user');
+  const normalizedProfile = normalizeProfileData(
+    userData,
+    userData?.uid || userData?.displayName || 'artes-user',
+    { fallbackRoles: [] },
+  );
   return {
     ...normalizedProfile,
-    roles: Array.isArray(userData?.roles) ? userData.roles.filter(Boolean) : [],
+    roles: Array.isArray(userData?.roles) ? userData.roles.filter(Boolean) : normalizedProfile.roles,
     themes: Array.isArray(userData?.themes) ? userData.themes.filter(Boolean) : [],
   };
 };
@@ -6155,11 +6162,11 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers }) {
   useEffect(() => {
     const existing = allUsers.find(u => u.uid === userId);
     if (existing) {
-      setFetchedUser(normalizeProfileData(existing, userId));
+      setFetchedUser(normalizeProfileData(existing, userId, { fallbackRoles: [] }));
     }
     fetchUserIndex(userId).then((data) => {
       if (data) {
-        setFetchedUser(normalizeProfileData(data, userId));
+        setFetchedUser(normalizeProfileData(data, userId, { fallbackRoles: [] }));
       }
     });
   }, [userId, allUsers]);
@@ -6370,11 +6377,11 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
   useEffect(() => {
     const existing = allUsers.find((u) => u.uid === userId);
     if (existing) {
-      setUserProfile(normalizeProfileData(existing, userId));
+      setUserProfile(normalizeProfileData(existing, userId, { fallbackRoles: [] }));
     }
     fetchUserIndex(userId).then((data) => {
       if (data) {
-        setUserProfile(normalizeProfileData(data, userId));
+        setUserProfile(normalizeProfileData(data, userId, { fallbackRoles: [] }));
       }
     });
   }, [userId, allUsers]);

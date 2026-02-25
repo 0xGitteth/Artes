@@ -398,6 +398,15 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes') => {
   };
 };
 
+const normalizeUserForCollections = (userData = {}) => {
+  const normalizedProfile = normalizeProfileData(userData, userData?.uid || userData?.displayName || 'artes-user');
+  return {
+    ...normalizedProfile,
+    roles: Array.isArray(userData?.roles) ? userData.roles.filter(Boolean) : [],
+    themes: Array.isArray(userData?.themes) ? userData.themes.filter(Boolean) : [],
+  };
+};
+
 
 // --- SEED DATA ---
 const SEED_USERS = [
@@ -937,7 +946,15 @@ export default function ArtesApp() {
      logListenerStart('Posts listener (ArtesApp)');
      const unsubPosts = subscribeToPosts(setPosts, { authReady, user });
      logListenerStart('Users listener (ArtesApp)');
-     const unsubUsers = subscribeToUsers(setUsers, { authReady, user });
+     const unsubUsers = subscribeToUsers(
+       (nextUsers = []) => {
+         const normalizedUsers = Array.isArray(nextUsers)
+           ? nextUsers.map((nextUser) => normalizeUserForCollections(nextUser))
+           : [];
+         setUsers(normalizedUsers);
+       },
+       { authReady, user },
+     );
      return () => { if (typeof unsubPosts === 'function') unsubPosts(); if (typeof unsubUsers === 'function') unsubUsers(); };
   }, [authReady, user, logListenerStart]);
 
@@ -2919,9 +2936,14 @@ function Discover({ users, posts, currentUserId, onUserClick, onPostClick, setVi
   const [showAllThemes, setShowAllThemes] = useState(false);
   const [showAllRoles, setShowAllRoles] = useState(false);
 
+  const normalizedUsers = useMemo(
+    () => (Array.isArray(users) ? users.map((u) => normalizeUserForCollections(u)) : []),
+    [users],
+  );
+
   const visibleUsers = useMemo(
-    () => users.filter((u) => !currentUserId || u.uid !== currentUserId),
-    [users, currentUserId]
+    () => normalizedUsers.filter((u) => !currentUserId || u.uid !== currentUserId),
+    [normalizedUsers, currentUserId]
   );
   const visiblePosts = useMemo(
     () => posts.filter((p) => !currentUserId || p.authorId !== currentUserId),
@@ -2947,7 +2969,7 @@ function Discover({ users, posts, currentUserId, onUserClick, onPostClick, setVi
   const filteredPosts = visiblePosts.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) && (activeThemes.length === 0 || p.styles?.some(s => activeThemes.includes(s))));
   const filteredUsers = visibleUsers.filter((u) => (
     u.displayName.toLowerCase().includes(search.toLowerCase())
-    && (!activeRole || u.roles?.includes(activeRole))
+    && (!activeRole || (Array.isArray(u.roles) && u.roles.includes(activeRole)))
     && (activeThemes.length === 0 || u.themes?.some((theme) => activeThemes.includes(theme)))
   ));
 
@@ -3003,7 +3025,13 @@ function Discover({ users, posts, currentUserId, onUserClick, onPostClick, setVi
               <button onClick={() => setShowAllRoles(!showAllRoles)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{filteredUsers.map(u => <div key={u.uid} onClick={() => onUserClick(u.uid)} className="bg-white dark:bg-slate-800 rounded-2xl overflow-hidden shadow-sm cursor-pointer"><div className="aspect-square relative"><img src={u.avatar} className="w-full h-full object-cover"/><div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-3"><span className="text-white font-bold">{u.displayName}</span><span className="text-white/70 text-xs">{ROLES.find(r => r.id === u.roles[0])?.label}</span></div></div></div>)}</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{filteredUsers.map((u) => {
+            const primaryRole = Array.isArray(u.roles) && u.roles.length ? u.roles[0] : null;
+            const primaryRoleLabel = primaryRole ? ROLES.find((r) => r.id === primaryRole)?.label : null;
+            return (
+              <div key={u.uid} onClick={() => onUserClick(u.uid)} className="bg-white dark:bg-slate-800 rounded-2xl overflow-hidden shadow-sm cursor-pointer"><div className="aspect-square relative"><img src={u.avatar} className="w-full h-full object-cover"/><div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-3"><span className="text-white font-bold">{u.displayName}</span><span className="text-white/70 text-xs">{primaryRoleLabel || 'Lid'}</span></div></div></div>
+            );
+          })}</div>
        </div>}
     </div>
   );

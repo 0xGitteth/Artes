@@ -2725,7 +2725,11 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       </div>
     );
 
-    if (step === 5) return (
+    if (step === 5) {
+      const effectiveRoles = roles.length
+        ? roles
+        : (Array.isArray(profile?.roles) ? profile.roles : []);
+      return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
         <h2 className="text-sm font-bold text-blue-600 uppercase mb-1">Stap 5/5</h2>
         <h1 className="text-3xl font-bold dark:text-white mb-6">Appvoorkeuren</h1>
@@ -2807,11 +2811,11 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex flex-col gap-3">
-            <Button className="w-full" disabled={!accountCreated || pending || roles.length === 0} onClick={async () => {
+            <Button className="w-full" disabled={!accountCreated || pending || effectiveRoles.length === 0} onClick={async () => {
                 try {
                   setPending(true);
                   setError(null);
-                  await onCompleteProfile?.(profileData, roles);
+                  await onCompleteProfile?.(profileData, effectiveRoles);
                   setError(null);
                 } catch (e) {
                   setError(e.message);
@@ -2824,6 +2828,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         </div>
       </div>
     );
+    }
 }
 
 function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick }) {

@@ -2852,6 +2852,10 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
   const [sensitiveRevealed, setSensitiveRevealed] = useState({});
   const triggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
   const isSensitivePost = (post) => getPostTriggerKeys(post).length > 0;
+  const getVisibleCredits = (post) => {
+    if (!Array.isArray(post?.credits)) return [];
+    return post.credits.filter((credit) => credit?.uid !== post.authorId && !credit?.isSelf);
+  };
   const visiblePosts = posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed');
 
   return (
@@ -2859,6 +2863,7 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
       {visiblePosts.map((post) => {
         const contentPreference = getPostContentPreference(post, triggerVisibility);
         const shouldCover = isSensitivePost(post) && contentPreference === 'cover' && !sensitiveRevealed[post.id];
+        const visibleCredits = getVisibleCredits(post);
         return (
         <div key={post.id} className="relative group">
            <div className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`} onClick={() => onPostClick(post)}>
@@ -2882,7 +2887,7 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
                     <div className="text-xs uppercase font-bold text-slate-400">{ROLES.find(r => r.id === post.authorRole)?.label}</div>
                     <div className="text-xs font-medium text-slate-900 group-hover:text-blue-600 dark:text-white transition-colors">{post.authorName}</div>
                  </div>
-                 {post.credits && post.credits.map((c, i) => (
+                 {visibleCredits.map((c, i) => (
                     <div
                       key={i}
                       className="cursor-pointer group"

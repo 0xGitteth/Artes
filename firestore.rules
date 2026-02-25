@@ -129,7 +129,26 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create, update: if request.auth != null
         && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['uid', 'username', 'displayName', 'displayNameLower', 'photoURL', 'updatedAt'])
+        && request.resource.data.keys().hasOnly([
+          'uid',
+          'username',
+          'displayName',
+          'displayNameLower',
+          'photoURL',
+          'avatar',
+          'bio',
+          'roles',
+          'themes',
+          'headerImage',
+          'headerPosition',
+          'linkedAgencyName',
+          'linkedCompanyName',
+          'linkedAgencyId',
+          'linkedCompanyId',
+          'linkedAgencyLink',
+          'linkedCompanyLink',
+          'updatedAt'
+        ])
         && request.resource.data.uid == uid
         && request.resource.data.username is string
         && request.resource.data.username.size() >= 3
@@ -137,7 +156,20 @@ service cloud.firestore {
         && request.resource.data.username.matches('^[a-z0-9]+$')
         && request.resource.data.displayName is string
         && request.resource.data.displayNameLower is string
-        && request.resource.data.displayNameLower.matches('^[a-z0-9\\s@._-]+$');
+        && request.resource.data.displayNameLower.matches('^[a-z0-9\s@._-]+$')
+        && (!('roles' in request.resource.data) || request.resource.data.roles is list)
+        && (!('themes' in request.resource.data) || request.resource.data.themes is list)
+        && (!('bio' in request.resource.data) || request.resource.data.bio is string)
+        && (!('photoURL' in request.resource.data) || request.resource.data.photoURL is string || request.resource.data.photoURL == null)
+        && (!('avatar' in request.resource.data) || request.resource.data.avatar is string || request.resource.data.avatar == null)
+        && (!('headerImage' in request.resource.data) || request.resource.data.headerImage is string || request.resource.data.headerImage == null)
+        && (!('headerPosition' in request.resource.data) || request.resource.data.headerPosition is string)
+        && (!('linkedAgencyName' in request.resource.data) || request.resource.data.linkedAgencyName is string || request.resource.data.linkedAgencyName == null)
+        && (!('linkedCompanyName' in request.resource.data) || request.resource.data.linkedCompanyName is string || request.resource.data.linkedCompanyName == null)
+        && (!('linkedAgencyId' in request.resource.data) || request.resource.data.linkedAgencyId is string || request.resource.data.linkedAgencyId == null)
+        && (!('linkedCompanyId' in request.resource.data) || request.resource.data.linkedCompanyId is string || request.resource.data.linkedCompanyId == null)
+        && (!('linkedAgencyLink' in request.resource.data) || request.resource.data.linkedAgencyLink is string || request.resource.data.linkedAgencyLink == null)
+        && (!('linkedCompanyLink' in request.resource.data) || request.resource.data.linkedCompanyLink is string || request.resource.data.linkedCompanyLink == null);
       allow delete: if false;
     }
 

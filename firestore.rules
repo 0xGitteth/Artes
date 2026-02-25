@@ -23,9 +23,6 @@ service cloud.firestore {
       return signInProvider() == 'anonymous'
         && devConfigEnabled('allowAnonymousOnboarding');
     }
-    function isNonAnonymousSignedInUser() {
-      return isSignedIn() && signInProvider() != 'anonymous';
-    }
     function isDevAnon() {
       return isAnonymousOnboardingUser();
     }
@@ -143,7 +140,6 @@ service cloud.firestore {
         && noClientGateFieldWrites()
         && (
           isVerifiedUser()
-          || isNonAnonymousSignedInUser()
           // Dev-only: anonymous onboarding writes require /config/app.allowAnonymousOnboarding == true.
           || (isAnonymousOnboardingUser() && devAnonUserUpdateAllowed())
         );

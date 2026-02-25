@@ -1796,7 +1796,7 @@ export default function ArtesApp() {
             onUserClick={setQuickProfileId}
             authUser={authUser}
             moderationApiBase={moderationApiBase}
-            onChallengeClick={() => setView('challenge_timeline')}
+            onChallengeClick={() => { setSelectedPost(null); setView('challenge_timeline'); }}
           />
         )}
         {shadowProfile && (

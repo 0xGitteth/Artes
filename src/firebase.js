@@ -30,6 +30,9 @@ import {
   orderBy,
   deleteDoc,
   runTransaction,
+  getDocs,
+  writeBatch,
+  limit,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
@@ -341,10 +344,54 @@ const stripClientGateFields = (payload = {}) => {
   return cleaned;
 };
 
-const PUBLIC_USER_ALLOWED_FIELDS = ['uid', 'username', 'displayName', 'photoURL'];
+const PUBLIC_USER_ALLOWED_FIELDS = [
+  'uid',
+  'username',
+  'displayName',
+  'displayNameLower',
+  'photoURL',
+  'avatar',
+  'roles',
+  'themes',
+  'bio',
+  'headerImage',
+  'headerPosition',
+  'linkedAgencyName',
+  'linkedCompanyName',
+  'linkedAgencyLink',
+  'linkedCompanyLink',
+];
+
+const sanitizePublicProfileField = (key, value) => {
+  if (value === undefined) return undefined;
+  if (key === 'username') return normalizeUsername(value);
+  if (key === 'photoURL' || key === 'avatar' || key === 'headerImage') return value || null;
+  if (key === 'displayName' || key === 'bio') return value || '';
+  if (key === 'headerPosition') return value || 'center';
+  if (key === 'roles' || key === 'themes') {
+    if (!Array.isArray(value)) return [];
+    return value.filter(Boolean);
+  }
+  return value;
+};
 
 const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
-  const hasRequestedPublicField = ['uid', 'displayName', 'username', 'photoURL', 'avatar']
+  const hasRequestedPublicField = [
+    'uid',
+    'displayName',
+    'username',
+    'photoURL',
+    'avatar',
+    'roles',
+    'themes',
+    'bio',
+    'headerImage',
+    'headerPosition',
+    'linkedAgencyName',
+    'linkedCompanyName',
+    'linkedAgencyLink',
+    'linkedCompanyLink',
+  ]
     .some((field) => data[field] !== undefined);
   if (!hasRequestedPublicField) return {};
 
@@ -359,8 +406,28 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     payload.username = normalizeUsername(data.username);
   }
   if (data.photoURL !== undefined || data.avatar !== undefined) {
-    payload.photoURL = data.photoURL ?? data.avatar ?? null;
+    const resolvedAvatar = data.avatar ?? data.photoURL ?? null;
+    payload.avatar = resolvedAvatar;
+    payload.photoURL = data.photoURL ?? resolvedAvatar;
   }
+
+  const passthroughFields = [
+    'roles',
+    'themes',
+    'bio',
+    'headerImage',
+    'headerPosition',
+    'linkedAgencyName',
+    'linkedCompanyName',
+    'linkedAgencyLink',
+    'linkedCompanyLink',
+  ];
+
+  passthroughFields.forEach((field) => {
+    if (data[field] !== undefined) {
+      payload[field] = sanitizePublicProfileField(field, data[field]);
+    }
+  });
 
   const hasUsername = typeof payload.username === 'string' && payload.username.length > 0;
   if (!hasUsername) {
@@ -371,6 +438,20 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
   if (payload.displayName === undefined && existingPublic?.displayName !== undefined) {
     payload.displayName = existingPublic.displayName;
   }
+
+  if (payload.avatar === undefined && existingPublic?.avatar !== undefined) {
+    payload.avatar = existingPublic.avatar;
+  }
+
+  if (payload.photoURL === undefined && existingPublic?.photoURL !== undefined) {
+    payload.photoURL = existingPublic.photoURL;
+  }
+
+  if (payload.headerImage === undefined && existingPublic?.headerImage !== undefined) {
+    payload.headerImage = existingPublic.headerImage;
+  }
+
+  payload.displayNameLower = String(payload.displayName || existingPublic?.displayName || '').toLowerCase();
 
   Object.keys(payload).forEach((key) => {
     if (!PUBLIC_USER_ALLOWED_FIELDS.includes(key)) {
@@ -557,7 +638,16 @@ export const createUserProfile = async (uid, profile) => {
 export const updateUserProfile = async (uid, data) => {
   const safeData = stripClientGateFields(data);
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
-  const publicPatch = buildPublicProfilePayload(safeData, uid);
+  let existingPublic = {};
+  try {
+    const existingPublicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', uid));
+    existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
+  } catch (error) {
+    if (error?.code !== 'permission-denied') {
+      throw error;
+    }
+  }
+  const publicPatch = buildPublicProfilePayload(safeData, uid, existingPublic);
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -596,15 +686,6 @@ export const updateUserProfile = async (uid, data) => {
 
   if (shouldSyncPublic) {
     try {
-      let existingPublic = {};
-
-      if (safeData.displayName !== undefined && safeData.username === undefined) {
-        const publicSnap = await getDoc(
-          doc(getFirebaseDb(), 'publicUsers', uid)
-        );
-        existingPublic = publicSnap.exists() ? publicSnap.data() : {};
-      }
-
       await writePublicUserProfile(uid, publicPatch, existingPublic);
 
     } catch (e) {
@@ -617,6 +698,62 @@ export const updateUserProfile = async (uid, data) => {
       throw e;
     }
   }
+};
+
+/**
+ * One-time backfill: sync safe public profile fields from users -> publicUsers.
+ */
+export const migrateBackfillPublicUsersFromUsers = async ({ dryRun = false, maxUsers = 1000 } = {}) => {
+  const db = getFirebaseDb();
+  const usersQuery = query(collection(db, 'users'), limit(Math.max(1, maxUsers)));
+  const usersSnapshot = await getDocs(usersQuery);
+
+  let queued = 0;
+  let processed = 0;
+  let batch = writeBatch(db);
+  const commitBatch = async () => {
+    if (dryRun || queued === 0) return;
+    await batch.commit();
+    batch = writeBatch(db);
+    queued = 0;
+  };
+
+  for (const userDoc of usersSnapshot.docs) {
+    const uid = userDoc.id;
+    const userData = userDoc.data() || {};
+    const existingPublicSnap = await getDoc(doc(db, 'publicUsers', uid));
+    const existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
+    const payload = buildPublicProfilePayload({ uid, ...userData }, uid, existingPublic);
+    if (!Object.keys(payload).length) continue;
+
+    const finalPayload = {
+      uid,
+      ...payload,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (!dryRun) {
+      batch.set(doc(db, 'publicUsers', uid), finalPayload, { merge: true });
+      queued += 1;
+      if (queued >= 400) {
+        await commitBatch();
+      }
+    }
+
+    processed += 1;
+  }
+
+  await commitBatch();
+
+  if (import.meta.env.DEV) {
+    console.log('[migrateBackfillPublicUsersFromUsers] Done', { dryRun, processed, scanned: usersSnapshot.size });
+  }
+
+  return {
+    dryRun,
+    scanned: usersSnapshot.size,
+    processed,
+  };
 };
 
 export const fetchUserProfile = (uid, gate = {}) => {

@@ -358,9 +358,7 @@ const getPostContentPreference = (post, triggerVisibility) => {
 
 const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options = {}) => {
   // Profile expectations:
-  // avatar: string (data URL or https) for the profile avatar.
-  // headerImage: string (data URL or https) for header/hero usage.
-  // headerPosition: CSS object-position value for headerImage (e.g. "center", "top").
+  // avatar: string (data URL or https) used as both profile photo and profile header.
   // quickProfilePreviewMode: "latest" | "best" | "manual".
   // quickProfilePostIds: array of post IDs to preview when mode is "manual".
   const seed = profileData?.uid || profileData?.displayName || fallbackSeed;
@@ -386,8 +384,6 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options 
     roles,
     themes,
     avatar: profileData?.avatar || profileData?.photoURL || buildDefaultAvatar(seed),
-    headerImage: profileData?.headerImage || '',
-    headerPosition: profileData?.headerPosition || 'center',
     quickProfilePreviewMode,
     quickProfilePostIds,
     linkedAgencyName: profileData?.linkedAgencyName ?? null,
@@ -3217,8 +3213,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
   const companyName = resolveLinkedProfileName(normalizedProfile.linkedCompanyId, normalizedProfile.linkedCompanyName, allUsers);
   const agencyLink = normalizedProfile.linkedAgencyLink || '';
   const companyLink = normalizedProfile.linkedCompanyLink || '';
-  const headerImage = normalizedProfile.headerImage || normalizedProfile.avatar;
-  const headerPosition = normalizedProfile.headerPosition || 'center';
+  const headerImage = normalizedProfile.avatar;
   const hasAgency = Boolean(agencyName);
   const hasCompany = Boolean(companyName);
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
@@ -3228,7 +3223,6 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
            <img
              src={headerImage}
              className="w-full h-full object-cover scale-105"
-             style={{ objectPosition: headerPosition }}
            />
            <div className="absolute inset-0 bg-white/40 dark:bg-black/55" />
            <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
@@ -5351,7 +5345,6 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
   const [tab, setTab] = useState('general');
   const [pendingRoleRemoval, setPendingRoleRemoval] = useState(null);
   const [avatarInputMode, setAvatarInputMode] = useState(profile?.avatar?.startsWith('data:') ? 'upload' : 'url');
-  const [headerInputMode, setHeaderInputMode] = useState(profile?.headerImage?.startsWith('data:') ? 'upload' : 'url');
   const [manualPostIds, setManualPostIds] = useState(profile?.quickProfilePostIds || []);
   const [saveError, setSaveError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -5381,7 +5374,6 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
        linkedCompanyName: formData.linkedCompanyName || '',
        linkedAgencyId: formData.linkedAgencyId || null,
        linkedCompanyId: formData.linkedCompanyId || null,
-       headerPosition: formData.headerPosition || 'center',
        quickProfilePreviewMode: formData.quickProfilePreviewMode || 'latest',
        quickProfilePostIds,
        preferences: {
@@ -5541,74 +5533,9 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
                         )}
                       </div>
 
-                      <div className="space-y-2">
-                        <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Header afbeelding</p>
-                        <div className="flex gap-2">
-                          {['upload', 'url'].map((mode) => (
-                            <button
-                              key={mode}
-                              type="button"
-                              onClick={() => setHeaderInputMode(mode)}
-                              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
-                                headerInputMode === mode
-                                  ? 'bg-blue-600 text-white border-blue-600'
-                                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                              }`}
-                            >
-                              {mode === 'upload' ? 'Upload' : 'URL'}
-                            </button>
-                          ))}
-                        </div>
-                        {headerInputMode === 'upload' ? (
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
-                            onChange={(event) => handleImageUpload(event, 'headerImage')}
-                          />
-                        ) : (
-                          <input
-                            className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
-                            placeholder="https://"
-                            value={formData.headerImage || ''}
-                            onChange={(event) => setFormData({ ...formData, headerImage: event.target.value })}
-                          />
-                        )}
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Header positie</label>
-                            <select
-                              className="w-full p-2 rounded-xl border text-sm dark:bg-slate-800 dark:text-white"
-                              value={formData.headerPosition || 'center'}
-                              onChange={(event) => setFormData({ ...formData, headerPosition: event.target.value })}
-                            >
-                              {[
-                                'center',
-                                'top',
-                                'bottom',
-                                'left',
-                                'right',
-                                'left top',
-                                'right top',
-                                'left bottom',
-                                'right bottom',
-                              ].map((option) => (
-                                <option key={option} value={option}>{option}</option>
-                              ))}
-                            </select>
-                          </div>
-                          {formData.headerImage && (
-                            <div className="rounded-2xl border overflow-hidden h-20">
-                              <img
-                                src={formData.headerImage}
-                                alt="Header preview"
-                                className="w-full h-full object-cover"
-                                style={{ objectPosition: formData.headerPosition || 'center' }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Deze profielfoto wordt overal gebruikt, inclusief de header van je profiel en quick profile.
+                      </p>
                     </div>
 
                     <div className="border-t pt-6">
@@ -6668,8 +6595,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
       .sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a))
       .slice(0, 3);
   }, [manualIds, previewMode, userPosts]);
-  const headerImage = userProfile?.headerImage || userProfile?.avatar;
-  const headerPosition = userProfile?.headerPosition || 'center';
+  const headerImage = userProfile?.avatar;
 
   // Early return after all hooks
   if (!userProfile) {
@@ -6687,7 +6613,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers }) {
     <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-6">
       <div className="bg-white dark:bg-slate-900 rounded-[32px] w-full max-w-4xl shadow-2xl overflow-hidden border border-white/10">
         <div className="relative h-80 w-full">
-          <img src={headerImage} className="w-full h-full object-cover scale-105" style={{ objectPosition: headerPosition }} />
+          <img src={headerImage} className="w-full h-full object-cover scale-105" />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
           <div className="absolute inset-x-0 bottom-0 p-8 text-white">
             <h2 className="text-4xl font-bold mb-3">{userProfile.displayName}</h2>

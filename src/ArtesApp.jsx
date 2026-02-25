@@ -5435,9 +5435,13 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
            roles: payload.roles 
          });
        }
-       await updateUserProfile(user.uid, payload);
-       const normalized = normalizeProfileData({ ...profile, ...payload, uid: user.uid }, user.uid);
-       onProfileUpdated?.(normalized);
+      const didPersistProfile = await updateUserProfile(user.uid, payload);
+      if (!didPersistProfile) {
+        setSaveError('Opslaan mislukt. Je profiel kon niet worden opgeslagen.');
+        return;
+      }
+      const normalized = normalizeProfileData({ ...profile, ...payload, uid: user.uid }, user.uid);
+      onProfileUpdated?.(normalized);
        if (import.meta.env.DEV) {
          console.log('[EditProfileModal] Profile save completed, snapshot listener will update UI');
        }

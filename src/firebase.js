@@ -686,7 +686,7 @@ export const updateUserProfile = async (uid, data) => {
     if (import.meta.env.DEV) {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid, reason: 'user-write-not-allowed-or-blocked' });
     }
-    return;
+    return false;
   }
 
   if (import.meta.env.DEV) {
@@ -727,6 +727,8 @@ export const updateUserProfile = async (uid, data) => {
       console.error('[updateUserProfile] Failed to sync authorName on posts', error);
     }
   }
+
+  return true;
 };
 
 /**

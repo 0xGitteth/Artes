@@ -890,8 +890,11 @@ export default function ArtesApp() {
       : path.startsWith('/support') ? 'support'
       : (path.startsWith('/chat') || path.startsWith('/messages')) ? 'chat'
       : 'gallery';
+    if (nextView === 'claim') {
+      setClaimInviteToken(getClaimTokenFromPath(path));
+    }
     setView(nextView);
-  }, [profileLoading, authUser?.uid, profile, view]);
+  }, [profileLoading, authUser?.uid, profile, view, getClaimTokenFromPath]);
 
   useEffect(() => {
     if (view === 'claim' || view === 'claimEmail') {

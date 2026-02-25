@@ -3022,7 +3022,17 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
               <div className="flex-1 space-y-3">
                  <div className="flex gap-4"><Hand className="w-6 h-6"/><Cloud className="w-6 h-6"/></div>
                  <div><h3 className="text-lg font-serif font-bold dark:text-white">{post.title}</h3><p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">{post.description}</p></div>
-                 <div className="flex flex-wrap gap-2">{post.styles?.map(s => <Badge key={s} colorClass={getThemeStyle(s)}>{s}</Badge>)}</div>
+                 <div className="flex flex-wrap gap-2">
+                   {post.isChallenge && (
+                     <Badge
+                       colorClass="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-300/40"
+                       onClick={() => onChallengeClick?.()}
+                     >
+                       Challenge
+                     </Badge>
+                   )}
+                   {post.styles?.map(s => <Badge key={s} colorClass={getThemeStyle(s)}>{s}</Badge>)}
+                 </div>
               </div>
               <div className="text-right flex flex-col gap-2">
                  <div className="cursor-pointer group" onClick={() => onUserClick(post.authorId)}>

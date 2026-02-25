@@ -1796,7 +1796,7 @@ export default function ArtesApp() {
             onUserClick={setQuickProfileId}
             authUser={authUser}
             moderationApiBase={moderationApiBase}
-            onChallengeClick={() => { setSelectedPost(null); setView('challenge_timeline'); }}
+            onChallengeClick={() => setView('challenge_timeline')}
           />
         )}
         {shadowProfile && (
@@ -3012,6 +3012,16 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
         return (
         <div key={post.id} className="relative group">
            <div className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`} onClick={() => onPostClick(post)}>
+             {post.isChallenge && (
+               <div className="absolute top-3 left-3 z-20">
+                 <Badge
+                   colorClass="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-300/40"
+                   onClick={() => onChallengeClick?.()}
+                 >
+                   Challenge
+                 </Badge>
+               </div>
+             )}
              {shouldCover ? (
                 <div className="absolute inset-0 z-10 backdrop-blur-3xl bg-slate-900/80 flex flex-col items-center justify-center p-6 text-center" onClick={(e) => e.stopPropagation()}>
                    <AlertOctagon className="w-12 h-12 text-orange-500 mb-4" />

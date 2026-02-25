@@ -75,6 +75,7 @@ import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import ChatPanel from './components/ChatPanel';
 import ModerationSupportChat from './components/ModerationSupportChat';
 import SupportLanding from './components/SupportLanding';
+import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
@@ -391,6 +392,8 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options 
     quickProfilePostIds,
     linkedAgencyName: profileData?.linkedAgencyName ?? null,
     linkedCompanyName: profileData?.linkedCompanyName ?? null,
+    linkedAgencyId: profileData?.linkedAgencyId ?? null,
+    linkedCompanyId: profileData?.linkedCompanyId ?? null,
     linkedAgencyLink: profileData?.linkedAgencyLink ?? '',
     linkedCompanyLink: profileData?.linkedCompanyLink ?? '',
     preferences: {
@@ -399,6 +402,14 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options 
       theme: themePreference,
     },
   };
+};
+
+const resolveLinkedProfileName = (linkedId, fallbackName, allUsers = []) => {
+  if (linkedId) {
+    const linkedUser = allUsers.find((item) => item?.uid === linkedId);
+    if (linkedUser?.displayName) return linkedUser.displayName;
+  }
+  return fallbackName || '';
 };
 
 const normalizeUserForCollections = (userData = {}) => {
@@ -1337,6 +1348,8 @@ export default function ArtesApp() {
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.uid || 'artes'}`,
       linkedAgencyName: profileData.linkedAgencyName,
       linkedCompanyName: profileData.linkedCompanyName,
+      linkedAgencyId: profileData.linkedAgencyId || null,
+      linkedCompanyId: profileData.linkedCompanyId || null,
       onboardingComplete: true,
       onboardingStep: 5,
       onboardingCompletedAt: serverTimestamp(),
@@ -1694,6 +1707,7 @@ export default function ArtesApp() {
               onOpenSettings={() => setShowEditProfile(true)}
               onPostClick={setSelectedPost}
               allUsers={users}
+              onLinkedProfileClick={(uid) => setView(`profile_${uid}`)}
             />
           )}
           
@@ -1958,12 +1972,18 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
        insta: '',
        linkedAgencyName: profile?.linkedAgencyName || '',
        linkedCompanyName: profile?.linkedCompanyName || '',
+       linkedAgencyId: profile?.linkedAgencyId || null,
+       linkedCompanyId: profile?.linkedCompanyId || null,
        themes: Array.isArray(profile?.themes) ? profile.themes : [],
        preferences: {
          triggerVisibility: normalizeTriggerPreferences(),
          theme: profile?.preferences?.theme || 'light',
        },
     }));
+    const [agencyInputMode, setAgencyInputMode] = useState(() => (profile?.linkedAgencyId ? 'existing' : 'manual'));
+    const [companyInputMode, setCompanyInputMode] = useState(() => (profile?.linkedCompanyId ? 'existing' : 'manual'));
+    const [agencySearch, setAgencySearch] = useState(() => profile?.linkedAgencyName || '');
+    const [companySearch, setCompanySearch] = useState(() => profile?.linkedCompanyName || '');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [accountCreated, setAccountCreated] = useState(!!authUser);
@@ -2069,6 +2089,28 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (!profile?.pendingClaimContributorName) return;
       setPendingClaimContributorName(profile.pendingClaimContributorName);
     }, [profile?.pendingClaimContributorName]);
+
+    useEffect(() => {
+      const resolvedAgencyName = resolveLinkedProfileName(profileData.linkedAgencyId, profileData.linkedAgencyName, users);
+      const resolvedCompanyName = resolveLinkedProfileName(profileData.linkedCompanyId, profileData.linkedCompanyName, users);
+      if (resolvedAgencyName !== profileData.linkedAgencyName || resolvedCompanyName !== profileData.linkedCompanyName) {
+        setProfileData((prev) => ({
+          ...prev,
+          linkedAgencyName: resolvedAgencyName,
+          linkedCompanyName: resolvedCompanyName,
+        }));
+      }
+      if (!agencySearch && resolvedAgencyName) setAgencySearch(resolvedAgencyName);
+      if (!companySearch && resolvedCompanyName) setCompanySearch(resolvedCompanyName);
+    }, [
+      users,
+      profileData.linkedAgencyId,
+      profileData.linkedCompanyId,
+      profileData.linkedAgencyName,
+      profileData.linkedCompanyName,
+      agencySearch,
+      companySearch,
+    ]);
 
     const clearDiditReturnParam = useCallback(() => {
       if (typeof window === 'undefined') return;
@@ -2721,11 +2763,87 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           <div className="flex gap-4">
              <div className="flex-1">
                  <label className="block text-sm font-medium mb-1 dark:text-slate-300">Agency (Optioneel)</label>
-                 <input className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="Naam Agency" value={profileData.linkedAgencyName} onChange={e => setProfileData({...profileData, linkedAgencyName: e.target.value})} />
+                 <div className="mb-2 flex gap-2">
+                   <button
+                     type="button"
+                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${agencyInputMode === 'existing' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                     onClick={() => setAgencyInputMode('existing')}
+                   >
+                     Bestaande pagina
+                   </button>
+                   <button
+                     type="button"
+                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${agencyInputMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                     onClick={() => setAgencyInputMode('manual')}
+                   >
+                     Vrije tekst
+                   </button>
+                 </div>
+                 {agencyInputMode === 'existing' ? (
+                   <SearchWithAutocomplete
+                     authReady={authReady}
+                     authUser={authUser}
+                     value={agencySearch}
+                     onChange={(value) => {
+                       setAgencySearch(value);
+                       setProfileData((prev) => ({ ...prev, linkedAgencyId: null, linkedAgencyName: value }));
+                     }}
+                     onSelect={(selectedUser) => {
+                       const selectedName = selectedUser?.displayName || selectedUser?.username || '';
+                       setAgencySearch(selectedName);
+                       setProfileData((prev) => ({
+                         ...prev,
+                         linkedAgencyId: selectedUser?.uid || null,
+                         linkedAgencyName: selectedName,
+                       }));
+                     }}
+                     placeholder="Zoek agency profiel"
+                   />
+                 ) : (
+                   <input className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="Naam Agency" value={profileData.linkedAgencyName || ''} onChange={e => setProfileData({...profileData, linkedAgencyName: e.target.value, linkedAgencyId: null})} />
+                 )}
              </div>
              <div className="flex-1">
                  <label className="block text-sm font-medium mb-1 dark:text-slate-300">Bedrijf/Studio (Optioneel)</label>
-                 <input className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="Naam Bedrijf" value={profileData.linkedCompanyName} onChange={e => setProfileData({...profileData, linkedCompanyName: e.target.value})} />
+                 <div className="mb-2 flex gap-2">
+                   <button
+                     type="button"
+                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${companyInputMode === 'existing' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                     onClick={() => setCompanyInputMode('existing')}
+                   >
+                     Bestaande pagina
+                   </button>
+                   <button
+                     type="button"
+                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${companyInputMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                     onClick={() => setCompanyInputMode('manual')}
+                   >
+                     Vrije tekst
+                   </button>
+                 </div>
+                 {companyInputMode === 'existing' ? (
+                   <SearchWithAutocomplete
+                     authReady={authReady}
+                     authUser={authUser}
+                     value={companySearch}
+                     onChange={(value) => {
+                       setCompanySearch(value);
+                       setProfileData((prev) => ({ ...prev, linkedCompanyId: null, linkedCompanyName: value }));
+                     }}
+                     onSelect={(selectedUser) => {
+                       const selectedName = selectedUser?.displayName || selectedUser?.username || '';
+                       setCompanySearch(selectedName);
+                       setProfileData((prev) => ({
+                         ...prev,
+                         linkedCompanyId: selectedUser?.uid || null,
+                         linkedCompanyName: selectedName,
+                       }));
+                     }}
+                     placeholder="Zoek bedrijfsprofiel"
+                   />
+                 ) : (
+                   <input className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="Naam Bedrijf" value={profileData.linkedCompanyName || ''} onChange={e => setProfileData({...profileData, linkedCompanyName: e.target.value, linkedCompanyId: null})} />
+                 )}
              </div>
           </div>
           <div>
@@ -3065,15 +3183,15 @@ function NavBar({ view, setView, onOpenSettings }) {
    );
 }
 
-function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }) {
+function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick }) {
   if (!profile) return null;
   const normalizedProfile = normalizeProfileData(profile);
   const roles = normalizedProfile.roles;
   const themes = normalizedProfile.themes;
   const bio = normalizedProfile.bio;
   const showBio = Boolean(bio && bio !== 'Nog geen bio toegevoegd.');
-  const agencyName = normalizedProfile.linkedAgencyName || '';
-  const companyName = normalizedProfile.linkedCompanyName || '';
+  const agencyName = resolveLinkedProfileName(normalizedProfile.linkedAgencyId, normalizedProfile.linkedAgencyName, allUsers);
+  const companyName = resolveLinkedProfileName(normalizedProfile.linkedCompanyId, normalizedProfile.linkedCompanyName, allUsers);
   const agencyLink = normalizedProfile.linkedAgencyLink || '';
   const companyLink = normalizedProfile.linkedCompanyLink || '';
   const headerImage = normalizedProfile.headerImage || normalizedProfile.avatar;
@@ -3114,6 +3232,14 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }
                         <a href={agencyLink} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors">
                           {agencyName}
                         </a>
+                      ) : normalizedProfile.linkedAgencyId && onLinkedProfileClick ? (
+                        <button
+                          type="button"
+                          onClick={() => onLinkedProfileClick?.(normalizedProfile.linkedAgencyId)}
+                          className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors"
+                        >
+                          {agencyName}
+                        </button>
                       ) : (
                         <span className="font-semibold text-slate-700 dark:text-white">{agencyName}</span>
                       )}
@@ -3126,6 +3252,14 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick }
                         <a href={companyLink} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors">
                           {companyName}
                         </a>
+                      ) : normalizedProfile.linkedCompanyId && onLinkedProfileClick ? (
+                        <button
+                          type="button"
+                          onClick={() => onLinkedProfileClick?.(normalizedProfile.linkedCompanyId)}
+                          className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors"
+                        >
+                          {companyName}
+                        </button>
                       ) : (
                         <span className="font-semibold text-slate-700 dark:text-white">{companyName}</span>
                       )}
@@ -3977,6 +4111,8 @@ function ModerationPortal({
   authReady,
   isModeratorClient,
   profileAgeVerified,
+  profileAgeVerifiedStrict,
+  profileIsAdult,
   logListenerStart,
   handleListenerError,
   uploads,
@@ -4199,7 +4335,7 @@ function ModerationPortal({
             isModeratorClient={isModeratorClient}
             profileAgeVerified={profileAgeVerified}
             profileAgeVerifiedStrict={profileAgeVerifiedStrict}
-            profileIsAdult={profile?.isAdult === true}
+            profileIsAdult={profileIsAdult}
             logListenerStart={logListenerStart}
             handleListenerError={handleListenerError}
             caseTypeFilter="upload"
@@ -4215,7 +4351,8 @@ function ModerationPortal({
           authReady={authReady}
           isModeratorClient={isModeratorClient}
           profileAgeVerified={profileAgeVerified}
-          profileIsAdult={profile?.isAdult === true}
+          profileAgeVerifiedStrict={profileAgeVerifiedStrict}
+          profileIsAdult={profileIsAdult}
           logListenerStart={logListenerStart}
           handleListenerError={handleListenerError}
           caseTypeFilter="report"
@@ -5184,7 +5321,10 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
 
 function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile }) {
   const [formData, setFormData] = useState({ ...profile });
-  const [agencySearch, setAgencySearch] = useState('');
+  const [agencySearch, setAgencySearch] = useState(profile?.linkedAgencyName || '');
+  const [companySearch, setCompanySearch] = useState(profile?.linkedCompanyName || '');
+  const [agencyInputMode, setAgencyInputMode] = useState(() => (profile?.linkedAgencyId ? 'existing' : 'manual'));
+  const [companyInputMode, setCompanyInputMode] = useState(() => (profile?.linkedCompanyId ? 'existing' : 'manual'));
   const [tab, setTab] = useState('general');
   const [pendingRoleRemoval, setPendingRoleRemoval] = useState(null);
   const [avatarInputMode, setAvatarInputMode] = useState(profile?.avatar?.startsWith('data:') ? 'upload' : 'url');
@@ -5214,6 +5354,10 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
        ...formData,
        roles: formData.roles?.length ? formData.roles : ['fan'],
        themes: formData.themes || [],
+       linkedAgencyName: formData.linkedAgencyName || '',
+       linkedCompanyName: formData.linkedCompanyName || '',
+       linkedAgencyId: formData.linkedAgencyId || null,
+       linkedCompanyId: formData.linkedCompanyId || null,
        headerPosition: formData.headerPosition || 'center',
        quickProfilePreviewMode: formData.quickProfilePreviewMode || 'latest',
        quickProfilePostIds,
@@ -5448,12 +5592,88 @@ function EditProfileModal({ onClose, profile, user, posts, onOpenQuickProfile })
                         <h4 className="font-bold mb-4 dark:text-white">Connecties</h4>
                         <div className="grid md:grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium mb-1 dark:text-slate-300">Agency (Naam)</label>
-                            <input className="w-full p-3 rounded-xl border mb-2 dark:bg-slate-800 dark:text-white" placeholder="Typ naam..." value={agencySearch || formData.linkedAgencyName} onChange={e => { setAgencySearch(e.target.value); setFormData({...formData, linkedAgencyName: e.target.value, linkedAgencyId: ''}); }} />
+                            <label className="block text-sm font-medium mb-1 dark:text-slate-300">Agency</label>
+                            <div className="mb-2 flex gap-2">
+                              <button
+                                type="button"
+                                className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${agencyInputMode === 'existing' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                                onClick={() => setAgencyInputMode('existing')}
+                              >
+                                Bestaande pagina
+                              </button>
+                              <button
+                                type="button"
+                                className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${agencyInputMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                                onClick={() => setAgencyInputMode('manual')}
+                              >
+                                Vrije tekst
+                              </button>
+                            </div>
+                            {agencyInputMode === 'existing' ? (
+                              <SearchWithAutocomplete
+                                authReady={Boolean(user?.uid)}
+                                authUser={user}
+                                value={agencySearch}
+                                onChange={(value) => {
+                                  setAgencySearch(value);
+                                  setFormData((prev) => ({ ...prev, linkedAgencyName: value, linkedAgencyId: null }));
+                                }}
+                                onSelect={(selectedUser) => {
+                                  const selectedName = selectedUser?.displayName || selectedUser?.username || '';
+                                  setAgencySearch(selectedName);
+                                  setFormData((prev) => ({
+                                    ...prev,
+                                    linkedAgencyName: selectedName,
+                                    linkedAgencyId: selectedUser?.uid || null,
+                                  }));
+                                }}
+                                placeholder="Zoek agency profiel"
+                              />
+                            ) : (
+                              <input className="w-full p-3 rounded-xl border mb-2 dark:bg-slate-800 dark:text-white" placeholder="Typ naam..." value={formData.linkedAgencyName || ''} onChange={e => setFormData({...formData, linkedAgencyName: e.target.value, linkedAgencyId: null})} />
+                            )}
                         </div>
                         <div>
-                            <label className="block text-sm font-medium mb-1 dark:text-slate-300">Bedrijf (Naam)</label>
-                            <input className="w-full p-3 rounded-xl border mb-2 dark:bg-slate-800 dark:text-white" placeholder="Typ naam..." value={formData.linkedCompanyName} onChange={e => setFormData({...formData, linkedCompanyName: e.target.value, linkedCompanyId: ''})} />
+                            <label className="block text-sm font-medium mb-1 dark:text-slate-300">Bedrijf</label>
+                            <div className="mb-2 flex gap-2">
+                              <button
+                                type="button"
+                                className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${companyInputMode === 'existing' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                                onClick={() => setCompanyInputMode('existing')}
+                              >
+                                Bestaande pagina
+                              </button>
+                              <button
+                                type="button"
+                                className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${companyInputMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                                onClick={() => setCompanyInputMode('manual')}
+                              >
+                                Vrije tekst
+                              </button>
+                            </div>
+                            {companyInputMode === 'existing' ? (
+                              <SearchWithAutocomplete
+                                authReady={Boolean(user?.uid)}
+                                authUser={user}
+                                value={companySearch}
+                                onChange={(value) => {
+                                  setCompanySearch(value);
+                                  setFormData((prev) => ({ ...prev, linkedCompanyName: value, linkedCompanyId: null }));
+                                }}
+                                onSelect={(selectedUser) => {
+                                  const selectedName = selectedUser?.displayName || selectedUser?.username || '';
+                                  setCompanySearch(selectedName);
+                                  setFormData((prev) => ({
+                                    ...prev,
+                                    linkedCompanyName: selectedName,
+                                    linkedCompanyId: selectedUser?.uid || null,
+                                  }));
+                                }}
+                                placeholder="Zoek bedrijfsprofiel"
+                              />
+                            ) : (
+                              <input className="w-full p-3 rounded-xl border mb-2 dark:bg-slate-800 dark:text-white" placeholder="Typ naam..." value={formData.linkedCompanyName || ''} onChange={e => setFormData({...formData, linkedCompanyName: e.target.value, linkedCompanyId: null})} />
+                            )}
                         </div>
                         </div>
                     </div>

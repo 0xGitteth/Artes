@@ -19,6 +19,7 @@ import {
 import {
   getFirestore,
   serverTimestamp,
+  deleteField,
   doc,
   setDoc,
   getDoc,
@@ -72,6 +73,21 @@ const getFirebaseStorage = () => getStorage(getFirebaseApp());
 
 let authStateReady = false;
 let authStateUser = null;
+
+const waitForAuthReady = async () => {
+  if (authStateReady) {
+    return authStateUser ?? getFirebaseAuth().currentUser ?? null;
+  }
+
+  return new Promise((resolve) => {
+    const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
+      authStateReady = true;
+      authStateUser = user ?? null;
+      unsubscribe();
+      resolve(user ?? null);
+    });
+  });
+};
 
 export const getFirebaseAuthInstance = () => getFirebaseAuth();
 export const getFirebaseDbInstance = () => getFirebaseDb();
@@ -575,10 +591,10 @@ export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = 
 export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
   if (!uid || !patch || typeof patch !== 'object') return false;
   const user = userOverride ?? authStateUser;
-  const canWrite = user?.emailVerified === true || Boolean(import.meta.env.DEV && user?.isAnonymous === true);
+  const canWrite = Boolean(user?.uid) && user.uid === uid;
 
   if (!canWrite) {
-    devLog('[firestore-gate]', { action: 'write-skip', uid, reason: 'user-not-verified' });
+    devLog('[firestore-gate]', { action: 'write-skip', uid, reason: 'auth-not-ready-or-owner-mismatch' });
     return false;
   }
 
@@ -642,18 +658,40 @@ export const createUserProfile = async (uid, profile) => {
   await safeUserWrite(uid, payload);
 };
 export const updateUserProfile = async (uid, data) => {
+  const authUser = await waitForAuthReady();
+  if (!authUser?.uid) {
+    throw new Error('Profiel opslaan mislukt: je bent niet ingelogd of auth is nog niet klaar.');
+  }
+  const resolvedUid = authUser.uid;
+  if (uid && uid !== resolvedUid && import.meta.env.DEV) {
+    console.warn('[updateUserProfile] uid mismatch, forcing auth uid', { requestedUid: uid, authUid: resolvedUid });
+  }
+
   const safeData = stripClientGateFields(data);
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
+  const userDocPath = `users/${resolvedUid}`;
+  const publicDocPath = `publicUsers/${resolvedUid}`;
+
+  if (updatePayload.email === undefined && authUser.email) {
+    updatePayload.email = authUser.email;
+  }
+
   let existingPublic = {};
   try {
-    const existingPublicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', uid));
+    const existingPublicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', resolvedUid));
     existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
   } catch (error) {
     if (error?.code !== 'permission-denied') {
       throw error;
     }
   }
-  const publicPatch = buildPublicProfilePayload(safeData, uid, existingPublic);
+  const publicPatch = buildPublicProfilePayload(safeData, resolvedUid, existingPublic);
+  const hadLegacyPublicEmail = Object.prototype.hasOwnProperty.call(existingPublic || {}, 'email');
+  if (hadLegacyPublicEmail) {
+    publicPatch.email = deleteField();
+  } else {
+    delete publicPatch.email;
+  }
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -661,13 +699,22 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   if (import.meta.env.DEV) {
-    console.log('[updateUserProfile] Writing to users/' + uid, updatePayload);
-    console.log('[updateUserProfile] payload keys', Object.keys(updatePayload).sort());
+    console.log('[updateUserProfile] PRIVATE WRITE', {
+      uid: resolvedUid,
+      path: userDocPath,
+      keys: Object.keys(updatePayload).sort(),
+    });
   }
 
   let didWriteUser = false;
   try {
-    didWriteUser = (await safeUserWrite(uid, updatePayload)) === true;
+    didWriteUser = (await safeUserWrite(resolvedUid, updatePayload, authUser)) === true;
+    if (updatePayload.email !== undefined) {
+      await setDoc(doc(getFirebaseDb(), 'users', resolvedUid), {
+        email: updatePayload.email,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
   } catch (e) {
     console.error(
       '[updateUserProfile] USERS WRITE FAILED',
@@ -681,29 +728,36 @@ export const updateUserProfile = async (uid, data) => {
   const shouldSyncPublic = Object.keys(publicPatch).length > 0;
   if (!didWriteUser) {
     if (import.meta.env.DEV) {
-      devLog('[firestore-gate]', { action: 'public-write-skip', uid, reason: 'user-write-not-allowed-or-blocked' });
+      devLog('[firestore-gate]', { action: 'public-write-skip', uid: resolvedUid, reason: 'user-write-not-allowed-or-blocked' });
     }
-    return;
+    throw new Error('Profiel opslaan mislukt: private profiel kon niet worden bijgewerkt.');
   }
 
   if (import.meta.env.DEV) {
-    console.log('[updateUserProfile] publicUsers patch keys', Object.keys(publicPatch).sort());
+    console.log('[updateUserProfile] PUBLIC WRITE', {
+      uid: resolvedUid,
+      path: publicDocPath,
+      keys: Object.keys(publicPatch).sort(),
+      removedLegacyEmail: hadLegacyPublicEmail,
+    });
   }
 
   if (shouldSyncPublic) {
     try {
-      await writePublicUserProfile(uid, publicPatch, existingPublic);
+      await writePublicUserProfile(resolvedUid, publicPatch, existingPublic);
 
     } catch (e) {
       console.error(
         '[updateUserProfile] PUBLIC USERS WRITE FAILED',
         e.code,
         e.message,
-        Object.keys(safeData).sort()
+        {
+          uid: resolvedUid,
+          path: publicDocPath,
+          keys: Object.keys(publicPatch).sort(),
+        }
       );
-      if (import.meta.env.DEV) {
-        console.warn('[updateUserProfile] Continuing despite publicUsers sync failure');
-      }
+      throw new Error('Profiel opslaan mislukt: public profiel kon niet worden bijgewerkt.');
     }
   }
 };

@@ -686,7 +686,9 @@ export const updateUserProfile = async (uid, data) => {
     if (import.meta.env.DEV) {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid, reason: 'user-write-not-allowed-or-blocked' });
     }
-    return;
+    const writeError = new Error('Profiel kon niet worden opgeslagen. Controleer je inlogstatus en probeer opnieuw.');
+    writeError.code = 'profile-write-blocked';
+    throw writeError;
   }
 
   if (import.meta.env.DEV) {

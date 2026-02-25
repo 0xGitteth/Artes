@@ -1708,6 +1708,7 @@ export default function ArtesApp() {
               onPostClick={setSelectedPost}
               allUsers={users}
               onLinkedProfileClick={(uid) => setView(`profile_${uid}`)}
+              onChallengeClick={() => setView('challenge_timeline')}
             />
           )}
           
@@ -1717,6 +1718,7 @@ export default function ArtesApp() {
                posts={posts}
                onPostClick={setSelectedPost}
                allUsers={users}
+               setView={setView}
             />
           )}
         </main>
@@ -1794,6 +1796,7 @@ export default function ArtesApp() {
             onUserClick={setQuickProfileId}
             authUser={authUser}
             moderationApiBase={moderationApiBase}
+            onChallengeClick={() => setView('challenge_timeline')}
           />
         )}
         {shadowProfile && (
@@ -3009,6 +3012,16 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
         return (
         <div key={post.id} className="relative group">
            <div className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`} onClick={() => onPostClick(post)}>
+             {post.isChallenge && (
+               <div className="absolute top-3 left-3 z-20">
+                 <Badge
+                   colorClass="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-300/40"
+                   onClick={() => onChallengeClick?.()}
+                 >
+                   Challenge
+                 </Badge>
+               </div>
+             )}
              {shouldCover ? (
                 <div className="absolute inset-0 z-10 backdrop-blur-3xl bg-slate-900/80 flex flex-col items-center justify-center p-6 text-center" onClick={(e) => e.stopPropagation()}>
                    <AlertOctagon className="w-12 h-12 text-orange-500 mb-4" />
@@ -3022,7 +3035,17 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
               <div className="flex-1 space-y-3">
                  <div className="flex gap-4"><Hand className="w-6 h-6"/><Cloud className="w-6 h-6"/></div>
                  <div><h3 className="text-lg font-serif font-bold dark:text-white">{post.title}</h3><p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">{post.description}</p></div>
-                 <div className="flex flex-wrap gap-2">{post.styles?.map(s => <Badge key={s} colorClass={getThemeStyle(s)}>{s}</Badge>)}</div>
+                 <div className="flex flex-wrap gap-2">
+                   {post.isChallenge && (
+                     <Badge
+                       colorClass="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-300/40"
+                       onClick={() => onChallengeClick?.()}
+                     >
+                       Challenge
+                     </Badge>
+                   )}
+                   {post.styles?.map(s => <Badge key={s} colorClass={getThemeStyle(s)}>{s}</Badge>)}
+                 </div>
               </div>
               <div className="text-right flex flex-col gap-2">
                  <div className="cursor-pointer group" onClick={() => onUserClick(post.authorId)}>
@@ -3116,7 +3139,7 @@ function Discover({ users, posts, currentUserId, onUserClick, onPostClick, setVi
 
        {tab === 'ideas' && <div>
           <div className="flex flex-wrap gap-2 mb-6">{displayedThemes.map(t => <button key={t} onClick={() => toggleTheme(t)} className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${activeThemes.includes(t) ? 'ring-2 ring-blue-500 ' + getThemeStyle(t) : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{t}</button>)}<button onClick={() => setShowAllThemes(!showAllThemes)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button></div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">{filteredPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-[4/5] bg-slate-200 rounded-lg overflow-hidden cursor-pointer"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">{filteredPosts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-[4/5] bg-slate-200 rounded-lg overflow-hidden cursor-pointer relative">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => setView('challenge_timeline')}>Challenge</Badge></div>}<img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}</div>
        </div>}
 
        {tab === 'people' && <div>
@@ -3183,7 +3206,7 @@ function NavBar({ view, setView, onOpenSettings }) {
    );
 }
 
-function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick }) {
+function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick }) {
   if (!profile) return null;
   const normalizedProfile = normalizeProfileData(profile);
   const roles = normalizedProfile.roles;
@@ -3281,7 +3304,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
         
         <div className="max-w-6xl mx-auto px-6 py-8 relative z-20">
            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {posts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-[4/5] bg-slate-200 rounded-sm overflow-hidden cursor-pointer"><img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}
+              {posts.map(p => <div key={p.id} onClick={() => onPostClick(p)} className="aspect-[4/5] bg-slate-200 rounded-sm overflow-hidden cursor-pointer relative">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => onChallengeClick?.()}>Challenge</Badge></div>}<img src={p.imageUrl} className="w-full h-full object-cover"/></div>)}
            </div>
            {posts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
         </div>
@@ -6377,7 +6400,7 @@ function ChallengeDetail({ setView, posts, onPostClick, challenge }) {
    );
 }
 
-function FetchedProfile({ userId, posts, onPostClick, allUsers }) {
+function FetchedProfile({ userId, posts, onPostClick, allUsers, setView }) {
   const [fetchedUser, setFetchedUser] = useState(null);
   useEffect(() => {
     const existing = allUsers.find(u => u.uid === userId);
@@ -6391,9 +6414,9 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers }) {
     });
   }, [userId, allUsers]);
   if (!fetchedUser) return <div>Loading...</div>;
-  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} />;
+  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} onChallengeClick={() => setView('challenge_timeline')} />;
 }
-function PhotoDetailModal({ post, onClose, authUser, moderationApiBase }) {
+function PhotoDetailModal({ post, onClose, authUser, moderationApiBase, onChallengeClick }) {
   const [reportState, setReportState] = useState({ status: 'idle', error: null });
   const [editState, setEditState] = useState({ saving: false, error: null, success: false });
   const [deleteState, setDeleteState] = useState({ confirm: false, deleting: false, error: null });
@@ -6482,6 +6505,15 @@ function PhotoDetailModal({ post, onClose, authUser, moderationApiBase }) {
     <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-10">
       <img src={post.imageUrl} className="max-h-full" />
       <div className="absolute top-4 left-4 flex items-center gap-3 text-xs text-white/70">
+        {post?.isChallenge && (
+          <Badge
+            colorClass="bg-amber-100/90 text-amber-900 border-amber-200"
+            className="text-xs"
+            onClick={() => onChallengeClick?.()}
+          >
+            Challenge
+          </Badge>
+        )}
         <button
           type="button"
           onClick={handleReport}

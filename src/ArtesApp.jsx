@@ -5444,7 +5444,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
        onClose();
      } catch (error) {
        console.error('Failed to save profile settings', error);
-       setSaveError('Opslaan mislukt. Probeer het opnieuw.');
+       setSaveError(error?.message || 'Opslaan mislukt. Probeer het opnieuw.');
      } finally {
        setIsSaving(false);
      }

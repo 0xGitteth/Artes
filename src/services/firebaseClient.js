@@ -42,6 +42,28 @@ const normalizeUsername = (value) => String(value || '')
   .replace(/[^a-z0-9]+/g, '')
   .slice(0, 20);
 
+const toPublicProfilePayload = (payload = {}, uid) => {
+  const {
+    email,
+    ...rest
+  } = payload || {};
+
+  const publicPayload = {
+    ...rest,
+    uid,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (payload?.displayName) {
+    publicPayload.displayNameLower = String(payload.displayName).toLowerCase();
+  }
+  if (payload?.username) {
+    publicPayload.username = normalizeUsername(payload.username);
+  }
+
+  return publicPayload;
+};
+
 // Debug logging helper (dev mode only)
 const logFirestoreOp = (operation, path, context = '') => {
   if (import.meta.env.DEV) {
@@ -126,10 +148,11 @@ export const subscribeToUsers = (callback, gate = {}) => {
     collection(db, 'publicUsers'),
     (snapshot) => callback(snapshot.docs.map((docSnap) => {
       const data = docSnap.data() || {};
+      const { email, ...safeData } = data;
       return {
         id: docSnap.id,
-        ...data,
-        uid: data.uid || docSnap.id,
+        ...safeData,
+        uid: safeData.uid || docSnap.id,
       };
     })),
     (err) => console.error('PUBLICUSERS LISTENER ERROR:', err.code, err.message, 'path=publicUsers')
@@ -153,14 +176,7 @@ export const createProfile = async (uid, profile) => {
   };
   logFirestoreOp('WRITE', `users/${uid}`, 'createProfile');
   await setDoc(doc(db, 'users', uid), payload);
-  const displayNameLower = String(profile?.displayName || '').toLowerCase();
-  const publicPayload = {
-    ...profile,
-    uid,
-    displayNameLower,
-    username: profile?.username ? normalizeUsername(profile.username) : profile?.username,
-    updatedAt: serverTimestamp(),
-  };
+  const publicPayload = toPublicProfilePayload(profile, uid);
   logFirestoreOp('WRITE', `publicUsers/${uid}`, 'createProfile');
   await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
 };
@@ -170,17 +186,7 @@ export const createProfile = async (uid, profile) => {
 export const updateProfile = async (uid, payload) => {
   logFirestoreOp('UPDATE', `users/${uid}`, 'updateProfile');
   await setDoc(doc(db, 'users', uid), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
-  const publicPayload = {
-    ...payload,
-    uid,
-    updatedAt: serverTimestamp(),
-  };
-  if (payload.displayName) {
-    publicPayload.displayNameLower = String(payload.displayName).toLowerCase();
-  }
-  if (payload.username) {
-    publicPayload.username = normalizeUsername(payload.username);
-  }
+  const publicPayload = toPublicProfilePayload(payload, uid);
   logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
   await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
 };
@@ -223,7 +229,23 @@ export const fetchUserIndex = async (userId, gate = {}) => {
     return null;
   }
   const snapshot = await getDoc(doc(db, 'publicUsers', userId));
-  return snapshot.exists() ? snapshot.data() : null;
+  if (!snapshot.exists()) return null;
+
+  const publicData = snapshot.data() || {};
+  const { email: _publicEmail, ...safePublicData } = publicData;
+
+  if (user?.uid !== userId) {
+    return safePublicData;
+  }
+
+  const privateSnap = await getDoc(doc(db, 'users', userId));
+  if (!privateSnap.exists()) return safePublicData;
+
+  const privateData = privateSnap.data() || {};
+  return {
+    ...safePublicData,
+    email: privateData.email ?? null,
+  };
 };
 
 export const logout = () => signOut(auth);

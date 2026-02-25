@@ -28,7 +28,6 @@ import {
   onSnapshot,
   query,
   orderBy,
-  where,
   deleteDoc,
   runTransaction,
   getDocs,
@@ -576,9 +575,7 @@ export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = 
 export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
   if (!uid || !patch || typeof patch !== 'object') return false;
   const user = userOverride ?? authStateUser;
-  const canWrite = user?.emailVerified === true
-    || user?.isAnonymous === false
-    || Boolean(import.meta.env.DEV && user?.isAnonymous === true);
+  const canWrite = user?.emailVerified === true || Boolean(import.meta.env.DEV && user?.isAnonymous === true);
 
   if (!canWrite) {
     devLog('[firestore-gate]', { action: 'write-skip', uid, reason: 'user-not-verified' });
@@ -709,24 +706,6 @@ export const updateUserProfile = async (uid, data) => {
       if (import.meta.env.DEV) {
         console.warn('[updateUserProfile] Continuing despite publicUsers sync failure');
       }
-    }
-  }
-
-  if (typeof safeData.displayName === 'string' && safeData.displayName.trim()) {
-    try {
-      const postsSnapshot = await getDocs(query(collection(getFirebaseDb(), 'posts'), where('authorId', '==', uid)));
-      if (!postsSnapshot.empty) {
-        const batch = writeBatch(getFirebaseDb());
-        postsSnapshot.docs.forEach((postDoc) => {
-          batch.update(postDoc.ref, {
-            authorName: safeData.displayName.trim(),
-            updatedAt: serverTimestamp(),
-          });
-        });
-        await batch.commit();
-      }
-    } catch (error) {
-      console.error('[updateUserProfile] Failed to sync authorName on posts', error);
     }
   }
 };

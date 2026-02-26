@@ -108,10 +108,10 @@ const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().t
 
 const hasCompletedOnboarding = isOnboardingComplete;
 
-const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
+const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true, idvBootstrapReady = true) => {
   if (!authIsReady) return null;
   if (!authUserData) return 1;
-  if (profileData?.idvBootstrapLoaded === false) return null;
+  if (!idvBootstrapReady) return null;
 
   if (isOnboardingComplete(profileData)) return 5;
   const statusFromProfile = normalizeDiditStatus(profileData?.idv?.status || profileData?.diditStatus);
@@ -528,6 +528,7 @@ export default function ArtesApp() {
   const [authPending, setAuthPending] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [idvBootstrapReady, setIdvBootstrapReady] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
   const [verificationNote, setVerificationNote] = useState(null);
@@ -577,6 +578,7 @@ export default function ArtesApp() {
   }) && !!resolvedModerationThreadId;
   const profileCompleted = hasCompletedOnboarding(profile);
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
+  const canRenderRoutedView = authReady && !profileLoading;
   useEffect(() => {
     const uid = authUser?.uid || null;
     if (lastUidRef.current && lastUidRef.current !== uid) {
@@ -758,6 +760,7 @@ export default function ArtesApp() {
         setAuthReady(true);
       }
       setProfileLoading(true);
+      setIdvBootstrapReady(false);
       setView('loading');
       setUser(u);
       setAuthUser(u);
@@ -778,6 +781,7 @@ export default function ArtesApp() {
             ? 'chat'
             : 'login';
         setView(unauthView);
+        setIdvBootstrapReady(true);
         setProfileLoading(false);
         return;
       }
@@ -812,7 +816,6 @@ export default function ArtesApp() {
 
         const mergedProfileData = {
           ...(profileData || {}),
-          idvBootstrapLoaded: true,
           idv: {
             ...(profileData?.idv || {}),
             ...(initialIdvData || {}),
@@ -866,7 +869,6 @@ export default function ArtesApp() {
             email: u.email ?? null,
             onboardingStep: 1,
             onboardingComplete: false,
-            idvBootstrapLoaded: true,
           }, u.uid);
           setProfile(fallbackProfile);
           setView('onboarding');
@@ -875,6 +877,7 @@ export default function ArtesApp() {
           setView('onboarding');
         }
       } finally {
+        setIdvBootstrapReady(true);
         setProfileLoading(false);
       }
     });
@@ -1590,13 +1593,13 @@ export default function ArtesApp() {
         )}
 
         <main className="h-full overflow-y-auto pb-24 pt-16 scroll-smooth">
-          {(view === 'loading' || profileLoading || (view === 'onboarding' && profileCompleted)) && (
+          {(!authReady || view === 'loading' || profileLoading || (view === 'onboarding' && (!authUser?.uid || profileCompleted || !idvBootstrapReady))) && (
             <div className="h-full flex items-center justify-center">
               <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
           )}
           
-          {!profileLoading && view === 'login' && (
+          {authReady && canRenderRoutedView && view === 'login' && (
             <LoginScreen
               setView={setView}
               onLogin={handleLogin}
@@ -1608,7 +1611,7 @@ export default function ArtesApp() {
             />
           )}
 
-          {!profileLoading && view === 'claim' && (
+          {authReady && canRenderRoutedView && view === 'claim' && (
             <ClaimInvitePage
               token={claimInviteToken}
               authUser={authUser}
@@ -1621,14 +1624,14 @@ export default function ArtesApp() {
             />
           )}
 
-          {!profileLoading && view === 'claimEmail' && (
+          {authReady && canRenderRoutedView && view === 'claimEmail' && (
             <ClaimEmailPage
               authUser={authUser}
               setView={setView}
             />
           )}
 
-          {!profileLoading && view === 'onboarding' && !profileCompleted && (
+          {authReady && canRenderRoutedView && view === 'onboarding' && !!authUser?.uid && !profileCompleted && idvBootstrapReady && (
             <Onboarding
               setView={setView}
               users={users}
@@ -1640,11 +1643,12 @@ export default function ArtesApp() {
               profile={profile}
               functionsBase={functionsBase}
               authReady={authReady}
+              idvBootstrapReady={idvBootstrapReady}
               appConfig={appConfig}
             />
           )}
           
-          {!profileLoading && view === 'gallery' && (
+          {canRenderRoutedView && view === 'gallery' && (
             <Gallery 
               posts={posts} 
               users={users}
@@ -1656,7 +1660,7 @@ export default function ArtesApp() {
             />
           )}
 
-          {!profileLoading && view === 'moderation' && (
+          {canRenderRoutedView && view === 'moderation' && (
             <ModerationPortal
               moderationApiBase={moderationApiBase}
               functionsBase={functionsBase}
@@ -1681,7 +1685,7 @@ export default function ArtesApp() {
             />
           )}
 
-          {!profileLoading && view === 'discover' && (
+          {canRenderRoutedView && view === 'discover' && (
             <Discover
               users={users}
               posts={posts}
@@ -1692,7 +1696,7 @@ export default function ArtesApp() {
             />
           )}
           
-          {!profileLoading && view === 'community' && (
+          {canRenderRoutedView && view === 'community' && (
             <CommunityList
               setView={setView}
               communities={communityConfig.communities}
@@ -1701,16 +1705,16 @@ export default function ArtesApp() {
               onStartChallengeUpload={() => handleOpenUploadModal({ isChallenge: true })}
             />
           )}
-          {!profileLoading && view === 'support' && (
+          {canRenderRoutedView && view === 'support' && (
             <SupportLanding onOpenChat={handleOpenSupportChat} canOpenChat={Boolean(authUser)} />
           )}
-          {!profileLoading && view === 'vouch' && (
+          {canRenderRoutedView && view === 'vouch' && (
             <VouchRequestsPanel
               authUser={authUser}
               functionsBase={functionsBase}
             />
           )}
-          {!profileLoading && view === 'chat' && (
+          {canRenderRoutedView && view === 'chat' && (
             authUser ? (
               <div className="max-w-6xl mx-auto px-4 py-6 h-[75vh]">
                 <ChatPanel
@@ -1728,7 +1732,7 @@ export default function ArtesApp() {
               </div>
             )
           )}
-          {!profileLoading && view === 'challenge_timeline' && (
+          {canRenderRoutedView && view === 'challenge_timeline' && (
             <ChallengeDetail
               setView={setView}
               posts={posts.filter(p => p.isChallenge)}
@@ -1737,7 +1741,7 @@ export default function ArtesApp() {
             />
           )}
           
-          {!profileLoading && view.startsWith('community_') && (() => {
+          {canRenderRoutedView && view.startsWith('community_') && (() => {
             const communityView = view.slice('community_'.length);
             const [communityId, topicTitleEncoded] = communityView.split('__topic__');
             const initialTopicTitle = topicTitleEncoded ? decodeURIComponent(topicTitleEncoded) : null;
@@ -1758,7 +1762,7 @@ export default function ArtesApp() {
           })()}
 
           {/* Wrapper logic for viewing profiles */}
-          {!profileLoading && view === 'profile' && (
+          {canRenderRoutedView && view === 'profile' && (
             <ImmersiveProfile 
               profile={profile} 
               isOwn={true} 
@@ -1771,7 +1775,7 @@ export default function ArtesApp() {
             />
           )}
           
-          {!profileLoading && view.startsWith('profile_') && (
+          {canRenderRoutedView && view.startsWith('profile_') && (
             <FetchedProfile 
                userId={view.split('_')[1]} 
                posts={posts}
@@ -2033,7 +2037,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   );
 }
 
-function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady, appConfig }) {
+function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady, idvBootstrapReady, appConfig }) {
     const onboardingQueryParams = useMemo(() => {
       if (typeof window === 'undefined') return new URLSearchParams();
       return new URLSearchParams(window.location.search || '');
@@ -2117,22 +2121,22 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }, [authUser, accountCreated]);
 
     useEffect(() => {
-      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
+      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady, idvBootstrapReady);
       if (!resolvedStep) return;
       setStep((prevStep) => {
         if (prevStep === MATCH_STEP && resolvedStep === 2) return prevStep;
         if (resolvedStep <= prevStep) return prevStep;
         return resolvedStep;
       });
-    }, [authReady, authUser, onboardingQueryParams, profile]);
+    }, [authReady, authUser, idvBootstrapReady, onboardingQueryParams, profile]);
 
     useEffect(() => {
       if (step !== null) return;
-      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
+      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady, idvBootstrapReady);
       if (resolvedStep) {
         setStep(resolvedStep);
       }
-    }, [step, profile, authUser, onboardingQueryParams, authReady]);
+    }, [step, profile, authUser, onboardingQueryParams, authReady, idvBootstrapReady]);
 
     useEffect(() => {
       if (step !== 2) return;

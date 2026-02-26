@@ -574,6 +574,7 @@ export default function ArtesApp() {
     profile,
     config: appConfig,
   }) && !!resolvedModerationThreadId;
+  const profileCompleted = hasCompletedOnboarding(profile);
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
   useEffect(() => {
     const uid = authUser?.uid || null;
@@ -1557,7 +1558,7 @@ export default function ArtesApp() {
         )}
 
         <main className="h-full overflow-y-auto pb-24 pt-16 scroll-smooth">
-          {(view === 'loading' || profileLoading) && (
+          {(view === 'loading' || profileLoading || (view === 'onboarding' && profileCompleted)) && (
             <div className="h-full flex items-center justify-center">
               <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
@@ -1595,7 +1596,7 @@ export default function ArtesApp() {
             />
           )}
 
-          {!profileLoading && view === 'onboarding' && (
+          {!profileLoading && view === 'onboarding' && !profileCompleted && (
             <Onboarding
               setView={setView}
               users={users}
@@ -2005,7 +2006,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (typeof window === 'undefined') return new URLSearchParams();
       return new URLSearchParams(window.location.search || '');
     }, []);
-    const [step, setStep] = useState(() => computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady) ?? 1);
+    const [step, setStep] = useState(null);
     const [roles, setRoles] = useState([]);
     const MATCH_STEP = 1.5;
     const [profileData, setProfileData] = useState(() => ({
@@ -2092,6 +2093,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         return resolvedStep;
       });
     }, [authReady, authUser, onboardingQueryParams, profile]);
+
+    useEffect(() => {
+      if (step !== null) return;
+      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
+      if (resolvedStep) {
+        setStep(resolvedStep);
+      }
+    }, [step, profile, authUser, onboardingQueryParams, authReady]);
 
     useEffect(() => {
       if (step !== 2) return;
@@ -2508,6 +2517,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
             Email signup staat op dit moment uit. Log in met een sociale provider of probeer het later opnieuw.
           </p>
           <Button className="w-full" onClick={() => setView('login')}>Terug naar inloggen</Button>
+        </div>
+      );
+    }
+
+    if (step === null) {
+      return (
+        <div className="max-w-md mx-auto py-12 px-4 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
         </div>
       );
     }

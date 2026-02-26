@@ -79,6 +79,7 @@ import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
+import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
 
 // --- Constants & Styling ---
 
@@ -1613,6 +1614,7 @@ export default function ArtesApp() {
           {!profileLoading && view === 'gallery' && (
             <Gallery 
               posts={posts} 
+              users={users}
               onUserClick={setQuickProfileId}
               onShadowClick={setShadowProfile}
               onPostClick={setSelectedPost}
@@ -2101,24 +2103,28 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     useEffect(() => {
       if (!authUser) return;
       setEmail(authUser.email || '');
-      if (authUser.displayName) {
-        setProfileData((prev) => ({ ...prev, displayName: authUser.displayName }));
-      }
-    }, [authUser]);
+      setProfileData((prev) => {
+        const resolvedDisplayName = pickPreferredDisplayName(prev?.displayName, profile?.displayName, authUser.displayName);
+        if (resolvedDisplayName === (prev?.displayName || '')) return prev;
+        return { ...prev, displayName: resolvedDisplayName };
+      });
+    }, [authUser, profile?.displayName]);
 
     useEffect(() => {
       if (!isGoogleUser || !authUser?.uid || syncedGoogleProfile) return;
       setAccountCreated(true);
       setStep((prev) => (prev < 2 ? 2 : prev));
+      // Google is fallback only and must not overwrite an existing app profile displayName.
+      const resolvedDisplayName = pickPreferredDisplayName(profile?.displayName, profileData.displayName, authUser.displayName, 'Artes gebruiker');
       updateUserProfile(authUser.uid, {
         onboardingStep: 2,
         onboardingComplete: false,
-        displayName: authUser.displayName || profileData.displayName || 'Artes gebruiker',
+        displayName: resolvedDisplayName,
         email: authUser.email ?? null,
         authProvider: 'google.com',
       }).catch((e) => console.error('Failed to sync Google profile', e));
       setSyncedGoogleProfile(true);
-    }, [isGoogleUser, authUser?.uid, authUser?.displayName, authUser?.email, profileData.displayName, syncedGoogleProfile]);
+    }, [isGoogleUser, authUser?.uid, authUser?.displayName, authUser?.email, profile?.displayName, profileData.displayName, syncedGoogleProfile]);
 
     useEffect(() => {
       if (!profile?.pendingClaimContributorId) return;
@@ -3030,7 +3036,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }
 }
 
-function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick }) {
+function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick }) {
   const [sensitiveRevealed, setSensitiveRevealed] = useState({});
   const triggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
   const isSensitivePost = (post) => getPostTriggerKeys(post).length > 0;
@@ -3046,6 +3052,7 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
         const contentPreference = getPostContentPreference(post, triggerVisibility);
         const shouldCover = isSensitivePost(post) && contentPreference === 'cover' && !sensitiveRevealed[post.id];
         const visibleCredits = getVisibleCredits(post);
+        const authorDisplayName = resolvePostAuthorDisplayName({ post, users });
         return (
         <div key={post.id} className="relative group">
            <div className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`} onClick={() => onPostClick(post)}>
@@ -3077,7 +3084,7 @@ function Gallery({ posts, onUserClick, profile, onChallengeClick, onPostClick, o
               <div className="text-right flex flex-col gap-2">
                  <div className="cursor-pointer group" onClick={() => onUserClick(post.authorId)}>
                     <div className="text-xs uppercase font-bold text-slate-400">{ROLES.find(r => r.id === post.authorRole)?.label}</div>
-                    <div className="text-xs font-medium text-slate-900 group-hover:text-blue-600 dark:text-white transition-colors">{post.authorName}</div>
+                    <div className="text-xs font-medium text-slate-900 group-hover:text-blue-600 dark:text-white transition-colors">{authorDisplayName}</div>
                  </div>
                  {visibleCredits.map((c, i) => (
                     <div

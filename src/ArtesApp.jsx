@@ -111,6 +111,7 @@ const hasCompletedOnboarding = isOnboardingComplete;
 const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
   if (!authIsReady) return null;
   if (!authUserData) return 1;
+  if (profileData?.idvBootstrapLoaded === false) return null;
 
   if (isOnboardingComplete(profileData)) return 5;
   const statusFromProfile = normalizeDiditStatus(profileData?.idv?.status || profileData?.diditStatus);
@@ -795,9 +796,39 @@ export default function ArtesApp() {
         }
         await migrateArtifactsUserData(u);
         const profileData = await ensureUserProfile(u);
-        const normalized = normalizeProfileData(profileData, u.uid);
+
+        let initialIdvData = null;
+        try {
+          const db = getFirebaseDbInstance();
+          const idvSnapshot = await getDoc(doc(db, 'users', u.uid, 'idv', 'status'));
+          if (idvSnapshot.exists()) {
+            initialIdvData = idvSnapshot.data() || null;
+          }
+        } catch (idvError) {
+          if (idvError?.code !== 'permission-denied') {
+            console.error('[ArtesApp] Failed to load initial IDV status', idvError);
+          }
+        }
+
+        const mergedProfileData = {
+          ...(profileData || {}),
+          idvBootstrapLoaded: true,
+          idv: {
+            ...(profileData?.idv || {}),
+            ...(initialIdvData || {}),
+          },
+        };
+
+        if (!mergedProfileData.diditStatus && initialIdvData?.status) {
+          mergedProfileData.diditStatus = initialIdvData.status;
+        }
+        if (typeof mergedProfileData.isAdult !== 'boolean' && typeof initialIdvData?.isAdult === 'boolean') {
+          mergedProfileData.isAdult = initialIdvData.isAdult;
+        }
+
+        const normalized = normalizeProfileData(mergedProfileData, u.uid);
         setProfile(normalized);
-        const onboardingComplete = hasCompletedOnboarding(profileData);
+        const onboardingComplete = hasCompletedOnboarding(mergedProfileData);
         const baseView = onboardingComplete ? 'gallery' : 'onboarding';
         const path = window.location.pathname || '/';
         const claimToken = getClaimTokenFromPath(path);
@@ -835,6 +866,7 @@ export default function ArtesApp() {
             email: u.email ?? null,
             onboardingStep: 1,
             onboardingComplete: false,
+            idvBootstrapLoaded: true,
           }, u.uid);
           setProfile(fallbackProfile);
           setView('onboarding');

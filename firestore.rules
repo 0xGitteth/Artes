@@ -33,7 +33,7 @@ service cloud.firestore {
       return isVerifiedUser() || isAnonymousOnboardingUser();
     }
     function noClientGateFieldWrites() {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+      return resource == null ? true : !request.resource.data.diff(resource.data).affectedKeys().hasAny([
         'ageVerified',
         'isAdult',
         'ageVerifiedAt'

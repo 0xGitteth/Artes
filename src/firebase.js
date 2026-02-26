@@ -484,6 +484,20 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
   return payload;
 };
 
+
+const cleanupLegacyPublicEmailIfNeeded = async (db, uid, existingPublic = {}) => {
+  if (!uid || !existingPublic || !Object.prototype.hasOwnProperty.call(existingPublic, 'email')) {
+    return false;
+  }
+
+  await updateDoc(doc(db, 'publicUsers', uid), {
+    email: deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+
+  return true;
+};
+
 const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   if (!uid) return;
   const payload = buildPublicProfilePayload(data, uid, existingPublic);
@@ -731,6 +745,23 @@ export const updateUserProfile = async (uid, data) => {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid: resolvedUid, reason: 'user-write-not-allowed-or-blocked' });
     }
     throw new Error('Profiel opslaan mislukt: private profiel kon niet worden bijgewerkt.');
+  }
+
+  let removedLegacyEmail = false;
+  try {
+    removedLegacyEmail = await cleanupLegacyPublicEmailIfNeeded(getFirebaseDb(), resolvedUid, existingPublic);
+  } catch (e) {
+    console.error(
+      '[updateUserProfile] PUBLIC USERS LEGACY EMAIL CLEANUP FAILED',
+      e.code,
+      e.message,
+      {
+        uid: resolvedUid,
+        path: publicDocPath,
+        keys: ['email', 'updatedAt'],
+      }
+    );
+    throw new Error('Profiel opslaan mislukt: legacy public profiel data kon niet worden opgeschoond.');
   }
 
   if (import.meta.env.DEV) {

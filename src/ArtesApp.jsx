@@ -108,10 +108,10 @@ const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().t
 
 const hasCompletedOnboarding = isOnboardingComplete;
 
-const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
+const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true, idvBootstrapReady = true) => {
   if (!authIsReady) return null;
   if (!authUserData) return 1;
-  if (profileData?.idvBootstrapLoaded === false) return null;
+  if (!idvBootstrapReady) return null;
 
   if (isOnboardingComplete(profileData)) return 5;
   const statusFromProfile = normalizeDiditStatus(profileData?.idv?.status || profileData?.diditStatus);
@@ -528,6 +528,7 @@ export default function ArtesApp() {
   const [authPending, setAuthPending] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [idvBootstrapReady, setIdvBootstrapReady] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
   const [verificationNote, setVerificationNote] = useState(null);
@@ -758,6 +759,7 @@ export default function ArtesApp() {
         setAuthReady(true);
       }
       setProfileLoading(true);
+      setIdvBootstrapReady(false);
       setView('loading');
       setUser(u);
       setAuthUser(u);
@@ -778,6 +780,7 @@ export default function ArtesApp() {
             ? 'chat'
             : 'login';
         setView(unauthView);
+        setIdvBootstrapReady(true);
         setProfileLoading(false);
         return;
       }
@@ -812,7 +815,6 @@ export default function ArtesApp() {
 
         const mergedProfileData = {
           ...(profileData || {}),
-          idvBootstrapLoaded: true,
           idv: {
             ...(profileData?.idv || {}),
             ...(initialIdvData || {}),
@@ -866,7 +868,6 @@ export default function ArtesApp() {
             email: u.email ?? null,
             onboardingStep: 1,
             onboardingComplete: false,
-            idvBootstrapLoaded: true,
           }, u.uid);
           setProfile(fallbackProfile);
           setView('onboarding');
@@ -875,6 +876,7 @@ export default function ArtesApp() {
           setView('onboarding');
         }
       } finally {
+        setIdvBootstrapReady(true);
         setProfileLoading(false);
       }
     });
@@ -1590,7 +1592,7 @@ export default function ArtesApp() {
         )}
 
         <main className="h-full overflow-y-auto pb-24 pt-16 scroll-smooth">
-          {(view === 'loading' || profileLoading || (view === 'onboarding' && profileCompleted)) && (
+          {(view === 'loading' || profileLoading || (view === 'onboarding' && (profileCompleted || (authUser?.uid && !idvBootstrapReady)))) && (
             <div className="h-full flex items-center justify-center">
               <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
@@ -1628,7 +1630,7 @@ export default function ArtesApp() {
             />
           )}
 
-          {!profileLoading && view === 'onboarding' && !profileCompleted && (
+          {!profileLoading && view === 'onboarding' && !profileCompleted && (idvBootstrapReady || !authUser?.uid) && (
             <Onboarding
               setView={setView}
               users={users}
@@ -1640,6 +1642,7 @@ export default function ArtesApp() {
               profile={profile}
               functionsBase={functionsBase}
               authReady={authReady}
+              idvBootstrapReady={idvBootstrapReady}
               appConfig={appConfig}
             />
           )}
@@ -2033,7 +2036,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   );
 }
 
-function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady, appConfig }) {
+function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady, idvBootstrapReady, appConfig }) {
     const onboardingQueryParams = useMemo(() => {
       if (typeof window === 'undefined') return new URLSearchParams();
       return new URLSearchParams(window.location.search || '');
@@ -2117,22 +2120,22 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }, [authUser, accountCreated]);
 
     useEffect(() => {
-      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
+      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady, idvBootstrapReady);
       if (!resolvedStep) return;
       setStep((prevStep) => {
         if (prevStep === MATCH_STEP && resolvedStep === 2) return prevStep;
         if (resolvedStep <= prevStep) return prevStep;
         return resolvedStep;
       });
-    }, [authReady, authUser, onboardingQueryParams, profile]);
+    }, [authReady, authUser, idvBootstrapReady, onboardingQueryParams, profile]);
 
     useEffect(() => {
       if (step !== null) return;
-      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
+      const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady, idvBootstrapReady);
       if (resolvedStep) {
         setStep(resolvedStep);
       }
-    }, [step, profile, authUser, onboardingQueryParams, authReady]);
+    }, [step, profile, authUser, onboardingQueryParams, authReady, idvBootstrapReady]);
 
     useEffect(() => {
       if (step !== 2) return;

@@ -700,6 +700,12 @@ export const updateUserProfile = async (uid, data) => {
     }
   }
   const publicPatch = buildPublicProfilePayload(safeData, resolvedUid, existingPublic);
+  const hadLegacyPublicEmail = Object.prototype.hasOwnProperty.call(existingPublic || {}, 'email');
+  if (hadLegacyPublicEmail) {
+    publicPatch.email = deleteField();
+  } else {
+    delete publicPatch.email;
+  }
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -763,7 +769,7 @@ export const updateUserProfile = async (uid, data) => {
       uid: resolvedUid,
       path: publicDocPath,
       keys: Object.keys(publicPatch).sort(),
-      removedLegacyEmail,
+      removedLegacyEmail: hadLegacyPublicEmail,
     });
   }
 

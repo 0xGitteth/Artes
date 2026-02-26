@@ -35,7 +35,7 @@ async function run() {
         displayNameLower: 'owner one',
         email: 'legacy@example.com',
         updatedAt: new Date(),
-      }, { merge: true });
+      });
     });
 
     const ownerDb = authedContext(testEnv, ownerUid).firestore();
@@ -47,15 +47,9 @@ async function run() {
 
     await assertSucceeds(
       updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
-        email: deleteField(),
-        updatedAt: new Date(),
-      }),
-    );
-
-    await assertSucceeds(
-      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
         displayName: 'Owner Prime',
         displayNameLower: 'owner prime',
+        email: deleteField(),
       }),
     );
 

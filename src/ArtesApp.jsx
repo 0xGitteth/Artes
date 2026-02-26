@@ -579,6 +579,21 @@ export default function ArtesApp() {
   const profileCompleted = hasCompletedOnboarding(profile);
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
   const canRenderRoutedView = authReady && !profileLoading;
+  const isOnboardingView = view === 'onboarding';
+  const isAuthedOnboardingView = isOnboardingView && !!authUser?.uid;
+
+  const shouldShowLoader =
+    !authReady ||
+    view === 'loading' ||
+    profileLoading ||
+    (isAuthedOnboardingView && (profileCompleted || !idvBootstrapReady));
+
+  const canRenderOnboarding =
+    canRenderRoutedView &&
+    isOnboardingView &&
+    (
+      !authUser?.uid || (!profileCompleted && idvBootstrapReady)
+    );
   useEffect(() => {
     const uid = authUser?.uid || null;
     if (lastUidRef.current && lastUidRef.current !== uid) {
@@ -1593,7 +1608,7 @@ export default function ArtesApp() {
         )}
 
         <main className="h-full overflow-y-auto pb-24 pt-16 scroll-smooth">
-          {(!authReady || view === 'loading' || profileLoading || (view === 'onboarding' && (!authUser?.uid || profileCompleted || !idvBootstrapReady))) && (
+          {shouldShowLoader && (
             <div className="h-full flex items-center justify-center">
               <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
@@ -1631,7 +1646,7 @@ export default function ArtesApp() {
             />
           )}
 
-          {authReady && canRenderRoutedView && view === 'onboarding' && !!authUser?.uid && !profileCompleted && idvBootstrapReady && (
+          {canRenderOnboarding && (
             <Onboarding
               setView={setView}
               users={users}

@@ -2114,17 +2114,23 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (!isGoogleUser || !authUser?.uid || syncedGoogleProfile) return;
       setAccountCreated(true);
       setStep((prev) => (prev < 2 ? 2 : prev));
-      // Google is fallback only and must not overwrite an existing app profile displayName.
-      const resolvedDisplayName = pickPreferredDisplayName(profile?.displayName, profileData.displayName, authUser.displayName, 'Artes gebruiker');
-      updateUserProfile(authUser.uid, {
+      const existingAppDisplayName = String(profile?.displayName || '').trim();
+      const googleDisplayName = String(authUser.displayName || '').trim();
+      const googleSyncPayload = {
         onboardingStep: 2,
         onboardingComplete: false,
-        displayName: resolvedDisplayName,
         email: authUser.email ?? null,
         authProvider: 'google.com',
-      }).catch((e) => console.error('Failed to sync Google profile', e));
+      };
+
+      // Google is fallback only and must not overwrite an existing app profile displayName.
+      if (!existingAppDisplayName && googleDisplayName) {
+        googleSyncPayload.displayName = googleDisplayName;
+      }
+
+      updateUserProfile(authUser.uid, googleSyncPayload).catch((e) => console.error('Failed to sync Google profile', e));
       setSyncedGoogleProfile(true);
-    }, [isGoogleUser, authUser?.uid, authUser?.displayName, authUser?.email, profile?.displayName, profileData.displayName, syncedGoogleProfile]);
+    }, [isGoogleUser, authUser?.uid, authUser?.displayName, authUser?.email, profile?.displayName, syncedGoogleProfile]);
 
     useEffect(() => {
       if (!profile?.pendingClaimContributorId) return;

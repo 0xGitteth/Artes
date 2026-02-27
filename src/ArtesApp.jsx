@@ -1307,6 +1307,11 @@ export default function ArtesApp() {
 
     if (profileBlockedKeysRef.current.has(key)) {
       devLog('[listener-blocked]', { label: 'Profile listener (ArtesApp)', key });
+      if (waitForAuthoritativeProfileRef.current) {
+        waitForAuthoritativeProfileRef.current = false;
+        logStartup('authoritative-profile-unavailable-blocked-key', { uid: authUser.uid, key });
+        setProfileLoading(false);
+      }
       return;
     }
 
@@ -1367,6 +1372,19 @@ export default function ArtesApp() {
           }
           profileBlockedKeysRef.current.add(key);
           devLog('[listener-blocked]', { label: 'Profile listener (ArtesApp)', key, code: error?.code });
+          if (waitForAuthoritativeProfileRef.current) {
+            waitForAuthoritativeProfileRef.current = false;
+            logStartup('authoritative-profile-unavailable-permission-denied', {
+              uid: authUser.uid,
+              key,
+              code: error?.code,
+            });
+            setProfileLoading(false);
+            setViewWithReason('onboarding', 'profile-listener:authoritative-profile-unavailable', {
+              path: window.location.pathname || '/',
+              code: error?.code,
+            });
+          }
           return;
         }
         handleListenerError('Profile listener (ArtesApp)', error);

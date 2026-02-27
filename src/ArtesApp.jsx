@@ -608,6 +608,7 @@ export default function ArtesApp() {
   const profileUnsubscribeRef = useRef(null);
   const profileActiveKeyRef = useRef(null);
   const profileBlockedKeysRef = useRef(new Set());
+  const waitForAuthoritativeProfileRef = useRef(false);
   const appStartAtRef = useRef(typeof performance !== 'undefined' ? performance.now() : Date.now());
   const viewRef = useRef('loading');
   const viewReasonRef = useRef('initial');
@@ -933,27 +934,21 @@ export default function ArtesApp() {
       } catch (e) {
         if (e?.code === 'permission-denied') {
           if (import.meta.env.DEV) {
-            console.log('[ArtesApp] Profile init permission denied, continuing with fallback profile');
+            console.log('[ArtesApp] Profile init permission denied, waiting for authoritative profile');
           }
-          const fallbackProfile = normalizeProfileData({
-            uid: u.uid,
-            displayName: u.displayName || u.email?.split('@')?.[0] || 'Nieuwe gebruiker',
-            email: u.email ?? null,
-            onboardingStep: 1,
-            onboardingComplete: false,
-          }, u.uid);
-          logStartup('before-setProfile-fallback', { uid: u.uid, codePath: 'permission-denied' });
-          setProfile(fallbackProfile);
-          logStartup('before-setView-fallback-onboarding', { uid: u.uid });
-          setViewWithReason('onboarding', 'observeAuth:fallback-permission-denied');
+          waitForAuthoritativeProfileRef.current = true;
+          logStartup('permission-denied-await-authoritative-profile', { uid: u.uid });
+          return;
         } else {
           console.error('Failed to load profile', e);
           logStartup('before-setView-error-onboarding', { uid: u.uid, errorCode: e?.code || null });
           setViewWithReason('onboarding', 'observeAuth:error-fallback');
         }
       } finally {
-        logStartup('before-setProfileLoading-false', { codePath: 'observeAuth:finally', uid: u?.uid || null });
-        setProfileLoading(false);
+        if (!waitForAuthoritativeProfileRef.current) {
+          logStartup('before-setProfileLoading-false', { codePath: 'observeAuth:finally', uid: u?.uid || null });
+          setProfileLoading(false);
+        }
       }
     });
     return () => {
@@ -1339,6 +1334,30 @@ export default function ArtesApp() {
           onboardingComplete: normalized?.onboardingComplete === true,
         });
         setProfile(normalized);
+        if (waitForAuthoritativeProfileRef.current) {
+          waitForAuthoritativeProfileRef.current = false;
+          const onboardingComplete = hasCompletedOnboarding(normalized);
+          const path = window.location.pathname || '/';
+          const claimToken = getClaimTokenFromPath(path);
+          setClaimInviteToken(claimToken);
+          const routedView = claimToken
+            ? 'claim'
+            : path.startsWith('/claim-email')
+              ? 'claimEmail'
+            : path.startsWith('/moderation')
+              ? 'moderation'
+            : path.startsWith('/vouch')
+              ? 'vouch'
+            : path.startsWith('/support')
+              ? 'support'
+              : path.startsWith('/chat') || path.startsWith('/messages')
+                ? 'chat'
+                : onboardingComplete ? 'gallery' : 'onboarding';
+          const nextView = onboardingComplete ? routedView : 'onboarding';
+          logStartup('before-setView-authoritative-profile', { uid: authUser.uid, nextView, onboardingComplete, path });
+          setViewWithReason(nextView, 'profile-listener:authoritative-routing', { onboardingComplete, path });
+          setProfileLoading(false);
+        }
       },
       (error) => {
         if (error?.code === 'permission-denied') {
@@ -1360,7 +1379,7 @@ export default function ArtesApp() {
         profileUnsubscribeRef.current = null;
       }
     };
-  }, [authReady, authUser?.uid, logListenerStart, handleListenerError]);
+  }, [authReady, authUser?.uid, getClaimTokenFromPath, logListenerStart, handleListenerError, logStartup, setViewWithReason]);
 
   const handleOpenSupportChat = () => {
     if (!authReady || !authUser?.uid || !functionsBase) {

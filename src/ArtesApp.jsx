@@ -108,22 +108,67 @@ const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().t
 
 const hasCompletedOnboarding = isOnboardingComplete;
 
-const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
-  if (!authIsReady) return null;
-  if (!authUserData) return 1;
+const DIAG_TRACE_ID = `trace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-  if (isOnboardingComplete(profileData)) return 5;
+const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
+  const debugPayload = {
+    authIsReady,
+    authUid: authUserData?.uid || null,
+    onboardingComplete: isOnboardingComplete(profileData),
+    storedStepRaw: profileData?.onboardingStep ?? null,
+    ageVerified: profileData?.ageVerified ?? null,
+    isAdult: profileData?.isAdult ?? null,
+    diditStatus: profileData?.diditStatus ?? null,
+    idvStatus: profileData?.idv?.status ?? null,
+    requestedStepRaw: queryParams?.get?.('step') ?? null,
+  };
+  if (!authIsReady) {
+    if (import.meta.env.DEV) devLog('[onboarding-step:compute]', { traceId: DIAG_TRACE_ID, ...debugPayload, resolvedStep: null, reason: 'auth-not-ready' });
+    return null;
+  }
+  if (!authUserData) {
+    if (import.meta.env.DEV) devLog('[onboarding-step:compute]', { traceId: DIAG_TRACE_ID, ...debugPayload, resolvedStep: 1, reason: 'no-auth-user' });
+    return 1;
+  }
+
+  if (isOnboardingComplete(profileData)) {
+    if (import.meta.env.DEV) devLog('[onboarding-step:compute]', { traceId: DIAG_TRACE_ID, ...debugPayload, resolvedStep: 5, reason: 'onboarding-complete' });
+    return 5;
+  }
   const statusFromProfile = normalizeDiditStatus(profileData?.idv?.status || profileData?.diditStatus);
   const ageVerified = profileData?.ageVerified;
   const isAdult = profileData?.isAdult;
   const storedStep = Number(profileData?.onboardingStep || 0);
   const requestedStep = Number.parseInt(queryParams?.get('step') || '', 10);
 
-  if (storedStep >= 3) return Math.min(storedStep, 4);
-  if (ageVerified === true && isAdult === true) return 3;
-  if (ageVerified === false || DIDIT_REJECTED_STATUSES.includes(statusFromProfile || '')) return 2;
-  if (Number.isFinite(requestedStep) && requestedStep === 1 && !authUserData?.uid) return 1;
-  return 2;
+  let resolvedStep = 2;
+  let reason = 'default-step-2';
+  if (storedStep >= 3) {
+    resolvedStep = Math.min(storedStep, 4);
+    reason = 'stored-step';
+  } else if (ageVerified === true && isAdult === true) {
+    resolvedStep = 3;
+    reason = 'adult-verified';
+  } else if (ageVerified === false || DIDIT_REJECTED_STATUSES.includes(statusFromProfile || '')) {
+    resolvedStep = 2;
+    reason = 'age-not-verified-or-rejected';
+  } else if (Number.isFinite(requestedStep) && requestedStep === 1 && !authUserData?.uid) {
+    resolvedStep = 1;
+    reason = 'requested-step-1-without-uid';
+  }
+  if (import.meta.env.DEV) {
+    devLog('[onboarding-step:compute]', {
+      traceId: DIAG_TRACE_ID,
+      ...debugPayload,
+      normalizedDiditStatus: statusFromProfile,
+      storedStep,
+      requestedStep,
+      resolvedStep,
+      reason,
+      highlightStep3: resolvedStep === 3,
+    });
+  }
+  return resolvedStep;
 };
 
 const PROOF_STATUS_LABELS = {
@@ -563,6 +608,9 @@ export default function ArtesApp() {
   const profileUnsubscribeRef = useRef(null);
   const profileActiveKeyRef = useRef(null);
   const profileBlockedKeysRef = useRef(new Set());
+  const appStartAtRef = useRef(typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const viewRef = useRef('loading');
+  const viewReasonRef = useRef('initial');
   const userProfile = profile;
   const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
   const profileAgeVerifiedStrict = profile?.ageVerified === true;
@@ -618,6 +666,27 @@ export default function ArtesApp() {
     const tokenPart = path.replace('/claim/', '');
     const token = tokenPart.split('/')[0];
     return token || null;
+  }, []);
+  const getStartupElapsedMs = useCallback(() => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    return Math.round(now - appStartAtRef.current);
+  }, []);
+  const logStartup = useCallback((label, payload = {}) => {
+    if (!import.meta.env.DEV) return;
+    devLog('[startup-flow]', { traceId: DIAG_TRACE_ID, label, elapsedMs: getStartupElapsedMs(), ...payload });
+  }, [getStartupElapsedMs]);
+  const setViewWithReason = useCallback((nextView, reason, payload = {}) => {
+    viewReasonRef.current = reason || 'unspecified';
+    if (import.meta.env.DEV) {
+      devLog('[view-transition:intent]', {
+        from: viewRef.current,
+        to: nextView,
+        traceId: DIAG_TRACE_ID,
+        reason: viewReasonRef.current,
+        ...payload,
+      });
+    }
+    setView(nextView);
   }, []);
   const ensureModerationThread = useCallback(async (user) => {
     if (!user?.uid || !functionsBase) return null;
@@ -699,6 +768,20 @@ export default function ArtesApp() {
   }, [authUser]);
 
   useEffect(() => {
+    const previousView = viewRef.current;
+    if (previousView !== view && import.meta.env.DEV) {
+      devLog('[view-transition:commit]', {
+        from: previousView,
+        to: view,
+        traceId: DIAG_TRACE_ID,
+        reason: viewReasonRef.current || 'unknown',
+      });
+    }
+    viewRef.current = view;
+    viewReasonRef.current = 'unknown';
+  }, [view]);
+
+  useEffect(() => {
     isModeratorClientRef.current = isModeratorClient;
   }, [isModeratorClient]);
 
@@ -734,11 +817,16 @@ export default function ArtesApp() {
   // Auth & Profile Listener
   useEffect(() => {
     let active = true;
+    logStartup('auth-callback-start');
     initAuth().catch((error) => console.error('Auth init error', error));
     handleAuthRedirectResult().catch((error) => console.error('Auth redirect error', error));
 
     const unsubscribe = observeAuth(async (u) => {
       if (!active) return;
+      logStartup('auth-resolved', {
+        uid: u?.uid || null,
+        emailVerified: u?.emailVerified ?? null,
+      });
       if (import.meta.env.DEV) {
         const providers = Array.isArray(u?.providerData)
           ? u.providerData.map((provider) => provider?.providerId).filter(Boolean)
@@ -755,12 +843,14 @@ export default function ArtesApp() {
         authReadyRef.current = true;
         setAuthReady(true);
       }
+      logStartup('before-setView-loading', { currentView: viewRef.current });
       setProfileLoading(true);
-      setView('loading');
+      setViewWithReason('loading', 'observeAuth:init-loading');
       setUser(u);
       setAuthUser(u);
       setResolvedModerationThreadId('');
       if (!u) {
+        logStartup('before-setProfile-null', { codePath: 'observeAuth:no-user' });
         setProfile(null);
         ensuredSupportThreadUidRef.current = null;
         const path = window.location.pathname || '/';
@@ -775,7 +865,9 @@ export default function ArtesApp() {
           : path.startsWith('/chat') || path.startsWith('/messages')
             ? 'chat'
             : 'login';
-        setView(unauthView);
+        logStartup('before-setView-unauth', { nextView: unauthView, path });
+        setViewWithReason(unauthView, 'observeAuth:no-user-routing', { path });
+        logStartup('before-setProfileLoading-false', { codePath: 'observeAuth:no-user' });
         setProfileLoading(false);
         return;
       }
@@ -793,8 +885,21 @@ export default function ArtesApp() {
           });
         }
         await migrateArtifactsUserData(u);
+        logStartup('bootstrap-reads-complete', { uid: u.uid, stage: 'migrateArtifactsUserData' });
         const profileData = await ensureUserProfile(u);
+        logStartup('profile-loaded', {
+          uid: u.uid,
+          onboardingStep: profileData?.onboardingStep ?? null,
+          onboardingComplete: profileData?.onboardingComplete ?? null,
+          ageVerified: profileData?.ageVerified ?? null,
+          isAdult: profileData?.isAdult ?? null,
+        });
         const normalized = normalizeProfileData(profileData, u.uid);
+        logStartup('before-setProfile', {
+          uid: u.uid,
+          onboardingStep: normalized?.onboardingStep ?? null,
+          onboardingComplete: normalized?.onboardingComplete ?? null,
+        });
         setProfile(normalized);
         const onboardingComplete = hasCompletedOnboarding(profileData);
         const baseView = onboardingComplete ? 'gallery' : 'onboarding';
@@ -814,7 +919,9 @@ export default function ArtesApp() {
             : path.startsWith('/chat') || path.startsWith('/messages')
               ? 'chat'
               : baseView;
-        setView(onboardingComplete ? routedView : 'onboarding');
+        const nextView = onboardingComplete ? routedView : 'onboarding';
+        logStartup('before-setView-authenticated', { nextView, onboardingComplete, path });
+        setViewWithReason(nextView, 'observeAuth:authenticated-routing', { onboardingComplete, path });
         ensureModerationThread(u)
           .then((threadId) => {
             if (!threadId) return;
@@ -835,13 +942,17 @@ export default function ArtesApp() {
             onboardingStep: 1,
             onboardingComplete: false,
           }, u.uid);
+          logStartup('before-setProfile-fallback', { uid: u.uid, codePath: 'permission-denied' });
           setProfile(fallbackProfile);
-          setView('onboarding');
+          logStartup('before-setView-fallback-onboarding', { uid: u.uid });
+          setViewWithReason('onboarding', 'observeAuth:fallback-permission-denied');
         } else {
           console.error('Failed to load profile', e);
-          setView('onboarding');
+          logStartup('before-setView-error-onboarding', { uid: u.uid, errorCode: e?.code || null });
+          setViewWithReason('onboarding', 'observeAuth:error-fallback');
         }
       } finally {
+        logStartup('before-setProfileLoading-false', { codePath: 'observeAuth:finally', uid: u?.uid || null });
         setProfileLoading(false);
       }
     });
@@ -849,7 +960,7 @@ export default function ArtesApp() {
       active = false;
       unsubscribe();
     };
-  }, [ensureModerationThread, getClaimTokenFromPath]);
+  }, [ensureModerationThread, getClaimTokenFromPath, logStartup, setViewWithReason]);
 
   useEffect(() => {
     if (!authReady) return;
@@ -907,29 +1018,29 @@ export default function ArtesApp() {
     const handlePopState = () => {
       const path = window.location.pathname || '/';
       if (onboardingLocked) {
-        setView('onboarding');
+        setViewWithReason('onboarding', 'popstate:onboarding-locked', { path });
         return;
       }
       if (path.startsWith('/claim/')) {
         setClaimInviteToken(getClaimTokenFromPath(path));
-        setView('claim');
+        setViewWithReason('claim', 'popstate:claim-path', { path });
       } else if (path.startsWith('/claim-email')) {
-        setView('claimEmail');
+        setViewWithReason('claimEmail', 'popstate:claim-email-path', { path });
       } else if (path.startsWith('/moderation')) {
-        setView('moderation');
+        setViewWithReason('moderation', 'popstate:moderation-path', { path });
       } else if (path.startsWith('/vouch')) {
-        setView('vouch');
+        setViewWithReason('vouch', 'popstate:vouch-path', { path });
       } else if (path.startsWith('/support')) {
-        setView('support');
+        setViewWithReason('support', 'popstate:support-path', { path });
       } else if (path.startsWith('/chat') || path.startsWith('/messages')) {
-        setView('chat');
+        setViewWithReason('chat', 'popstate:chat-path', { path });
       } else if (view === 'moderation' || view === 'vouch' || view === 'support' || view === 'chat') {
-        setView('gallery');
+        setViewWithReason('gallery', 'popstate:return-to-gallery', { path, previousView: view });
       }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [view, getClaimTokenFromPath, onboardingLocked]);
+  }, [view, getClaimTokenFromPath, onboardingLocked, setViewWithReason]);
 
   useEffect(() => {
     if (profileLoading || !authUser?.uid || !profile) return;
@@ -945,8 +1056,8 @@ export default function ArtesApp() {
     if (nextView === 'claim') {
       setClaimInviteToken(getClaimTokenFromPath(path));
     }
-    setView(nextView);
-  }, [profileLoading, authUser?.uid, profile, view, getClaimTokenFromPath]);
+    setViewWithReason(nextView, 'onboarding-complete-redirect', { path });
+  }, [profileLoading, authUser?.uid, profile, view, getClaimTokenFromPath, setViewWithReason]);
 
   useEffect(() => {
     if (view === 'claim' || view === 'claimEmail') {
@@ -1607,6 +1718,8 @@ export default function ArtesApp() {
               profile={profile}
               functionsBase={functionsBase}
               authReady={authReady}
+              view={view}
+              profileLoading={profileLoading}
               appConfig={appConfig}
             />
           )}
@@ -2000,7 +2113,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   );
 }
 
-function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady, appConfig }) {
+function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidit, authUser, authError, profile, functionsBase, authReady, view, profileLoading, appConfig }) {
     const onboardingQueryParams = useMemo(() => {
       if (typeof window === 'undefined') return new URLSearchParams();
       return new URLSearchParams(window.location.search || '');
@@ -2072,7 +2185,38 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const shouldHandleDiditReturn = diditReturnContext.shouldHandle;
 
     useEffect(() => {
+      if (!import.meta.env.DEV) return undefined;
+      const snapshot = {
+        traceId: DIAG_TRACE_ID,
+        authReady,
+        authUid: authUser?.uid || null,
+        view,
+        profileLoading,
+        profileFields: {
+          onboardingStep: profile?.onboardingStep ?? null,
+          onboardingComplete: profile?.onboardingComplete ?? null,
+          ageVerified: profile?.ageVerified ?? null,
+          isAdult: profile?.isAdult ?? null,
+          diditStatus: profile?.diditStatus ?? null,
+          idvStatus: profile?.idv?.status ?? null,
+        },
+      };
+      devLog('[onboarding:lifecycle] mount', snapshot);
+      return () => {
+        devLog('[onboarding:lifecycle] unmount', snapshot);
+      };
+    }, []);
+
+    useEffect(() => {
       if (!accountCreated && step > 1) {
+        if (import.meta.env.DEV) {
+          devLog('[onboarding:step-effect] accountCreated-guard', {
+            traceId: DIAG_TRACE_ID,
+            previousStep: step,
+            nextStep: 1,
+            accountCreated,
+          });
+        }
         setStep(1);
       }
     }, [accountCreated, step]);
@@ -2087,8 +2231,39 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
       if (!resolvedStep) return;
       setStep((prevStep) => {
-        if (prevStep === MATCH_STEP && resolvedStep === 2) return prevStep;
-        if (resolvedStep <= prevStep) return prevStep;
+        if (prevStep === MATCH_STEP && resolvedStep === 2) {
+          if (import.meta.env.DEV) {
+            devLog('[onboarding:step-effect] resolved-step-sync', {
+              traceId: DIAG_TRACE_ID,
+              effectRun: 'match-step-hold',
+              previousStep: prevStep,
+              nextStep: prevStep,
+              resolvedStep,
+            });
+          }
+          return prevStep;
+        }
+        if (resolvedStep <= prevStep) {
+          if (import.meta.env.DEV) {
+            devLog('[onboarding:step-effect] resolved-step-sync', {
+              traceId: DIAG_TRACE_ID,
+              effectRun: 'non-increasing-hold',
+              previousStep: prevStep,
+              nextStep: prevStep,
+              resolvedStep,
+            });
+          }
+          return prevStep;
+        }
+        if (import.meta.env.DEV) {
+          devLog('[onboarding:step-effect] resolved-step-sync', {
+            traceId: DIAG_TRACE_ID,
+            effectRun: 'advance-step',
+            previousStep: prevStep,
+            nextStep: resolvedStep,
+            resolvedStep,
+          });
+        }
         return resolvedStep;
       });
     }, [authReady, authUser, onboardingQueryParams, profile]);
@@ -2113,7 +2288,18 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     useEffect(() => {
       if (!isGoogleUser || !authUser?.uid || syncedGoogleProfile) return;
       setAccountCreated(true);
-      setStep((prev) => (prev < 2 ? 2 : prev));
+      setStep((prev) => {
+        const nextStep = prev < 2 ? 2 : prev;
+        if (import.meta.env.DEV) {
+          devLog('[onboarding:step-effect] google-sync', {
+            traceId: DIAG_TRACE_ID,
+            previousStep: prev,
+            nextStep,
+            effectRun: 'google-profile-sync',
+          });
+        }
+        return nextStep;
+      });
       const existingAppDisplayName = String(profile?.displayName || '').trim();
       const googleDisplayName = String(authUser.displayName || '').trim();
       const googleSyncPayload = {

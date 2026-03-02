@@ -20,6 +20,21 @@ const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
 const mediumLogThreshold = 0.55;
 
+const ADULT_ART_NUDE_TRIGGER = 'adultArtNude';
+const ADULT_EROTIC_SUGGESTIVE_TRIGGER = 'adultEroticSuggestive';
+const INTERNAL_SEXUAL_EXPLICIT_TRIGGER = 'sexualExplicit';
+const ART_NUDE_THEME = 'Art Nude';
+
+const TRIGGER_ALIASES = {
+  nudityerotic: ADULT_ART_NUDE_TRIGGER,
+  'naakt (erotisch)': ADULT_ART_NUDE_TRIGGER,
+  'naakt (artistiek)': ADULT_ART_NUDE_TRIGGER,
+  adultartnude: ADULT_ART_NUDE_TRIGGER,
+  explicit18: ADULT_EROTIC_SUGGESTIVE_TRIGGER,
+  'expliciet 18+': ADULT_EROTIC_SUGGESTIVE_TRIGGER,
+  adulteroticsuggestive: ADULT_EROTIC_SUGGESTIVE_TRIGGER,
+};
+
 const likelihoodScores = {
   UNKNOWN: 0,
   VERY_UNLIKELY: 0.1,
@@ -591,8 +606,16 @@ const normalizeMakerTags = (makerTags) => {
   const normalized = raw
     .map((tag) => String(tag).trim())
     .filter(Boolean)
-    .map((tag) => tag.toLowerCase());
+    .map((tag) => {
+      const lowered = tag.toLowerCase();
+      return TRIGGER_ALIASES[lowered] || tag;
+    });
   return [...new Set(normalized)];
+};
+
+const normalizeThemes = (themes) => {
+  const raw = Array.isArray(themes) ? themes : [];
+  return [...new Set(raw.map((theme) => String(theme).trim()).filter(Boolean))];
 };
 
 const scoreFromLikelihood = (likelihood) => likelihoodScores[likelihood] ?? 0;
@@ -806,7 +829,7 @@ const runGeminiClassifier = async ({ buffer, mimeType }) => {
   const prompt = [
     'You are a moderation classifier. Return ONLY valid JSON.',
     'Schema: {"triggers": [{"trigger": string, "confidence": number, "severity": "suggest"|"forbidden"}], "forbiddenReasons": [string]}',
-    'Only include triggers that are NOT nudityErotic, explicit18, needlesInjections, spidersInsects.',
+    'Only include triggers that are NOT adultArtNude, adultEroticSuggestive, nudityErotic, explicit18, needlesInjections, spidersInsects.',
     'If nothing is detected, return {"triggers": [], "forbiddenReasons": []}.',
   ].join('\n');
 
@@ -855,7 +878,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
     return;
   }
 
-  const { image, makerTags } = body;
+  const { image, makerTags, themes } = body;
   const userId = decoded.uid;
   const parsed = parseImageDataUrl(image);
   if (parsed.error) {
@@ -920,6 +943,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 
   const normalizedMakerTags = normalizeMakerTags(makerTags);
+  const normalizedThemes = normalizeThemes(themes);
   const appliedTriggers = normalizedMakerTags.map((tag) => buildTriggerRecord(tag, 1, 'makerTag'));
   const suggestedTriggers = [];
   const forbiddenReasons = [];
@@ -960,21 +984,26 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
     const explicitScore = scoreFromLikelihood(safeSearch.adult);
 
     if (nudityScore >= forbiddenThreshold) {
-      appliedTriggers.push(buildTriggerRecord('nudityErotic', nudityScore, 'safeSearch'));
-      forbiddenReasons.push({ trigger: 'nudityErotic', reason: 'SafeSearch racy', score: nudityScore });
+      suggestedTriggers.push(buildTriggerRecord(ADULT_EROTIC_SUGGESTIVE_TRIGGER, nudityScore, 'safeSearch'));
     } else if (nudityScore >= suggestThreshold) {
-      suggestedTriggers.push(buildTriggerRecord('nudityErotic', nudityScore, 'safeSearch'));
+      suggestedTriggers.push(buildTriggerRecord(ADULT_EROTIC_SUGGESTIVE_TRIGGER, nudityScore, 'safeSearch'));
     }
 
     if (explicitScore >= forbiddenThreshold) {
-      appliedTriggers.push(buildTriggerRecord('explicit18', explicitScore, 'safeSearch'));
-      forbiddenReasons.push({ trigger: 'explicit18', reason: 'SafeSearch adult', score: explicitScore });
+      suggestedTriggers.push(buildTriggerRecord(ADULT_EROTIC_SUGGESTIVE_TRIGGER, explicitScore, 'safeSearch'));
     } else if (explicitScore >= suggestThreshold) {
-      suggestedTriggers.push(buildTriggerRecord('explicit18', explicitScore, 'safeSearch'));
+      suggestedTriggers.push(buildTriggerRecord(ADULT_EROTIC_SUGGESTIVE_TRIGGER, explicitScore, 'safeSearch'));
     }
 
     if (nudityScore >= mediumLogThreshold || explicitScore >= mediumLogThreshold) {
       logger.info('Medium log threshold bereikt.', { nudityScore, explicitScore });
+    }
+  }
+
+  if (!cachedResult && normalizedThemes.includes(ART_NUDE_THEME)) {
+    const hasArtNudeTrigger = appliedTriggers.some((item) => item.trigger === ADULT_ART_NUDE_TRIGGER);
+    if (!hasArtNudeTrigger) {
+      appliedTriggers.push(buildTriggerRecord(ADULT_ART_NUDE_TRIGGER, 1, 'themeRule'));
     }
   }
 
@@ -1008,7 +1037,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
       const geminiResult = await runGeminiClassifier(parsed);
       if (geminiResult?.triggers?.length) {
         geminiResult.triggers.forEach((item) => {
-          const trigger = String(item.trigger || '').trim();
+          const rawTrigger = String(item.trigger || '').trim();
+          const trigger = TRIGGER_ALIASES[rawTrigger.toLowerCase()] || rawTrigger;
           const confidence = Number(item.confidence) || 0;
           if (!trigger) return;
           if (item.severity === 'forbidden' && confidence >= suggestThreshold) {
@@ -1022,7 +1052,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
       if (geminiResult?.forbiddenReasons?.length) {
         geminiResult.forbiddenReasons.forEach((reason) => {
           if (typeof reason === 'string' && reason.trim()) {
-            forbiddenReasons.push({ trigger: 'gemini', reason: reason.trim(), score: 1 });
+            const normalizedReason = reason.trim();
+            const lowerReason = normalizedReason.toLowerCase();
+            const trigger = (lowerReason.includes('sexual') || lowerReason.includes('porn') || lowerReason.includes('penetration') || lowerReason.includes('masturbation'))
+              ? INTERNAL_SEXUAL_EXPLICIT_TRIGGER
+              : 'gemini';
+            forbiddenReasons.push({ trigger, reason: normalizedReason, score: 1 });
           }
         });
       }
@@ -1121,6 +1156,50 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
     }
   }
 
+  const hasSexualExplicitReason = finalForbiddenReasons.some((reason) => reason?.trigger === INTERNAL_SEXUAL_EXPLICIT_TRIGGER);
+  const hasReportedContentReason = finalForbiddenReasons.some((reason) => reason?.trigger === 'reportedContent');
+  const hasArtNudeTrigger = finalAppliedTriggers.some((item) => item.trigger === ADULT_ART_NUDE_TRIGGER);
+  const hasEroticSuggestiveTrigger = finalAppliedTriggers.some((item) => item.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER);
+  const safeSearchNudityScore = safeSearch ? scoreFromLikelihood(safeSearch.racy) : 0;
+  const safeSearchAdultScore = safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0;
+  const hasGeminiForbiddenSignal = finalForbiddenReasons.some((reason) => reason?.trigger === 'gemini');
+  const hasMixedAdultSignals = safeSearchAdultScore >= forbiddenThreshold && safeSearchNudityScore >= mediumLogThreshold;
+  const shouldEscalateToUncertain = !hasSexualExplicitReason && (hasGeminiForbiddenSignal || hasMixedAdultSignals);
+
+  let classification = 'allowed_general';
+  if (hasSexualExplicitReason || hasReportedContentReason) {
+    classification = 'disallowed_sexual_explicit';
+  } else if (shouldEscalateToUncertain) {
+    classification = 'uncertain_possible_explicit';
+  } else if (hasArtNudeTrigger || normalizedThemes.includes(ART_NUDE_THEME)) {
+    classification = 'allowed_adult_art_nude';
+  } else if (hasEroticSuggestiveTrigger || safeSearchNudityScore >= suggestThreshold || safeSearchAdultScore >= suggestThreshold) {
+    classification = 'allowed_adult_erotic_suggestive';
+  }
+
+  const requiredThemes = [];
+  if (classification === 'allowed_adult_art_nude' && !normalizedThemes.includes(ART_NUDE_THEME)) {
+    requiredThemes.push(ART_NUDE_THEME);
+  }
+
+  const autoAppliedTriggers = [];
+  if (classification === 'allowed_adult_art_nude') {
+    autoAppliedTriggers.push(ADULT_ART_NUDE_TRIGGER);
+  } else if (classification === 'allowed_adult_erotic_suggestive' || classification === 'uncertain_possible_explicit') {
+    autoAppliedTriggers.push(ADULT_EROTIC_SUGGESTIVE_TRIGGER);
+  }
+
+  const shouldReview = classification === 'uncertain_possible_explicit';
+  const userMessage = classification === 'disallowed_sexual_explicit'
+    ? 'Deze publicatie is geblokkeerd: Pornografisch / Seksueel expliciet.'
+    : requiredThemes.length > 0
+      ? 'Deze content is toegestaan, maar voeg eerst het thema Art Nude toe voordat je publiceert.'
+      : shouldReview
+        ? 'Deze content lijkt toegestaan, maar is borderline expliciet. Vraag een review aan als je twijfelt.'
+        : autoAppliedTriggers.length > 0
+          ? 'Deze content is toegestaan met 18+ labeling.'
+          : 'AI-check: toegestaan. Je kunt publiceren.';
+
   const response = {
     outcome,
     appliedTriggers: finalAppliedTriggers,
@@ -1129,6 +1208,11 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
     showSuggestionUI: finalSuggestedTriggers.length > 0,
     canRequestReview,
     reviewCaseId,
+    classification,
+    requiredThemes,
+    autoAppliedTriggers,
+    shouldReview,
+    userMessage,
     fingerprints,
     legacy: {
       labels: labels.map((label) => label.description).filter(Boolean),

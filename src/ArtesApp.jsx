@@ -5076,7 +5076,12 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
       setReviewCaseId(nextReviewCaseId);
       setShowSuggestionUI(shouldShowSuggestions);
       setReviewRequested(false);
-      return data;
+      return {
+        ...data,
+        appliedTriggers: nextAppliedTriggers,
+        suggestedTriggers: nextSuggestedTriggers,
+        forbiddenReasons: nextForbiddenReasons,
+      };
     } catch (error) {
       console.error('AI check failed', error);
       if (!silent) {

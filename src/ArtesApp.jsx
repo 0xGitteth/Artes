@@ -5329,11 +5329,17 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
 
   const handlePublish = async ({ applySuggestions = false } = {}) => {
     const validationErrors = {};
+    const normalizeTheme = (theme) => String(theme || '').trim().toLowerCase();
+    const getMissingRequiredThemes = (themes = []) => {
+      const selectedThemeSet = new Set(selectedStyles.map(normalizeTheme));
+      return themes.filter((theme) => !selectedThemeSet.has(normalizeTheme(theme)));
+    };
 
     if (!image) validationErrors.image = 'Voeg een afbeelding toe.';
     if (!title.trim()) validationErrors.title = 'Titel is verplicht.';
     if (selectedStyles.length === 0) validationErrors.styles = 'Kies minstens één thema.';
-    if (requiredThemes.length > 0) validationErrors.moderation = `Voeg eerst thema toe: ${requiredThemes.join(', ')}.`;
+    const missingRequiredThemes = getMissingRequiredThemes(requiredThemes);
+    if (missingRequiredThemes.length > 0) validationErrors.moderation = `Voeg eerst thema toe: ${missingRequiredThemes.join(', ')}.`;
     if (shouldReview) validationErrors.moderation = 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.';
     if (outcome === 'forbidden') validationErrors.moderation = 'Deze publicatie is geblokkeerd door de safety check.';
 
@@ -5363,9 +5369,10 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
     const effectiveReviewCaseId = moderationData?.reviewCaseId ?? reviewCaseId;
     const effectiveRequiredThemes = moderationData?.requiredThemes ?? requiredThemes;
     const effectiveShouldReview = moderationData?.shouldReview ?? shouldReview;
+    const effectiveMissingRequiredThemes = getMissingRequiredThemes(effectiveRequiredThemes);
 
-    if (effectiveRequiredThemes.length > 0) {
-      setErrors((prev) => ({ ...prev, moderation: `Deze content is toegestaan maar vereist thema: ${effectiveRequiredThemes.join(', ')}.` }));
+    if (effectiveMissingRequiredThemes.length > 0) {
+      setErrors((prev) => ({ ...prev, moderation: `Deze content is toegestaan maar vereist thema: ${effectiveMissingRequiredThemes.join(', ')}.` }));
       return;
     }
     if (effectiveShouldReview) {

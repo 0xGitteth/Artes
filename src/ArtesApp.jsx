@@ -5044,7 +5044,13 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
       }
 
       const data = await response.json();
-      const nextAppliedTriggers = Array.isArray(data.appliedTriggers) ? data.appliedTriggers : [];
+      const nextAppliedTriggers = (Array.isArray(data.appliedTriggers) ? data.appliedTriggers : [])
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object') return item.trigger;
+          return null;
+        })
+        .filter(Boolean);
       const nextSuggestedTriggers = (Array.isArray(data.suggestedTriggers) ? data.suggestedTriggers : [])
         .map((item) => {
           if (typeof item === 'string') return item;

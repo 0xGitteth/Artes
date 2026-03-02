@@ -1311,6 +1311,10 @@ export default function ArtesApp() {
         waitForAuthoritativeProfileRef.current = false;
         logStartup('authoritative-profile-unavailable-blocked-key', { uid: authUser.uid, key });
         setProfileLoading(false);
+        setViewWithReason('onboarding', 'profile-listener:authoritative-profile-unavailable', {
+          path: window.location.pathname || '/',
+          code: 'permission-denied',
+        });
       }
       return;
     }
@@ -1331,7 +1335,16 @@ export default function ArtesApp() {
     profileUnsubscribeRef.current = onSnapshot(
       doc(db, 'users', authUser.uid),
       (snapshot) => {
-        if (!snapshot.exists()) return;
+        if (!snapshot.exists()) {
+          if (waitForAuthoritativeProfileRef.current) {
+            waitForAuthoritativeProfileRef.current = false;
+            const path = window.location.pathname || '/';
+            logStartup('authoritative-profile-missing-doc', { uid: authUser.uid, path });
+            setProfileLoading(false);
+            setViewWithReason('onboarding', 'profile-listener:authoritative-profile-missing-doc', { path });
+          }
+          return;
+        }
         const normalized = normalizeProfileData(snapshot.data(), authUser.uid);
         devLog('[onboarding-state]', {
           uid: authUser.uid,

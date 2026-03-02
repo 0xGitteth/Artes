@@ -564,6 +564,16 @@ const Input = ({ label, type = "text", placeholder, value, onChange, error }) =>
 // --- Main App ---
 
 export default function ArtesApp() {
+  const buildVerificationGateState = (sourceUser) => {
+    const providerIds = Array.isArray(sourceUser?.providerData)
+      ? sourceUser.providerData.map((provider) => provider?.providerId).filter(Boolean)
+      : [];
+    return {
+      hasUser: Boolean(sourceUser?.uid),
+      emailVerified: sourceUser?.emailVerified === true,
+      hasPasswordProvider: providerIds.includes('password'),
+    };
+  };
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [view, setView] = useState('loading');
@@ -576,6 +586,7 @@ export default function ArtesApp() {
   const [showTour, setShowTour] = useState(false);
   const [verificationNote, setVerificationNote] = useState(null);
   const [verificationPending, setVerificationPending] = useState(false);
+  const [verificationGateState, setVerificationGateState] = useState(() => buildVerificationGateState(null));
   const [appConfig, setAppConfig] = useState(null);
   
   // Modals & States
@@ -849,6 +860,7 @@ export default function ArtesApp() {
       setViewWithReason('loading', 'observeAuth:init-loading');
       setUser(u);
       setAuthUser(u);
+      setVerificationGateState(buildVerificationGateState(u));
       setResolvedModerationThreadId('');
       if (!u) {
         logStartup('before-setProfile-null', { codePath: 'observeAuth:no-user' });
@@ -1457,11 +1469,9 @@ export default function ArtesApp() {
   };
 
   const canUpload = profile && (!profile.roles.includes('fan') || profile.roles.length > 1);
-  const requiresEmailVerification = useMemo(() => {
-    if (!authUser) return false;
-    const usesPasswordProvider = authUser?.providerData?.some((provider) => provider?.providerId === 'password');
-    return usesPasswordProvider && !authUser.emailVerified;
-  }, [authUser]);
+  const requiresEmailVerification = verificationGateState.hasUser
+    && verificationGateState.hasPasswordProvider
+    && !verificationGateState.emailVerified;
 
   useEffect(() => {
     if (!authReady || !authUser?.uid) {
@@ -1586,6 +1596,7 @@ export default function ArtesApp() {
       const refreshed = await reloadCurrentUser();
       setAuthUser(refreshed);
       setUser(refreshed);
+      setVerificationGateState(buildVerificationGateState(refreshed));
       if (!refreshed?.emailVerified) {
         setVerificationNote('Je email is nog niet geverifieerd.');
         return;
@@ -1608,6 +1619,7 @@ export default function ArtesApp() {
     setProfile(null);
     setAuthUser(null);
     setUser(null);
+    setVerificationGateState(buildVerificationGateState(null));
     setView('login');
   };
 
@@ -1616,6 +1628,7 @@ export default function ArtesApp() {
     setProfile(null);
     setAuthUser(null);
     setUser(null);
+    setVerificationGateState(buildVerificationGateState(null));
     setShowSettingsModal(false);
     setView('login');
   };

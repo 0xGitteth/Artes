@@ -1033,8 +1033,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 
   if (!cachedResult) {
+    let geminiResult = null;
+    let geminiAttempted = false;
+    let geminiFailed = false;
     try {
-      const geminiResult = await runGeminiClassifier(parsed);
+      geminiAttempted = true;
+      geminiResult = await runGeminiClassifier(parsed);
       if (geminiResult?.triggers?.length) {
         geminiResult.triggers.forEach((item) => {
           const rawTrigger = String(item.trigger || '').trim();
@@ -1062,7 +1066,23 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
         });
       }
     } catch (error) {
+      geminiFailed = true;
       logger.error('Gemini classifier fout.', error);
+    }
+
+    const hasUsableGeminiOutput = Boolean(
+      geminiResult
+      && (Array.isArray(geminiResult.triggers) || Array.isArray(geminiResult.forbiddenReasons))
+    );
+
+    const geminiUnavailableOrUnusable = geminiFailed || !geminiResult || !hasUsableGeminiOutput;
+    const hasStrongAdultSafeSearchSignal = safeSearch && scoreFromLikelihood(safeSearch.adult) >= forbiddenThreshold;
+    if (geminiAttempted && geminiUnavailableOrUnusable && hasStrongAdultSafeSearchSignal) {
+      forbiddenReasons.push({
+        trigger: 'gemini_uncertain_fallback',
+        reason: 'SafeSearch adult hoog, Gemini niet beschikbaar of output onbruikbaar.',
+        score: scoreFromLikelihood(safeSearch.adult),
+      });
     }
   }
 
@@ -1162,7 +1182,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   const hasEroticSuggestiveTrigger = finalAppliedTriggers.some((item) => item.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER);
   const safeSearchNudityScore = safeSearch ? scoreFromLikelihood(safeSearch.racy) : 0;
   const safeSearchAdultScore = safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0;
-  const hasGeminiForbiddenSignal = finalForbiddenReasons.some((reason) => reason?.trigger === 'gemini');
+  const hasGeminiForbiddenSignal = finalForbiddenReasons.some((reason) => reason?.trigger === 'gemini' || reason?.trigger === 'gemini_uncertain_fallback');
   const hasMixedAdultSignals = safeSearchAdultScore >= forbiddenThreshold && safeSearchNudityScore >= mediumLogThreshold;
   const shouldEscalateToUncertain = !hasSexualExplicitReason && (hasGeminiForbiddenSignal || hasMixedAdultSignals);
 

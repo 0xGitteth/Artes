@@ -5045,9 +5045,21 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
 
       const data = await response.json();
       const nextAppliedTriggers = Array.isArray(data.appliedTriggers) ? data.appliedTriggers : [];
-      const nextSuggestedTriggers = Array.isArray(data.suggestedTriggers) ? data.suggestedTriggers : [];
+      const nextSuggestedTriggers = (Array.isArray(data.suggestedTriggers) ? data.suggestedTriggers : [])
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object') return item.trigger;
+          return null;
+        })
+        .filter(Boolean);
       const nextOutcome = data?.outcome ?? null;
-      const nextForbiddenReasons = Array.isArray(data.forbiddenReasons) ? data.forbiddenReasons : [];
+      const nextForbiddenReasons = (Array.isArray(data.forbiddenReasons) ? data.forbiddenReasons : [])
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object') return item.reason || item.trigger;
+          return null;
+        })
+        .filter(Boolean);
       const nextReviewCaseId = data?.reviewCaseId ?? null;
       const shouldShowSuggestions = nextOutcome === 'allowed' && nextSuggestedTriggers.length > 0;
 

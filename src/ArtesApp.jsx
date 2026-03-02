@@ -307,9 +307,17 @@ const DEFAULT_CHALLENGE_CONFIG = {
   description: 'Deel je beste interpretatie van dit thema en inspireer de community.',
 };
 
+const CANONICAL_TRIGGER_ALIASES = {
+  nudityErotic: 'adultArtNude',
+  'Naakt (erotisch)': 'adultArtNude',
+  'Naakt (Artistiek)': 'adultArtNude',
+  explicit18: 'adultEroticSuggestive',
+  'Expliciet 18+': 'adultEroticSuggestive',
+};
+
 const TRIGGERS = [
-  { id: 'nudityErotic', label: 'Naakt (erotisch)' },
-  { id: 'explicit18', label: 'Expliciet 18+' },
+  { id: 'adultArtNude', label: '18+ Artistiek naakt' },
+  { id: 'adultEroticSuggestive', label: '18+ Erotisch / suggestief' },
   { id: 'kinkBdsm', label: 'Kink / BDSM' },
   { id: 'breathRestriction', label: 'Ademrestrictie' },
   { id: 'bloodInjury', label: 'Bloed / verwonding' },
@@ -354,15 +362,26 @@ const buildDefaultAvatar = (seed) =>
 const sanitizeHandle = (value) => (value || '').replace(/^@+/, '').trim();
 
 const normalizeTriggerPreferences = (triggerVisibility = {}) => {
-  const normalized = { ...triggerVisibility };
+  const normalized = {};
+  Object.entries(triggerVisibility || {}).forEach(([key, value]) => {
+    const resolvedKey = resolveTriggerKey(key);
+    normalized[resolvedKey] = value;
+  });
   TRIGGERS.forEach((trigger) => {
-    const stored = triggerVisibility?.[trigger.id];
+    const stored = normalized?.[trigger.id];
     normalized[trigger.id] = TRIGGER_PREFERENCE_OPTIONS.some((opt) => opt.id === stored) ? stored : 'cover';
   });
   return normalized;
 };
 
 const resolveTriggerKey = (trigger) => {
+  if (!trigger) return trigger;
+  const aliasMatch = CANONICAL_TRIGGER_ALIASES[trigger];
+  if (aliasMatch) return aliasMatch;
+  const normalizedKey = String(trigger).trim().toLowerCase();
+  const normalizedAlias = Object.entries(CANONICAL_TRIGGER_ALIASES)
+    .find(([key]) => key.toLowerCase() === normalizedKey)?.[1];
+  if (normalizedAlias) return normalizedAlias;
   const match = TRIGGERS.find((item) => item.id === trigger || item.label === trigger);
   return match ? match.id : trigger;
 };
@@ -1944,6 +1963,7 @@ export default function ArtesApp() {
             profile={profile}
             users={users}
             isChallenge={uploadContext.isChallenge}
+            functionsBase={functionsBase}
           />
         )}
         {showSettingsModal && (
@@ -4872,7 +4892,7 @@ function ModerationPortal({
   );
 }
 
-function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
+function UploadModal({ onClose, user, profile, users, isChallenge = false, functionsBase = '' }) {
   const defaultRole = profile.roles?.[0] || 'photographer';
   const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true };
   const triggerLabelMap = useMemo(() => new Map(TRIGGERS.map((trigger) => [trigger.id, trigger.label])), []);
@@ -4906,7 +4926,12 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
   const [forbiddenReasons, setForbiddenReasons] = useState([]);
   const [reviewCaseId, setReviewCaseId] = useState(null);
   const [showSuggestionUI, setShowSuggestionUI] = useState(false);
+  const [requiredThemes, setRequiredThemes] = useState([]);
+  const [userMessage, setUserMessage] = useState('');
+  const [shouldReview, setShouldReview] = useState(false);
+  const [classification, setClassification] = useState(null);
   const [reviewRequested, setReviewRequested] = useState(false);
+  const [reviewRequestPending, setReviewRequestPending] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [uploaderRole, setUploaderRole] = useState(defaultRole);
@@ -4994,6 +5019,10 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
       setForbiddenReasons([]);
       setReviewCaseId(null);
       setShowSuggestionUI(false);
+      setRequiredThemes([]);
+      setUserMessage('');
+      setShouldReview(false);
+      setClassification(null);
       setReviewRequested(false);
     } catch (error) {
       console.error('Image processing failed', error);
@@ -5036,7 +5065,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ image, makerTags }),
+        body: JSON.stringify({ image, makerTags, themes: selectedStyles }),
       });
 
       if (!response.ok) {
@@ -5059,6 +5088,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
         })
         .filter(Boolean);
       const nextOutcome = data?.outcome ?? null;
+      const nextClassification = data?.classification ?? null;
       const nextForbiddenReasons = (Array.isArray(data.forbiddenReasons) ? data.forbiddenReasons : [])
         .map((item) => {
           if (typeof item === 'string') return item;
@@ -5067,20 +5097,31 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
         })
         .filter(Boolean);
       const nextReviewCaseId = data?.reviewCaseId ?? null;
+      const nextRequiredThemes = Array.isArray(data?.requiredThemes) ? data.requiredThemes : [];
+      const nextAutoAppliedTriggers = (Array.isArray(data?.autoAppliedTriggers) ? data.autoAppliedTriggers : []).map(resolveTriggerKey).filter(Boolean);
+      const normalizedAppliedTriggers = Array.from(new Set([...nextAppliedTriggers.map(resolveTriggerKey), ...nextAutoAppliedTriggers]));
       const shouldShowSuggestions = nextOutcome === 'allowed' && nextSuggestedTriggers.length > 0;
 
-      setAppliedTriggers(nextAppliedTriggers);
-      setSuggestedTriggers(nextSuggestedTriggers);
+      setAppliedTriggers(normalizedAppliedTriggers);
+      setSuggestedTriggers(nextSuggestedTriggers.map(resolveTriggerKey));
       setOutcome(nextOutcome);
       setForbiddenReasons(nextForbiddenReasons);
       setReviewCaseId(nextReviewCaseId);
+      setRequiredThemes(nextRequiredThemes);
+      setUserMessage(data?.userMessage || '');
+      setShouldReview(Boolean(data?.shouldReview));
+      setClassification(nextClassification);
       setShowSuggestionUI(shouldShowSuggestions);
       setReviewRequested(false);
       return {
         ...data,
-        appliedTriggers: nextAppliedTriggers,
-        suggestedTriggers: nextSuggestedTriggers,
+        appliedTriggers: normalizedAppliedTriggers,
+        suggestedTriggers: nextSuggestedTriggers.map(resolveTriggerKey),
         forbiddenReasons: nextForbiddenReasons,
+        requiredThemes: nextRequiredThemes,
+        userMessage: data?.userMessage || '',
+        shouldReview: Boolean(data?.shouldReview),
+        classification: nextClassification,
       };
     } catch (error) {
       console.error('AI check failed', error);
@@ -5093,10 +5134,78 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
       setForbiddenReasons([]);
       setReviewCaseId(null);
       setShowSuggestionUI(false);
+      setRequiredThemes([]);
+      setUserMessage('');
+      setShouldReview(false);
+      setClassification(null);
       setReviewRequested(false);
       return null;
     } finally {
       setAiLoading(false);
+    }
+  };
+
+  const handleRequestReview = async () => {
+    if (reviewRequestPending) return;
+    if (!user) {
+      setAiError('Je moet ingelogd zijn om een review aan te vragen.');
+      return;
+    }
+    if (!functionsBase) {
+      setAiError('Geen functions-endpoint ingesteld. Review aanvragen is nu niet beschikbaar.');
+      return;
+    }
+
+    setReviewRequestPending(true);
+    setAiError('');
+
+    try {
+      const token = await user.getIdToken();
+      const ensureResponse = await fetch(`${functionsBase}/ensureModerationThread`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const ensureData = await ensureResponse.json().catch(() => ({}));
+      if (!ensureResponse.ok) {
+        throw new Error(ensureData?.error || 'Kon moderatiedraad niet openen.');
+      }
+
+      const threadId = ensureData?.threadId || `support_${user.uid}`;
+      const triggerContext = Array.from(new Set([...(appliedTriggers || []), ...(makerTags || [])].map(resolveTriggerKey)));
+      const reviewMessage = [
+        '[UPLOAD_REVIEW_REQUEST]',
+        `classification: ${classification || 'unknown'}`,
+        `shouldReview: ${Boolean(shouldReview)}`,
+        `reviewCaseId: ${reviewCaseId || 'none'}`,
+        `outcome: ${outcome || 'unknown'}`,
+        `title: ${(title || '').trim() || '(geen titel)'}`,
+        `themes: ${selectedStyles.length > 0 ? selectedStyles.join(', ') : 'none'}`,
+        `triggers: ${triggerContext.length > 0 ? triggerContext.join(', ') : 'none'}`,
+        `requiredThemes: ${requiredThemes.length > 0 ? requiredThemes.join(', ') : 'none'}`,
+      ].join('\n');
+
+      const sendResponse = await fetch(`${functionsBase}/sendSupportMessage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ threadId, text: reviewMessage }),
+      });
+      const sendData = await sendResponse.json().catch(() => ({}));
+      if (!sendResponse.ok) {
+        throw new Error(sendData?.error || 'Reviewverzoek versturen mislukt.');
+      }
+
+      setReviewRequested(true);
+    } catch (error) {
+      setReviewRequested(false);
+      setAiError(error?.message || 'Reviewverzoek versturen mislukt. Probeer opnieuw.');
+    } finally {
+      setReviewRequestPending(false);
     }
   };
 
@@ -5204,8 +5313,18 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
   }, [uploaderRole, profile.displayName, profile.uid]);
 
   const toggleStyle = (theme) => {
-    setSelectedStyles((prev) => prev.includes(theme) ? prev.filter(x => x !== theme) : [...prev, theme]);
-    setErrors(prev => ({ ...prev, styles: undefined }));
+    setSelectedStyles((prev) => {
+      const next = prev.includes(theme) ? prev.filter((x) => x !== theme) : [...prev, theme];
+      const hasArtNude = next.includes('Art Nude');
+      setMakerTags((prevTags) => {
+        const normalized = Array.from(new Set(prevTags.map(resolveTriggerKey)));
+        if (hasArtNude && !normalized.includes('adultArtNude')) return [...normalized, 'adultArtNude'];
+        if (!hasArtNude) return normalized;
+        return normalized;
+      });
+      return next;
+    });
+    setErrors(prev => ({ ...prev, styles: undefined, moderation: undefined }));
   };
 
   const handlePublish = async ({ applySuggestions = false } = {}) => {
@@ -5214,6 +5333,8 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
     if (!image) validationErrors.image = 'Voeg een afbeelding toe.';
     if (!title.trim()) validationErrors.title = 'Titel is verplicht.';
     if (selectedStyles.length === 0) validationErrors.styles = 'Kies minstens één thema.';
+    if (requiredThemes.length > 0) validationErrors.moderation = `Voeg eerst thema toe: ${requiredThemes.join(', ')}.`;
+    if (shouldReview) validationErrors.moderation = 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.';
     if (outcome === 'forbidden') validationErrors.moderation = 'Deze publicatie is geblokkeerd door de safety check.';
 
     if (Object.keys(validationErrors).length > 0) {
@@ -5240,7 +5361,18 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
       ? (Array.isArray(moderationData.forbiddenReasons) ? moderationData.forbiddenReasons : [])
       : forbiddenReasons;
     const effectiveReviewCaseId = moderationData?.reviewCaseId ?? reviewCaseId;
-    const baseTriggers = effectiveAppliedTriggers.length ? effectiveAppliedTriggers : makerTags;
+    const effectiveRequiredThemes = moderationData?.requiredThemes ?? requiredThemes;
+    const effectiveShouldReview = moderationData?.shouldReview ?? shouldReview;
+
+    if (effectiveRequiredThemes.length > 0) {
+      setErrors((prev) => ({ ...prev, moderation: `Deze content is toegestaan maar vereist thema: ${effectiveRequiredThemes.join(', ')}.` }));
+      return;
+    }
+    if (effectiveShouldReview) {
+      setErrors((prev) => ({ ...prev, moderation: 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.' }));
+      return;
+    }
+    const baseTriggers = (effectiveAppliedTriggers.length ? effectiveAppliedTriggers : makerTags).map(resolveTriggerKey);
     const finalAppliedTriggers = applySuggestions
       ? Array.from(new Set([...baseTriggers, ...suggestedTriggers]))
       : baseTriggers;
@@ -5286,6 +5418,10 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
       setForbiddenReasons([]);
       setReviewCaseId(null);
       setShowSuggestionUI(false);
+      setRequiredThemes([]);
+      setUserMessage('');
+      setShouldReview(false);
+      setClassification(null);
       setReviewRequested(false);
       setAiLoading(false);
       setUploaderRole(defaultRole);
@@ -5436,10 +5572,15 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
                                key={trigger.id}
                                type="button"
                                onClick={() => {
-                                 setMakerTags((prev) => prev.includes(trigger.id)
-                                   ? prev.filter((item) => item !== trigger.id)
-                                   : [...prev, trigger.id]
-                                 );
+                                 setMakerTags((prev) => {
+                                   const normalized = Array.from(new Set(prev.map(resolveTriggerKey)));
+                                   const triggerId = resolveTriggerKey(trigger.id);
+                                   const isArtNudeLocked = selectedStyles.includes('Art Nude') && triggerId === 'adultArtNude';
+                                   if (isArtNudeLocked && normalized.includes('adultArtNude')) return normalized;
+                                   return normalized.includes(triggerId)
+                                     ? normalized.filter((item) => item !== triggerId)
+                                     : [...normalized, triggerId];
+                                 });
                                  setShowSuggestionUI(false);
                                }}
                                className={`text-[11px] px-2 py-1 rounded border ${makerTags.includes(trigger.id) ? 'bg-orange-100 text-orange-800 border-orange-200' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-200'}`}
@@ -5464,14 +5605,31 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false }) {
                              <div className="mt-3 flex flex-wrap gap-2">
                                <button
                                  type="button"
-                                 onClick={() => setReviewRequested(true)}
+                                 onClick={handleRequestReview}
+                                 disabled={reviewRequestPending}
                                  className="text-xs bg-red-600 text-white px-3 py-1 rounded"
                                >
-                                 Vraag review aan
+                                 {reviewRequestPending ? 'Review versturen...' : 'Vraag review aan'}
                                </button>
                                {reviewRequested && (
                                  <span className="text-xs text-red-600 dark:text-red-300">Review aangevraagd. We nemen contact op.</span>
                                )}
+                             </div>
+                           </div>
+                         )}
+                         {((requiredThemes.length > 0) || shouldReview || userMessage) && outcome !== 'forbidden' && (
+                           <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-900/30 dark:text-blue-200">
+                             {userMessage && <p className="font-semibold">{userMessage}</p>}
+                             {requiredThemes.length > 0 && <p className="mt-1">Vereist thema: {requiredThemes.join(', ')}</p>}
+                             <div className="mt-2">
+                               <button
+                                 type="button"
+                                 onClick={handleRequestReview}
+                                 disabled={reviewRequestPending}
+                                 className="text-xs bg-blue-600 text-white px-3 py-1 rounded"
+                               >
+                                 {reviewRequestPending ? 'Review versturen...' : 'Vraag review aan'}
+                               </button>
                              </div>
                            </div>
                          )}

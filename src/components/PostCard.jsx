@@ -12,8 +12,13 @@ const THEME_STYLES = {
 
 const getThemeStyle = (theme) => THEME_STYLES[theme] || 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800';
 const TRIGGER_LABELS = {
-  nudityErotic: 'Naakt (erotisch)',
-  explicit18: 'Expliciet 18+',
+  adultArtNude: '18+ Artistiek naakt',
+  adultEroticSuggestive: '18+ Erotisch / suggestief',
+  nudityErotic: '18+ Artistiek naakt',
+  explicit18: '18+ Erotisch / suggestief',
+  'Naakt (erotisch)': '18+ Artistiek naakt',
+  'Expliciet 18+': '18+ Erotisch / suggestief',
+  'Naakt (Artistiek)': '18+ Artistiek naakt',
   kinkBdsm: 'Kink / BDSM',
   breathRestriction: 'Ademrestrictie',
   bloodInjury: 'Bloed / verwonding',
@@ -22,10 +27,19 @@ const TRIGGER_LABELS = {
   spidersInsects: 'Spinnen / insecten',
 };
 
+
+const resolveTriggerKey = (trigger) => ({
+  nudityErotic: 'adultArtNude',
+  explicit18: 'adultEroticSuggestive',
+  'Naakt (erotisch)': 'adultArtNude',
+  'Expliciet 18+': 'adultEroticSuggestive',
+  'Naakt (Artistiek)': 'adultArtNude',
+}[trigger] || trigger);
+
 export default function PostCard({ post, onClick, onToggleLike, liked, contentPreference, onReveal }) {
   const { title, imageUrl, authorName, styles = [], likes = 0, commentsCount = 0, triggers = [], appliedTriggers = [], makerTags = [] } = post;
   const sensitiveFlag = post.sensitive || appliedTriggers.length > 0 || makerTags.length > 0 || triggers.length > 0;
-  const resolvedTriggers = Array.from(new Set([...appliedTriggers, ...makerTags, ...triggers]))
+  const resolvedTriggers = Array.from(new Set([...appliedTriggers, ...makerTags, ...triggers].map(resolveTriggerKey)))
     .map((trigger) => TRIGGER_LABELS[trigger] || trigger);
   const effectivePreference = contentPreference ?? (sensitiveFlag ? 'cover' : 'show');
   const shouldCover = sensitiveFlag && effectivePreference === 'cover';

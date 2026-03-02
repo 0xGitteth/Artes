@@ -4,8 +4,13 @@ import { addComment, subscribeToComments, subscribeToLikes, toggleLike } from '.
 import { Badge, Button, Input } from './ui';
 
 const TRIGGER_LABELS = {
-  nudityErotic: 'Naakt (erotisch)',
-  explicit18: 'Expliciet 18+',
+  adultArtNude: '18+ Artistiek naakt',
+  adultEroticSuggestive: '18+ Erotisch / suggestief',
+  nudityErotic: '18+ Artistiek naakt',
+  explicit18: '18+ Erotisch / suggestief',
+  'Naakt (erotisch)': '18+ Artistiek naakt',
+  'Expliciet 18+': '18+ Erotisch / suggestief',
+  'Naakt (Artistiek)': '18+ Artistiek naakt',
   kinkBdsm: 'Kink / BDSM',
   breathRestriction: 'Ademrestrictie',
   bloodInjury: 'Bloed / verwonding',
@@ -13,6 +18,15 @@ const TRIGGER_LABELS = {
   needlesInjections: 'Naalden / injecties',
   spidersInsects: 'Spinnen / insecten',
 };
+
+
+const resolveTriggerKey = (trigger) => ({
+  nudityErotic: 'adultArtNude',
+  explicit18: 'adultEroticSuggestive',
+  'Naakt (erotisch)': 'adultArtNude',
+  'Expliciet 18+': 'adultEroticSuggestive',
+  'Naakt (Artistiek)': 'adultArtNude',
+}[trigger] || trigger);
 
 export default function PhotoDetailModal({ post, onClose, currentUser }) {
   const [comments, setComments] = useState([]);
@@ -57,7 +71,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser }) {
     }
   };
 
-  const resolvedTriggers = Array.from(new Set([...(post.appliedTriggers || []), ...(post.makerTags || []), ...(post.triggers || [])]))
+  const resolvedTriggers = Array.from(new Set([...(post.appliedTriggers || []), ...(post.makerTags || []), ...(post.triggers || [])].map(resolveTriggerKey)))
     .map((trigger) => TRIGGER_LABELS[trigger] || trigger);
   const sensitiveFlag = post.sensitive || (post.appliedTriggers || []).length > 0 || (post.makerTags || []).length > 0;
 

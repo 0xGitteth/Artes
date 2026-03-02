@@ -99,8 +99,8 @@ export default function UploadModal({ onClose, onPublish, initialStyles = [] }) 
     },
   ];
   const triggerOptions = [
-    { id: 'nudityErotic', label: 'Naakt (erotisch)' },
-    { id: 'explicit18', label: 'Expliciet 18+' },
+    { id: 'adultArtNude', label: '18+ Artistiek naakt' },
+    { id: 'adultEroticSuggestive', label: '18+ Erotisch / suggestief' },
     { id: 'kinkBdsm', label: 'Kink / BDSM' },
     { id: 'breathRestriction', label: 'Ademrestrictie' },
     { id: 'bloodInjury', label: 'Bloed / verwonding' },

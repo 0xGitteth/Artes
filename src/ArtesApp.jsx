@@ -4925,6 +4925,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
   const [outcome, setOutcome] = useState(null);
   const [forbiddenReasons, setForbiddenReasons] = useState([]);
   const [reviewCaseId, setReviewCaseId] = useState(null);
+  const [reviewUploadId, setReviewUploadId] = useState(null);
   const [showSuggestionUI, setShowSuggestionUI] = useState(false);
   const [requiredThemes, setRequiredThemes] = useState([]);
   const [userMessage, setUserMessage] = useState('');
@@ -5018,6 +5019,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
       setOutcome(null);
       setForbiddenReasons([]);
       setReviewCaseId(null);
+      setReviewUploadId(null);
       setShowSuggestionUI(false);
       setRequiredThemes([]);
       setUserMessage('');
@@ -5097,6 +5099,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
         })
         .filter(Boolean);
       const nextReviewCaseId = data?.reviewCaseId ?? null;
+      const nextUploadId = data?.uploadId ?? null;
       const nextRequiredThemes = Array.isArray(data?.requiredThemes) ? data.requiredThemes : [];
       const nextAutoAppliedTriggers = (Array.isArray(data?.autoAppliedTriggers) ? data.autoAppliedTriggers : []).map(resolveTriggerKey).filter(Boolean);
       const normalizedAppliedTriggers = Array.from(new Set([...nextAppliedTriggers.map(resolveTriggerKey), ...nextAutoAppliedTriggers]));
@@ -5107,6 +5110,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
       setOutcome(nextOutcome);
       setForbiddenReasons(nextForbiddenReasons);
       setReviewCaseId(nextReviewCaseId);
+      setReviewUploadId(nextUploadId);
       setRequiredThemes(nextRequiredThemes);
       setUserMessage(data?.userMessage || '');
       setShouldReview(Boolean(data?.shouldReview));
@@ -5133,6 +5137,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
       setOutcome(null);
       setForbiddenReasons([]);
       setReviewCaseId(null);
+      setReviewUploadId(null);
       setShowSuggestionUI(false);
       setRequiredThemes([]);
       setUserMessage('');
@@ -5161,6 +5166,26 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
 
     try {
       const token = await user.getIdToken();
+      const uploadId = reviewUploadId || null;
+      if (!uploadId) {
+        throw new Error('Geen upload-ID beschikbaar. Voer eerst de AI-check uit en probeer opnieuw.');
+      }
+
+      const caseResponse = await fetch(`${functionsBase}/requestUploadReviewCase`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ uploadId }),
+      });
+      const caseData = await caseResponse.json().catch(() => ({}));
+      if (!caseResponse.ok) {
+        throw new Error(caseData?.error || 'Kon geen review-case aanmaken.');
+      }
+      const ensuredReviewCaseId = caseData?.reviewCaseId || null;
+      setReviewCaseId(ensuredReviewCaseId);
+
       const ensureResponse = await fetch(`${functionsBase}/ensureModerationThread`, {
         method: 'POST',
         headers: {
@@ -5179,7 +5204,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
         '[UPLOAD_REVIEW_REQUEST]',
         `classification: ${classification || 'unknown'}`,
         `shouldReview: ${Boolean(shouldReview)}`,
-        `reviewCaseId: ${reviewCaseId || 'none'}`,
+        `reviewCaseId: ${ensuredReviewCaseId || 'none'}`,
         `outcome: ${outcome || 'unknown'}`,
         `title: ${(title || '').trim() || '(geen titel)'}`,
         `themes: ${selectedStyles.length > 0 ? selectedStyles.join(', ') : 'none'}`,
@@ -5197,7 +5222,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
       });
       const sendData = await sendResponse.json().catch(() => ({}));
       if (!sendResponse.ok) {
-        throw new Error(sendData?.error || 'Reviewverzoek versturen mislukt.');
+        console.warn('Reviewcase aangemaakt, maar supportbericht versturen mislukt.', sendData?.error || 'unknown error');
       }
 
       setReviewRequested(true);
@@ -5424,6 +5449,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
       setOutcome(null);
       setForbiddenReasons([]);
       setReviewCaseId(null);
+      setReviewUploadId(null);
       setShowSuggestionUI(false);
       setRequiredThemes([]);
       setUserMessage('');

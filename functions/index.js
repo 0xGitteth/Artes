@@ -1274,6 +1274,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
     }
   }
 
+  response.uploadId = uploadId;
   res.status(200).json(response);
 });
 
@@ -1636,6 +1637,106 @@ export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, asyn
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to report post' });
+  }
+});
+
+export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const body = parseJsonBody(req);
+    const uploadId = String(body?.uploadId || '').trim();
+    if (!uploadId) {
+      res.status(400).json({ error: 'uploadId is required' });
+      return;
+    }
+
+    const uploadRef = db.collection('uploads').doc(uploadId);
+    const uploadSnapshot = await uploadRef.get();
+    if (!uploadSnapshot.exists) {
+      res.status(404).json({ error: 'Upload not found' });
+      return;
+    }
+
+    const uploadData = uploadSnapshot.data() || {};
+    if (uploadData.userId !== decoded.uid) {
+      res.status(403).json({ error: 'Not authorized for this upload' });
+      return;
+    }
+
+    let existingCase = null;
+    if (uploadData.reviewCaseId) {
+      const linkedCaseSnap = await db.collection('reviewCases').doc(uploadData.reviewCaseId).get();
+      if (linkedCaseSnap.exists) {
+        const linkedCaseData = linkedCaseSnap.data() || {};
+        if (linkedCaseData.status === 'inReview' && linkedCaseData.userId === decoded.uid) {
+          existingCase = { id: linkedCaseSnap.id, data: linkedCaseData };
+        }
+      }
+    }
+
+    if (!existingCase) {
+      const openCasesSnapshot = await db
+        .collection('reviewCases')
+        .where('userId', '==', decoded.uid)
+        .where('status', '==', 'inReview')
+        .limit(20)
+        .get();
+      existingCase = openCasesSnapshot.docs
+        .map((docSnap) => ({ id: docSnap.id, data: docSnap.data() || {} }))
+        .find(({ data }) => {
+          if (data.caseType && data.caseType !== 'upload') return false;
+          if (data.uploadId === uploadId) return true;
+          return Array.isArray(data.linkedUploadIds) && data.linkedUploadIds.includes(uploadId);
+        }) || null;
+    }
+
+    let reviewCaseId = existingCase?.id || null;
+    let created = false;
+
+    if (!reviewCaseId) {
+      const reviewRef = await db.collection('reviewCases').add({
+        caseType: 'upload',
+        status: 'inReview',
+        decision: null,
+        userId: decoded.uid,
+        uploadId,
+        linkedUploadIds: [uploadId],
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      reviewCaseId = reviewRef.id;
+      created = true;
+    }
+
+    await uploadRef.set(
+      {
+        reviewCaseId,
+        reviewStatus: 'inReview',
+        reviewRequestedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    if (!existingCase) {
+      await db.collection('reviewCases').doc(reviewCaseId).set(
+        {
+          uploadId,
+          linkedUploadIds: FieldValue.arrayUnion(uploadId),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    res.status(200).json({ ok: true, reviewCaseId, created });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to request upload review case' });
   }
 });
 

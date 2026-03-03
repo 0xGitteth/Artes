@@ -1450,7 +1450,7 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 });
 
-export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west1' }, async (req, res) => {
+export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4' }, async (req, res) => {
   setCorsHeaders(req, res);
   
   // Handle preflight OPTIONS request

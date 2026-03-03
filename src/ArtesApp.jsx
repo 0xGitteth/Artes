@@ -4040,13 +4040,13 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const isReportCase = selectedCase?.caseType === 'report';
   const reportedPost = selectedCase?.reportedPost || null;
   const uploadPreviewUrl = selectedUpload?.previewUrl || selectedUpload?.imageUrl || selectedUpload?.image || reportedPost?.imageUrl || null;
-  const tags = ((selectedUpload?.appliedTriggers || selectedUpload?.makerTags || [])
-    .map((item) => {
-      if (typeof item === 'string') return item;
-      if (item && typeof item === 'object') return item.trigger || item.reason || null;
+  const tags = (Array.isArray(selectedUpload?.appliedTriggers) ? selectedUpload.appliedTriggers : (Array.isArray(selectedUpload?.makerTags) ? selectedUpload.makerTags : []))
+    .map((tag) => {
+      if (typeof tag === 'string') return resolveTriggerKey(tag);
+      if (tag && typeof tag === 'object') return resolveTriggerKey(tag.trigger || tag.reason);
       return null;
     })
-    .filter(Boolean));
+    .filter(Boolean);
   const queueTitle = caseTypeFilter === 'report' ? 'Gerapporteerde foto’s' : 'Foto’s in review';
 
   return (
@@ -4127,7 +4127,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                     <div className="flex flex-wrap gap-2 mt-2">
                       {tags.length > 0 ? tags.map((tag, index) => (
                         <span key={`${tag}-${index}`} className="text-[11px] px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-200">
-                          {tag}
+                          {TRIGGERS.find((item) => item.id === tag)?.label || tag}
                         </span>
                       )) : (
                         <span className="text-xs text-slate-400">{isReportCase ? 'Geen tags beschikbaar' : 'Geen tags'}</span>

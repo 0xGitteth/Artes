@@ -19,7 +19,7 @@ async function verifyIdToken(req) {
   return auth.verifyIdToken(match[1]);
 }
 
-export const ensureSupportThread = onRequest({ region: "europe-west1" }, (req, res) => {
+export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, res) => {
   corsHandler(req, res, async () => {
     try {
       // ✅ Preflight moet 2xx zijn

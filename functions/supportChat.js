@@ -12,6 +12,20 @@ const auth = getAuth();
 const db = getFirestore();
 const corsHandler = cors({ origin: true });
 
+async function detectSupportThreadHasUserMessage(threadRef, userUid) {
+  const byRole = await threadRef.collection("messages")
+    .where("senderRole", "==", "user")
+    .limit(1)
+    .get();
+  if (!byRole.empty) return true;
+
+  const byUid = await threadRef.collection("messages")
+    .where("senderUid", "==", userUid)
+    .limit(1)
+    .get();
+  return !byUid.empty;
+}
+
 async function verifyIdToken(req) {
   const header = req.headers.authorization || "";
   const match = header.match(/^Bearer (.+)$/);
@@ -69,6 +83,18 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
           senderId: "system",
           senderLabel: "Artes Moderatie",
         });
+      } else {
+        const threadData = threadSnap.data() || {};
+        if (typeof threadData.hasUserMessage !== "boolean") {
+          const hasUserMessage = await detectSupportThreadHasUserMessage(threadRef, uid);
+          await threadRef.set(
+            {
+              hasUserMessage,
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
       }
 
       const indexSnap = await indexRef.get();

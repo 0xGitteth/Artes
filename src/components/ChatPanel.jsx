@@ -64,6 +64,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [startingChat, setStartingChat] = useState(false);
 
   const normalizedQuery = useMemo(() => normalizeQuery(queryText), [queryText]);
 
@@ -146,24 +147,30 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   }, [authUser]);
 
   const handleStartChat = async () => {
+    if (startingChat) return;
     if (!selectedUser || selectedUser.uid === authUser.uid) return;
     if (!functionsBase) return;
-    const token = await authUser.getIdToken();
-    const response = await fetch(`${functionsBase}/createDmThread`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        recipientUid: selectedUser.uid,
-      }),
-    });
-    if (!response.ok) return;
-    const data = await response.json();
-    if (data?.threadId) {
-      onThreadReady(data.threadId);
-      onClose();
+    setStartingChat(true);
+    try {
+      const token = await authUser.getIdToken();
+      const response = await fetch(`${functionsBase}/createDmThread`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          recipientUid: selectedUser.uid,
+        }),
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data?.threadId) {
+        onThreadReady(data.threadId);
+        onClose();
+      }
+    } finally {
+      setStartingChat(false);
     }
   };
 
@@ -236,10 +243,10 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
                   <button
                     type="button"
                     onClick={handleStartChat}
-                    disabled={!functionsBase}
+                    disabled={!functionsBase || startingChat}
                     className="w-full bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700"
                   >
-                    Start chat
+                    {startingChat ? 'Chat starten...' : 'Start chat'}
                   </button>
                   {!functionsBase && (
                     <p className="text-xs text-red-500 mt-2">Chat is nog niet beschikbaar zonder backend.</p>

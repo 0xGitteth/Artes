@@ -50,6 +50,7 @@ const needlesKeywords = ['needle', 'syringe', 'injection', 'injections', 'hypode
 const spidersKeywords = ['spider', 'spiders', 'insect', 'insects', 'bug', 'bugs', 'beetle', 'mosquito', 'cockroach', 'ant', 'fly'];
 const dhashPrefixLength = 4;
 const dhashThreshold = Number.parseInt(process.env.DHASH_HAMMING_THRESHOLD || '8', 10);
+const freshEvaluationReservationMs = Number.parseInt(process.env.FRESH_EVAL_RESERVATION_MS || '120000', 10);
 const falseAppealThreshold = Number.parseInt(process.env.FALSE_APPEAL_THRESHOLD || '2', 10);
 const cooldownDays = Number.parseInt(process.env.REVIEW_COOLDOWN_DAYS || '7', 10);
 const claimInviteExpiryMs = Number.parseInt(process.env.CLAIM_INVITE_EXPIRY_MS || `${14 * 24 * 60 * 60 * 1000}`, 10);
@@ -788,6 +789,121 @@ const isFingerprintBlocked = (fingerprints, blockedFingerprints = []) => {
   return false;
 };
 
+const matchesFingerprintEntry = (fingerprints, candidate) => {
+  if (!fingerprints || !candidate) return false;
+  if (candidate?.sha256 && candidate.sha256 === fingerprints.sha256) {
+    return true;
+  }
+  if (!fingerprints.dhash || !fingerprints.dhashPrefix) return false;
+  if (candidate?.dhashPrefix !== fingerprints.dhashPrefix) return false;
+  if (!candidate?.dhash) return false;
+  const distance = hammingDistance(fingerprints.dhash, candidate.dhash);
+  return distance <= dhashThreshold;
+};
+
+const reserveFreshEvaluationOverride = async ({ userModerationRef, fingerprints }) => {
+  if (!userModerationRef || !fingerprints) return null;
+  const requestId = crypto.randomUUID();
+  let reservation = null;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userModerationRef);
+    if (!snapshot.exists) return;
+    const data = snapshot.data() || {};
+    const overrides = Array.isArray(data.freshEvaluationOverrides)
+      ? data.freshEvaluationOverrides
+      : [];
+    const now = Date.now();
+    const matchIndex = overrides.findIndex((item) => {
+      if (!matchesFingerprintEntry(fingerprints, item)) return false;
+      const expiresAtMs = Number(item?.reservationExpiresAtMs || 0);
+      const isReserved = Boolean(item?.reservationRequestId) && expiresAtMs > now;
+      return !isReserved;
+    });
+    if (matchIndex === -1) return;
+    const nextOverrides = overrides.map((item, index) => {
+      if (index !== matchIndex) return item;
+      return {
+        ...item,
+        reservationRequestId: requestId,
+        reservationReservedAtMs: now,
+        reservationExpiresAtMs: now + freshEvaluationReservationMs,
+      };
+    });
+    transaction.set(
+      userModerationRef,
+      {
+        freshEvaluationOverrides: nextOverrides,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    reservation = { requestId };
+  });
+  return reservation;
+};
+
+const consumeFreshEvaluationOverride = async ({ userModerationRef, fingerprints, reservationRequestId }) => {
+  if (!userModerationRef || !fingerprints || !reservationRequestId) return false;
+  let consumed = false;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userModerationRef);
+    if (!snapshot.exists) return;
+    const data = snapshot.data() || {};
+    const overrides = Array.isArray(data.freshEvaluationOverrides)
+      ? data.freshEvaluationOverrides
+      : [];
+    const matchIndex = overrides.findIndex((item) => (
+      matchesFingerprintEntry(fingerprints, item)
+      && item?.reservationRequestId === reservationRequestId
+    ));
+    if (matchIndex === -1) return;
+    const nextOverrides = overrides.filter((_, index) => index !== matchIndex);
+    transaction.set(
+      userModerationRef,
+      {
+        freshEvaluationOverrides: nextOverrides,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    consumed = true;
+  });
+  return consumed;
+};
+
+const releaseFreshEvaluationOverrideReservation = async ({ userModerationRef, fingerprints, reservationRequestId }) => {
+  if (!userModerationRef || !fingerprints || !reservationRequestId) return false;
+  let released = false;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userModerationRef);
+    if (!snapshot.exists) return;
+    const data = snapshot.data() || {};
+    const overrides = Array.isArray(data.freshEvaluationOverrides)
+      ? data.freshEvaluationOverrides
+      : [];
+    const matchIndex = overrides.findIndex((item) => (
+      matchesFingerprintEntry(fingerprints, item)
+      && item?.reservationRequestId === reservationRequestId
+    ));
+    if (matchIndex === -1) return;
+    const nextOverrides = overrides.map((item, index) => {
+      if (index !== matchIndex) return item;
+      const { reservationRequestId: _a, reservationReservedAtMs: _b, reservationExpiresAtMs: _c, ...rest } = item;
+      return rest;
+    });
+    transaction.set(
+      userModerationRef,
+      {
+        freshEvaluationOverrides: nextOverrides,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    released = true;
+  });
+  return released;
+};
+
 const extractLabelScore = (labels, keywords) => {
   if (!labels?.length) return 0;
   return labels.reduce((maxScore, label) => {
@@ -922,14 +1038,25 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
     });
     return;
   }
+
+  let overrideReservation = null;
   try {
-    matchedUpload = await findExactUpload(fingerprints.sha256);
-    if (!matchedUpload) {
-      matchedUpload = await findNearDuplicateUpload(fingerprints);
-    }
+    overrideReservation = await reserveFreshEvaluationOverride({
+      userModerationRef: userModeration?.ref,
+      fingerprints,
+    });
   } catch (error) {
-    logger.error('Upload lookup mislukt.', error);
+    logger.error('Fresh evaluation override reserve mislukt.', error);
   }
+  const skipUploadReuse = Boolean(overrideReservation);
+
+  try {
+    if (!skipUploadReuse) {
+      matchedUpload = await findExactUpload(fingerprints.sha256);
+      if (!matchedUpload) {
+        matchedUpload = await findNearDuplicateUpload(fingerprints);
+      }
+    }
 
   let cachedResult = null;
   if (matchedUpload?.data) {
@@ -1275,7 +1402,35 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 
   response.uploadId = uploadId;
+
+  if (skipUploadReuse) {
+    try {
+      await consumeFreshEvaluationOverride({
+        userModerationRef: userModeration?.ref,
+        fingerprints,
+        reservationRequestId: overrideReservation?.requestId,
+      });
+    } catch (error) {
+      logger.error('Fresh evaluation override consume mislukt.', error);
+    }
+  }
+
   res.status(200).json(response);
+  } catch (error) {
+    if (skipUploadReuse) {
+      try {
+        await releaseFreshEvaluationOverrideReservation({
+          userModerationRef: userModeration?.ref,
+          fingerprints,
+          reservationRequestId: overrideReservation?.requestId,
+        });
+      } catch (releaseError) {
+        logger.error('Fresh evaluation override release mislukt.', releaseError);
+      }
+    }
+    logger.error('moderateImage fout.', error);
+    res.status(500).json({ error: 'Moderatie mislukt.' });
+  }
 });
 
 export const isModerator = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
@@ -2041,6 +2196,71 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to decide review case' });
+  }
+});
+
+export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    await ensureModerator(decoded);
+    const body = parseJsonBody(req);
+    const uploadId = String(body?.uploadId || '').trim();
+    if (!uploadId) {
+      res.status(400).json({ error: 'uploadId is required' });
+      return;
+    }
+
+    const uploadRef = db.collection('uploads').doc(uploadId);
+    const uploadSnapshot = await uploadRef.get();
+    if (!uploadSnapshot.exists) {
+      res.status(404).json({ error: 'Upload not found' });
+      return;
+    }
+
+    const uploadData = uploadSnapshot.data() || {};
+    const userId = String(uploadData.userId || '').trim();
+    const fingerprints = uploadData.fingerprints || null;
+    if (!userId) {
+      res.status(400).json({ error: 'Upload has no userId' });
+      return;
+    }
+    if (!fingerprints?.sha256 || !fingerprints?.dhash || !fingerprints?.dhashPrefix) {
+      res.status(400).json({ error: 'Upload has no complete fingerprints' });
+      return;
+    }
+
+    const moderation = await getUserModeration(userId);
+    const existingOverrides = Array.isArray(moderation?.data?.freshEvaluationOverrides)
+      ? moderation.data.freshEvaluationOverrides
+      : [];
+    const alreadyQueued = existingOverrides.some((item) => matchesFingerprintEntry(fingerprints, item));
+
+    if (!alreadyQueued) {
+      await moderation.ref.set(
+        {
+          freshEvaluationOverrides: FieldValue.arrayUnion({
+            sha256: fingerprints.sha256,
+            dhash: fingerprints.dhash,
+            dhashPrefix: fingerprints.dhashPrefix,
+            uploadId,
+            reviewCaseId: body?.reviewCaseId || null,
+            createdByUid: decoded.uid,
+            createdAtMs: Date.now(),
+          }),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    res.status(200).json({ ok: true, queued: !alreadyQueued });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to queue fresh evaluation override' });
   }
 });
 

@@ -1632,6 +1632,48 @@ export const archiveDmThread = onRequest({ cors: true, region: 'europe-west4' },
   }
 });
 
+
+export const dismissSupportThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    await ensureModerator(decoded);
+
+    const body = parseJsonBody(req);
+    const threadId = String(body?.threadId || '').trim();
+    if (!threadId) {
+      res.status(400).json({ error: 'threadId is required' });
+      return;
+    }
+
+    const threadRef = db.collection('threads').doc(threadId);
+    const threadSnap = await threadRef.get();
+    if (!threadSnap.exists) {
+      res.status(404).json({ error: 'Thread not found' });
+      return;
+    }
+    const threadData = threadSnap.data() || {};
+    if (threadData?.type !== 'support') {
+      res.status(400).json({ error: 'Only support threads can be dismissed' });
+      return;
+    }
+
+    await threadRef.set({
+      hasUserMessage: false,
+      unreadForModerator: 0,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.status(200).json({ ok: true, threadId });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to dismiss support thread' });
+  }
+});
+
 export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });

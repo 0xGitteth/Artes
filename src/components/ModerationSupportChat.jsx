@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send } from 'lucide-react';
+import { MessageCircle, Send, X } from 'lucide-react';
 import {
   collection,
   doc,
@@ -50,7 +50,7 @@ const resolveThreadDisplay = (thread, userProfile) => {
   return { displayName, username, photoURL };
 };
 
-export default function ModerationSupportChat({ authReady, authUser, isModerator }) {
+export default function ModerationSupportChat({ authReady, authUser, isModerator, functionsBase }) {
   const [threads, setThreads] = useState([]);
   const [activeThreadId, setActiveThreadId] = useState(null);
   const [activeThread, setActiveThread] = useState(null);
@@ -59,6 +59,7 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
   const [searchValue, setSearchValue] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [userProfiles, setUserProfiles] = useState({});
+  const [dismissingThreadId, setDismissingThreadId] = useState(null);
   const moderationThreadsLogRef = useRef(null);
 
   useEffect(() => {
@@ -195,6 +196,30 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
     [messages, activeThread],
   );
 
+
+  const handleDismissThread = async (threadId, event) => {
+    event?.stopPropagation?.();
+    if (!threadId || !functionsBase || !authUser) return;
+    if (!window.confirm('Verwijder deze chat uit je moderatielijst?')) return;
+    setDismissingThreadId(threadId);
+    try {
+      const token = await authUser.getIdToken();
+      await fetch(`${functionsBase}/dismissSupportThread`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ threadId }),
+      });
+      if (activeThreadId === threadId) {
+        setActiveThreadId(null);
+      }
+    } finally {
+      setDismissingThreadId(null);
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!authUser?.uid || !activeThread) return;
     const trimmed = composerText.trim();
@@ -266,37 +291,50 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
               const profile = userProfiles[thread.userUid];
               const info = resolveThreadDisplay(thread, profile);
               return (
-                <button
+                <div
                   key={thread.id}
-                  type="button"
-                  onClick={() => setActiveThreadId(thread.id)}
-                  className={`w-full text-left p-4 transition ${
+                  className={`group flex items-stretch transition ${
                     thread.id === activeThreadId
                       ? 'bg-slate-50 dark:bg-slate-800'
                       : 'hover:bg-slate-50 dark:hover:bg-slate-800'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Avatar photoURL={info.photoURL} name={info.displayName} />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-semibold text-sm dark:text-white">{info.displayName}</p>
-                        {thread.unreadForModerator > 0 && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-600 text-white">
-                            {thread.unreadForModerator}
-                          </span>
-                        )}
+                  <button
+                    type="button"
+                    onClick={() => setActiveThreadId(thread.id)}
+                    className="w-full text-left p-4"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Avatar photoURL={info.photoURL} name={info.displayName} />
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold text-sm dark:text-white">{info.displayName}</p>
+                          {thread.unreadForModerator > 0 && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-600 text-white">
+                              {thread.unreadForModerator}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500">{info.username || 'onbekend'}</p>
+                        <p className="text-xs text-slate-500 mt-1 line-clamp-1">
+                          {thread.lastMessagePreview || 'Nog geen berichten'}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          {thread.lastMessageAt ? formatDate(thread.lastMessageAt) : ''}
+                        </p>
                       </div>
-                      <p className="text-xs text-slate-500">{info.username || 'onbekend'}</p>
-                      <p className="text-xs text-slate-500 mt-1 line-clamp-1">
-                        {thread.lastMessagePreview || 'Nog geen berichten'}
-                      </p>
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        {thread.lastMessageAt ? formatDate(thread.lastMessageAt) : ''}
-                      </p>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Verwijder uit lijst"
+                    onClick={(event) => handleDismissThread(thread.id, event)}
+                    disabled={dismissingThreadId === thread.id}
+                    className="px-3 text-slate-400 hover:text-red-500 transition opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               );
             })
           )}

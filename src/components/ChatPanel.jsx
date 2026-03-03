@@ -64,6 +64,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [startingChat, setStartingChat] = useState(false);
 
   const normalizedQuery = useMemo(() => normalizeQuery(queryText), [queryText]);
 
@@ -146,24 +147,31 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   }, [authUser]);
 
   const handleStartChat = async () => {
+    if (startingChat) return;
     if (!selectedUser || selectedUser.uid === authUser.uid) return;
     if (!functionsBase) return;
-    const token = await authUser.getIdToken();
-    const response = await fetch(`${functionsBase}/createDmThread`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        recipientUid: selectedUser.uid,
-      }),
-    });
-    if (!response.ok) return;
-    const data = await response.json();
-    if (data?.threadId) {
-      onThreadReady(data.threadId);
-      onClose();
+    setStartingChat(true);
+    try {
+      const isActive = activeThreadId === targetId;
+      const token = await authUser.getIdToken();
+      const response = await fetch(`${functionsBase}/createDmThread`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          recipientUid: selectedUser.uid,
+        }),
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data?.threadId) {
+        onThreadReady(data.threadId);
+        onClose();
+      }
+    } finally {
+      setStartingChat(false);
     }
   };
 
@@ -236,10 +244,10 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
                   <button
                     type="button"
                     onClick={handleStartChat}
-                    disabled={!functionsBase}
+                    disabled={!functionsBase || startingChat}
                     className="w-full bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700"
                   >
-                    Start chat
+                    {startingChat ? 'Chat starten...' : 'Start chat'}
                   </button>
                   {!functionsBase && (
                     <p className="text-xs text-red-500 mt-2">Chat is nog niet beschikbaar zonder backend.</p>
@@ -262,6 +270,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
   const [composerText, setComposerText] = useState('');
   const [showNewChat, setShowNewChat] = useState(false);
   const [sendError, setSendError] = useState(null);
+  const [archivingThreadId, setArchivingThreadId] = useState(null);
 
   useEffect(() => {
     if (!initialThreadId) return;
@@ -278,9 +287,6 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
       (snapshot) => {
         const items = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
         setThreads(items);
-        if (!activeThreadId && items.length > 0) {
-          setActiveThreadId(items[0].threadId || items[0].id);
-        }
       },
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Thread index listener users/${authUser?.uid}/threadIndex`),
     );
@@ -327,6 +333,27 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
     return threads.find((thread) => thread.threadId === activeThreadId || thread.id === activeThreadId) || null;
   }, [threads, activeThreadId]);
 
+
+  const visibleThreads = useMemo(
+    () => threads.filter((thread) => thread.hidden !== true),
+    [threads],
+  );
+
+  useEffect(() => {
+    if (visibleThreads.length === 0) {
+      if (activeThreadId) setActiveThreadId(null);
+      return;
+    }
+    if (!activeThreadId) {
+      setActiveThreadId(visibleThreads[0].threadId || visibleThreads[0].id);
+      return;
+    }
+    const stillVisible = visibleThreads.some((thread) => (thread.threadId || thread.id) === activeThreadId);
+    if (!stillVisible) {
+      setActiveThreadId(visibleThreads[0].threadId || visibleThreads[0].id);
+    }
+  }, [visibleThreads, activeThreadId]);
+
   const normalizedSupportMessages = useMemo(() => {
     if (activeThread?.type !== 'support') return [];
     return messages.map((message) => normalizeSupportMessage(message, activeThread)).filter(Boolean);
@@ -354,6 +381,34 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
       }))
     });
   }
+
+
+  const handleArchiveDmThread = async (thread, event) => {
+    event?.stopPropagation?.();
+    if (!thread || !functionsBase || !authUser) return;
+    const targetId = thread.threadId || thread.id;
+    const isSupportThread = thread.threadType === 'support' || thread.type === 'support';
+    if (isSupportThread) return;
+    if (!window.confirm('Gesprek archiveren?')) return;
+    setArchivingThreadId(targetId);
+    try {
+      const isActive = activeThreadId === targetId;
+      const token = await authUser.getIdToken();
+      await fetch(`${functionsBase}/archiveDmThread`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ threadId: targetId }),
+      });
+      if (isActive) {
+        setActiveThreadId(null);
+      }
+    } finally {
+      setArchivingThreadId(null);
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!authUser?.uid || !activeThread) return;
@@ -399,39 +454,54 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
           </button>
         </div>
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {threads.length === 0 ? (
+          {visibleThreads.length === 0 ? (
             <div className="p-4 text-sm text-slate-500">Nog geen gesprekken.</div>
           ) : (
-            threads.map((thread) => (
-              <button
-                key={thread.id}
-                type="button"
-                onClick={() => setActiveThreadId(thread.threadId || thread.id)}
-                className={`w-full text-left p-4 transition ${
-                  (thread.threadId || thread.id) === activeThreadId
+            visibleThreads.map((thread) => {
+              const threadKey = thread.threadId || thread.id;
+              const isSupport = thread.threadType === 'support' || thread.type === 'support';
+              return (
+                <div key={thread.id} className={`group flex items-stretch ${
+                  threadKey === activeThreadId
                     ? 'bg-slate-50 dark:bg-slate-800'
                     : 'hover:bg-slate-50 dark:hover:bg-slate-800'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-sm dark:text-white">{thread.displayTitle || 'Chat'}</p>
-                    {(thread.threadType === 'support'
-                      ) && (
-                      <span className="text-[10px] uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">
-                        Support
-                      </span>
-                    )}
-                  </div>
-                  {thread.pinned && (
-                    <span className="text-[10px] uppercase text-blue-600 font-semibold">Vastgezet</span>
+                }`}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveThreadId(threadKey)}
+                    className="flex-1 text-left p-4 transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-sm dark:text-white">{thread.displayTitle || 'Chat'}</p>
+                        {isSupport && (
+                          <span className="text-[10px] uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">
+                            Support
+                          </span>
+                        )}
+                      </div>
+                      {thread.pinned && (
+                        <span className="text-[10px] uppercase text-blue-600 font-semibold">Vastgezet</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {thread.lastMessageAt ? formatTime(thread.lastMessageAt) : 'Nog geen berichten'}
+                    </p>
+                  </button>
+                  {!isSupport && (
+                    <button
+                      type="button"
+                      aria-label="Archiveer chat"
+                      onClick={(event) => handleArchiveDmThread(thread, event)}
+                      disabled={archivingThreadId === threadKey}
+                      className="px-3 text-slate-400 hover:text-red-500 transition opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   )}
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  {thread.lastMessageAt ? formatTime(thread.lastMessageAt) : 'Nog geen berichten'}
-                </p>
-              </button>
-            ))
+              );
+            })
           )}
         </div>
       </aside>

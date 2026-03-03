@@ -45,10 +45,15 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
           type: "support",
           title: "Artes Moderatie",
           userUid: uid,
+          participantUids: [uid],
           participants: [uid],
           hasUserMessage: false,
+          userCanSend: true,
+          userMessageAllowance: 1,
           createdAt: FieldValue.serverTimestamp(),
           lastMessageAt: FieldValue.serverTimestamp(),
+          lastMessagePreview:
+            "Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen. Je krijgt binnen 3 werkdagen reactie.",
           updatedAt: FieldValue.serverTimestamp(),
           userMaySend: true,
         });
@@ -71,12 +76,23 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
         await indexRef.set({
           threadId,
           type: "support",
+          threadType: "support",
           pinned: true,
+          hidden: false,
           displayTitle: "Artes Moderatie",
           lastMessageAt: FieldValue.serverTimestamp(),
         });
       } else {
-        await indexRef.set({ pinned: true, displayTitle: "Artes Moderatie" }, { merge: true });
+        await indexRef.set(
+          {
+            pinned: true,
+            hidden: false,
+            type: "support",
+            threadType: "support",
+            displayTitle: "Artes Moderatie",
+          },
+          { merge: true }
+        );
       }
 
       return res.status(200).json({ ok: true, threadId });

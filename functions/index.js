@@ -1467,14 +1467,47 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       return;
     }
 
-    const dmKey = [decoded.uid, recipientUid].sort().join('_');
+    const participantPair = [decoded.uid, recipientUid].sort();
+    const dmKey = participantPair.join('_');
+    const canonicalThreadId = `dm_${dmKey}`;
+    const canonicalRef = db.collection('threads').doc(canonicalThreadId);
+
+    const canonicalSnap = await canonicalRef.get();
+    if (canonicalSnap.exists) {
+      const canonicalData = canonicalSnap.data() || {};
+      const canonicalParticipants = Array.isArray(canonicalData?.participantUids)
+        ? [...canonicalData.participantUids].sort()
+        : [];
+      if (canonicalData?.type === 'dm' && arraysEqual(canonicalParticipants, participantPair)) {
+        res.status(200).json({ threadId: canonicalThreadId });
+        return;
+      }
+    }
+
     const existingSnap = await db.collection('threads')
-      .where('dmKey', '==', dmKey)
       .where('type', '==', 'dm')
-      .limit(1)
+      .where('dmKey', '==', dmKey)
       .get();
     if (!existingSnap.empty) {
-      res.status(200).json({ threadId: existingSnap.docs[0].id });
+      const pickTimestamp = (data, key) => {
+        const value = data?.[key];
+        if (!value) return 0;
+        if (typeof value.toMillis === 'function') return value.toMillis();
+        if (value?._seconds) return value._seconds * 1000;
+        return 0;
+      };
+      const sorted = [...existingSnap.docs].sort((left, right) => {
+        if (left.id === canonicalThreadId && right.id !== canonicalThreadId) return -1;
+        if (right.id === canonicalThreadId && left.id !== canonicalThreadId) return 1;
+        const leftData = left.data() || {};
+        const rightData = right.data() || {};
+        const byLastMessageAt = pickTimestamp(rightData, 'lastMessageAt') - pickTimestamp(leftData, 'lastMessageAt');
+        if (byLastMessageAt !== 0) return byLastMessageAt;
+        const byCreatedAt = pickTimestamp(rightData, 'createdAt') - pickTimestamp(leftData, 'createdAt');
+        if (byCreatedAt !== 0) return byCreatedAt;
+        return left.id.localeCompare(right.id);
+      });
+      res.status(200).json({ threadId: sorted[0].id });
       return;
     }
 
@@ -1484,21 +1517,51 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
     ]);
     const senderTitle = resolveDisplayTitle(recipientPublic);
     const recipientTitle = resolveDisplayTitle(senderPublic);
-    const threadRef = await db.collection('threads').add({
-      type: 'dm',
-      participantUids: [decoded.uid, recipientUid],
-      dmKey,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-      lastMessageAt: FieldValue.serverTimestamp(),
-      lastMessageText: '',
-      lastSenderUid: decoded.uid,
-    });
+    let createdCanonicalThread = false;
+    try {
+      await canonicalRef.create({
+        type: 'dm',
+        participantUids: [decoded.uid, recipientUid],
+        dmKey,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        lastMessageAt: FieldValue.serverTimestamp(),
+        lastMessageText: '',
+        lastSenderUid: decoded.uid,
+      });
+      createdCanonicalThread = true;
+    } catch (error) {
+      const errorCode = error?.code;
+      const alreadyExists = errorCode === 6 || errorCode === 'already-exists' || errorCode === 'ALREADY_EXISTS';
+      if (!alreadyExists) throw error;
+    }
+
+    if (!createdCanonicalThread) {
+      const postCreateSnap = await canonicalRef.get();
+      const postCreateData = postCreateSnap.exists ? (postCreateSnap.data() || {}) : null;
+      const postCreateParticipants = Array.isArray(postCreateData?.participantUids)
+        ? [...postCreateData.participantUids].sort()
+        : [];
+      const canonicalValid = Boolean(
+        postCreateData
+        && postCreateData?.type === 'dm'
+        && arraysEqual(postCreateParticipants, participantPair)
+      );
+      if (canonicalValid) {
+        res.status(200).json({ threadId: canonicalThreadId });
+        return;
+      }
+      const conflictError = new Error('Canonical DM thread id conflict');
+      conflictError.status = 409;
+      throw conflictError;
+    }
+
+    const threadId = canonicalThreadId;
 
     await Promise.all([
-      db.collection('users').doc(decoded.uid).collection('threadIndex').doc(threadRef.id).set(
+      db.collection('users').doc(decoded.uid).collection('threadIndex').doc(threadId).set(
         {
-          threadId: threadRef.id,
+          threadId,
           pinned: false,
           hidden: false,
           displayTitle: senderTitle,
@@ -1506,9 +1569,9 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
         },
         { merge: true }
       ),
-      db.collection('users').doc(recipientUid).collection('threadIndex').doc(threadRef.id).set(
+      db.collection('users').doc(recipientUid).collection('threadIndex').doc(threadId).set(
         {
-          threadId: threadRef.id,
+          threadId,
           pinned: false,
           hidden: false,
           displayTitle: recipientTitle,
@@ -1518,10 +1581,218 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       ),
     ]);
 
-    res.status(200).json({ threadId: threadRef.id });
+    res.status(200).json({ threadId });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create dm thread' });
+  }
+});
+
+export const archiveDmThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const body = parseJsonBody(req);
+    const threadId = String(body?.threadId || '').trim();
+    if (!threadId) {
+      res.status(400).json({ error: 'threadId is required' });
+      return;
+    }
+
+    const threadRef = db.collection('threads').doc(threadId);
+    const threadSnap = await threadRef.get();
+    if (!threadSnap.exists) {
+      res.status(404).json({ error: 'Thread not found' });
+      return;
+    }
+    const threadData = threadSnap.data() || {};
+    if (threadData?.type !== 'dm') {
+      res.status(400).json({ error: 'Only DM threads can be archived' });
+      return;
+    }
+    const participants = Array.isArray(threadData?.participantUids) ? threadData.participantUids : [];
+    if (!participants.includes(decoded.uid)) {
+      res.status(403).json({ error: 'Not a participant' });
+      return;
+    }
+
+    const indexRef = db.collection('users').doc(decoded.uid).collection('threadIndex').doc(threadId);
+    const indexSnap = await indexRef.get();
+    if (indexSnap.exists) {
+      await indexRef.set({ hidden: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+
+    res.status(200).json({ ok: true, threadId, indexFound: indexSnap.exists });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to archive dm thread' });
+  }
+});
+
+
+export const dismissSupportThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    await ensureModerator(decoded);
+
+    const body = parseJsonBody(req);
+    const threadId = String(body?.threadId || '').trim();
+    if (!threadId) {
+      res.status(400).json({ error: 'threadId is required' });
+      return;
+    }
+
+    const threadRef = db.collection('threads').doc(threadId);
+    const threadSnap = await threadRef.get();
+    if (!threadSnap.exists) {
+      res.status(404).json({ error: 'Thread not found' });
+      return;
+    }
+    const threadData = threadSnap.data() || {};
+    if (threadData?.type !== 'support') {
+      res.status(400).json({ error: 'Only support threads can be dismissed' });
+      return;
+    }
+
+    await threadRef.set({
+      hasUserMessage: false,
+      unreadForModerator: 0,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.status(200).json({ ok: true, threadId });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to dismiss support thread' });
+  }
+});
+
+export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    const body = parseJsonBody(req);
+    const requestedThreadId = String(body?.threadId || '').trim();
+    const fallbackThreadId = `support_${decoded.uid}`;
+    const threadId = requestedThreadId || fallbackThreadId;
+
+    const threadRef = db.collection('threads').doc(threadId);
+    const threadSnap = await threadRef.get();
+    if (!threadSnap.exists) {
+      res.status(404).json({ error: 'Thread not found' });
+      return;
+    }
+
+    const threadData = threadSnap.data() || {};
+    if (threadData?.type !== 'support') {
+      res.status(400).json({ error: 'Only support threads can be reset' });
+      return;
+    }
+
+    const isOwner = threadData?.userUid === decoded.uid;
+    let isModeratorRequest = false;
+    if (!isOwner) {
+      try {
+        await ensureModerator(decoded);
+        isModeratorRequest = true;
+      } catch (_error) {
+        isModeratorRequest = false;
+      }
+    }
+    if (!isOwner && !isModeratorRequest) {
+      res.status(403).json({ error: 'Not authorized to reset this support thread' });
+      return;
+    }
+
+    const userUid = threadData?.userUid;
+    if (!userUid) {
+      res.status(400).json({ error: 'Support thread is missing userUid' });
+      return;
+    }
+
+    const messagesRef = threadRef.collection('messages');
+    let keptIntroRef = null;
+    while (true) {
+      const snapshot = await messagesRef.limit(400).get();
+      if (snapshot.empty) break;
+      const batch = db.batch();
+      let deletesInRound = 0;
+      snapshot.docs.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        const isSystemIntro = data?.senderRole === 'system' && SUPPORT_INTRO_TEXTS.includes(data?.text || '');
+        if (isSystemIntro) {
+          if (!keptIntroRef) {
+            keptIntroRef = docSnap.ref;
+            return;
+          }
+          if (keptIntroRef.path === docSnap.ref.path) {
+            return;
+          }
+        }
+        batch.delete(docSnap.ref);
+        deletesInRound += 1;
+      });
+      if (deletesInRound === 0) {
+        break;
+      }
+      await batch.commit();
+      if (snapshot.size < 400) break;
+    }
+
+    if (!keptIntroRef) {
+      await messagesRef.add({
+        text: SUPPORT_INTRO_MESSAGE,
+        type: 'system',
+        senderRole: 'system',
+        senderUid: null,
+        senderId: 'system',
+        senderLabel: 'Artes Moderatie',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    await threadRef.set({
+      type: 'support',
+      title: 'Artes Moderatie',
+      threadKey: threadData?.threadKey || threadId,
+      userUid,
+      participantUids: [userUid],
+      hasUserMessage: false,
+      lastMessageAt: FieldValue.serverTimestamp(),
+      lastMessagePreview: SUPPORT_INTRO_MESSAGE,
+      unreadForModerator: 0,
+      unreadForUser: 0,
+      userMaySend: true,
+      userCanSend: true,
+      userMessageAllowance: 1,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    const indexRef = db.collection('users').doc(userUid).collection('threadIndex').doc(threadId);
+    await indexRef.set({
+      threadId,
+      type: 'support',
+      threadType: 'support',
+      pinned: true,
+      hidden: false,
+      displayTitle: 'Artes Moderatie',
+      lastMessageAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.status(200).json({ ok: true, threadId, resetBy: isOwner ? 'owner' : 'moderator' });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to reset support thread' });
   }
 });
 
@@ -1721,6 +1992,8 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
         lastMessagePreview: text,
         hasUserMessage: true,
         userMaySend: false,
+        userCanSend: false,
+        userMessageAllowance: 0,
         unreadForModerator: (threadData?.unreadForModerator || 0) + 1,
         unreadForUser: 0,
         updatedAt: FieldValue.serverTimestamp(),

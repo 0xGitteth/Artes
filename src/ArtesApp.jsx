@@ -4721,7 +4721,12 @@ function ModerationPortal({
       {activeTab === 'chat' && (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900 min-h-[60vh]">
           {authUser ? (
-            <ModerationSupportChat authReady={authReady} authUser={authUser} isModerator={isModerator} />
+            <ModerationSupportChat
+              authReady={authReady}
+              authUser={authUser}
+              isModerator={isModerator}
+              functionsBase={functionsBase}
+            />
           ) : (
             <div className="p-6 text-sm text-slate-500 dark:text-slate-400">Log in om de chat te openen.</div>
           )}

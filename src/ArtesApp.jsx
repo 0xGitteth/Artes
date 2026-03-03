@@ -3745,6 +3745,10 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [moderatorNote, setModeratorNote] = useState('');
   const [decisionPending, setDecisionPending] = useState(false);
   const [decisionError, setDecisionError] = useState(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [freshEvaluationPending, setFreshEvaluationPending] = useState(false);
+  const [freshEvaluationMessage, setFreshEvaluationMessage] = useState('');
+  const [freshEvaluationError, setFreshEvaluationError] = useState('');
   const reviewCasesListenerLogRef = useRef(null);
 
   useEffect(() => {
@@ -4016,6 +4020,41 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     }
   };
 
+  const handleQueueFreshEvaluation = async () => {
+    if (!selectedCase || !authUser || !moderationApiBase) return;
+    const uploadId = selectedUpload?.id || selectedCase.uploadId || selectedCase.linkedUploadIds?.[0] || null;
+    if (!uploadId) {
+      setFreshEvaluationError('Geen upload-ID beschikbaar voor deze case.');
+      return;
+    }
+    setFreshEvaluationPending(true);
+    setFreshEvaluationError('');
+    setFreshEvaluationMessage('');
+    try {
+      const token = await authUser.getIdToken();
+      const response = await fetch(`${moderationApiBase}/moderatorQueueFreshEvaluation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          reviewCaseId: selectedCase.id,
+          uploadId,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Kon override niet opslaan.');
+      }
+      setFreshEvaluationMessage('De volgende upload van deze afbeelding wordt opnieuw beoordeeld.');
+    } catch (error) {
+      setFreshEvaluationError(error.message || 'Kon override niet opslaan.');
+    } finally {
+      setFreshEvaluationPending(false);
+    }
+  };
+
   if (isModerator === false) {
     return (
       <div className="max-w-2xl mx-auto px-6 py-10 text-center">
@@ -4193,6 +4232,35 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                         onChange={(event) => setModeratorNote(event.target.value)}
                         rows={3}
                       />
+                    </div>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/50 p-3 space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setAdvancedOpen((prev) => !prev)}
+                        className="w-full flex items-center justify-between text-left"
+                      >
+                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Geavanceerd</span>
+                        <span className="text-[11px] text-slate-400">{advancedOpen ? 'Verbergen' : 'Tonen'}</span>
+                      </button>
+                      {advancedOpen && (
+                        <div className="space-y-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={handleQueueFreshEvaluation}
+                            disabled={freshEvaluationPending || isLockedByOther || isReportCase || !selectedUpload?.fingerprints}
+                            className="w-full"
+                          >
+                            {freshEvaluationPending ? 'Opslaan...' : 'Bij volgende upload opnieuw beoordelen'}
+                          </Button>
+                          {isReportCase && <p className="text-[11px] text-slate-500 dark:text-slate-400">Alleen beschikbaar voor upload-cases.</p>}
+                          {!isReportCase && !selectedUpload?.fingerprints && (
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">Geen fingerprint-data gevonden op de geselecteerde upload.</p>
+                          )}
+                          {freshEvaluationError && <p className="text-xs text-red-500">{freshEvaluationError}</p>}
+                          {freshEvaluationMessage && <p className="text-xs text-emerald-600 dark:text-emerald-400">{freshEvaluationMessage}</p>}
+                        </div>
+                      )}
                     </div>
                     {decisionError && <p className="text-xs text-red-500">{decisionError}</p>}
                     <Button

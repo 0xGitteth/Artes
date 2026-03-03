@@ -46,6 +46,7 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
           title: "Artes Moderatie",
           userUid: uid,
           participants: [uid],
+          hasUserMessage: false,
           createdAt: FieldValue.serverTimestamp(),
           lastMessageAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),

@@ -616,7 +616,6 @@ export default function ArtesApp() {
   const [quickProfileId, setQuickProfileId] = useState(null);
   const [selectedPost, setSelectedPost] = useState(null);
   const [shadowProfile, setShadowProfile] = useState(null);
-  const [uploads, setUploads] = useState([]);
   const [moderationModal, setModerationModal] = useState(null);
   const [moderationActionPending, setModerationActionPending] = useState(false);
   const [moderatorAccess, setModeratorAccess] = useState(null);
@@ -1137,27 +1136,6 @@ export default function ArtesApp() {
      );
      return () => { if (typeof unsubPosts === 'function') unsubPosts(); if (typeof unsubUsers === 'function') unsubUsers(); };
   }, [authReady, user, logListenerStart]);
-
-  useEffect(() => {
-    if (!canReadFirestore) {
-      setIsModeratorClient(false);
-      return;
-    }
-    const db = getFirebaseDbInstance();
-    const q = query(
-      collection(db, 'uploads'),
-      where('userId', '==', authUser.uid),
-      orderBy('createdAt', 'desc'),
-    );
-    logListenerStart('Uploads listener (ArtesApp)');
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        setUploads(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
-      },
-      (err) => handleListenerError('Uploads listener (ArtesApp)', err),
-    );
-  }, [canReadFirestore, authUser?.uid, logListenerStart, handleListenerError]);
 
   useEffect(() => {
     let active = true;
@@ -1831,7 +1809,6 @@ export default function ArtesApp() {
               profileIsAdult={profile?.isAdult === true}
               logListenerStart={logListenerStart}
               handleListenerError={handleListenerError}
-              uploads={uploads}
               moderationModal={moderationModal}
               moderationActionPending={moderationActionPending}
               onModerationAction={handleModerationAction}
@@ -3673,65 +3650,6 @@ function ModerationDecisionModal({ message, onClose, onAction, pending }) {
   );
 }
 
-function UploadStatusPanel({ uploads = [] }) {
-  const renderReviewStatus = (upload) => {
-    if (upload.reviewStatus === 'approved') return 'Goedgekeurd';
-    if (upload.reviewStatus === 'rejected') return 'Afgekeurd';
-    return 'In review';
-  };
-
-  return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
-      <div>
-        <h2 className="text-xl font-semibold dark:text-white">Upload status</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Moderatie updates verschijnen hier zodra ze beschikbaar zijn.</p>
-      </div>
-      {uploads.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-6 text-sm text-slate-500 dark:text-slate-400">
-          Nog geen uploads in moderatie.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {uploads.map((upload) => (
-            <div key={upload.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold dark:text-white">Upload {upload.id.slice(0, 6)}</p>
-                  <p className="text-xs text-slate-500">{renderReviewStatus(upload)}</p>
-                </div>
-                <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                  upload.reviewStatus === 'approved'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : upload.reviewStatus === 'rejected'
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-slate-100 text-slate-600'
-                }`}>
-                  {renderReviewStatus(upload)}
-                </span>
-              </div>
-              {upload.reviewDecisionMessagePublic && (
-                <p className="text-sm text-slate-700 dark:text-slate-200">{upload.reviewDecisionMessagePublic}</p>
-              )}
-              {Array.isArray(upload.reviewDecisionReasons) && upload.reviewDecisionReasons.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {upload.reviewDecisionReasons.map((reason) => {
-                    const label = MODERATION_REASON_PRESETS.find((preset) => preset.id === reason)?.label || reason;
-                    return (
-                      <span key={reason} className="text-[11px] px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200">
-                        {label}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter, authReady, isModeratorClient, profileAgeVerified, profileAgeVerifiedStrict, profileIsAdult, logListenerStart, handleListenerError }) {
   const [cases, setCases] = useState([]);
   const [selectedCaseId, setSelectedCaseId] = useState(null);
@@ -4519,7 +4437,6 @@ function ModerationPortal({
   profileIsAdult,
   logListenerStart,
   handleListenerError,
-  uploads,
   moderationModal,
   moderationActionPending,
   onModerationAction,
@@ -4735,7 +4652,6 @@ function ModerationPortal({
 
       {activeTab === 'review' && (
         <div className="space-y-6">
-          <UploadStatusPanel uploads={uploads} />
           <ModerationPanel
             moderationApiBase={moderationApiBase}
             authUser={authUser}

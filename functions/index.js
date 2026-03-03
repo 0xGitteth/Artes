@@ -231,6 +231,7 @@ const ensureModerationThreadForUser = async (uid) => {
       userUsername: publicProfile?.username || '',
       userMessageAllowance: 1,
       userCanSend: true,
+      hasUserMessage: false,
       lastMessageAt: FieldValue.serverTimestamp(),
       lastMessagePreview: SUPPORT_INTRO_MESSAGE,
       unreadForModerator: 0,
@@ -1563,6 +1564,7 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
       transaction.update(threadRef, {
         lastMessageAt: FieldValue.serverTimestamp(),
         lastMessagePreview: text,
+        hasUserMessage: true,
         userMaySend: false,
         unreadForModerator: (threadData?.unreadForModerator || 0) + 1,
         unreadForUser: 0,

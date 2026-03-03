@@ -82,6 +82,7 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
     const q = query(
       collection(db, 'threads'),
       where('type', '==', 'support'),
+      where('hasUserMessage', '==', true),
       orderBy('lastMessageAt', 'desc'),
     );
     return onSnapshot(

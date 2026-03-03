@@ -389,7 +389,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
     const targetId = thread.threadId || thread.id;
     const isSupportThread = thread.threadType === 'support' || thread.type === 'support';
     if (isSupportThread) return;
-    if (!window.confirm('Gesprek archiveren?')) return;
+    if (!window.confirm('Gesprek verwijderen?')) return;
     setArchivingThreadId(targetId);
     try {
       const isActive = activeThreadId === targetId;

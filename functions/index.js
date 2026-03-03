@@ -181,6 +181,20 @@ const SUPPORT_INTRO_MESSAGE = 'Je kunt hier chatten met de moderatie. Om spam te
 const LEGACY_SUPPORT_INTRO_MESSAGE = 'Je kunt hier chatten met de moderatie. Om spam te voorkomen kun je maximaal 1 bericht sturen totdat wij reageren. We reageren binnen 3 werkdagen.';
 const SUPPORT_INTRO_TEXTS = [SUPPORT_INTRO_MESSAGE, LEGACY_SUPPORT_INTRO_MESSAGE];
 
+const detectSupportThreadHasUserMessage = async (threadRef, userUid) => {
+  const roleSnap = await threadRef.collection('messages')
+    .where('senderRole', '==', 'user')
+    .limit(1)
+    .get();
+  if (!roleSnap.empty) return true;
+
+  const uidSnap = await threadRef.collection('messages')
+    .where('senderUid', '==', userUid)
+    .limit(1)
+    .get();
+  return !uidSnap.empty;
+};
+
 const ensureModerationThreadForUser = async (uid) => {
   if (!uid) return null;
   const threadId = `support_${uid}`;
@@ -212,6 +226,9 @@ const ensureModerationThreadForUser = async (uid) => {
       }
       if (!data.lastMessagePreview) {
         updates.lastMessagePreview = SUPPORT_INTRO_MESSAGE;
+      }
+      if (typeof data.hasUserMessage !== 'boolean') {
+        updates.hasUserMessage = await detectSupportThreadHasUserMessage(threadRef, uid);
       }
       transaction.set(
         threadRef,

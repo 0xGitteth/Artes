@@ -2017,6 +2017,17 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
       });
     });
 
+    await threadRef.set(
+      {
+        hasUserMessage: true,
+        userMaySend: false,
+        userCanSend: false,
+        userMessageAllowance: 0,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
     logger.info('sendSupportMessage: Message sent successfully', { uid: decoded.uid });
     res.status(200).json({ ok: true });
   } catch (error) {

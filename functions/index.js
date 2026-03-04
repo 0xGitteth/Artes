@@ -2166,10 +2166,37 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
     }
 
     const uploadData = uploadSnapshot.data() || {};
-    if (uploadData.userId !== decoded.uid) {
+    const uploadOwnerId = uploadData.userId || uploadData.ownerUid || uploadData.userUid || null;
+    if (uploadOwnerId !== decoded.uid) {
       res.status(403).json({ error: 'Not authorized for this upload' });
       return;
     }
+
+    const postDraftInput = body?.postDraft && typeof body.postDraft === 'object'
+      ? body.postDraft
+      : null;
+    const postDraft = postDraftInput
+      ? {
+          title: String(postDraftInput.title || '').trim(),
+          description: String(postDraftInput.description || postDraftInput.caption || '').trim(),
+          imageUrl: String(postDraftInput.imageUrl || '').trim(),
+          authorName: String(postDraftInput.authorName || '').trim(),
+          authorRole: String(postDraftInput.authorRole || '').trim(),
+          styles: Array.isArray(postDraftInput.styles)
+            ? postDraftInput.styles.filter(Boolean)
+            : Array.isArray(postDraftInput.themes)
+              ? postDraftInput.themes.filter(Boolean)
+              : [],
+          makerTags: Array.isArray(postDraftInput.makerTags) ? postDraftInput.makerTags.filter(Boolean) : [],
+          appliedTriggers: Array.isArray(postDraftInput.appliedTriggers) ? postDraftInput.appliedTriggers.filter(Boolean) : [],
+          credits: Array.isArray(postDraftInput.credits)
+            ? postDraftInput.credits.filter(Boolean)
+            : Array.isArray(postDraftInput.contributors)
+              ? postDraftInput.contributors.filter(Boolean)
+              : [],
+          isChallenge: Boolean(postDraftInput.isChallenge),
+        }
+      : null;
 
     let existingCase = null;
     if (uploadData.reviewCaseId) {
@@ -2222,6 +2249,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
         reviewStatus: 'inReview',
         reviewRequestedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
+        ...(postDraft ? { postDraft } : {}),
       },
       { merge: true }
     );
@@ -2622,34 +2650,48 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     const decoded = await verifyToken(req);
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
-    const { messageId, uploadId, action } = body || {};
-    if (!messageId || !uploadId || !action) {
-      res.status(400).json({ error: 'messageId, uploadId and action are required' });
+    const { messageId, uploadId, action, postDraft: postDraftFromBody } = body || {};
+    if (!uploadId || !action || (action !== 'repairPublished' && !messageId)) {
+      res.status(400).json({ error: 'uploadId and action are required (messageId required unless repairPublished)' });
       return;
     }
-    if (!['publishNow', 'saveDraft', 'dismiss'].includes(action)) {
+    if (!['publishNow', 'saveDraft', 'dismiss', 'repairPublished'].includes(action)) {
       res.status(400).json({ error: 'Invalid action' });
       return;
     }
     const userId = decoded.uid;
     const threadId = `support_${userId}`;
     const threadRef = db.collection('threads').doc(threadId);
-    const messageRef = threadRef.collection('messages').doc(messageId);
+    const messageRef = action === 'repairPublished' ? null : threadRef.collection('messages').doc(messageId);
     const uploadRef = db.collection('uploads').doc(uploadId);
 
-    const [messageSnap, uploadSnap] = await Promise.all([messageRef.get(), uploadRef.get()]);
-    if (!messageSnap.exists || !uploadSnap.exists) {
-      res.status(404).json({ error: 'Message or upload not found' });
+    const [messageSnap, uploadSnap] = await Promise.all([
+      messageRef ? messageRef.get() : Promise.resolve(null),
+      uploadRef.get(),
+    ]);
+    if (!uploadSnap.exists) {
+      res.status(404).json({ error: 'Upload not found' });
       return;
     }
-    const message = messageSnap.data();
+    if (messageRef && !messageSnap?.exists) {
+      res.status(404).json({ error: 'Message not found' });
+      return;
+    }
+
+    const message = messageSnap?.data?.() || null;
     const upload = uploadSnap.data();
-    if (message?.metadata?.uploadId !== uploadId || upload?.userId !== userId) {
+    const uploadOwnerId = upload?.userId || upload?.ownerUid || upload?.userUid || null;
+    if (uploadOwnerId !== userId) {
+      res.status(403).json({ error: 'Not authorized for this action' });
+      return;
+    }
+    if (messageRef && message?.metadata?.uploadId !== uploadId) {
       res.status(403).json({ error: 'Not authorized for this action' });
       return;
     }
 
-    if (action === 'publishNow' && upload?.reviewStatus !== 'approved') {
+    const isApprovedOrLegacyPublished = upload?.reviewStatus === 'approved' || upload?.publicationStatus === 'published';
+    if ((action === 'publishNow' || action === 'repairPublished') && !isApprovedOrLegacyPublished) {
       res.status(409).json({ error: 'Upload is not approved' });
       return;
     }
@@ -2658,24 +2700,111 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       return;
     }
 
-    if (action === 'publishNow') {
-      await Promise.all([
-        uploadRef.set(
+    if (action === 'publishNow' || action === 'repairPublished') {
+      const postDraft = {
+        ...(upload?.postDraft || {}),
+        ...(postDraftFromBody && typeof postDraftFromBody === 'object' ? postDraftFromBody : {}),
+      };
+      const normalizedTitle = String(postDraft?.title || upload?.title || upload?.caption || '').trim();
+      const normalizedDescription = String(postDraft?.description || postDraft?.caption || upload?.description || upload?.caption || '').trim();
+      const normalizedImageUrl = String(postDraft?.imageUrl || upload?.imageUrl || upload?.imageRef || '').trim();
+      const normalizedStyles = Array.isArray(postDraft?.styles)
+        ? postDraft.styles.filter(Boolean)
+        : Array.isArray(postDraft?.themes)
+          ? postDraft.themes.filter(Boolean)
+          : [];
+      const normalizedMakerTags = Array.isArray(postDraft?.makerTags)
+        ? postDraft.makerTags.filter(Boolean)
+        : Array.isArray(upload?.makerTags)
+          ? upload.makerTags.filter(Boolean)
+          : [];
+      const normalizedAppliedTriggers = Array.isArray(postDraft?.appliedTriggers)
+        ? postDraft.appliedTriggers.filter(Boolean)
+        : Array.isArray(upload?.appliedTriggers)
+          ? upload.appliedTriggers.filter(Boolean)
+          : [];
+      const normalizedCredits = Array.isArray(postDraft?.credits)
+        ? postDraft.credits.filter(Boolean)
+        : Array.isArray(postDraft?.contributors)
+          ? postDraft.contributors.filter(Boolean)
+          : [];
+      const normalizedAuthorName = String(postDraft?.authorName || upload?.authorName || '').trim();
+      const normalizedAuthorRole = String(postDraft?.authorRole || upload?.authorRole || '').trim();
+      const normalizedIsChallenge = Boolean(postDraft?.isChallenge || upload?.isChallenge);
+
+      if (!normalizedImageUrl) {
+        res.status(400).json({ error: 'Cannot publish upload without imageUrl' });
+        return;
+      }
+
+      await db.runTransaction(async (transaction) => {
+        const postRef = db.collection('posts').doc(uploadId);
+        const latestUploadSnap = await transaction.get(uploadRef);
+        if (!latestUploadSnap.exists) {
+          const error = new Error('Upload not found');
+          error.status = 404;
+          throw error;
+        }
+        const latestUpload = latestUploadSnap.data() || {};
+        const latestOwnerId = latestUpload?.userId || latestUpload?.ownerUid || latestUpload?.userUid || null;
+        if (latestOwnerId !== userId) {
+          const error = new Error('Not authorized for this action');
+          error.status = 403;
+          throw error;
+        }
+        const latestApprovedOrLegacyPublished = latestUpload?.reviewStatus === 'approved' || latestUpload?.publicationStatus === 'published';
+        if (!latestApprovedOrLegacyPublished) {
+          const error = new Error('Upload is not approved');
+          error.status = 409;
+          throw error;
+        }
+
+        const postSnap = await transaction.get(postRef);
+        if (!postSnap.exists) {
+          transaction.create(postRef, {
+            title: normalizedTitle || 'Untitled',
+            description: normalizedDescription || '',
+            imageUrl: normalizedImageUrl,
+            authorId: userId,
+            authorUid: userId,
+            authorName: normalizedAuthorName || null,
+            authorRole: normalizedAuthorRole || null,
+            styles: normalizedStyles,
+            makerTags: normalizedMakerTags,
+            appliedTriggers: normalizedAppliedTriggers,
+            triggers: normalizedAppliedTriggers,
+            outcome: latestUpload?.outcome || 'allowed',
+            forbiddenReasons: Array.isArray(latestUpload?.forbiddenReasons) ? latestUpload.forbiddenReasons : [],
+            reviewCaseId: latestUpload?.reviewCaseId || null,
+            credits: normalizedCredits,
+            likes: 0,
+            isChallenge: normalizedIsChallenge,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+
+        transaction.set(
+          uploadRef,
           {
             publicationStatus: 'published',
             publishedAt: FieldValue.serverTimestamp(),
+            postId: uploadId,
           },
           { merge: true }
-        ),
-        messageRef.set(
+        );
+      });
+
+      if (messageRef) {
+        await messageRef.set(
           {
             unread: false,
             resolved: true,
             resolvedAt: FieldValue.serverTimestamp(),
           },
           { merge: true }
-        ),
-      ]);
+        );
+      }
     }
 
     if (action === 'saveDraft') {

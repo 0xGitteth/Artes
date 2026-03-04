@@ -1650,6 +1650,7 @@ export default function ArtesApp() {
           messageId: moderationModal.id,
           uploadId,
           action,
+          postDraft: moderationModal?.metadata?.postDraft || null,
         }),
       });
       if (!response.ok) {
@@ -5189,7 +5190,21 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ uploadId }),
+        body: JSON.stringify({
+          uploadId,
+          postDraft: {
+            title,
+            description: desc,
+            imageUrl: image,
+            authorName: profile.displayName,
+            authorRole: uploaderRole,
+            styles: selectedStyles,
+            makerTags,
+            appliedTriggers,
+            credits,
+            isChallenge,
+          },
+        }),
       });
       const caseData = await caseResponse.json().catch(() => ({}));
       if (!caseResponse.ok) {

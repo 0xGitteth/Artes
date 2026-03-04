@@ -1013,6 +1013,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 
   const { image, makerTags, themes } = body;
+  const includeDebug = process.env.NODE_ENV === 'development' || body?.debug === true;
   const userId = decoded.uid;
   const parsed = parseImageDataUrl(image);
   if (parsed.error) {
@@ -1030,6 +1031,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 
   let matchedUpload = null;
+  let matchedFingerprintType = null;
   let userModeration = null;
   let blockedByReport = false;
   try {
@@ -1040,7 +1042,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 
   if (blockedByReport) {
-    res.status(200).json({
+    const blockedResponse = {
       outcome: 'forbidden',
       appliedTriggers: [buildTriggerRecord('reportedContent', 1, 'manualReport')],
       suggestedTriggers: [],
@@ -1053,7 +1055,17 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
         labels: [],
         isSensitive: true,
       },
-    });
+    };
+    if (includeDebug) {
+      blockedResponse.debug = {
+        path: 'blockedFingerprint',
+        matchedUploadId: null,
+        matchedFingerprintType: null,
+        forbiddenTriggerKeys: ['reportedContent'],
+        suggestedTriggerKeys: [],
+      };
+    }
+    res.status(200).json(blockedResponse);
     return;
   }
 
@@ -1071,8 +1083,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   try {
     if (!skipUploadReuse) {
       matchedUpload = await findExactUpload(fingerprints.sha256);
+      if (matchedUpload) {
+        matchedFingerprintType = 'sha256';
+      }
       if (!matchedUpload) {
         matchedUpload = await findNearDuplicateUpload(fingerprints);
+        if (matchedUpload) {
+          matchedFingerprintType = 'dhash';
+        }
       }
     }
 
@@ -1223,12 +1241,20 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
     const geminiUnavailableOrUnusable = geminiFailed || !geminiResult || !hasUsableGeminiOutput;
     const hasStrongAdultSafeSearchSignal = safeSearch && scoreFromLikelihood(safeSearch.adult) >= forbiddenThreshold;
     if (geminiAttempted && geminiUnavailableOrUnusable && hasStrongAdultSafeSearchSignal) {
-      forbiddenReasons.push({
-        trigger: 'gemini_uncertain_fallback',
-        reason: 'SafeSearch adult hoog, Gemini niet beschikbaar of output onbruikbaar.',
-        score: scoreFromLikelihood(safeSearch.adult),
-      });
+      const hasManualArtNudeContext = normalizedMakerTags.includes(ADULT_ART_NUDE_TRIGGER);
+      if (hasManualArtNudeContext) {
+        suggestedTriggers.push(
+          buildTriggerRecord('gemini_uncertain_fallback', scoreFromLikelihood(safeSearch.adult), 'geminiFallback')
+        );
+      } else {
+        forbiddenReasons.push({
+          trigger: 'gemini_uncertain_fallback',
+          reason: 'SafeSearch adult hoog, Gemini niet beschikbaar of output onbruikbaar.',
+          score: scoreFromLikelihood(safeSearch.adult),
+        });
+      }
     }
+
   }
 
   const outcome = cachedResult
@@ -1328,8 +1354,9 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   const safeSearchNudityScore = safeSearch ? scoreFromLikelihood(safeSearch.racy) : 0;
   const safeSearchAdultScore = safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0;
   const hasGeminiForbiddenSignal = finalForbiddenReasons.some((reason) => reason?.trigger === 'gemini' || reason?.trigger === 'gemini_uncertain_fallback');
+  const hasGeminiUncertainFallbackSuggestion = finalSuggestedTriggers.some((item) => item?.trigger === 'gemini_uncertain_fallback');
   const hasMixedAdultSignals = safeSearchAdultScore >= forbiddenThreshold && safeSearchNudityScore >= mediumLogThreshold;
-  const shouldEscalateToUncertain = !hasSexualExplicitReason && (hasGeminiForbiddenSignal || hasMixedAdultSignals);
+  const shouldEscalateToUncertain = !hasSexualExplicitReason && (hasGeminiForbiddenSignal || hasGeminiUncertainFallbackSuggestion || hasMixedAdultSignals);
 
   let classification = 'allowed_general';
   if (hasSexualExplicitReason || hasReportedContentReason) {
@@ -1420,6 +1447,24 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 
   response.uploadId = uploadId;
+
+  if (includeDebug) {
+    response.debug = {
+      path: blockedByReport
+        ? 'blockedFingerprint'
+        : skipUploadReuse
+          ? 'freshEvaluationOverrideUsed'
+          : matchedFingerprintType === 'sha256'
+            ? 'exactReuse'
+            : matchedFingerprintType === 'dhash'
+              ? 'nearReuse'
+              : 'none',
+      matchedUploadId: matchedUpload?.id || null,
+      matchedFingerprintType,
+      forbiddenTriggerKeys: finalForbiddenReasons.map((reason) => reason?.trigger).filter(Boolean),
+      suggestedTriggerKeys: finalSuggestedTriggers.map((item) => item?.trigger).filter(Boolean),
+    };
+  }
 
   if (skipUploadReuse) {
     try {

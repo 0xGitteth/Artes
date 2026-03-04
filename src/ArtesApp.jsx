@@ -4934,7 +4934,15 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
   const [errors, setErrors] = useState({});
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState('');
-  const moderationEndpoint = import.meta.env.VITE_MODERATION_FUNCTION_URL;
+  const moderationEndpoint = useMemo(() => {
+    const functionsBase = import.meta.env.VITE_FUNCTIONS_BASE_URL
+      || import.meta.env.VITE_FUNCTIONS_BASE
+      || import.meta.env.VITE_MODERATION_API_BASE;
+    if (functionsBase) {
+      return `${functionsBase.replace(/\/$/, '')}/moderateImage`;
+    }
+    return import.meta.env.VITE_MODERATION_FUNCTION_URL || '';
+  }, []);
   const [allowExternalOverride, setAllowExternalOverride] = useState(false);
 
   // Contributor search logic

@@ -31,7 +31,9 @@ const statusStyles = {
 };
 
 const resolveFunctionsBase = () => {
-  const explicitBase = import.meta.env.VITE_FUNCTIONS_BASE;
+  const explicitBase = import.meta.env.VITE_FUNCTIONS_BASE_URL
+    || import.meta.env.VITE_FUNCTIONS_BASE
+    || import.meta.env.VITE_MODERATION_API_BASE;
   if (explicitBase) return explicitBase;
   const moderationUrl = import.meta.env.VITE_MODERATION_FUNCTION_URL;
   if (moderationUrl && moderationUrl.includes('/moderateImage')) {

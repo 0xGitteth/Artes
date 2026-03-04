@@ -97,7 +97,7 @@ const ROLES = [
   { id: 'assistent', label: 'Assistent', desc: 'Ondersteuning op de set.' },
   { id: 'agency', label: 'Agency', desc: 'Vertegenwoordig talent.' },
   { id: 'company', label: 'Company', desc: 'Merk, studio of bedrijf.' },
-  { id: 'fan', label: 'Fan', desc: 'Volg je favoriete makers en bewaar inspiratie.' },
+  { id: 'fan', label: 'Fan', desc: 'Word fan van je favoriete makers en bewaar inspiratie.' },
 ];
 
 const DIDIT_SUPPORT_EMAIL = 'support@artes.app';
@@ -9018,7 +9018,7 @@ function WelcomeTour({ onClose, setView }) {
       icon: Info,
       action: null,
     },
-    { title: 'De Galerij', desc: 'Hier vind je inspirerend werk van mensen die je volgt.', icon: ImageIcon, action: 'gallery' },
+    { title: 'De Galerij', desc: 'Hier vind je inspirerend werk van makers waarvan je fan bent.', icon: ImageIcon, action: 'gallery' },
     { title: 'Ontdekken', desc: 'Zoek nieuwe makers, ideeën en connecties.', icon: Search, action: 'discover' },
     { title: 'Community', desc: 'Praat mee over veiligheid, techniek en samenwerkingen.', icon: Users, action: 'community' },
     { title: 'Jouw Portfolio', desc: 'Je visitekaartje. Beheer je werk en connecties.', icon: User, action: 'profile' },

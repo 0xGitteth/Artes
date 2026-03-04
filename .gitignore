@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+.tmp/
+tmp/cleanup-exports/
+**/serviceAccountKey.json

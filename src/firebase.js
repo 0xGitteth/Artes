@@ -950,6 +950,71 @@ export const subscribeToProfile = (uid, cb, gate = {}) => {
   );
 };
 
+export const setFanStatus = async (targetUid, shouldBeFan) => {
+  const currentUser = await waitForAuthReady();
+  if (!currentUser?.uid) throw new Error('Je moet ingelogd zijn om fan te worden.');
+  if (!targetUid) throw new Error('Doelgebruiker ontbreekt.');
+  if (currentUser.uid === targetUid) throw new Error('Je kunt jezelf niet volgen.');
+
+  const fanRef = doc(getFirebaseDb(), 'users', currentUser.uid, 'following', targetUid);
+  if (shouldBeFan) {
+    await setDoc(fanRef, {
+      targetUid,
+      createdAt: serverTimestamp(),
+    }, { merge: true });
+    return;
+  }
+  await deleteDoc(fanRef);
+};
+
+export const subscribeToFanStatus = (targetUid, cb) => {
+  const user = authStateUser ?? getFirebaseAuth().currentUser;
+  if (!user?.uid || !targetUid) {
+    cb(false);
+    return () => {};
+  }
+
+  const fanRef = doc(getFirebaseDb(), 'users', user.uid, 'following', targetUid);
+  let hasLoggedError = false;
+  return onSnapshot(
+    fanRef,
+    (snapshot) => cb(snapshot.exists()),
+    (error) => {
+      if (!hasLoggedError) {
+        hasLoggedError = true;
+        console.warn('Fan status listener tijdelijk niet beschikbaar:', error?.code || error?.message || error);
+      }
+      cb(false);
+    },
+  );
+};
+
+export const subscribeToFanCounts = (uid, cb) => {
+  if (!uid) {
+    cb({ fansCount: 0, fanOfCount: 0 });
+    return () => {};
+  }
+
+  let hasLoggedError = false;
+  return onSnapshot(
+    doc(getFirebaseDb(), 'publicUsers', uid),
+    (snapshot) => {
+      const data = snapshot.exists() ? snapshot.data() : {};
+      cb({
+        fansCount: Number(data?.fansCount || 0),
+        fanOfCount: Number(data?.fanOfCount || 0),
+      });
+    },
+    (error) => {
+      if (!hasLoggedError) {
+        hasLoggedError = true;
+        console.warn('Fan counters tijdelijk niet beschikbaar:', error?.code || error?.message || error);
+      }
+      cb({ fansCount: 0, fanOfCount: 0 });
+    },
+  );
+};
+
 const resolveAuthProvider = (user) => {
   if (user?.providerData?.some((provider) => provider?.providerId === 'google.com')) {
     return 'google.com';

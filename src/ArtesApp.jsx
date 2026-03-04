@@ -51,6 +51,9 @@ import {
   getFirebaseStorageInstance,
   getFirebaseFunctionsInstance,
   getAppConfig,
+  setFanStatus,
+  subscribeToFanCounts,
+  subscribeToFanStatus,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { signInAnonymously } from 'firebase/auth';
@@ -3495,6 +3498,8 @@ function NavBar({ view, setView, onOpenSettings }) {
 function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick }) {
   if (!profile) return null;
   const normalizedProfile = normalizeProfileData(profile);
+  const fansCount = Number(normalizedProfile?.fansCount || 0);
+  const fanOfCount = Number(normalizedProfile?.fanOfCount || 0);
   const roles = normalizedProfile.roles;
   const themes = normalizedProfile.themes;
   const bio = normalizedProfile.bio;
@@ -3530,6 +3535,10 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
                  ))}
               </div>
               {showBio && <p className="text-slate-700 dark:text-slate-200 max-w-xl text-base md:text-lg mb-5 leading-relaxed">{bio}</p>}
+              <div className="flex flex-wrap justify-center gap-4 text-xs font-semibold text-slate-700/90 dark:text-slate-200/90 mb-5">
+                <span>Fans: {fansCount}</span>
+                <span>Fan van: {fanOfCount}</span>
+              </div>
               {(hasAgency || hasCompany) && (
                 <div className="flex flex-col sm:flex-row flex-wrap justify-center gap-2 sm:gap-6 text-xs text-slate-700/80 dark:text-white/80 mb-5">
                   {hasAgency && (
@@ -7084,15 +7093,24 @@ function PhotoDetailModal({ post, onClose, authUser, moderationApiBase, onChalle
 }
 function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile }) {
   const [userProfile, setUserProfile] = useState(null);
+  const [isFan, setIsFan] = useState(false);
+  const [fanBusy, setFanBusy] = useState(false);
+  const [fanError, setFanError] = useState('');
+  const [fanCounts, setFanCounts] = useState({ fansCount: 0, fanOfCount: 0 });
+  const fanBusyRef = useRef(false);
+  const fanRequestRef = useRef(0);
+  const fanTargetRef = useRef(userId);
+  const bufferedLiveCountsRef = useRef(null);
 
   useEffect(() => {
+    let isActive = true;
     const resolved = resolveProfileFromCollections({ userId, allUsers, currentUserId, currentProfile });
     if (resolved) {
       setUserProfile(resolved);
     }
 
     fetchUserIndex(userId).then((data) => {
-      if (data) {
+      if (isActive && data) {
         setUserProfile((prev) => normalizeProfileData(
           { ...(prev || {}), ...data, uid: data?.uid || userId },
           userId,
@@ -7100,7 +7118,87 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
         ));
       }
     });
+
+    return () => {
+      isActive = false;
+    };
   }, [userId, allUsers, currentUserId, currentProfile]);
+
+  useEffect(() => {
+    fanTargetRef.current = userId;
+    setFanError('');
+    setFanBusy(false);
+    setIsFan(false);
+    setFanCounts({ fansCount: 0, fanOfCount: 0 });
+    bufferedLiveCountsRef.current = null;
+    fanRequestRef.current += 1;
+
+    if (!userId || !currentUserId || currentUserId === userId) {
+      return () => {};
+    }
+
+    let isActive = true;
+    const unsubscribeStatus = subscribeToFanStatus(userId, (exists) => {
+      if (!isActive) return;
+      setIsFan(exists);
+    });
+    const unsubscribeCounts = subscribeToFanCounts(userId, (counts) => {
+      if (!isActive) return;
+      const normalizedCounts = {
+        fansCount: Number(counts?.fansCount || 0),
+        fanOfCount: Number(counts?.fanOfCount || 0),
+      };
+      if (fanBusyRef.current) {
+        bufferedLiveCountsRef.current = normalizedCounts;
+        return;
+      }
+      setFanCounts(normalizedCounts);
+    });
+
+    return () => {
+      isActive = false;
+      unsubscribeStatus?.();
+      unsubscribeCounts?.();
+    };
+  }, [currentUserId, userId]);
+
+  useEffect(() => {
+    fanBusyRef.current = fanBusy;
+    if (!fanBusy && bufferedLiveCountsRef.current) {
+      setFanCounts(bufferedLiveCountsRef.current);
+      bufferedLiveCountsRef.current = null;
+    }
+  }, [fanBusy]);
+
+  const handleFanToggle = useCallback(async () => {
+    if (!userId || !currentUserId || currentUserId === userId || fanBusy) return;
+    const requestId = fanRequestRef.current + 1;
+    fanRequestRef.current = requestId;
+    const targetAtStart = userId;
+
+    const previousFan = isFan;
+    const nextFan = !previousFan;
+    const previousCounts = fanCounts;
+    setFanError('');
+    setFanBusy(true);
+    setIsFan(nextFan);
+    setFanCounts((prev) => ({
+      ...prev,
+      fansCount: Math.max(0, Number(prev?.fansCount || 0) + (nextFan ? 1 : -1)),
+    }));
+
+    try {
+      await setFanStatus(userId, nextFan);
+    } catch (error) {
+      if (fanRequestRef.current !== requestId || fanTargetRef.current !== targetAtStart) return;
+      setIsFan(previousFan);
+      setFanCounts(previousCounts);
+      setFanError(error?.message || 'Kon fanstatus niet opslaan. Probeer opnieuw.');
+    } finally {
+      if (fanRequestRef.current !== requestId || fanTargetRef.current !== targetAtStart) return;
+      setFanBusy(false);
+    }
+  }, [currentUserId, fanBusy, fanCounts, isFan, userId]);
 
   // All hooks must be called in the same order on every render
   // Moved BEFORE the early return to prevent "Rendered more hooks" error
@@ -7133,6 +7231,9 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
       .slice(0, 3);
   }, [manualIds, previewMode, userPosts]);
   const headerImage = userProfile?.headerImage || userProfile?.avatar;
+  const resolvedFansCount = Number(fanCounts?.fansCount ?? userProfile?.fansCount ?? 0);
+  const resolvedFanOfCount = Number(fanCounts?.fanOfCount ?? userProfile?.fanOfCount ?? 0);
+  const canFanUser = Boolean(currentUserId && userId && currentUserId !== userId);
 
   // Early return after all hooks
   if (!userProfile) {
@@ -7169,6 +7270,10 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
                 {userProfile.bio}
               </p>
             )}
+            <div className="flex gap-4 mt-3 text-xs font-semibold text-white/85">
+              <span>Fans: {resolvedFansCount}</span>
+              <span>Fan van: {resolvedFanOfCount}</span>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -7220,10 +7325,15 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
             <Button onClick={onFullProfile} className="flex-1">
               Bekijk volledig profiel <ArrowRight className="w-4 h-4" />
             </Button>
-            <Button onClick={() => {}} variant="secondary" className="flex-1">
-              Word fan
-            </Button>
+            {canFanUser ? (
+              <Button onClick={handleFanToggle} variant="secondary" className="flex-1" disabled={fanBusy}>
+                {fanBusy ? 'Bezig...' : (isFan ? 'Stop fan zijn' : 'Word fan')}
+              </Button>
+            ) : null}
           </div>
+          {canFanUser && fanError ? (
+            <p className="text-sm text-red-500 dark:text-red-300">{fanError}</p>
+          ) : null}
         </div>
       </div>
     </div>

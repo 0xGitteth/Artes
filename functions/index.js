@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { VertexAI } from '@google-cloud/vertexai';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
+import { onDocumentCreated, onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { logger } from 'firebase-functions';
 import admin from 'firebase-admin';
@@ -3845,6 +3846,107 @@ export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-we
   } catch (error) {
     logger.error('Failed to set claim proof retention metadata', { error, name });
   }
+});
+
+export const onFollowingCreated = onDocumentCreated({
+  document: 'users/{uid}/following/{targetUid}',
+  region: 'europe-west4',
+}, async (event) => {
+  const { uid, targetUid } = event.params;
+  const relationRef = event.data?.ref;
+
+  if (!relationRef) {
+    logger.info('Skipping following create: missing relation ref.', { uid, targetUid });
+    return;
+  }
+
+  if (uid === targetUid) {
+    logger.info('Deleting invalid self-fan relation.', { uid, targetUid });
+    await relationRef.delete();
+    return;
+  }
+
+  const eventRelationData = event.data?.data() || {};
+  if (eventRelationData.targetUid && eventRelationData.targetUid !== targetUid) {
+    logger.info('Normalizing following create: targetUid mismatch.', {
+      uid,
+      targetUid,
+      bodyTargetUid: eventRelationData.targetUid,
+    });
+  }
+
+  await db.runTransaction(async (transaction) => {
+    const relationSnap = await transaction.get(relationRef);
+    if (!relationSnap.exists) {
+      return;
+    }
+
+    const relationData = relationSnap.data() || {};
+    const createdAt = relationData.createdAt || FieldValue.serverTimestamp();
+    transaction.set(relationRef, {
+      targetUid,
+      fanUid: uid,
+      createdAt,
+    }, { merge: true });
+
+    if (relationData.countersApplied === true) {
+      return;
+    }
+
+    transaction.set(db.collection('publicUsers').doc(targetUid), {
+      fansCount: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(db.collection('publicUsers').doc(uid), {
+      fanOfCount: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(relationRef, {
+      countersApplied: true,
+    }, { merge: true });
+  });
+});
+
+export const onFollowingDeleted = onDocumentDeleted({
+  document: 'users/{uid}/following/{targetUid}',
+  region: 'europe-west4',
+}, async (event) => {
+  const { uid, targetUid } = event.params;
+
+  if (uid === targetUid) {
+    logger.info('Skipping following delete: self-fan relation.', { uid, targetUid });
+    return;
+  }
+
+  const relationData = event.data?.data() || {};
+  if (relationData.targetUid && relationData.targetUid !== targetUid) {
+    logger.info('Continuing following delete with route params after targetUid mismatch.', {
+      uid,
+      targetUid,
+      bodyTargetUid: relationData.targetUid,
+    });
+  }
+
+  await db.runTransaction(async (transaction) => {
+    const targetRef = db.collection('publicUsers').doc(targetUid);
+    const fanRef = db.collection('publicUsers').doc(uid);
+    const [targetSnap, fanSnap] = await Promise.all([
+      transaction.get(targetRef),
+      transaction.get(fanRef),
+    ]);
+
+    const targetCurrent = Number(targetSnap.data()?.fansCount) || 0;
+    const fanCurrent = Number(fanSnap.data()?.fanOfCount) || 0;
+
+    transaction.set(targetRef, {
+      fansCount: Math.max(0, targetCurrent - 1),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(fanRef, {
+      fanOfCount: Math.max(0, fanCurrent - 1),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
 });
 
 export const config = {

@@ -348,13 +348,13 @@ service cloud.firestore {
 
       match /comments/{commentId} {
         allow read: if true;
-        allow create: if isVerifiedOrDev();
-        allow update, delete: if isVerifiedOrDev() && request.auth.uid == resource.data.authorId;
+        allow create: if isSignedIn();
+        allow update, delete: if isSignedIn() && request.auth.uid == resource.data.authorId;
       }
 
       match /likes/{userId} {
         allow read: if true;
-        allow create, delete: if isVerifiedOrDev() && request.auth.uid == userId;
+        allow create, delete: if isSignedIn() && request.auth.uid == userId;
       }
     }
 

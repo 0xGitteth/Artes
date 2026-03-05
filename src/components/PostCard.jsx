@@ -1,6 +1,7 @@
 import React from 'react';
-import { Hand, Cloud } from 'lucide-react';
 import { Badge } from './ui';
+import LikeIcon from './icons/LikeIcon';
+import CommentIcon from './icons/CommentIcon';
 
 const THEME_STYLES = {
   Nature: 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800',
@@ -77,16 +78,16 @@ export default function PostCard({ post, onClick, onToggleLike, liked, contentPr
           </div>
           <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
             <button
-              className={`flex items-center gap-1 px-3 py-2 rounded-full text-sm border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 ${liked ? 'text-red-500' : ''}`}
+              className="flex items-center gap-1 px-1 py-1 text-sm text-slate-600 dark:text-slate-300 disabled:opacity-60"
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleLike();
               }}
             >
-              <Hand size={16} /> {likes}
+              <LikeIcon size={16} active={liked} disabled={false} /> {likes}
             </button>
-            <div className="flex items-center gap-1 px-3 py-2 rounded-full text-sm border border-slate-200 dark:border-slate-800">
-              <Cloud size={16} /> {commentsCount}
+            <div className="flex items-center gap-1 px-1 py-1 text-sm text-slate-600 dark:text-slate-300">
+              <CommentIcon size={16} active={false} /> {commentsCount}
             </div>
           </div>
         </div>

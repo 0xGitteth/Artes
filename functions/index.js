@@ -1785,9 +1785,13 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
 
     const messagesRef = threadRef.collection('messages');
     let keptIntroRef = null;
-    while (true) {
+    let hasMoreMessages = true;
+    while (hasMoreMessages) {
       const snapshot = await messagesRef.limit(400).get();
-      if (snapshot.empty) break;
+      if (snapshot.empty) {
+        hasMoreMessages = false;
+        continue;
+      }
       const batch = db.batch();
       let deletesInRound = 0;
       snapshot.docs.forEach((docSnap) => {
@@ -1805,11 +1809,10 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
         batch.delete(docSnap.ref);
         deletesInRound += 1;
       });
-      if (deletesInRound === 0) {
-        break;
+      if (deletesInRound > 0) {
+        await batch.commit();
       }
-      await batch.commit();
-      if (snapshot.size < 400) break;
+      hasMoreMessages = deletesInRound > 0 && snapshot.size === 400;
     }
 
     if (!keptIntroRef) {

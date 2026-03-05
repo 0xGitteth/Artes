@@ -152,6 +152,8 @@ async function run() {
       }),
     );
 
+    await assertSucceeds(getDoc(doc(ownerUnverifiedDb, 'users', ownerUid, 'following', 'target_a')));
+
     await assertFails(
       updateDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_b'), {
         createdAt: new Date(),
@@ -202,6 +204,8 @@ async function run() {
     );
 
     await assertFails(deleteDoc(doc(otherDb, 'users', ownerUid, 'following', 'target_a')));
+
+    await assertFails(deleteDoc(doc(ownerUnverifiedDb, 'users', ownerUid, 'following', 'target_a')));
 
     await assertSucceeds(deleteDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_a')));
 

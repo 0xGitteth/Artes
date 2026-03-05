@@ -145,7 +145,7 @@ service cloud.firestore {
       }
 
       match /following/{targetUid} {
-        allow read: if isOwner(userId);
+        allow read: if request.auth != null && request.auth.uid == userId;
         allow create: if isOwner(userId)
           && isVerifiedOrDev()
           && targetUid != userId

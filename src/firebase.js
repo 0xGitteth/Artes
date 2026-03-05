@@ -89,6 +89,26 @@ const waitForAuthReady = async () => {
   });
 };
 
+const getFanDiagnostics = ({ targetUid, authUid, extra = {} } = {}) => ({
+  targetUid: targetUid || null,
+  authUid: authUid || null,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || null,
+  appProjectId: getFirebaseApp()?.options?.projectId || null,
+  ...extra,
+});
+
+let hasLoggedFanProjectContext = false;
+
+const logFanProjectContextOnce = (authUid = null) => {
+  if (hasLoggedFanProjectContext) return;
+  hasLoggedFanProjectContext = true;
+  const diagnostics = getFanDiagnostics({ authUid, extra: { action: 'fan-project-context' } });
+  console.info('Fan project context', diagnostics);
+  if (diagnostics.projectId && diagnostics.appProjectId && diagnostics.projectId !== diagnostics.appProjectId) {
+    console.error('Fan project mismatch detected', diagnostics);
+  }
+};
+
 export const getFirebaseAuthInstance = () => getFirebaseAuth();
 export const getFirebaseDbInstance = () => getFirebaseDb();
 export const getFirebaseFunctionsInstance = () => getFirebaseFunctions();
@@ -952,41 +972,119 @@ export const subscribeToProfile = (uid, cb, gate = {}) => {
 
 export const setFanStatus = async (targetUid, shouldBeFan) => {
   const currentUser = await waitForAuthReady();
+  logFanProjectContextOnce(currentUser?.uid || null);
+  const diagnosticBase = {
+    targetUid,
+    authUid: currentUser?.uid,
+  };
   if (!currentUser?.uid) throw new Error('Je moet ingelogd zijn om fan te worden.');
   if (!targetUid) throw new Error('Doelgebruiker ontbreekt.');
   if (currentUser.uid === targetUid) throw new Error('Je kunt geen fan van jezelf zijn.');
 
   const fanRef = doc(getFirebaseDb(), 'users', currentUser.uid, 'following', targetUid);
   if (shouldBeFan) {
-    await setDoc(fanRef, {
-      targetUid,
-      createdAt: serverTimestamp(),
-    }, { merge: true });
+    try {
+      await setDoc(fanRef, {
+        targetUid,
+        createdAt: serverTimestamp(),
+      }, { merge: true });
+    } catch (error) {
+      console.warn('Fan write mislukt.', getFanDiagnostics({
+        ...diagnosticBase,
+        extra: {
+          shouldBeFan: true,
+          action: 'create',
+          errorCode: error?.code || null,
+          errorMessage: error?.message || null,
+        },
+      }));
+      throw error;
+    }
     return;
   }
-  await deleteDoc(fanRef);
+  try {
+    await deleteDoc(fanRef);
+  } catch (error) {
+    console.warn('Fan write mislukt.', getFanDiagnostics({
+      ...diagnosticBase,
+      extra: {
+        shouldBeFan: false,
+        action: 'delete',
+        errorCode: error?.code || null,
+        errorMessage: error?.message || null,
+      },
+    }));
+    throw error;
+  }
 };
 
-export const subscribeToFanStatus = (targetUid, cb) => {
-  const user = authStateUser ?? getFirebaseAuth().currentUser;
-  if (!user?.uid || !targetUid) {
-    cb(false);
-    return () => {};
-  }
+export const subscribeToFanStatus = (targetUid, cb, options = {}) => {
+  let unsubscribed = false;
+  let unsubscribeSnapshot = null;
 
-  const fanRef = doc(getFirebaseDb(), 'users', user.uid, 'following', targetUid);
-  let hasLoggedError = false;
-  return onSnapshot(
-    fanRef,
-    (snapshot) => cb(snapshot.exists()),
-    (error) => {
-      if (!hasLoggedError) {
-        hasLoggedError = true;
-        console.warn('Fan status listener tijdelijk niet beschikbaar:', error?.code || error?.message || error);
+  waitForAuthReady()
+    .then((resolvedUser) => {
+      if (unsubscribed) return;
+      const user = resolvedUser ?? authStateUser ?? getFirebaseAuth().currentUser;
+      logFanProjectContextOnce(user?.uid || null);
+      const expectedAuthUid = options?.expectedAuthUid || null;
+      if (!user?.uid || !targetUid) {
+        cb(false);
+        return;
       }
+      if (expectedAuthUid && user.uid !== expectedAuthUid) {
+        console.info('Fan listener overgeslagen door auth mismatch.', getFanDiagnostics({
+          targetUid,
+          authUid: user.uid,
+          extra: { expectedAuthUid },
+        }));
+        cb(false);
+        return;
+      }
+
+      const fanRef = doc(getFirebaseDb(), 'users', user.uid, 'following', targetUid);
+      let hasLoggedError = false;
+      unsubscribeSnapshot = onSnapshot(
+        fanRef,
+        (snapshot) => cb(snapshot.exists()),
+        (error) => {
+          if (!hasLoggedError) {
+            hasLoggedError = true;
+            console.warn('Fan status listener tijdelijk niet beschikbaar.', getFanDiagnostics({
+              targetUid,
+              authUid: user.uid,
+              extra: {
+                errorCode: error?.code || null,
+                errorMessage: error?.message || null,
+              },
+            }));
+          }
+          cb(false);
+        },
+      );
+    })
+    .catch((error) => {
+      if (unsubscribed) return;
+      console.warn('Fan status listener kon auth-status niet bepalen.', getFanDiagnostics({
+        targetUid,
+        extra: {
+          errorCode: error?.code || null,
+          errorMessage: error?.message || null,
+        },
+      }));
       cb(false);
-    },
-  );
+    });
+
+  return () => {
+    unsubscribed = true;
+    unsubscribeSnapshot?.();
+    unsubscribeSnapshot = null;
+  };
+};
+
+export const getFanDebugContext = async (targetUid) => {
+  const currentUser = await waitForAuthReady();
+  return getFanDiagnostics({ targetUid, authUid: currentUser?.uid });
 };
 
 export const subscribeToFanCounts = (uid, cb) => {

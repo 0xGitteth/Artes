@@ -11,6 +11,7 @@ import {
   updateDoc,
   deleteDoc,
   deleteField,
+  serverTimestamp,
 } from 'firebase/firestore';
 
 const PROJECT_ID = 'artes-rules-test';
@@ -141,14 +142,14 @@ async function run() {
     await assertSucceeds(
       setDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_b'), {
         targetUid: 'target_b',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
 
-    await assertFails(
+    await assertSucceeds(
       setDoc(doc(ownerUnverifiedDb, 'users', ownerUid, 'following', 'target_c'), {
         targetUid: 'target_c',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
 
@@ -164,7 +165,7 @@ async function run() {
     await assertFails(
       setDoc(doc(ownerDb, 'users', ownerUid, 'following', ownerUid), {
         targetUid: ownerUid,
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
 
@@ -172,7 +173,7 @@ async function run() {
     await assertFails(
       setDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_d'), {
         targetUid: 'other-target',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
 
@@ -180,7 +181,7 @@ async function run() {
     await assertFails(
       setDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_e'), {
         targetUid: 'target_e',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
         fanUid: ownerUid,
       }),
     );
@@ -189,8 +190,24 @@ async function run() {
     await assertFails(
       setDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_f'), {
         targetUid: 'target_f',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
         countersApplied: true,
+      }),
+    );
+
+    // following create deny: createdAt wrong type
+    await assertFails(
+      setDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_g'), {
+        targetUid: 'target_g',
+        createdAt: 'not-a-timestamp',
+      }),
+    );
+
+    // following create deny: client-selected timestamp (not request.time)
+    await assertFails(
+      setDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_h'), {
+        targetUid: 'target_h',
+        createdAt: new Date(),
       }),
     );
 
@@ -199,13 +216,13 @@ async function run() {
     await assertFails(
       setDoc(doc(otherDb, 'users', ownerUid, 'following', 'target_z'), {
         targetUid: 'target_z',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
 
     await assertFails(deleteDoc(doc(otherDb, 'users', ownerUid, 'following', 'target_a')));
 
-    await assertFails(deleteDoc(doc(ownerUnverifiedDb, 'users', ownerUid, 'following', 'target_a')));
+    await assertSucceeds(deleteDoc(doc(ownerUnverifiedDb, 'users', ownerUid, 'following', 'target_a')));
 
     await assertSucceeds(deleteDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_a')));
 

@@ -954,7 +954,7 @@ export const setFanStatus = async (targetUid, shouldBeFan) => {
   const currentUser = await waitForAuthReady();
   if (!currentUser?.uid) throw new Error('Je moet ingelogd zijn om fan te worden.');
   if (!targetUid) throw new Error('Doelgebruiker ontbreekt.');
-  if (currentUser.uid === targetUid) throw new Error('Je kunt jezelf niet volgen.');
+  if (currentUser.uid === targetUid) throw new Error('Je kunt geen fan van jezelf zijn.');
 
   const fanRef = doc(getFirebaseDb(), 'users', currentUser.uid, 'following', targetUid);
   if (shouldBeFan) {

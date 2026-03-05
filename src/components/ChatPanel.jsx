@@ -152,7 +152,6 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
     if (!functionsBase) return;
     setStartingChat(true);
     try {
-      const isActive = activeThreadId === targetId;
       const token = await authUser.getIdToken();
       const response = await fetch(`${functionsBase}/createDmThread`, {
         method: 'POST',

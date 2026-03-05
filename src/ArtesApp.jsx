@@ -3334,6 +3334,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick, currentUser, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [postEngagement, setPostEngagement] = useState({});
   const [likeBusyByPost, setLikeBusyByPost] = useState({});
+  const triggerVisibility = normalizeTriggerPreferences(profile?.preferences?.triggerVisibility);
   const getVisibleCredits = (post) => {
     if (!Array.isArray(post?.credits)) return [];
     return post.credits.filter((credit) => credit?.uid !== post.authorId && !credit?.isSelf);

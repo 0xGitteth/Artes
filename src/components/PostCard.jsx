@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, MessageSquare } from 'lucide-react';
+import { Hand, Cloud } from 'lucide-react';
 import { Badge } from './ui';
 
 const THEME_STYLES = {
@@ -83,10 +83,10 @@ export default function PostCard({ post, onClick, onToggleLike, liked, contentPr
                 onToggleLike();
               }}
             >
-              <Heart size={16} fill={liked ? 'currentColor' : 'none'} /> {likes}
+              <Hand size={16} /> {likes}
             </button>
             <div className="flex items-center gap-1 px-3 py-2 rounded-full text-sm border border-slate-200 dark:border-slate-800">
-              <MessageSquare size={16} /> {commentsCount}
+              <Cloud size={16} /> {commentsCount}
             </div>
           </div>
         </div>

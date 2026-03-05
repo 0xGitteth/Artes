@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Image as ImageIcon, Search, Users, Plus, Hand, Cloud, Bookmark,
+  Image as ImageIcon, Search, Users, Plus, Bookmark, Hand, Cloud,
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
@@ -55,6 +55,9 @@ import {
   subscribeToFanCounts,
   subscribeToFanStatus,
   getFanDebugContext,
+  subscribeToComments,
+  subscribeToLikes,
+  toggleLike,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { signInAnonymously } from 'firebase/auth';
@@ -1799,6 +1802,7 @@ export default function ArtesApp() {
               onPostClick={setSelectedPost}
               onChallengeClick={() => setView('challenge_timeline')}
               profile={profile}
+              currentUser={authUser}
             />
           )}
 
@@ -3293,8 +3297,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }
 }
 
-function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick }) {
+function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick, currentUser }) {
   const [sensitiveRevealed, setSensitiveRevealed] = useState({});
+  const [postEngagement, setPostEngagement] = useState({});
+  const [likeBusyByPost, setLikeBusyByPost] = useState({});
   const triggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
   const isSensitivePost = (post) => getPostTriggerKeys(post).length > 0;
   const getVisibleCredits = (post) => {
@@ -3303,6 +3309,62 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
   };
   const visiblePosts = posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed');
 
+  useEffect(() => {
+    if (!visiblePosts.length) {
+      setPostEngagement({});
+      return () => {};
+    }
+
+    const unsubs = visiblePosts.flatMap((post) => {
+      const likeUnsub = subscribeToLikes(post.id, (snap) => {
+        setPostEngagement((prev) => ({
+          ...prev,
+          [post.id]: {
+            ...(prev[post.id] || {}),
+            likesCount: snap.size,
+            liked: Boolean(currentUser?.uid && snap.docs.some((docSnap) => docSnap.id === currentUser.uid)),
+          },
+        }));
+      });
+
+      const commentsUnsub = subscribeToComments(post.id, (snap) => {
+        setPostEngagement((prev) => ({
+          ...prev,
+          [post.id]: {
+            ...(prev[post.id] || {}),
+            commentsCount: snap.size,
+          },
+        }));
+      });
+
+      return [likeUnsub, commentsUnsub];
+    });
+
+    return () => {
+      unsubs.forEach((unsub) => {
+        if (typeof unsub === 'function') unsub();
+      });
+    };
+  }, [currentUser?.uid, visiblePosts]);
+
+  const handleLikeClick = async (event, post) => {
+    event.stopPropagation();
+    if (!currentUser?.uid) {
+      onPostClick(post);
+      return;
+    }
+    if (likeBusyByPost[post.id]) return;
+
+    setLikeBusyByPost((prev) => ({ ...prev, [post.id]: true }));
+    try {
+      await toggleLike(post.id, currentUser.uid);
+    } catch (error) {
+      console.error('Timeline like failed', error);
+    } finally {
+      setLikeBusyByPost((prev) => ({ ...prev, [post.id]: false }));
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-12">
       {visiblePosts.map((post) => {
@@ -3310,6 +3372,12 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
         const shouldCover = isSensitivePost(post) && contentPreference === 'cover' && !sensitiveRevealed[post.id];
         const visibleCredits = getVisibleCredits(post);
         const authorDisplayName = resolvePostAuthorDisplayName({ post, users });
+        const engagement = postEngagement[post.id] || {};
+        const likesCount = Number.isFinite(engagement.likesCount) ? engagement.likesCount : Number(post.likes || 0);
+        const commentsCount = Number.isFinite(engagement.commentsCount) ? engagement.commentsCount : Number(post.commentsCount || 0);
+        const liked = engagement.liked === true;
+        const likeBusy = likeBusyByPost[post.id] === true;
+
         return (
         <div key={post.id} className="relative group">
            <div className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`} onClick={() => onPostClick(post)}>
@@ -3324,7 +3392,28 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
            </div>
            <div className="bg-white dark:bg-slate-800 rounded-b-xl shadow-xl p-5 mt-2 border border-slate-100 dark:border-slate-700 flex gap-6">
               <div className="flex-1 space-y-3">
-                 <div className="flex gap-4"><Hand className="w-6 h-6"/><Cloud className="w-6 h-6"/></div>
+                 <div className="flex gap-3">
+                   <button
+                     type="button"
+                     onClick={(event) => handleLikeClick(event, post)}
+                     disabled={likeBusy}
+                     className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition disabled:opacity-60 ${liked ? 'border-red-200 text-red-500 bg-red-50 dark:border-red-500/50 dark:bg-red-500/10' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}
+                   >
+                     <Hand className="w-4 h-4" />
+                     <span>{likesCount}</span>
+                   </button>
+                   <button
+                     type="button"
+                     onClick={(event) => {
+                       event.stopPropagation();
+                       onPostClick(post);
+                     }}
+                     className="inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-300"
+                   >
+                     <Cloud className="w-4 h-4" />
+                     <span>{commentsCount}</span>
+                   </button>
+                 </div>
                  <div><h3 className="text-lg font-serif font-bold dark:text-white">{post.title}</h3><p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">{post.description}</p></div>
                  <div className="flex flex-wrap gap-2">
                    {post.isChallenge && (

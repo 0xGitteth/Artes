@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Image as ImageIcon, Search, Users, Plus, Bookmark, Hand, Cloud,
+  Image as ImageIcon, Search, Users, Plus, Bookmark,
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
@@ -81,6 +81,8 @@ import {
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import ChatPanel from './components/ChatPanel';
 import ModerationSupportChat from './components/ModerationSupportChat';
+import LikeIcon from './components/icons/LikeIcon';
+import CommentIcon from './components/icons/CommentIcon';
 import SupportLanding from './components/SupportLanding';
 import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import PhotoDetailModal from './components/PhotoDetailModal';
@@ -3422,9 +3424,9 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
                      type="button"
                      onClick={(event) => handleLikeClick(event, post)}
                      disabled={likeBusy}
-                     className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition disabled:opacity-60 ${liked ? 'border-red-200 text-red-500 bg-red-50 dark:border-red-500/50 dark:bg-red-500/10' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}
+                     className="inline-flex items-center gap-2 px-1 py-1.5 text-sm text-slate-600 dark:text-slate-300 transition disabled:opacity-60"
                    >
-                     <Hand className="w-4 h-4" />
+                     <LikeIcon size={16} active={liked} disabled={likeBusy} />
                      <span>{likesCount}</span>
                    </button>
                    <button
@@ -3433,9 +3435,9 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
                        event.stopPropagation();
                        onPostClick(post);
                      }}
-                     className="inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-300"
+                     className="inline-flex items-center gap-2 px-1 py-1.5 text-sm text-slate-600 dark:text-slate-300"
                    >
-                     <Cloud className="w-4 h-4" />
+                     <CommentIcon size={16} active={false} />
                      <span>{commentsCount}</span>
                    </button>
                  </div>

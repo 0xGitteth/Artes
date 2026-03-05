@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { X, Hand, Cloud, MessageSquare, Calendar, Shield, Loader2, AlertTriangle } from 'lucide-react';
+import { X, MessageSquare, Calendar, Shield, Loader2, AlertTriangle } from 'lucide-react';
 import { addComment, subscribeToComments, subscribeToLikes, toggleLike } from '../firebase';
 import { updatePost, deletePost } from '../services/firebaseClient';
 import { Badge, Button, Input } from './ui';
+import LikeIcon from './icons/LikeIcon';
+import CommentIcon from './icons/CommentIcon';
 
 const TRIGGER_LABELS = {
   adultArtNude: '18+ Artistiek naakt',
@@ -225,11 +227,16 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="secondary" onClick={handleLike} disabled={!user || likeLoading} className={liked ? 'text-red-500' : ''}>
-                {likeLoading ? <Loader2 size={18} className="animate-spin" /> : <Hand size={18} />} {likesCount}
-              </Button>
+              <button
+                type="button"
+                onClick={handleLike}
+                disabled={!user || likeLoading}
+                className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 disabled:opacity-60"
+              >
+                {likeLoading ? <Loader2 size={18} className="animate-spin" /> : <LikeIcon size={18} active={liked} disabled={!user || likeLoading} />} {likesCount}
+              </button>
               <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
-                <Cloud size={18} /> {comments.length}
+                <CommentIcon size={18} active /> {comments.length}
               </div>
               <button
                 type="button"

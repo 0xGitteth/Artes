@@ -7421,10 +7421,13 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
             </Button>
             {canFanUser ? (
               <Button onClick={handleFanToggle} variant="secondary" className="flex-1" disabled={fanBusy}>
-                {fanBusy ? 'Bezig...' : (isFan ? 'Stop fan zijn' : 'Word fan')}
+                {fanBusy ? 'Fanstatus opslaan...' : (isFan ? 'Stop fan zijn' : 'Word fan')}
               </Button>
             ) : null}
           </div>
+          {canFanUser ? (
+            <p className="text-xs text-slate-500 dark:text-slate-300">Word fan van deze maker om die makkelijker terug te vinden.</p>
+          ) : null}
           {canFanUser && fanError ? (
             <p className="text-sm text-red-500 dark:text-red-300">{fanError}</p>
           ) : null}

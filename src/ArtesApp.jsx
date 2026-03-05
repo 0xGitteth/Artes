@@ -54,6 +54,7 @@ import {
   setFanStatus,
   subscribeToFanCounts,
   subscribeToFanStatus,
+  getFanDebugContext,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { signInAnonymously } from 'firebase/auth';
@@ -7226,7 +7227,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
     const unsubscribeStatus = subscribeToFanStatus(userId, (exists) => {
       if (!isActive) return;
       setIsFan(exists);
-    });
+    }, { expectedAuthUid: currentUserId });
     const unsubscribeCounts = subscribeToFanCounts(userId, (counts) => {
       if (!isActive) return;
       const normalizedCounts = {
@@ -7288,9 +7289,14 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
       setIsFan(previousFan);
       setFanCounts(previousCounts);
       setFanError(error?.message || 'Kon fanstatus niet opslaan. Probeer opnieuw.');
+      getFanDebugContext(userId)
+        .then((context) => {
+          console.info('Fan toggle diagnostic context', context);
+        })
+        .catch(() => {});
     } finally {
-      if (fanRequestRef.current !== requestId || fanTargetRef.current !== targetAtStart) return;
-      setFanBusy(false);
+      const isCurrentRequest = fanRequestRef.current === requestId && fanTargetRef.current === targetAtStart;
+      if (isCurrentRequest) setFanBusy(false);
     }
   }, [currentUserId, fanBusy, fanCounts, isFan, userId]);
 

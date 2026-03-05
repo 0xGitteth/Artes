@@ -147,12 +147,12 @@ service cloud.firestore {
       match /following/{targetUid} {
         allow read: if request.auth != null && request.auth.uid == userId;
         allow create: if isOwner(userId)
-          && isVerifiedOrDev()
           && targetUid != userId
           && request.resource.data.targetUid == targetUid
+          && request.resource.data.createdAt == request.time
           && onlyKeys(['targetUid', 'createdAt']);
         allow update: if false;
-        allow delete: if isOwner(userId) && isVerifiedOrDev();
+        allow delete: if isOwner(userId);
       }
     }
 

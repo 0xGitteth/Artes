@@ -5088,6 +5088,13 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
       }
 
       const data = await response.json();
+      const getTriggerKeys = (items) => (Array.isArray(items) ? items : [])
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object') return item.trigger;
+          return null;
+        })
+        .filter(Boolean);
       const nextAppliedTriggers = (Array.isArray(data.appliedTriggers) ? data.appliedTriggers : [])
         .map((item) => {
           if (typeof item === 'string') return item;
@@ -5117,6 +5124,24 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
       const nextAutoAppliedTriggers = (Array.isArray(data?.autoAppliedTriggers) ? data.autoAppliedTriggers : []).map(resolveTriggerKey).filter(Boolean);
       const normalizedAppliedTriggers = Array.from(new Set([...nextAppliedTriggers.map(resolveTriggerKey), ...nextAutoAppliedTriggers]));
       const shouldShowSuggestions = nextOutcome === 'allowed' && nextSuggestedTriggers.length > 0;
+
+      const moderationDebugEnabled = import.meta.env.DEV || import.meta.env.VITE_MODERATION_DEBUG === '1';
+      if (moderationDebugEnabled) {
+        console.debug('[moderateImage]', {
+          endpoint: moderationEndpoint,
+          outcome: nextOutcome,
+          classification: nextClassification,
+          shouldReview: Boolean(data?.shouldReview),
+          reviewCaseId: nextReviewCaseId,
+          debugPath: data?.debug?.path || null,
+          matchedUploadId: data?.debug?.matchedUploadId || null,
+          matchedFingerprintType: data?.debug?.matchedFingerprintType || null,
+          forbiddenReasonTriggerKeys: getTriggerKeys(data?.forbiddenReasons),
+          suggestedTriggerKeys: getTriggerKeys(data?.suggestedTriggers),
+          appliedTriggerKeys: normalizedAppliedTriggers,
+          autoAppliedTriggers: nextAutoAppliedTriggers,
+        });
+      }
 
       setAppliedTriggers(normalizedAppliedTriggers);
       setSuggestedTriggers(nextSuggestedTriggers.map(resolveTriggerKey));

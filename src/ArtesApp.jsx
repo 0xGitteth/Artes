@@ -3496,11 +3496,50 @@ function NavBar({ view, setView, onOpenSettings }) {
    );
 }
 
+const seedCountsFromProfile = (profileData, normalizedProfileData = null) => {
+  const source = normalizedProfileData || profileData;
+  return {
+    fansCount: Number(source?.fansCount ?? profileData?.fansCount ?? 0),
+    fanOfCount: Number(source?.fanOfCount ?? profileData?.fanOfCount ?? 0),
+  };
+};
+
 function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick }) {
-  if (!profile) return null;
-  const normalizedProfile = normalizeProfileData(profile);
-  const fansCount = Number(normalizedProfile?.fansCount || 0);
-  const fanOfCount = Number(normalizedProfile?.fanOfCount || 0);
+  const normalizedProfile = useMemo(() => (profile ? normalizeProfileData(profile) : null), [profile]);
+  const profileUserId = normalizedProfile?.uid || profile?.uid || null;
+  const seededFanCounts = useMemo(() => seedCountsFromProfile(profile, normalizedProfile), [profile, normalizedProfile]);
+  const [fanCounts, setFanCounts] = useState(seededFanCounts);
+  const fanBusyRef = useRef(false);
+  const hasLiveCountsRef = useRef(false);
+
+  useEffect(() => {
+    hasLiveCountsRef.current = false;
+    setFanCounts(seededFanCounts);
+  }, [profileUserId]);
+
+  useEffect(() => {
+    if (!profileUserId) return () => {};
+    const unsubscribeCounts = subscribeToFanCounts(profileUserId, (counts) => {
+      const normalizedCounts = {
+        fansCount: Number(counts?.fansCount || 0),
+        fanOfCount: Number(counts?.fanOfCount || 0),
+      };
+      hasLiveCountsRef.current = true;
+      setFanCounts(normalizedCounts);
+    });
+    return () => unsubscribeCounts?.();
+  }, [profileUserId]);
+
+  useEffect(() => {
+    if (!profileUserId) return;
+    if (fanBusyRef.current) return;
+    if (hasLiveCountsRef.current) return;
+    setFanCounts(seededFanCounts);
+  }, [profileUserId, seededFanCounts]);
+
+  const fansCount = Number(fanCounts?.fansCount ?? normalizedProfile?.fansCount ?? 0);
+  const fanOfCount = Number(fanCounts?.fanOfCount ?? normalizedProfile?.fanOfCount ?? 0);
+  if (!normalizedProfile) return null;
   const roles = normalizedProfile.roles;
   const themes = normalizedProfile.themes;
   const bio = normalizedProfile.bio;
@@ -7132,21 +7171,26 @@ function PhotoDetailModal({ post, onClose, authUser, moderationApiBase, onChalle
   );
 }
 function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile }) {
-  const [userProfile, setUserProfile] = useState(null);
+  const targetSeedProfile = useMemo(
+    () => resolveProfileFromCollections({ userId, allUsers, currentUserId, currentProfile }),
+    [userId, allUsers, currentUserId, currentProfile],
+  );
+  const [userProfile, setUserProfile] = useState(targetSeedProfile);
   const [isFan, setIsFan] = useState(false);
   const [fanBusy, setFanBusy] = useState(false);
   const [fanError, setFanError] = useState('');
-  const [fanCounts, setFanCounts] = useState({ fansCount: 0, fanOfCount: 0 });
+  const targetSeedCounts = useMemo(() => seedCountsFromProfile(targetSeedProfile, targetSeedProfile), [targetSeedProfile]);
+  const [fanCounts, setFanCounts] = useState(() => targetSeedCounts);
   const fanBusyRef = useRef(false);
   const fanRequestRef = useRef(0);
   const fanTargetRef = useRef(userId);
   const bufferedLiveCountsRef = useRef(null);
+  const hasLiveCountsRef = useRef(false);
 
   useEffect(() => {
     let isActive = true;
-    const resolved = resolveProfileFromCollections({ userId, allUsers, currentUserId, currentProfile });
-    if (resolved) {
-      setUserProfile(resolved);
+    if (targetSeedProfile) {
+      setUserProfile(targetSeedProfile);
     }
 
     fetchUserIndex(userId).then((data) => {
@@ -7169,8 +7213,9 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
     setFanError('');
     setFanBusy(false);
     setIsFan(false);
-    setFanCounts({ fansCount: 0, fanOfCount: 0 });
+    setFanCounts(targetSeedCounts);
     bufferedLiveCountsRef.current = null;
+    hasLiveCountsRef.current = false;
     fanRequestRef.current += 1;
 
     if (!userId || !currentUserId || currentUserId === userId) {
@@ -7188,6 +7233,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
         fansCount: Number(counts?.fansCount || 0),
         fanOfCount: Number(counts?.fanOfCount || 0),
       };
+      hasLiveCountsRef.current = true;
       if (fanBusyRef.current) {
         bufferedLiveCountsRef.current = normalizedCounts;
         return;
@@ -7200,7 +7246,15 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
       unsubscribeStatus?.();
       unsubscribeCounts?.();
     };
-  }, [currentUserId, userId]);
+  }, [currentUserId, targetSeedCounts, userId]);
+
+  useEffect(() => {
+    const canFanUser = Boolean(currentUserId && userId && currentUserId !== userId);
+    if (!canFanUser) return;
+    if (fanBusyRef.current) return;
+    if (hasLiveCountsRef.current) return;
+    setFanCounts(targetSeedCounts);
+  }, [currentUserId, targetSeedCounts, userId]);
 
   useEffect(() => {
     fanBusyRef.current = fanBusy;

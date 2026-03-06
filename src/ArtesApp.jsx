@@ -86,6 +86,7 @@ import CommentIcon from './components/icons/CommentIcon';
 import SupportLanding from './components/SupportLanding';
 import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import PhotoDetailModal from './components/PhotoDetailModal';
+import AppLogo from './components/branding/AppLogo';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
@@ -2113,9 +2114,9 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900">
        <div className="max-w-md w-full text-center">
-          <div className="w-20 h-20 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-bold text-4xl mb-6 shadow-xl shadow-blue-500/20 mx-auto">A</div>
-          <h1 className="text-4xl font-bold mb-2 dark:text-white">Artes</h1>
-          <p className="text-slate-500 dark:text-slate-400 mb-8 text-lg">Connect, Create, Inspire.</p>
+          <div className="-mb-8 flex justify-center">
+            <AppLogo size={380} alt="Artes" className="mx-auto" />
+          </div>
           <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700">
              <div className="space-y-4">
                {import.meta.env.DEV && !authUser && (

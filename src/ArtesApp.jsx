@@ -3607,7 +3607,14 @@ function NavBar({ view, setView, onOpenSettings }) {
    return (
       <>
         <div className="fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-30 flex items-center justify-between px-6">
-           <div className="font-bold text-xl dark:text-white cursor-pointer" onClick={() => setView('gallery')}>Artes</div>
+           <button
+             type="button"
+             className="cursor-pointer"
+             onClick={() => setView('gallery')}
+             aria-label="Ga naar galerij"
+           >
+             <img src="/brand/logo.png" alt="Artes" className="h-9 w-auto" />
+           </button>
            <div className="hidden md:flex gap-6">
               {['gallery', 'discover', 'community'].map(v => <button key={v} onClick={() => setView(v)} className={`capitalize font-medium ${view === v ? 'text-blue-600' : 'text-slate-500'}`}>{v === 'discover' ? 'Ontdekken' : v === 'gallery' ? 'Galerij' : v}</button>)}
               <button onClick={() => setView('profile')} className={`capitalize font-medium ${view === 'profile' ? 'text-blue-600' : 'text-slate-500'}`}>Mijn Portfolio</button>

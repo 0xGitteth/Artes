@@ -1771,6 +1771,10 @@ export default function ArtesApp() {
     }
   }, [authUser?.uid, followingIds, fullProfileFanBusy, fullProfileIsOwn, fullProfileTargetUid]);
 
+  const handleOpenDiscover = useCallback(() => {
+    setView('discover');
+  }, []);
+
 
   if (requiresEmailVerification) {
     return (
@@ -1907,7 +1911,7 @@ export default function ArtesApp() {
               profile={profile}
               currentUser={authUser}
               followingLoaded={followingLoaded}
-              onOpenDiscover={() => setView('discover')}
+              onOpenDiscover={handleOpenDiscover}
               revealedSensitivePostsById={revealedSensitivePostsById}
               onRevealSensitivePost={(postId) => setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }))}
             />
@@ -3420,12 +3424,18 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick, currentUser, followingLoaded, onOpenDiscover, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [postEngagement, setPostEngagement] = useState({});
   const [likeBusyByPost, setLikeBusyByPost] = useState({});
-  const triggerVisibility = normalizeTriggerPreferences(profile?.preferences?.triggerVisibility);
+  const triggerVisibility = useMemo(
+    () => normalizeTriggerPreferences(profile?.preferences?.triggerVisibility),
+    [profile?.preferences?.triggerVisibility],
+  );
   const getVisibleCredits = (post) => {
     if (!Array.isArray(post?.credits)) return [];
     return post.credits.filter((credit) => credit?.uid !== post.authorId && !credit?.isSelf);
   };
-  const visiblePosts = posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed');
+  const visiblePosts = useMemo(
+    () => posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
+    [posts, triggerVisibility],
+  );
 
   useEffect(() => {
     if (!visiblePosts.length) {

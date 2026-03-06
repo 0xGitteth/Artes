@@ -5,6 +5,7 @@ import { updatePost, deletePost } from '../services/firebaseClient';
 import { Badge, Button, Input } from './ui';
 import LikeIcon from './icons/LikeIcon';
 import CommentIcon from './icons/CommentIcon';
+import SensitiveOverlay from './SensitiveOverlay';
 
 const TRIGGER_LABELS = {
   adultArtNude: '18+ Artistiek naakt',
@@ -38,7 +39,7 @@ const toActionErrorMessage = (error, fallbackMessage) => {
   return error.message || fallbackMessage;
 };
 
-export default function PhotoDetailModal({ post, onClose, currentUser, authUser, moderationApiBase, onChallengeClick }) {
+export default function PhotoDetailModal({ post, onClose, currentUser, authUser, moderationApiBase, onChallengeClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost }) {
   const user = currentUser || authUser || null;
   const [comments, setComments] = useState([]);
   const [likesCount, setLikesCount] = useState(post.likes || 0);
@@ -81,6 +82,12 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
       unsubLikes();
     };
   }, [post?.id, user?.uid]);
+
+  useEffect(() => {
+    if (contentPreference === 'hideFeed') {
+      onClose?.();
+    }
+  }, [contentPreference, onClose]);
 
   const handleLike = async () => {
     if (!user || likeLoading) return;
@@ -194,7 +201,10 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
           </button>
         </div>
         <div className="grid md:grid-cols-2 gap-0">
-          <img src={post.imageUrl} alt={post.title} className="w-full h-full object-cover max-h-[520px]" />
+          <div className="relative w-full h-full max-h-[520px]">
+            {shouldCover ? <SensitiveOverlay onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
+            <img src={post.imageUrl} alt={post.title} className="w-full h-full object-cover max-h-[520px]" />
+          </div>
           <div className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Calendar size={16} />

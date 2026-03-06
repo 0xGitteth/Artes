@@ -87,6 +87,7 @@ import CommentIcon from './components/icons/CommentIcon';
 import SupportLanding from './components/SupportLanding';
 import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import PhotoDetailModal from './components/PhotoDetailModal';
+import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { debugAllowed } from './utils/debugAccess';
@@ -439,19 +440,6 @@ const shouldCoverPost = (post, triggerVisibility, revealedSensitivePostsById = {
   const isRevealed = revealedSensitivePostsById?.[post?.id] === true;
   return isSensitivePost && contentPreference === 'cover' && !isRevealed;
 };
-
-function SensitiveOverlay({ onReveal }) {
-  return (
-    <div
-      className="absolute inset-0 z-10 backdrop-blur-3xl bg-slate-900/80 flex flex-col items-center justify-center p-6 text-center"
-      onClick={(event) => event.stopPropagation()}
-    >
-      <AlertOctagon className="w-12 h-12 text-orange-500 mb-4" />
-      <h4 className="text-white font-bold text-lg mb-2">Gevoelige inhoud</h4>
-      <Button variant="outline" onClick={onReveal}>Toch bekijken</Button>
-    </div>
-  );
-}
 
 const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options = {}) => {
   // Profile expectations:
@@ -1745,6 +1733,26 @@ export default function ArtesApp() {
       });
   }, [authUser?.uid, followingIds, galleryTriggerVisibility, posts]);
 
+  const handleRevealSensitivePost = useCallback((postId) => {
+    setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }));
+  }, []);
+
+  const handleOpenPost = useCallback((post) => {
+    if (!post) return;
+    if (getPostContentPreference(post, galleryTriggerVisibility) === 'hideFeed') {
+      setToastMessage('Deze post is verborgen op basis van je trigger voorkeuren.');
+      return;
+    }
+    setSelectedPost(post);
+  }, [galleryTriggerVisibility]);
+
+  useEffect(() => {
+    if (!selectedPost) return;
+    if (getPostContentPreference(selectedPost, galleryTriggerVisibility) === 'hideFeed') {
+      setSelectedPost(null);
+    }
+  }, [galleryTriggerVisibility, selectedPost]);
+
   const handleFullProfileFanToggle = useCallback(async () => {
     if (!authUser?.uid || !fullProfileTargetUid || fullProfileIsOwn || fullProfileFanBusy) return;
     const nextFan = !followingIds.has(fullProfileTargetUid);
@@ -1906,14 +1914,14 @@ export default function ArtesApp() {
               users={users}
               onUserClick={setQuickProfileId}
               onShadowClick={setShadowProfile}
-              onPostClick={setSelectedPost}
+              onPostClick={handleOpenPost}
               onChallengeClick={() => setView('challenge_timeline')}
               profile={profile}
               currentUser={authUser}
               followingLoaded={followingLoaded}
               onOpenDiscover={handleOpenDiscover}
               revealedSensitivePostsById={revealedSensitivePostsById}
-              onRevealSensitivePost={(postId) => setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }))}
+              onRevealSensitivePost={handleRevealSensitivePost}
             />
           )}
 
@@ -1948,10 +1956,10 @@ export default function ArtesApp() {
               profile={profile}
               currentUserId={authUser?.uid}
               onUserClick={setQuickProfileId}
-              onPostClick={setSelectedPost}
+              onPostClick={handleOpenPost}
               setView={setView}
               revealedSensitivePostsById={revealedSensitivePostsById}
-              onRevealSensitivePost={(postId) => setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }))}
+              onRevealSensitivePost={handleRevealSensitivePost}
             />
           )}
           
@@ -1995,8 +2003,11 @@ export default function ArtesApp() {
             <ChallengeDetail
               setView={setView}
               posts={posts.filter(p => p.isChallenge)}
-              onPostClick={setSelectedPost}
+              onPostClick={handleOpenPost}
               challenge={challengeConfig}
+              triggerVisibility={galleryTriggerVisibility}
+              revealedSensitivePostsById={revealedSensitivePostsById}
+              onRevealSensitivePost={handleRevealSensitivePost}
             />
           )}
           
@@ -2027,13 +2038,13 @@ export default function ArtesApp() {
               isOwn={true} 
               posts={posts.filter(p => p.authorId === user?.uid)}
               onOpenSettings={() => setShowEditProfile(true)}
-              onPostClick={setSelectedPost}
+              onPostClick={handleOpenPost}
               allUsers={users}
               onLinkedProfileClick={(uid) => setView(`profile_${uid}`)}
               onChallengeClick={() => setView('challenge_timeline')}
               triggerVisibility={profile?.preferences?.triggerVisibility || normalizeTriggerPreferences()}
               revealedSensitivePostsById={revealedSensitivePostsById}
-              onRevealSensitivePost={(postId) => setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }))}
+              onRevealSensitivePost={handleRevealSensitivePost}
             />
           )}
           
@@ -2041,7 +2052,7 @@ export default function ArtesApp() {
             <FetchedProfile 
                userId={view.split('_')[1]} 
                posts={posts}
-               onPostClick={setSelectedPost}
+               onPostClick={handleOpenPost}
                allUsers={users}
                setView={setView}
                currentUserId={user?.uid}
@@ -2052,7 +2063,7 @@ export default function ArtesApp() {
                fanError={fullProfileFanError}
                onToggleFan={handleFullProfileFanToggle}
                revealedSensitivePostsById={revealedSensitivePostsById}
-               onRevealSensitivePost={(postId) => setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }))}
+               onRevealSensitivePost={handleRevealSensitivePost}
             />
           )}
         </main>
@@ -2132,6 +2143,9 @@ export default function ArtesApp() {
             allUsers={users}
             currentUserId={user?.uid}
             currentProfile={profile}
+            triggerVisibility={galleryTriggerVisibility}
+            revealedSensitivePostsById={revealedSensitivePostsById}
+            onRevealSensitivePost={handleRevealSensitivePost}
           />
         )}
         {selectedPost && (
@@ -2142,6 +2156,9 @@ export default function ArtesApp() {
             authUser={authUser}
             moderationApiBase={moderationApiBase}
             onChallengeClick={() => setView('challenge_timeline')}
+            contentPreference={getPostContentPreference(selectedPost, galleryTriggerVisibility)}
+            shouldCover={shouldCoverPost(selectedPost, galleryTriggerVisibility, revealedSensitivePostsById)}
+            onRevealSensitivePost={handleRevealSensitivePost}
           />
         )}
         {shadowProfile && (
@@ -2150,7 +2167,10 @@ export default function ArtesApp() {
             contributorId={shadowProfile.contributorId}
             posts={posts}
             onClose={() => setShadowProfile(null)}
-            onPostClick={setSelectedPost}
+            onPostClick={handleOpenPost}
+            triggerVisibility={galleryTriggerVisibility}
+            revealedSensitivePostsById={revealedSensitivePostsById}
+            onRevealSensitivePost={handleRevealSensitivePost}
             authUser={authUser}
             userProfile={userProfile}
             functionsBase={functionsBase}
@@ -7175,8 +7195,12 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProf
     </div>
   );
 }
-function ChallengeDetail({ setView, posts, onPostClick, challenge }) {
+function ChallengeDetail({ setView, posts, onPostClick, challenge, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
    const challengeData = challenge || DEFAULT_CHALLENGE_CONFIG;
+   const visiblePosts = useMemo(
+    () => posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
+    [posts, triggerVisibility],
+   );
    return (
       <div className="max-w-4xl mx-auto px-4 py-6">
          <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 mb-6 font-medium"><ChevronLeft className="w-4 h-4 mr-1"/> Terug</button>
@@ -7186,15 +7210,18 @@ function ChallengeDetail({ setView, posts, onPostClick, challenge }) {
             <p className="text-sm text-amber-800 dark:text-amber-200/80">{challengeData.description}</p>
          </div>
          <div className="grid grid-cols-2 md:grid-cols-3 gap-1 md:gap-4">
-            {posts.map(post => (
+            {visiblePosts.map(post => {
+              const covered = shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById);
+              return (
               <div
                 key={post.id}
                 onClick={() => onPostClick(post)}
-                className={`aspect-square bg-slate-200 rounded-lg overflow-hidden cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`}
+                className={`aspect-square bg-slate-200 rounded-lg overflow-hidden cursor-pointer relative ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`}
               >
+                {covered ? <SensitiveOverlay onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
                 <img src={post.imageUrl} className="w-full h-full object-cover" />
               </div>
-            ))}
+            );})}
          </div>
       </div>
    );
@@ -7221,7 +7248,7 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, current
   if (!fetchedUser) return <div>Loading...</div>;
   return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
 }
-function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile }) {
+function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
   const targetSeedProfile = useMemo(
     () => resolveProfileFromCollections({ userId, allUsers, currentUserId, currentProfile }),
     [userId, allUsers, currentUserId, currentProfile],
@@ -7365,21 +7392,25 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   const previewMode = userProfile?.quickProfilePreviewMode || 'latest';
   const manualIds = Array.isArray(userProfile?.quickProfilePostIds) ? userProfile.quickProfilePostIds : [];
   const previewPosts = useMemo(() => {
+    let rankedPosts = [];
     if (previewMode === 'manual' && manualIds.length) {
       const manualPosts = manualIds
         .map((id) => userPosts.find((post) => post.id === id))
         .filter(Boolean);
-      if (manualPosts.length) return manualPosts.slice(0, 3);
+      if (manualPosts.length) rankedPosts = manualPosts;
     }
-    if (previewMode === 'best') {
-      return [...userPosts]
-        .sort((a, b) => (b.likes || 0) - (a.likes || 0))
-        .slice(0, 3);
+    if (!rankedPosts.length && previewMode === 'best') {
+      rankedPosts = [...userPosts]
+        .sort((a, b) => (b.likes || 0) - (a.likes || 0));
     }
-    return [...userPosts]
-      .sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a))
+    if (!rankedPosts.length) {
+      rankedPosts = [...userPosts]
+        .sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a));
+    }
+    return rankedPosts
+      .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed')
       .slice(0, 3);
-  }, [manualIds, previewMode, userPosts]);
+  }, [manualIds, previewMode, triggerVisibility, userPosts]);
   const headerImage = userProfile?.headerImage || userProfile?.avatar;
   const resolvedFansCount = Number(fanCounts?.fansCount ?? userProfile?.fansCount ?? 0);
   const resolvedFanOfCount = Number(fanCounts?.fanOfCount ?? userProfile?.fanOfCount ?? 0);
@@ -7452,9 +7483,12 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
             </div>
             {previewPosts.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {previewPosts.map((post) => (
+                {previewPosts.map((post) => {
+                  const covered = shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById);
+                  return (
                   <div key={post.id} className="bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden">
-                    <div className="aspect-[4/5]">
+                    <div className="aspect-[4/5] relative">
+                      {covered ? <SensitiveOverlay onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
                       <img src={post.imageUrl} className="w-full h-full object-cover" />
                     </div>
                     <div className="p-3">
@@ -7462,7 +7496,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
                       <p className="text-xs text-slate-500 dark:text-slate-400">{post.description}</p>
                     </div>
                   </div>
-                ))}
+                );})}
               </div>
             ) : (
               <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-300">
@@ -7498,6 +7532,9 @@ function ShadowProfileModal({
   posts,
   onClose,
   onPostClick,
+  triggerVisibility,
+  revealedSensitivePostsById,
+  onRevealSensitivePost,
   authUser,
   userProfile,
   functionsBase,
@@ -8299,11 +8336,16 @@ function ShadowProfileModal({
           </div>
           <div className="flex-1 p-6 overflow-y-auto no-scrollbar">
             <div className="grid grid-cols-3 gap-2">
-              {shadowPosts.map(p => (
-                <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800">
+              {shadowPosts
+                .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed')
+                .map((p) => {
+                  const covered = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
+                  return (
+                <div key={p.id} onClick={() => onPostClick(p)} className="aspect-square bg-slate-800 relative">
+                  {covered ? <SensitiveOverlay onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}
                   <img src={p.imageUrl} className="w-full h-full object-cover" />
                 </div>
-              ))}
+              );})}
             </div>
           </div>
         </div>

@@ -2114,8 +2114,8 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900">
        <div className="max-w-md w-full text-center">
-          <div className="-mb-8 flex justify-center">
-            <AppLogo size={380} alt="Artes" className="mx-auto" />
+          <div className="-mt-4 mb-4 flex justify-center">
+            <AppLogo size={140} alt="Artes" className="mx-auto" />
           </div>
           <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700">
              <div className="space-y-4">

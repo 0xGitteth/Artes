@@ -54,6 +54,7 @@ import {
   setFanStatus,
   subscribeToFanCounts,
   subscribeToFanStatus,
+  subscribeToFollowingIds,
   getFanDebugContext,
   subscribeToComments,
   subscribeToLikes,
@@ -704,6 +705,8 @@ export default function ArtesApp() {
   // Data
   const [posts, setPosts] = useState([]);
   const [users, setUsers] = useState([]);
+  const [followingIds, setFollowingIds] = useState(() => new Set());
+  const [followingLoaded, setFollowingLoaded] = useState(false);
   const [revealedSensitivePostsById, setRevealedSensitivePostsById] = useState({});
   const moderationApiBase = useMemo(() => {
     const explicitBase = import.meta.env.VITE_MODERATION_API_BASE;
@@ -1152,6 +1155,29 @@ export default function ArtesApp() {
 
   // Data Listeners
   // No Firestore listeners before authReady.
+  useEffect(() => {
+    if (!authReady) {
+      setFollowingIds(new Set());
+      setFollowingLoaded(false);
+      return () => {};
+    }
+    if (!user?.uid) {
+      setFollowingIds(new Set());
+      setFollowingLoaded(true);
+      return () => {};
+    }
+
+    setFollowingLoaded(false);
+    const unsubscribeFollowing = subscribeToFollowingIds((nextIds) => {
+      setFollowingIds(new Set(nextIds || []));
+      setFollowingLoaded(true);
+    }, { expectedAuthUid: user.uid });
+
+    return () => {
+      unsubscribeFollowing?.();
+    };
+  }, [authReady, user?.uid]);
+
   useEffect(() => {
      if (!canAccessFirestore({ authReady, user })) return;
      logListenerStart('Posts listener (ArtesApp)');
@@ -1693,6 +1719,59 @@ export default function ArtesApp() {
     }
   };
 
+  const [fullProfileFanBusy, setFullProfileFanBusy] = useState(false);
+  const [fullProfileFanError, setFullProfileFanError] = useState('');
+  const fullProfileTargetUid = useMemo(
+    () => (view.startsWith('profile_') ? view.split('_')[1] : null),
+    [view],
+  );
+  const fullProfileIsOwn = Boolean(fullProfileTargetUid && user?.uid && fullProfileTargetUid === user.uid);
+  const fullProfileIsFan = Boolean(fullProfileTargetUid && followingIds.has(fullProfileTargetUid));
+
+  useEffect(() => {
+    setFullProfileFanError('');
+    setFullProfileFanBusy(false);
+  }, [fullProfileTargetUid]);
+
+  const galleryTriggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
+  const galleryPosts = useMemo(() => {
+    if (!authUser?.uid) return [];
+    return posts
+      .filter((post) => getPostContentPreference(post, galleryTriggerVisibility) !== 'hideFeed')
+      .filter((post) => {
+        const authorId = post?.authorId;
+        if (!authorId) return false;
+        return authorId === authUser.uid || followingIds.has(authorId);
+      });
+  }, [authUser?.uid, followingIds, galleryTriggerVisibility, posts]);
+
+  const handleFullProfileFanToggle = useCallback(async () => {
+    if (!authUser?.uid || !fullProfileTargetUid || fullProfileIsOwn || fullProfileFanBusy) return;
+    const nextFan = !followingIds.has(fullProfileTargetUid);
+    setFullProfileFanError('');
+    setFullProfileFanBusy(true);
+    setFollowingIds((prev) => {
+      const next = new Set(prev);
+      if (nextFan) next.add(fullProfileTargetUid);
+      else next.delete(fullProfileTargetUid);
+      return next;
+    });
+    try {
+      await setFanStatus(fullProfileTargetUid, nextFan);
+    } catch (error) {
+      setFollowingIds((prev) => {
+        const next = new Set(prev);
+        if (nextFan) next.delete(fullProfileTargetUid);
+        else next.add(fullProfileTargetUid);
+        return next;
+      });
+      setFullProfileFanError(error?.message || 'Kon fanstatus niet opslaan. Probeer opnieuw.');
+    } finally {
+      setFullProfileFanBusy(false);
+    }
+  }, [authUser?.uid, followingIds, fullProfileFanBusy, fullProfileIsOwn, fullProfileTargetUid]);
+
+
   if (requiresEmailVerification) {
     return (
       <div className={`${darkMode ? 'dark' : ''} h-screen w-full flex flex-col transition-colors duration-300`}>
@@ -1819,7 +1898,7 @@ export default function ArtesApp() {
           
           {!profileLoading && view === 'gallery' && (
             <Gallery 
-              posts={posts} 
+              posts={galleryPosts} 
               users={users}
               onUserClick={setQuickProfileId}
               onShadowClick={setShadowProfile}
@@ -1827,6 +1906,8 @@ export default function ArtesApp() {
               onChallengeClick={() => setView('challenge_timeline')}
               profile={profile}
               currentUser={authUser}
+              followingLoaded={followingLoaded}
+              onOpenDiscover={() => setView('discover')}
               revealedSensitivePostsById={revealedSensitivePostsById}
               onRevealSensitivePost={(postId) => setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }))}
             />
@@ -1962,6 +2043,10 @@ export default function ArtesApp() {
                currentUserId={user?.uid}
                currentProfile={profile}
                triggerVisibility={profile?.preferences?.triggerVisibility || normalizeTriggerPreferences()}
+               isFan={fullProfileIsFan}
+               fanBusy={fullProfileFanBusy}
+               fanError={fullProfileFanError}
+               onToggleFan={handleFullProfileFanToggle}
                revealedSensitivePostsById={revealedSensitivePostsById}
                onRevealSensitivePost={(postId) => setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }))}
             />
@@ -3332,7 +3417,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }
 }
 
-function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick, currentUser, revealedSensitivePostsById, onRevealSensitivePost }) {
+function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostClick, onShadowClick, currentUser, followingLoaded, onOpenDiscover, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [postEngagement, setPostEngagement] = useState({});
   const [likeBusyByPost, setLikeBusyByPost] = useState({});
   const triggerVisibility = normalizeTriggerPreferences(profile?.preferences?.triggerVisibility);
@@ -3398,8 +3483,20 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
     }
   };
 
+  const showTimelineEmptyState = Boolean(currentUser?.uid && followingLoaded && visiblePosts.length === 0);
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-12">
+      {showTimelineEmptyState ? (
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-center">
+          <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
+            Je volgt nog niemand of er zijn nog geen posts van makers die je volgt.
+          </p>
+          <Button variant="secondary" onClick={onOpenDiscover}>
+            Ontdek makers
+          </Button>
+        </div>
+      ) : null}
       {visiblePosts.map((post) => {
         const shouldCover = shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById);
         const visibleCredits = getVisibleCredits(post);
@@ -3639,7 +3736,7 @@ const seedCountsFromProfile = (profileData, normalizedProfileData = null) => {
   };
 };
 
-function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
+function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, triggerVisibility, currentUserId = null, isFan = false, fanBusy = false, fanError = '', onToggleFan = null, revealedSensitivePostsById, onRevealSensitivePost }) {
   const normalizedProfile = useMemo(() => (profile ? normalizeProfileData(profile) : null), [profile]);
   const profileUserId = normalizedProfile?.uid || profile?.uid || null;
   const seededFanCounts = useMemo(() => seedCountsFromProfile(profile, normalizedProfile), [profile, normalizedProfile]);
@@ -3674,6 +3771,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
 
   const fansCount = Number(fanCounts?.fansCount ?? normalizedProfile?.fansCount ?? 0);
   const fanOfCount = Number(fanCounts?.fanOfCount ?? normalizedProfile?.fanOfCount ?? 0);
+  const canFanUser = Boolean(!isOwn && currentUserId && profileUserId && currentUserId !== profileUserId);
   if (!normalizedProfile) return null;
   const roles = normalizedProfile.roles;
   const themes = normalizedProfile.themes;
@@ -3718,6 +3816,14 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
                 <span>Fans: {fansCount}</span>
                 <span>Fan van: {fanOfCount}</span>
               </div>
+              {canFanUser ? (
+                <div className="flex flex-col items-center gap-2 mb-5">
+                  <Button onClick={onToggleFan} variant="secondary" disabled={fanBusy}>
+                    {fanBusy ? 'Fanstatus opslaan...' : (isFan ? 'Stop fan zijn' : 'Word fan')}
+                  </Button>
+                  {fanError ? <p className="text-sm text-red-500 dark:text-red-300">{fanError}</p> : null}
+                </div>
+              ) : null}
               {(hasAgency || hasCompany) && (
                 <div className="flex flex-col sm:flex-row flex-wrap justify-center gap-2 sm:gap-6 text-xs text-slate-700/80 dark:text-white/80 mb-5">
                   {hasAgency && (
@@ -7084,7 +7190,7 @@ function ChallengeDetail({ setView, posts, onPostClick, challenge }) {
    );
 }
 
-function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, currentUserId, currentProfile, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
+function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, currentUserId, currentProfile, triggerVisibility, isFan, fanBusy, fanError, onToggleFan, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [fetchedUser, setFetchedUser] = useState(null);
   useEffect(() => {
     const resolved = resolveProfileFromCollections({ userId, allUsers, currentUserId, currentProfile });
@@ -7103,7 +7209,7 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, current
     });
   }, [userId, allUsers, currentUserId, currentProfile]);
   if (!fetchedUser) return <div>Loading...</div>;
-  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
+  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
 }
 function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile }) {
   const targetSeedProfile = useMemo(

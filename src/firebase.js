@@ -1018,6 +1018,52 @@ export const setFanStatus = async (targetUid, shouldBeFan) => {
   }
 };
 
+export const subscribeToFollowingIds = (cb, options = {}) => {
+  let unsubscribed = false;
+  let unsubscribeSnapshot = null;
+
+  waitForAuthReady()
+    .then((resolvedUser) => {
+      if (unsubscribed) return;
+      const user = resolvedUser ?? authStateUser ?? getFirebaseAuth().currentUser;
+      const expectedAuthUid = options?.expectedAuthUid || null;
+      if (!user?.uid) {
+        cb(new Set());
+        return;
+      }
+      if (expectedAuthUid && user.uid !== expectedAuthUid) {
+        cb(new Set());
+        return;
+      }
+
+      const followingRef = collection(getFirebaseDb(), 'users', user.uid, 'following');
+      unsubscribeSnapshot = onSnapshot(
+        followingRef,
+        (snapshot) => {
+          const nextIds = new Set();
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data() || {};
+            const targetUid = String(data?.targetUid || docSnap.id || '').trim();
+            if (targetUid) nextIds.add(targetUid);
+          });
+          cb(nextIds);
+        },
+        () => cb(new Set()),
+      );
+    })
+    .catch(() => {
+      if (unsubscribed) return;
+      cb(new Set());
+    });
+
+  return () => {
+    unsubscribed = true;
+    if (typeof unsubscribeSnapshot === 'function') {
+      unsubscribeSnapshot();
+    }
+  };
+};
+
 export const subscribeToFanStatus = (targetUid, cb, options = {}) => {
   let unsubscribed = false;
   let unsubscribeSnapshot = null;

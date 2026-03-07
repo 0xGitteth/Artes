@@ -4435,7 +4435,12 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const isLockedByOther = selectedCaseId && !claimState.claimed;
   const isReportCase = selectedCase?.caseType === 'report';
   const reportedPost = selectedCase?.reportedPost || null;
-  const uploadPreviewUrl = selectedUpload?.previewUrl || selectedUpload?.imageUrl || selectedUpload?.image || reportedPost?.imageUrl || null;
+  const uploadPreviewUrl = selectedUpload?.previewUrl
+    || selectedUpload?.imageUrl
+    || selectedUpload?.image
+    || selectedUpload?.postDraft?.imageUrl
+    || reportedPost?.imageUrl
+    || null;
   const tags = (Array.isArray(selectedUpload?.appliedTriggers) ? selectedUpload.appliedTriggers : (Array.isArray(selectedUpload?.makerTags) ? selectedUpload.makerTags : []))
     .map((tag) => {
       if (typeof tag === 'string') return resolveTriggerKey(tag);

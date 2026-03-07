@@ -3,6 +3,7 @@ import { MessageCircle, Plus, Search, X } from 'lucide-react';
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -261,7 +262,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   );
 }
 
-export default function ChatPanel({ authUser, functionsBase, initialThreadId, userProfile }) {
+export default function ChatPanel({ authUser, functionsBase, initialThreadId, userProfile, onResumeApprovedUpload }) {
   const [threads, setThreads] = useState([]);
   const [activeThreadId, setActiveThreadId] = useState(null);
   const [activeThread, setActiveThread] = useState(null);
@@ -270,6 +271,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
   const [showNewChat, setShowNewChat] = useState(false);
   const [sendError, setSendError] = useState(null);
   const [archivingThreadId, setArchivingThreadId] = useState(null);
+  const [uploadOwnerById, setUploadOwnerById] = useState({});
 
   useEffect(() => {
     if (!initialThreadId) return;
@@ -326,6 +328,52 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Active thread messages listener threads/${activeThreadId}/messages`),
     );
   }, [activeThreadId]);
+
+  useEffect(() => {
+    if (!authUser?.uid || activeThread?.type !== 'support') {
+      setUploadOwnerById({});
+      return;
+    }
+
+    const uploadIds = Array.from(new Set(
+      (messages || [])
+        .filter((message) => message?.type === 'moderation_decision')
+        .map((message) => message?.metadata?.uploadId)
+        .filter(Boolean)
+    ));
+
+    if (uploadIds.length === 0) {
+      setUploadOwnerById({});
+      return;
+    }
+
+    let active = true;
+    const db = getFirebaseDbInstance();
+    const loadOwners = async () => {
+      const pairs = await Promise.all(uploadIds.map(async (uploadId) => {
+        const messageWithOwner = (messages || []).find((message) => message?.metadata?.uploadId === uploadId && message?.metadata?.ownerUid);
+        if (messageWithOwner?.metadata?.ownerUid) {
+          return [uploadId, messageWithOwner.metadata.ownerUid];
+        }
+        try {
+          const uploadSnap = await getDoc(doc(db, 'uploads', uploadId));
+          if (!uploadSnap.exists()) return [uploadId, null];
+          const uploadData = uploadSnap.data() || {};
+          return [uploadId, uploadData.userId || uploadData.ownerUid || uploadData.userUid || null];
+        } catch (_error) {
+          return [uploadId, null];
+        }
+      }));
+
+      if (!active) return;
+      setUploadOwnerById(Object.fromEntries(pairs));
+    };
+
+    loadOwners();
+    return () => {
+      active = false;
+    };
+  }, [authUser?.uid, activeThread?.type, messages]);
 
   const activeThreadIndex = useMemo(() => {
     if (!activeThreadId) return null;
@@ -589,6 +637,22 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
                                 </span>
                               ))}
                             </div>
+                          )}
+                          {message.type === 'moderation_decision'
+                            && message.metadata?.decision === 'approved'
+                            && message.metadata?.caseType !== 'report'
+                            && message.metadata?.uploadId
+                            && ((message.metadata?.ownerUid || uploadOwnerById[message.metadata.uploadId]) === authUser?.uid)
+                            && typeof onResumeApprovedUpload === 'function' && (
+                              <div className="mt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => onResumeApprovedUpload(message.metadata.uploadId)}
+                                  className="text-xs font-semibold px-3 py-1.5 rounded-full bg-blue-600 text-white"
+                                >
+                                  Open in editor
+                                </button>
+                              </div>
                           )}
                           <div className="mt-1 text-[10px] text-slate-400 text-right">
                             {formatTime(message.createdAt)}

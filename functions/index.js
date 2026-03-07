@@ -592,6 +592,7 @@ const createDecisionMessage = ({
   uploadId = null,
   reviewCaseId = null,
   reportedPostId = null,
+  ownerUid = null,
 }) => ({
   senderUid: 'system',
   text: decisionMessagePublic,
@@ -604,6 +605,7 @@ const createDecisionMessage = ({
     uploadId,
     reviewCaseId,
     reportedPostId,
+    ownerUid,
   },
 });
 
@@ -2541,6 +2543,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         uploadId,
         reviewCaseId,
         reportedPostId: reportPostId,
+        ownerUid: userId,
       });
       await Promise.all(
         recipientUids.map(async (recipientUid) => {

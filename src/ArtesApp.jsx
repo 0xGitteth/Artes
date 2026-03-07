@@ -61,7 +61,7 @@ import {
   toggleLike,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
-import { signInAnonymously } from 'firebase/auth';
+import { signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -1947,6 +1947,7 @@ export default function ArtesApp() {
               authUser={authUser}
               appConfig={appConfig}
               onDevConfigLoaded={setAppConfig}
+              functionsBase={functionsBase}
             />
           )}
 
@@ -2295,7 +2296,7 @@ export default function ArtesApp() {
 
 // --- SUB COMPONENTS ---
 
-function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, onDevConfigLoaded }) {
+function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, onDevConfigLoaded, functionsBase }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState(null);
@@ -2325,6 +2326,32 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
       const code = err?.code ?? 'unknown';
       const message = err?.message ?? String(err);
       alert(`Dev login failed:\nCode: ${code}\nMessage: ${message}`);
+    }
+  };
+
+  const handleCodexDevLogin = async () => {
+    try {
+      setLocalError(null);
+      if (!functionsBase) {
+        setLocalError('Codex dev login is niet beschikbaar: VITE_FUNCTIONS_BASE_URL ontbreekt.');
+        return;
+      }
+      const response = await fetch(`${functionsBase}/createDevCodexToken`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.token) {
+        throw new Error(data?.error || 'Codex dev login mislukt.');
+      }
+      await signInWithCustomToken(auth, data.token);
+      const refreshedConfig = await getAppConfig({ forceRefresh: true });
+      onDevConfigLoaded?.(refreshedConfig || null);
+      console.log('Codex custom-token login successful');
+    } catch (err) {
+      setLocalError(err?.message || 'Codex dev login mislukt.');
     }
   };
   return (
@@ -2399,14 +2426,23 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
                 Continue with Apple {enableApple ? '' : '(soon)'}
               </button>
               {debugAllowed() && (
-                <button
-                  type="button"
-                  onClick={handleDevLogin}
-                  disabled={!import.meta.env.DEV && !devAnonymousEnabled}
-                  className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
-                >
-                  Dev login
-                </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleDevLogin}
+                    disabled={!import.meta.env.DEV && !devAnonymousEnabled}
+                    className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
+                  >
+                    Dev login
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCodexDevLogin}
+                    className="w-full border border-dashed border-blue-300 text-blue-700 dark:border-blue-500/60 dark:text-blue-200 rounded-xl py-3 text-sm font-semibold hover:bg-blue-50 dark:hover:bg-blue-500/10 transition"
+                  >
+                    Codex Dev login (vast)
+                  </button>
+                </div>
               )}
              </div>
              <div className="relative my-8">

@@ -104,6 +104,78 @@ const getAppIdFromEnv = () => {
   }
 };
 
+const resolveProjectId = () => {
+  if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
+  const firebaseConfig = process.env.FIREBASE_CONFIG;
+  if (!firebaseConfig) return null;
+  try {
+    const parsed = JSON.parse(firebaseConfig);
+    return parsed?.projectId || null;
+  } catch (error) {
+    return null;
+  }
+};
+
+const isCodexDevLoginEnabled = () => String(process.env.CODEX_DEV_LOGIN_ENABLED || '').toLowerCase() === 'true';
+
+const isProjectAllowedForCodexDevLogin = () => {
+  const raw = process.env.CODEX_DEV_ALLOWED_PROJECT_IDS || '';
+  if (!raw.trim()) return false;
+  const allowed = raw.split(',').map((v) => v.trim()).filter(Boolean);
+  if (!allowed.length) return false;
+  const projectId = resolveProjectId();
+  return Boolean(projectId && allowed.includes(projectId));
+};
+
+const resolveCodexDevUid = () => {
+  const configured = String(process.env.CODEX_DEV_UID || '').trim();
+  return configured || 'codex-dev-user';
+};
+
+const codexDevDisplayName = 'Codex';
+const codexDevActor = 'codex';
+const codexDevRoles = ['assistent'];
+
+const ensureCodexDevProfileState = async (uid) => {
+  const now = FieldValue.serverTimestamp();
+  const userRef = db.collection('users').doc(uid);
+  const publicUserRef = db.collection('publicUsers').doc(uid);
+  const existingUserSnap = await userRef.get();
+
+  const userPayload = {
+    uid,
+    displayName: codexDevDisplayName,
+    authProvider: 'custom',
+    roles: codexDevRoles,
+    onboardingStep: 5,
+    onboardingComplete: true,
+    ageVerified: true,
+    isAdult: true,
+    isDevTestUser: true,
+    devActor: codexDevActor,
+    updatedAt: now,
+  };
+  if (!existingUserSnap.exists) {
+    userPayload.createdAt = now;
+  }
+
+  const publicPayload = {
+    uid,
+    displayName: codexDevDisplayName,
+    displayNameLower: codexDevDisplayName.toLowerCase(),
+    roles: codexDevRoles,
+    ageVerified: true,
+    isAdult: true,
+    isDevTestUser: true,
+    updatedAt: now,
+  };
+
+  await Promise.all([
+    userRef.set(userPayload, { merge: true }),
+    publicUserRef.set(publicPayload, { merge: true }),
+  ]);
+};
+
 const buildReportedPostPath = (postId) => {
   const appId = getAppIdFromEnv();
   if (!appId || !postId) return null;
@@ -1650,6 +1722,36 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create dm thread' });
+  }
+});
+
+export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  if (!isCodexDevLoginEnabled()) {
+    res.status(403).json({ error: 'Codex dev login is disabled' });
+    return;
+  }
+
+  if (!isProjectAllowedForCodexDevLogin()) {
+    res.status(403).json({ error: 'Codex dev login is not allowed for this project' });
+    return;
+  }
+
+  try {
+    const uid = resolveCodexDevUid();
+    await ensureCodexDevProfileState(uid);
+    const token = await admin.auth().createCustomToken(uid, {
+      devCodex: true,
+      devActor: codexDevActor,
+    });
+    res.status(200).json({ ok: true, uid, token });
+  } catch (error) {
+    logger.error('createDevCodexToken failed', error);
+    res.status(500).json({ error: 'Failed to create Codex dev token' });
   }
 });
 

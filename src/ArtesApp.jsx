@@ -644,6 +644,7 @@ export default function ArtesApp() {
   const [toastMessage, setToastMessage] = useState(null);
   const [supportThreadId, setSupportThreadId] = useState(null);
   const [resolvedModerationThreadId, setResolvedModerationThreadId] = useState('');
+  const [pendingApprovedReminder, setPendingApprovedReminder] = useState(null);
   const [claimInviteToken, setClaimInviteToken] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
@@ -686,7 +687,7 @@ export default function ArtesApp() {
   const [challengeConfig, setChallengeConfig] = useState(DEFAULT_CHALLENGE_CONFIG);
   const [configLoading, setConfigLoading] = useState(true);
   const handleOpenUploadModal = useCallback((options = {}) => {
-    setUploadContext({ isChallenge: false, ...options });
+    setUploadContext({ isChallenge: false, resumeUploadId: null, ...options });
     setShowUploadModal(true);
   }, []);
 
@@ -1485,6 +1486,85 @@ export default function ArtesApp() {
       });
   };
 
+  const handleResumeApprovedUpload = useCallback((uploadId) => {
+    if (!uploadId) return;
+    handleOpenUploadModal({ resumeUploadId: uploadId, isChallenge: false });
+    setPendingApprovedReminder(null);
+  }, [handleOpenUploadModal]);
+
+  const handlePendingReminderToChat = useCallback(() => {
+    setPendingApprovedReminder(null);
+    handleOpenSupportChat();
+  }, [handleOpenSupportChat]);
+
+  useEffect(() => {
+    if (!authReady || !authUser?.uid || !profile) {
+      setPendingApprovedReminder(null);
+      return;
+    }
+    let active = true;
+    const db = getFirebaseDbInstance();
+
+    const resolveTimestamp = (value) => {
+      if (!value) return 0;
+      if (typeof value.toMillis === 'function') return value.toMillis();
+      if (typeof value.seconds === 'number') return value.seconds * 1000;
+      if (typeof value === 'number') return value;
+      return 0;
+    };
+
+    const loadPendingApprovedUpload = async () => {
+      try {
+        const snapshot = await getDocs(query(
+          collection(db, 'uploads'),
+          where('userId', '==', authUser.uid),
+          where('reviewStatus', '==', 'approved'),
+          where('publicationStatus', '==', 'pending'),
+          limit(10),
+        ));
+        if (!active || snapshot.empty) {
+          setPendingApprovedReminder(null);
+          return;
+        }
+
+        const candidates = snapshot.docs
+          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          .sort((a, b) => {
+            const left = resolveTimestamp(b.reviewDecisionAt) || resolveTimestamp(b.approvedAt) || resolveTimestamp(b.createdAt);
+            const right = resolveTimestamp(a.reviewDecisionAt) || resolveTimestamp(a.approvedAt) || resolveTimestamp(a.createdAt);
+            return left - right;
+          });
+
+        let openCandidate = null;
+        for (const item of candidates) {
+          const postSnap = await getDoc(doc(db, 'posts', item.id));
+          if (!postSnap.exists()) {
+            openCandidate = item;
+            break;
+          }
+        }
+
+        if (!active || !openCandidate) {
+          setPendingApprovedReminder(null);
+          return;
+        }
+
+        setPendingApprovedReminder({
+          uploadId: openCandidate.id,
+          count: candidates.length,
+        });
+      } catch (error) {
+        if (!active) return;
+        setPendingApprovedReminder(null);
+      }
+    };
+
+    loadPendingApprovedUpload();
+    return () => {
+      active = false;
+    };
+  }, [authReady, authUser?.uid, profile?.uid]);
+
   const handleToggleDarkMode = async () => {
     const nextTheme = darkMode ? 'light' : 'dark';
     setDarkMode(nextTheme === 'dark');
@@ -1940,8 +2020,8 @@ export default function ArtesApp() {
               handleListenerError={handleListenerError}
               moderationModal={moderationModal}
               moderationActionPending={moderationActionPending}
-              onModerationAction={handleModerationAction}
               onCloseModerationModal={() => handleModerationAction('dismiss')}
+              onResumeApprovedUpload={handleResumeApprovedUpload}
               communityConfig={communityConfig}
               challengeConfig={challengeConfig}
               configLoading={configLoading}
@@ -1989,6 +2069,7 @@ export default function ArtesApp() {
                   functionsBase={functionsBase}
                   initialThreadId={supportThreadId}
                   userProfile={userProfile}
+                  onResumeApprovedUpload={handleResumeApprovedUpload}
                 />
               </div>
             ) : (
@@ -2086,6 +2167,8 @@ export default function ArtesApp() {
             users={users}
             isChallenge={uploadContext.isChallenge}
             functionsBase={functionsBase}
+            moderationApiBase={moderationApiBase}
+            resumeUploadId={uploadContext.resumeUploadId}
           />
         )}
         {showSettingsModal && (
@@ -2131,6 +2214,30 @@ export default function ArtesApp() {
         {toastMessage && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-slate-900 text-white text-sm px-4 py-2 rounded-full shadow-lg">
             {toastMessage}
+          </div>
+        )}
+        {pendingApprovedReminder && (
+          <div className="fixed top-5 right-5 z-[75] w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-blue-200 bg-white/95 dark:bg-slate-900/95 dark:border-slate-700 shadow-2xl p-4">
+            <p className="text-sm font-semibold text-slate-900 dark:text-white">Je goedgekeurde upload wacht nog op publicatie.</p>
+            <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              Open de chat met Artes Moderatie en kies “Open in editor” om je post af te ronden.
+            </p>
+            <div className="mt-3 flex gap-2 justify-end">
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-600"
+                onClick={() => setPendingApprovedReminder(null)}
+              >
+                Sluiten
+              </button>
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-full bg-blue-600 text-white"
+                onClick={handlePendingReminderToChat}
+              >
+                Naar chat
+              </button>
+            </div>
           </div>
         )}
         
@@ -3923,13 +4030,18 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
   );
 }
 
-function ModerationDecisionModal({ message, onClose, onAction, pending }) {
+function ModerationDecisionModal({ message, onClose, onOpenComposer, pending, currentUserUid }) {
   if (!message) return null;
   const decision = message?.metadata?.decision;
   const reasons = message?.metadata?.reasons || [];
   const isApproved = decision === 'approved';
   const isReport = message?.metadata?.caseType === 'report';
-  const canTakeAction = isApproved && !isReport && message?.metadata?.uploadId;
+  const ownerUid = message?.metadata?.ownerUid || null;
+  const canTakeAction = isApproved
+    && !isReport
+    && message?.metadata?.uploadId
+    && ownerUid
+    && ownerUid === currentUserUid;
   const title = decision ? (isApproved ? 'Je foto is goedgekeurd' : 'Je foto is niet goedgekeurd') : 'Moderatie-update';
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
@@ -3959,15 +4071,15 @@ function ModerationDecisionModal({ message, onClose, onAction, pending }) {
         <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex flex-wrap gap-3 justify-end">
           {canTakeAction ? (
             <>
-              <Button variant="secondary" onClick={() => onAction('saveDraft')} disabled={pending}>
-                Later plaatsen
+              <Button variant="secondary" onClick={onClose} disabled={pending}>
+                Later
               </Button>
-              <Button onClick={() => onAction('publishNow')} disabled={pending}>
-                Nu plaatsen
+              <Button onClick={() => onOpenComposer?.(message?.metadata?.uploadId)} disabled={pending}>
+                Open in editor
               </Button>
             </>
           ) : (
-            <Button onClick={() => onAction('dismiss')} disabled={pending}>
+            <Button onClick={onClose} disabled={pending}>
               Oké
             </Button>
           )}
@@ -4766,8 +4878,8 @@ function ModerationPortal({
   handleListenerError,
   moderationModal,
   moderationActionPending,
-  onModerationAction,
   onCloseModerationModal,
+  onResumeApprovedUpload,
   communityConfig,
   challengeConfig,
   configLoading,
@@ -5206,15 +5318,25 @@ function ModerationPortal({
         <ModerationDecisionModal
           message={moderationModal}
           onClose={onCloseModerationModal}
-          onAction={onModerationAction}
+          onOpenComposer={onResumeApprovedUpload}
           pending={moderationActionPending}
+          currentUserUid={authUser?.uid || null}
         />
       )}
     </div>
   );
 }
 
-function UploadModal({ onClose, user, profile, users, isChallenge = false, functionsBase = '' }) {
+function UploadModal({
+  onClose,
+  user,
+  profile,
+  users,
+  isChallenge = false,
+  functionsBase = '',
+  moderationApiBase = '',
+  resumeUploadId = null,
+}) {
   const defaultRole = profile.roles?.[0] || 'photographer';
   const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true };
   const triggerLabelMap = useMemo(() => new Map(TRIGGERS.map((trigger) => [trigger.id, trigger.label])), []);
@@ -5255,6 +5377,9 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
   const [classification, setClassification] = useState(null);
   const [reviewRequested, setReviewRequested] = useState(false);
   const [reviewRequestPending, setReviewRequestPending] = useState(false);
+  const [resumeUpload, setResumeUpload] = useState(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
+  const [resumeError, setResumeError] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [uploaderRole, setUploaderRole] = useState(defaultRole);
@@ -5270,6 +5395,97 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
     }
     return import.meta.env.VITE_MODERATION_FUNCTION_URL || '';
   }, []);
+
+  const isResumeFlow = Boolean(resumeUploadId);
+
+  useEffect(() => {
+    if (!resumeUploadId || !user?.uid) {
+      setResumeUpload(null);
+      setResumeLoading(false);
+      setResumeError('');
+      return;
+    }
+    let active = true;
+    const loadUpload = async () => {
+      setResumeLoading(true);
+      setResumeError('');
+      try {
+        const db = getFirebaseDbInstance();
+        const uploadSnap = await getDoc(doc(db, 'uploads', resumeUploadId));
+        if (!active) return;
+        if (!uploadSnap.exists()) {
+          setResumeUpload(null);
+          setResumeError('De goedgekeurde upload is niet gevonden.');
+          return;
+        }
+        const uploadData = uploadSnap.data() || {};
+        const ownerId = uploadData.userId || uploadData.ownerUid || uploadData.userUid || null;
+        if (ownerId !== user.uid) {
+          setResumeUpload(null);
+          setResumeError('Deze upload hoort niet bij jouw account.');
+          return;
+        }
+        const draft = uploadData.postDraft || {};
+        const nextImage = String(draft.imageUrl || uploadData.imageUrl || uploadData.imageRef || '').trim();
+        if (!nextImage) {
+          setResumeUpload(null);
+          setResumeError('Deze upload mist een afbeelding en kan niet hervat worden.');
+          return;
+        }
+        setResumeUpload({ id: uploadSnap.id, ...uploadData });
+        setImage(nextImage);
+        setTitle(String(draft.title || uploadData.title || uploadData.caption || '').trim());
+        setDesc(String(draft.description || draft.caption || uploadData.description || uploadData.caption || '').trim());
+        setSelectedStyles(Array.isArray(draft.styles)
+          ? draft.styles.filter(Boolean)
+          : Array.isArray(draft.themes)
+            ? draft.themes.filter(Boolean)
+            : []);
+        const nextCredits = Array.isArray(draft.credits)
+          ? draft.credits.filter(Boolean)
+          : Array.isArray(draft.contributors)
+            ? draft.contributors.filter(Boolean)
+            : [];
+        if (nextCredits.length > 0) {
+          setCredits(nextCredits);
+        }
+        const nextMakerTags = Array.isArray(draft.makerTags)
+          ? draft.makerTags.filter(Boolean)
+          : Array.isArray(uploadData.makerTags)
+            ? uploadData.makerTags.filter(Boolean)
+            : [];
+        const nextAppliedTriggers = Array.isArray(draft.appliedTriggers)
+          ? draft.appliedTriggers.filter(Boolean)
+          : Array.isArray(uploadData.appliedTriggers)
+            ? uploadData.appliedTriggers.filter(Boolean)
+            : [];
+        setMakerTags(nextMakerTags);
+        setAppliedTriggers(nextAppliedTriggers);
+        setOutcome(uploadData.outcome || 'allowed');
+        setForbiddenReasons(Array.isArray(uploadData.forbiddenReasons) ? uploadData.forbiddenReasons : []);
+        setReviewCaseId(uploadData.reviewCaseId || null);
+        setReviewUploadId(uploadSnap.id);
+        setRequiredThemes([]);
+        setShouldReview(false);
+        setShowSuggestionUI(false);
+        setUploaderRole(String(draft.authorRole || uploadData.authorRole || defaultRole));
+        setStep(2);
+      } catch (error) {
+        if (!active) return;
+        setResumeUpload(null);
+        setResumeError('Hervatten mislukt. Probeer het opnieuw via de chat.');
+      } finally {
+        if (active) {
+          setResumeLoading(false);
+        }
+      }
+    };
+
+    loadUpload();
+    return () => {
+      active = false;
+    };
+  }, [resumeUploadId, user?.uid, defaultRole]);
   const [allowExternalOverride, setAllowExternalOverride] = useState(false);
 
   // Contributor search logic
@@ -5783,6 +5999,43 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
     setPublishError('');
 
     try {
+      if (isResumeFlow && resumeUpload?.reviewStatus === 'approved' && resumeUpload?.publicationStatus === 'pending') {
+        if (!moderationApiBase) {
+          throw new Error('Publiceren is tijdelijk niet beschikbaar. Probeer opnieuw via de chat.');
+        }
+        const token = await user.getIdToken();
+        const response = await fetch(`${moderationApiBase}/userModerationAction`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            uploadId: resumeUpload.id,
+            action: 'repairPublished',
+            postDraft: {
+              title,
+              description: desc,
+              imageUrl: image,
+              authorName: profile.displayName,
+              authorRole: uploaderRole,
+              styles: selectedStyles,
+              makerTags,
+              appliedTriggers,
+              credits,
+              isChallenge,
+            },
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || 'Publiceren van goedgekeurde upload mislukt.');
+        }
+        setPublishing(false);
+        onClose();
+        return;
+      }
+
       const publishedDoc = await publishPost({
         title,
         description: desc,
@@ -5940,11 +6193,27 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
                   Challenge
                 </span>
               )}
+              {isResumeFlow && (
+                <span className="text-xs uppercase tracking-wide bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                  Hervatten
+                </span>
+              )}
             </div>
             <button onClick={onClose}><X className="dark:text-white"/></button>
           </div>
           <div className="flex-1 overflow-y-auto p-6 no-scrollbar">
-             {step === 1 ? <div className="h-full border-2 border-dashed rounded-3xl flex items-center justify-center relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-10 h-10 text-slate-400"/></div> : (
+             {resumeLoading && (
+               <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
+                 <Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploadgegevens laden...
+               </div>
+             )}
+             {!resumeLoading && resumeError && (
+               <div className="max-w-lg mx-auto mt-6 rounded-2xl border border-red-200 bg-red-50 text-red-700 p-4 text-sm">
+                 {resumeError}
+               </div>
+             )}
+             {!resumeLoading && !resumeError && (
+             step === 1 ? <div className="h-full border-2 border-dashed rounded-3xl flex items-center justify-center relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-10 h-10 text-slate-400"/></div> : (
                 <div className="grid md:grid-cols-2 gap-8">
                    <div className="space-y-4">
                       <div className="aspect-[4/5] bg-slate-100 rounded-xl overflow-hidden relative">
@@ -6205,6 +6474,7 @@ function UploadModal({ onClose, user, profile, users, isChallenge = false, funct
                       </Button>
                    </div>
                 </div>
+             )
              )}
           </div>
        </div>

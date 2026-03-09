@@ -127,14 +127,17 @@ const isProjectAllowedForCodexDevLogin = () => {
   return Boolean(projectId && allowed.includes(projectId));
 };
 
+const codexDevUidDefault = 'codex-dev-user';
+
 const resolveCodexDevUid = () => {
   const configured = String(process.env.CODEX_DEV_UID || '').trim();
-  return configured || 'codex-dev-user';
+  return configured || codexDevUidDefault;
 };
 
 const codexDevDisplayName = 'Codex';
 const codexDevActor = 'codex';
 const codexDevRoles = ['assistent'];
+const isCodexDevUid = (uid) => Boolean(uid) && uid === resolveCodexDevUid();
 
 const ensureCodexDevProfileState = async (uid) => {
   const now = FieldValue.serverTimestamp();
@@ -1491,6 +1494,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   try {
     const uploadPayload = {
       userId: userId || null,
+      ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
       outcome,
       appliedTriggers: finalAppliedTriggers,
       suggestedTriggers: finalSuggestedTriggers,
@@ -2341,6 +2345,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
         status: 'inReview',
         decision: null,
         userId: decoded.uid,
+        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
         uploadId,
         linkedUploadIds: [uploadId],
         createdAt: FieldValue.serverTimestamp(),
@@ -2352,6 +2357,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
 
     await uploadRef.set(
       {
+        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
         reviewCaseId,
         reviewStatus: 'inReview',
         reviewRequestedAt: FieldValue.serverTimestamp(),
@@ -2364,6 +2370,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
     if (!existingCase) {
       await db.collection('reviewCases').doc(reviewCaseId).set(
         {
+          ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
           uploadId,
           linkedUploadIds: FieldValue.arrayUnion(uploadId),
           updatedAt: FieldValue.serverTimestamp(),
@@ -2887,6 +2894,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             credits: normalizedCredits,
             likes: 0,
             isChallenge: normalizedIsChallenge,
+            ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
           });
@@ -2895,6 +2903,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
         transaction.set(
           uploadRef,
           {
+            ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
             publicationStatus: 'published',
             publishedAt: FieldValue.serverTimestamp(),
             postId: uploadId,
@@ -3775,6 +3784,163 @@ export const getVouchRequests = onRequest({ cors: true, region: 'europe-west4' }
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to fetch vouch requests' });
+  }
+});
+
+export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  try {
+    const decoded = await verifyToken(req);
+    await ensureModerator(decoded);
+
+    const body = parseJsonBody(req) || {};
+    const dryRun = body?.dryRun !== false;
+    const confirm = String(body?.confirm || '');
+    const targetUid = resolveCodexDevUid();
+
+    if (!dryRun && confirm !== targetUid) {
+      res.status(400).json({ error: `confirm must equal ${targetUid} for execute mode` });
+      return;
+    }
+
+    const deleteInBatches = async (refs = []) => {
+      if (dryRun || refs.length === 0) return { deleted: 0, failed: [] };
+      let deleted = 0;
+      const failed = [];
+      const chunkSize = 400;
+
+      for (let i = 0; i < refs.length; i += chunkSize) {
+        const chunk = refs.slice(i, i + chunkSize);
+        const batch = db.batch();
+        chunk.forEach((ref) => batch.delete(ref));
+        try {
+          await batch.commit();
+          deleted += chunk.length;
+        } catch (error) {
+          chunk.forEach((ref) => failed.push({ path: ref.path, error: error?.message || String(error) }));
+        }
+      }
+
+      return { deleted, failed };
+    };
+
+    const [
+      postsByAuthorIdSnap,
+      postsByAuthorUidSnap,
+      uploadsSnap,
+      commentsSnap,
+      likesSnap,
+      followsSnap,
+    ] = await Promise.all([
+      db.collection('posts').where('authorId', '==', targetUid).get(),
+      db.collection('posts').where('authorUid', '==', targetUid).get(),
+      db.collection('uploads').where('userId', '==', targetUid).get(),
+      db.collectionGroup('comments').where('authorId', '==', targetUid).get(),
+      db.collectionGroup('likes').where(FieldPath.documentId(), '==', targetUid).get(),
+      db.collection('users').doc(targetUid).collection('following').get(),
+    ]);
+
+    const postsById = new Map();
+    postsByAuthorIdSnap.docs.forEach((docSnap) => {
+      postsById.set(docSnap.id, docSnap);
+    });
+    postsByAuthorUidSnap.docs.forEach((docSnap) => {
+      postsById.set(docSnap.id, docSnap);
+    });
+    const postDocs = Array.from(postsById.values());
+
+    const codexUploadIds = new Set(uploadsSnap.docs.map((docSnap) => docSnap.id));
+    const reviewCasesByUserSnap = await db
+      .collection('reviewCases')
+      .where('caseType', '==', 'upload')
+      .where('userId', '==', targetUid)
+      .get();
+
+    const reviewCaseDocs = reviewCasesByUserSnap.docs.filter((docSnap) => {
+      const data = docSnap.data() || {};
+      const uploadId = data?.uploadId || null;
+      const linkedUploadIds = Array.isArray(data?.linkedUploadIds) ? data.linkedUploadIds : [];
+      if (uploadId && codexUploadIds.has(uploadId)) return true;
+      return linkedUploadIds.some((id) => codexUploadIds.has(id));
+    });
+
+    const likesRefs = likesSnap.docs.map((docSnap) => docSnap.ref);
+    const commentsRefs = commentsSnap.docs.map((docSnap) => docSnap.ref);
+    const followsRefs = followsSnap.docs.map((docSnap) => docSnap.ref);
+    const postsRefs = postDocs.map((docSnap) => docSnap.ref);
+    const reviewCaseRefs = reviewCaseDocs.map((docSnap) => docSnap.ref);
+    const uploadsRefs = uploadsSnap.docs.map((docSnap) => docSnap.ref);
+
+    const summary = {
+      targetUid,
+      mode: dryRun ? 'dryRun' : 'execute',
+      counts: {
+        likes: likesRefs.length,
+        comments: commentsRefs.length,
+        follows: followsRefs.length,
+        posts: postsRefs.length,
+        reviewCases: reviewCaseRefs.length,
+        uploads: uploadsRefs.length,
+      },
+      samples: {
+        likes: likesRefs.slice(0, 20).map((ref) => ref.path),
+        comments: commentsRefs.slice(0, 20).map((ref) => ref.path),
+        follows: followsRefs.slice(0, 20).map((ref) => ref.path),
+        posts: postsRefs.slice(0, 20).map((ref) => ref.path),
+        reviewCases: reviewCaseRefs.slice(0, 20).map((ref) => ref.path),
+        uploads: uploadsRefs.slice(0, 20).map((ref) => ref.path),
+      },
+      guard: {
+        moderatorEmail: decoded?.email || null,
+      },
+      order: ['likes', 'comments', 'follows', 'posts', 'reviewCases', 'uploads'],
+    };
+
+    if (dryRun) {
+      res.status(200).json({ ok: true, ...summary });
+      return;
+    }
+
+    const failures = [];
+    const deletedCounts = {};
+
+    const likeResult = await deleteInBatches(likesRefs);
+    deletedCounts.likes = likeResult.deleted;
+    failures.push(...likeResult.failed);
+
+    const commentResult = await deleteInBatches(commentsRefs);
+    deletedCounts.comments = commentResult.deleted;
+    failures.push(...commentResult.failed);
+
+    const followResult = await deleteInBatches(followsRefs);
+    deletedCounts.follows = followResult.deleted;
+    failures.push(...followResult.failed);
+
+    const postResult = await deleteInBatches(postsRefs);
+    deletedCounts.posts = postResult.deleted;
+    failures.push(...postResult.failed);
+
+    const reviewCaseResult = await deleteInBatches(reviewCaseRefs);
+    deletedCounts.reviewCases = reviewCaseResult.deleted;
+    failures.push(...reviewCaseResult.failed);
+
+    const uploadResult = await deleteInBatches(uploadsRefs);
+    deletedCounts.uploads = uploadResult.deleted;
+    failures.push(...uploadResult.failed);
+
+    res.status(200).json({
+      ok: failures.length === 0,
+      ...summary,
+      deletedCounts,
+      failed: failures,
+    });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to cleanup codex test data' });
   }
 });
 

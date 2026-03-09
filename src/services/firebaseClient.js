@@ -199,10 +199,12 @@ export const publishPost = async (post) => {
     : [];
 
   logFirestoreOp('WRITE', 'posts/{auto}', 'publishPost');
+  const isCodexActor = auth.currentUser.uid === 'codex-dev-user';
   return addDoc(collection(db, 'posts'), {
     ...post,
     contributorIds,
     authorUid: auth.currentUser.uid,
+    ...(isCodexActor ? { testActor: 'codex' } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });

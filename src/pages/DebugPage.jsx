@@ -100,7 +100,7 @@ export default function DebugPage() {
 
   const uid = user?.uid || 'uid';
   const functionsBase = useMemo(() => resolveFunctionsBase(), []);
-  const showCodexCleanup = import.meta.env.DEV && moderatorAccess;
+  const showCodexCleanup = debugAllowed() && moderatorAccess;
 
   const testDefinitions = useMemo(
     () => [

@@ -12,9 +12,9 @@ export function debugAllowed() {
   // Geen debug tijdens server-side rendering
   if (typeof window === 'undefined') return false;
 
-  // Alleen toestaan als je in dev draait (npm run dev)
-  const isDev = import.meta.env.DEV === true;
-  if (!isDev) return false;
+  // Toestaan in lokale dev, of expliciet in build/staging via VITE_ENABLE_DEBUG_PAGE=1
+  const debugByMode = import.meta.env.DEV === true || import.meta.env.VITE_ENABLE_DEBUG_PAGE === '1';
+  if (!debugByMode) return false;
 
   // Host moet lokaal of expliciet in VITE_DEBUG_HOSTS staan
   const hostname = window.location.hostname;

@@ -1413,6 +1413,7 @@ export const subscribeToPosts = (cb) =>
 export const addComment = (postId, comment) =>
   addDoc(collection(getFirebaseDb(), 'posts', postId, 'comments'), {
     ...comment,
+    ...(comment?.authorId === 'codex-dev-user' ? { testActor: 'codex' } : {}),
     createdAt: serverTimestamp(),
   });
 

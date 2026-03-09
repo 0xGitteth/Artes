@@ -64,6 +64,10 @@ export default function DebugPage() {
   const [moderatorAccess, setModeratorAccess] = useState(false);
   const [results, setResults] = useState({});
   const [running, setRunning] = useState(false);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [cleanupStatus, setCleanupStatus] = useState('');
+  const [cleanupError, setCleanupError] = useState('');
+  const [cleanupResult, setCleanupResult] = useState(null);
 
   useEffect(() => {
     if (!debugAllowed()) {
@@ -95,6 +99,8 @@ export default function DebugPage() {
   }, [user]);
 
   const uid = user?.uid || 'uid';
+  const functionsBase = useMemo(() => resolveFunctionsBase(), []);
+  const showCodexCleanup = import.meta.env.DEV && moderatorAccess;
 
   const testDefinitions = useMemo(
     () => [
@@ -125,6 +131,55 @@ export default function DebugPage() {
       },
     }));
   }, []);
+
+  const runCodexCleanup = useCallback(async (dryRun) => {
+    if (!user) {
+      setCleanupError('Je bent niet ingelogd.');
+      return;
+    }
+    if (!functionsBase) {
+      setCleanupError('Functions base ontbreekt. Controleer VITE_FUNCTIONS_BASE_URL.');
+      return;
+    }
+    if (!dryRun) {
+      const confirmed = window.confirm(
+        'Weet je zeker dat je Codex testdata wilt verwijderen? Dit voert execute mode uit.'
+      );
+      if (!confirmed) return;
+    }
+
+    setCleanupLoading(true);
+    setCleanupError('');
+    setCleanupResult(null);
+    setCleanupStatus(dryRun ? 'Dry run gestart…' : 'Execute gestart…');
+
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(`${functionsBase}/cleanupCodexTestData`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(
+          dryRun
+            ? { dryRun: true }
+            : { dryRun: false, confirm: 'codex-dev-user' }
+        ),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || 'cleanupCodexTestData call mislukt.');
+      }
+      setCleanupResult(data);
+      setCleanupStatus(dryRun ? 'Dry run voltooid.' : 'Execute voltooid.');
+    } catch (error) {
+      setCleanupStatus('');
+      setCleanupError(error?.message || 'Onbekende fout bij cleanup.');
+    } finally {
+      setCleanupLoading(false);
+    }
+  }, [functionsBase, user]);
 
   const runAuthTests = useCallback(async () => {
     logDebug('Running auth tests');
@@ -516,6 +571,62 @@ export default function DebugPage() {
         <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {testDefinitions.map((definition) => renderCard(definition))}
         </div>
+
+        {showCodexCleanup && (
+          <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">Codex cleanup (moderator, dev)</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              Roept <code>cleanupCodexTestData</code> aan via de bestaande functions base.
+            </p>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => runCodexCleanup(true)}
+                disabled={cleanupLoading}
+                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+              >
+                Dry run Codex cleanup
+              </button>
+              <button
+                type="button"
+                onClick={() => runCodexCleanup(false)}
+                disabled={cleanupLoading}
+                className="rounded-full border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+              >
+                Voer Codex cleanup uit
+              </button>
+            </div>
+
+            {cleanupStatus ? <p className="mt-3 text-sm text-slate-700">{cleanupStatus}</p> : null}
+            {cleanupError ? <p className="mt-3 text-sm text-rose-600">{cleanupError}</p> : null}
+
+            {cleanupResult && (
+              <div className="mt-3 space-y-3 text-xs text-slate-700">
+                <div>
+                  <span className="font-semibold">Counts</span>
+                  <pre className="mt-1 overflow-auto rounded-lg bg-slate-50 p-2">{JSON.stringify(cleanupResult.counts || {}, null, 2)}</pre>
+                </div>
+                <div>
+                  <span className="font-semibold">Samples</span>
+                  <pre className="mt-1 overflow-auto rounded-lg bg-slate-50 p-2">{JSON.stringify(cleanupResult.samples || {}, null, 2)}</pre>
+                </div>
+                {cleanupResult.deletedCounts && (
+                  <div>
+                    <span className="font-semibold">Deleted counts</span>
+                    <pre className="mt-1 overflow-auto rounded-lg bg-slate-50 p-2">{JSON.stringify(cleanupResult.deletedCounts, null, 2)}</pre>
+                  </div>
+                )}
+                {Array.isArray(cleanupResult.failed) && cleanupResult.failed.length > 0 && (
+                  <div>
+                    <span className="font-semibold">Failed items</span>
+                    <pre className="mt-1 overflow-auto rounded-lg bg-slate-50 p-2">{JSON.stringify(cleanupResult.failed, null, 2)}</pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

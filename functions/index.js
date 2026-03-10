@@ -3840,7 +3840,7 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
       db.collection('posts').where('authorUid', '==', targetUid).get(),
       db.collection('uploads').where('userId', '==', targetUid).get(),
       db.collectionGroup('comments').where('authorId', '==', targetUid).get(),
-      db.collectionGroup('likes').where(FieldPath.documentId(), '==', targetUid).get(),
+      db.collectionGroup('likes').get(),
       db.collection('users').doc(targetUid).collection('following').get(),
     ]);
 
@@ -3868,7 +3868,9 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
       return linkedUploadIds.some((id) => codexUploadIds.has(id));
     });
 
-    const likesRefs = likesSnap.docs.map((docSnap) => docSnap.ref);
+    const likesRefs = likesSnap.docs
+      .filter((docSnap) => docSnap.id === targetUid)
+      .map((docSnap) => docSnap.ref);
     const commentsRefs = commentsSnap.docs.map((docSnap) => docSnap.ref);
     const followsRefs = followsSnap.docs.map((docSnap) => docSnap.ref);
     const postsRefs = postDocs.map((docSnap) => docSnap.ref);

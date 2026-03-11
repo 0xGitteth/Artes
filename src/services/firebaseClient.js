@@ -1,7 +1,6 @@
 import { initializeApp, getApps } from 'firebase/app';
 import {
   getAuth,
-  signInAnonymously,
   onAuthStateChanged,
   signInWithCustomToken,
   signOut,
@@ -71,11 +70,6 @@ const logFirestoreOp = (operation, path, context = '') => {
   }
 };
 
-export const ensureUserSignedIn = async (customToken) => {
-  if (customToken) return signInWithCustomToken(auth, customToken);
-  return signInAnonymously(auth);
-};
-
 export const subscribeToAuth = (callback) =>
   onAuthStateChanged(auth, async (user) => {
     if (import.meta.env.DEV) {
@@ -92,7 +86,6 @@ export const subscribeToAuth = (callback) =>
 
       console.log('[Auth Debug]', {
         uid: user?.uid ?? null,
-        isAnonymous: user?.isAnonymous ?? false,
         email: user?.email ?? null,
         emailVerified: user?.emailVerified ?? false,
         provider,

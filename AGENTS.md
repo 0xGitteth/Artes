@@ -8,12 +8,12 @@ Start
 
 Login
 
-1. Gebruik de knop `Dev login`
+1. Gebruik de knop `Codex Dev login (vast)`
 2. Gebruik geen email of wachtwoord login
 
 Verwachte flow na login
 
-1. Na Dev login kan de app door onboarding gaan
+1. Na Codex Dev login kan de app door onboarding gaan
 2. Dit is normaal en betekent niet dat login is mislukt
 3. Ga door totdat de app bruikbaar is
 

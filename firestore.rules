@@ -16,21 +16,15 @@ service cloud.firestore {
     function onlyKeys(allowed) {
       return request.resource.data.keys().hasOnly(allowed);
     }
-    // Dev flags are strictly server-side controlled via /config/app.
-    // In production this document should be absent, or flags should stay false.
-    function devConfigEnabled(flagName) {
-      return exists(/databases/$(database)/documents/config/app)
-        && get(/databases/$(database)/documents/config/app).data[flagName] == true;
-    }
-    function isAnonymousOnboardingUser() {
-      return signInProvider() == 'anonymous'
-        && devConfigEnabled('allowAnonymousOnboarding');
+    function isCodexDev() {
+      return request.auth != null
+        && request.auth.token.devCodex == true;
     }
     function isDevAnon() {
-      return isAnonymousOnboardingUser();
+      return isCodexDev();
     }
     function isVerifiedOrDev() {
-      return isVerifiedUser() || isAnonymousOnboardingUser();
+      return isVerifiedUser() || isCodexDev();
     }
     function noClientGateFieldWrites() {
       return resource == null ? true : !request.resource.data.diff(resource.data).affectedKeys().hasAny([

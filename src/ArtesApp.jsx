@@ -5463,6 +5463,9 @@ function UploadModal({
   const [errors, setErrors] = useState({});
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState('');
+  const moderationDebugEnabled = import.meta.env.DEV || import.meta.env.VITE_MODERATION_DEBUG === '1';
+  const moderationTraceRef = useRef(null);
+  const lastUiStateRef = useRef(null);
   const moderationEndpoint = useMemo(() => {
     const functionsBase = import.meta.env.VITE_FUNCTIONS_BASE_URL
       || import.meta.env.VITE_FUNCTIONS_BASE
@@ -5474,6 +5477,62 @@ function UploadModal({
   }, []);
 
   const isResumeFlow = Boolean(resumeUploadId);
+
+  const deriveCaseId = useCallback((value) => {
+    const normalized = String(value || '').trim();
+    const match = normalized.match(/(SAFE_\d+|BOUDOIR_\d+|BORDERLINE_\d+|EXPLICIT_\d+)/i);
+    return match ? match[1].toUpperCase() : null;
+  }, []);
+
+  const ensureModerationTrace = useCallback((seed = {}) => {
+    const current = moderationTraceRef.current;
+    const traceId = current?.traceId || `trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const next = {
+      traceId,
+      uploadId: current?.uploadId || resumeUploadId || null,
+      caseId: current?.caseId || deriveCaseId(title) || null,
+      filename: current?.filename || null,
+      userId: user?.uid || null,
+      selectedThemes: selectedStyles,
+      selectedSafetyTags: makerTags,
+      ...current,
+      ...seed,
+    };
+    moderationTraceRef.current = next;
+    return next;
+  }, [deriveCaseId, makerTags, resumeUploadId, selectedStyles, title, user?.uid]);
+
+  const logModerationDebug = useCallback((stage, patch = {}) => {
+    if (!moderationDebugEnabled) return;
+    const snapshot = ensureModerationTrace(patch);
+    console.debug('[upload-moderation-debug]', { stage, ...snapshot });
+  }, [ensureModerationTrace, moderationDebugEnabled]);
+
+  useEffect(() => {
+    const uiShownState = outcome === 'forbidden'
+      ? 'blocked'
+      : (shouldReview || requiredThemes.length > 0 ? 'review' : (outcome === 'allowed' ? 'allowed' : 'pending'));
+    if (lastUiStateRef.current === uiShownState) return;
+    lastUiStateRef.current = uiShownState;
+    logModerationDebug('ui-state-determined', {
+      uiShownState,
+      overlayShown: false,
+      reviewShown: uiShownState === 'review',
+      blockedShown: uiShownState === 'blocked',
+      finalResult: uiShownState,
+    });
+    const trace = moderationTraceRef.current;
+    if (trace?.aiParsedResult || trace?.policyResult || trace?.finalResult) {
+      const mismatch = Boolean(trace?.finalResult) && trace.finalResult !== uiShownState;
+      logModerationDebug('final-summary', {
+        aiResult: trace?.aiParsedResult?.outcome || null,
+        policyResult: trace?.policyResult || null,
+        finalResult: trace?.finalResult || null,
+        uiShownState,
+        mismatch,
+      });
+    }
+  }, [logModerationDebug, outcome, requiredThemes.length, shouldReview]);
 
   useEffect(() => {
     if (!resumeUploadId || !user?.uid) {
@@ -5630,6 +5689,21 @@ function UploadModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const initialTrace = {
+      traceId: `trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      uploadId: resumeUploadId || null,
+      caseId: deriveCaseId(file.name) || deriveCaseId(title) || null,
+      filename: file.name || null,
+      userId: user?.uid || null,
+      selectedThemes: selectedStyles,
+      selectedSafetyTags: makerTags,
+      moderateImageCalled: false,
+      firestoreWriteAttempted: false,
+      firestoreWriteSucceeded: false,
+    };
+    moderationTraceRef.current = initialTrace;
+    logModerationDebug('file-selected', initialTrace);
+
     try {
       const dataUrl = await compressImage(file);
       setImage(dataUrl);
@@ -5649,8 +5723,13 @@ function UploadModal({
       setShouldReview(false);
       setClassification(null);
       setReviewRequested(false);
+      logModerationDebug('file-processed', { previewSource: 'local-file', previewField: null });
     } catch (error) {
       console.error('Image processing failed', error);
+      logModerationDebug('file-processing-failed', {
+        finalResult: 'error',
+        finalReason: error?.message || 'image-processing-failed',
+      });
       setErrors(prev => ({ ...prev, image: 'Afbeelding verwerken mislukt. Probeer een ander bestand.' }));
     }
   };
@@ -5675,6 +5754,11 @@ function UploadModal({
       setAiError('');
     }
     setErrors((prev) => ({ ...prev, moderation: undefined }));
+    logModerationDebug('before-moderate-image', {
+      moderateImageCalled: true,
+      selectedThemes: selectedStyles,
+      selectedSafetyTags: makerTags,
+    });
 
     try {
       if (!user) {
@@ -5694,6 +5778,11 @@ function UploadModal({
       });
 
       if (!response.ok) {
+        logModerationDebug('after-moderate-image-response', {
+          moderateImageHttpStatus: response.status,
+          finalResult: 'error',
+          finalReason: 'moderate-image-http-error',
+        });
         throw new Error('AI-service gaf een fout terug.');
       }
 
@@ -5738,7 +5827,18 @@ function UploadModal({
       const normalizedAppliedTriggers = Array.from(new Set([...nextAppliedTriggers.map(resolveTriggerKey), ...nextAutoAppliedTriggers]));
       const shouldShowSuggestions = nextOutcome === 'allowed' && nextSuggestedTriggers.length > 0;
 
-      const moderationDebugEnabled = import.meta.env.DEV || import.meta.env.VITE_MODERATION_DEBUG === '1';
+      logModerationDebug('after-moderate-image-response', {
+        moderateImageHttpStatus: response.status,
+        aiRawSummary: {
+          outcome: data?.outcome ?? null,
+          shouldReview: Boolean(data?.shouldReview),
+          reviewCaseId: data?.reviewCaseId ?? null,
+        },
+        uploadId: nextUploadId || moderationTraceRef.current?.uploadId || null,
+        previewField: nextPreviewField,
+        previewSource: nextPreviewField || (nextUploadId ? 'linked-upload' : null),
+      });
+
       if (moderationDebugEnabled) {
         console.debug('[moderateImage]', {
           endpoint: moderationEndpoint,
@@ -5762,6 +5862,30 @@ function UploadModal({
           });
         }
       }
+
+      const parsedPolicyResult = nextOutcome === 'forbidden'
+        ? 'blocked'
+        : (Boolean(data?.shouldReview) || nextRequiredThemes.length > 0 ? 'review_required' : 'allowed');
+      const parsedPolicyReason = nextOutcome === 'forbidden'
+        ? (nextForbiddenReasons[0] || 'forbidden')
+        : (Boolean(data?.shouldReview)
+          ? 'manual-review-required'
+          : (nextRequiredThemes.length > 0 ? `missing-theme:${nextRequiredThemes.join(',')}` : 'policy-clear'));
+      const parsedFinalResult = parsedPolicyResult === 'blocked' ? 'blocked' : (parsedPolicyResult === 'review_required' ? 'review' : 'allowed');
+      logModerationDebug('after-parse-mapping', {
+        aiParsedResult: {
+          outcome: nextOutcome,
+          classification: nextClassification,
+          shouldReview: Boolean(data?.shouldReview),
+          requiredThemes: nextRequiredThemes,
+          forbiddenReasons: nextForbiddenReasons,
+        },
+        aiReason: nextClassification || null,
+        policyResult: parsedPolicyResult,
+        policyReason: parsedPolicyReason,
+        finalResult: parsedFinalResult,
+        finalReason: parsedPolicyReason,
+      });
 
       setAppliedTriggers(normalizedAppliedTriggers);
       setSuggestedTriggers(nextSuggestedTriggers.map(resolveTriggerKey));
@@ -5787,6 +5911,10 @@ function UploadModal({
       };
     } catch (error) {
       console.error('AI check failed', error);
+      logModerationDebug('after-parse-mapping', {
+        finalResult: 'error',
+        finalReason: error?.message || 'ai-check-failed',
+      });
       if (!silent) {
         setAiError('AI-check mislukt. Probeer het opnieuw.');
       }
@@ -6041,6 +6169,14 @@ function UploadModal({
     if (outcome === 'forbidden') validationErrors.moderation = 'Deze publicatie is geblokkeerd door de safety check.';
 
     if (Object.keys(validationErrors).length > 0) {
+      const nextFinalResult = validationErrors.moderation?.includes('review') ? 'review' : (validationErrors.moderation?.includes('geblokkeerd') ? 'blocked' : 'validation_error');
+      logModerationDebug('after-policy-gating', {
+        policyResult: nextFinalResult === 'review' ? 'review_required' : (nextFinalResult === 'blocked' ? 'blocked' : 'validation_error'),
+        policyReason: validationErrors.moderation || 'validation-failed',
+        finalResult: nextFinalResult,
+        finalReason: validationErrors.moderation || 'validation-failed',
+        publishAllowed: false,
+      });
       setErrors(validationErrors);
       return;
     }
@@ -6053,6 +6189,13 @@ function UploadModal({
     }
 
     if (nextOutcome === 'forbidden') {
+      logModerationDebug('after-policy-gating', {
+        policyResult: 'blocked',
+        policyReason: 'outcome-forbidden',
+        finalResult: 'blocked',
+        finalReason: 'outcome-forbidden',
+        publishAllowed: false,
+      });
       setErrors((prev) => ({ ...prev, moderation: 'Deze publicatie is geblokkeerd door de safety check.' }));
       return;
     }
@@ -6069,10 +6212,24 @@ function UploadModal({
     const effectiveMissingRequiredThemes = getMissingRequiredThemes(effectiveRequiredThemes);
 
     if (effectiveMissingRequiredThemes.length > 0) {
+      logModerationDebug('after-policy-gating', {
+        policyResult: 'review_required',
+        policyReason: `missing-required-themes:${effectiveMissingRequiredThemes.join(',')}`,
+        finalResult: 'review',
+        finalReason: 'required-theme-missing',
+        publishAllowed: false,
+      });
       setErrors((prev) => ({ ...prev, moderation: `Deze content is toegestaan maar vereist thema: ${effectiveMissingRequiredThemes.join(', ')}.` }));
       return;
     }
     if (effectiveShouldReview) {
+      logModerationDebug('after-policy-gating', {
+        policyResult: 'review_required',
+        policyReason: 'manual-review-required',
+        finalResult: 'review',
+        finalReason: 'manual-review-required',
+        publishAllowed: false,
+      });
       setErrors((prev) => ({ ...prev, moderation: 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.' }));
       return;
     }
@@ -6084,12 +6241,20 @@ function UploadModal({
 
     setPublishing(true);
     setPublishError('');
+    logModerationDebug('after-policy-gating', {
+      policyResult: 'allowed',
+      policyReason: 'policy-clear',
+      finalResult: 'allowed',
+      finalReason: 'ready-to-publish',
+      publishAllowed: true,
+    });
 
     try {
       if (isResumeFlow && resumeUpload?.reviewStatus === 'approved' && resumeUpload?.publicationStatus === 'pending') {
         if (!moderationApiBase) {
           throw new Error('Publiceren is tijdelijk niet beschikbaar. Probeer opnieuw via de chat.');
         }
+        logModerationDebug('before-firestore-write', { firestoreWriteAttempted: true, writeTarget: 'uploads/repaired-publication' });
         const token = await user.getIdToken();
         const response = await fetch(`${moderationApiBase}/userModerationAction`, {
           method: 'POST',
@@ -6116,13 +6281,21 @@ function UploadModal({
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
+          logModerationDebug('after-firestore-write-result', {
+            firestoreWriteAttempted: true,
+            firestoreWriteSucceeded: false,
+            finalResult: 'error',
+            finalReason: data?.error || 'resume-publication-failed',
+          });
           throw new Error(data?.error || 'Publiceren van goedgekeurde upload mislukt.');
         }
+        logModerationDebug('after-firestore-write-result', { firestoreWriteAttempted: true, firestoreWriteSucceeded: true });
         setPublishing(false);
         onClose();
         return;
       }
 
+      logModerationDebug('before-firestore-write', { firestoreWriteAttempted: true, writeTarget: 'posts/{auto}' });
       const publishedDoc = await publishPost({
         title,
         description: desc,
@@ -6143,6 +6316,11 @@ function UploadModal({
         isChallenge,
       });
       const postId = publishedDoc?.id || null;
+      logModerationDebug('after-firestore-write-result', {
+        firestoreWriteAttempted: true,
+        firestoreWriteSucceeded: Boolean(postId),
+        uploadId: moderationTraceRef.current?.uploadId || resumeUpload?.id || null,
+      });
 
       setErrors({});
       setImage(null);

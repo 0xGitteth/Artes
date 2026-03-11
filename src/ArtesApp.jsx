@@ -645,6 +645,7 @@ export default function ArtesApp() {
   const [supportThreadId, setSupportThreadId] = useState(null);
   const [resolvedModerationThreadId, setResolvedModerationThreadId] = useState('');
   const [pendingApprovedReminder, setPendingApprovedReminder] = useState(null);
+  const [acknowledgedApprovedUploadIds, setAcknowledgedApprovedUploadIds] = useState(() => new Set());
   const [claimInviteToken, setClaimInviteToken] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
@@ -1485,11 +1486,55 @@ export default function ArtesApp() {
       });
   };
 
+  const approvedReminderStorageKey = authUser?.uid
+    ? `artes.approvedReminderAcknowledged.${authUser.uid}`
+    : '';
+
+  useEffect(() => {
+    if (!approvedReminderStorageKey) {
+      setAcknowledgedApprovedUploadIds(new Set());
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(approvedReminderStorageKey);
+      if (!raw) {
+        setAcknowledgedApprovedUploadIds(new Set());
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        setAcknowledgedApprovedUploadIds(new Set());
+        return;
+      }
+      setAcknowledgedApprovedUploadIds(new Set(parsed.filter((value) => typeof value === 'string' && value.trim())));
+    } catch {
+      setAcknowledgedApprovedUploadIds(new Set());
+    }
+  }, [approvedReminderStorageKey]);
+
+  const markApprovedUploadReminderAcknowledged = useCallback((uploadId) => {
+    if (!uploadId) return;
+    setAcknowledgedApprovedUploadIds((prev) => {
+      if (prev.has(uploadId)) return prev;
+      const next = new Set(prev);
+      next.add(uploadId);
+      if (approvedReminderStorageKey) {
+        try {
+          window.localStorage.setItem(approvedReminderStorageKey, JSON.stringify(Array.from(next)));
+        } catch {
+          // noop: localStorage can fail in restricted browser modes.
+        }
+      }
+      return next;
+    });
+  }, [approvedReminderStorageKey]);
+
   const handleResumeApprovedUpload = useCallback((uploadId) => {
     if (!uploadId) return;
+    markApprovedUploadReminderAcknowledged(uploadId);
     handleOpenUploadModal({ resumeUploadId: uploadId, isChallenge: false });
     setPendingApprovedReminder(null);
-  }, [handleOpenUploadModal]);
+  }, [handleOpenUploadModal, markApprovedUploadReminderAcknowledged]);
 
   const handlePendingReminderToChat = useCallback(() => {
     setPendingApprovedReminder(null);
@@ -1528,11 +1573,17 @@ export default function ArtesApp() {
 
         const candidates = snapshot.docs
           .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          .filter((item) => !acknowledgedApprovedUploadIds.has(item.id))
           .sort((a, b) => {
             const left = resolveTimestamp(b.reviewDecisionAt) || resolveTimestamp(b.approvedAt) || resolveTimestamp(b.createdAt);
             const right = resolveTimestamp(a.reviewDecisionAt) || resolveTimestamp(a.approvedAt) || resolveTimestamp(a.createdAt);
             return left - right;
           });
+
+        if (!candidates.length) {
+          setPendingApprovedReminder(null);
+          return;
+        }
 
         let openCandidate = null;
         for (const item of candidates) {
@@ -1562,7 +1613,7 @@ export default function ArtesApp() {
     return () => {
       active = false;
     };
-  }, [authReady, authUser?.uid, profile?.uid]);
+  }, [acknowledgedApprovedUploadIds, authReady, authUser?.uid, profile?.uid]);
 
   const handleToggleDarkMode = async () => {
     const nextTheme = darkMode ? 'light' : 'dark';

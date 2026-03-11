@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 import {
   fetchUserIndex,
-  ensureUserSignedIn,
   publishPost,
   seedDemoContent,
   subscribeToPosts,
@@ -61,7 +60,7 @@ import {
   toggleLike,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
-import { signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import { signInWithCustomToken } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -93,6 +92,7 @@ import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/con
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
+import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
 
 // --- Constants & Styling ---
 
@@ -887,7 +887,6 @@ export default function ArtesApp() {
           : [];
         console.log('[ArtesApp] Auth state changed', {
           uid: u?.uid || null,
-          isAnonymous: u?.isAnonymous ?? false,
           email: u?.email || null,
           emailVerified: u?.emailVerified ?? false,
           provider: providers,
@@ -2305,30 +2304,6 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
   const auth = getFirebaseAuthInstance();
 
-  const devAnonymousEnabled = import.meta.env.DEV
-    ? true
-    : appConfig?.allowAnonymousOnboarding === true;
-
-  const handleDevLogin = async () => {
-    try {
-      setLocalError(null);
-      const result = await signInAnonymously(auth);
-      const refreshedConfig = await getAppConfig({ forceRefresh: true });
-      onDevConfigLoaded?.(refreshedConfig || null);
-      if (refreshedConfig?.allowAnonymousOnboarding !== true) {
-        await firebaseLogout();
-        setLocalError('Dev anonymous login staat server-side uit (config/app.allowAnonymousOnboarding).');
-        return;
-      }
-      await ensureUserProfile(result?.user || auth.currentUser);
-      console.log('Anonymous login successful');
-    } catch (err) {
-      const code = err?.code ?? 'unknown';
-      const message = err?.message ?? String(err);
-      alert(`Dev login failed:\nCode: ${code}\nMessage: ${message}`);
-    }
-  };
-
   const handleCodexDevLogin = async () => {
     try {
       setLocalError(null);
@@ -2364,7 +2339,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
              <div className="space-y-4">
                {import.meta.env.DEV && !authUser && (
                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
-                   Je bent niet ingelogd. Gebruik Dev login (anoniem) alleen met config/app.allowAnonymousOnboarding.
+                   Je bent niet ingelogd. Gebruik Codex Dev login (vast) voor ontwikkeltoegang.
                  </div>
                )}
                <Input label="E-mailadres" placeholder="naam@voorbeeld.nl" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -2427,14 +2402,6 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
               </button>
               {debugAllowed() && (
                 <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={handleDevLogin}
-                    disabled={!import.meta.env.DEV && !devAnonymousEnabled}
-                    className="w-full border border-dashed border-amber-300 text-amber-700 dark:border-amber-500/60 dark:text-amber-200 rounded-xl py-3 text-sm font-semibold hover:bg-amber-50 dark:hover:bg-amber-500/10 transition"
-                  >
-                    Dev login
-                  </button>
                   <button
                     type="button"
                     onClick={handleCodexDevLogin}
@@ -2523,7 +2490,24 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const usesPasswordProvider = authUser?.providerData?.some((provider) => provider?.providerId === 'password')
       || profile?.authProvider === 'password';
     const requiresEmailVerificationForIdv = Boolean(authUser?.uid && usesPasswordProvider && !authUser?.emailVerified);
-    const allowDevSkipIdv = Boolean(import.meta.env.DEV && authUser?.isAnonymous && appConfig?.allowDevSkipIdv === true);
+    const [isCodexDevAuth, setIsCodexDevAuth] = useState(false);
+    useEffect(() => {
+      let active = true;
+      const resolveCodexDevAuth = async () => {
+        if (!import.meta.env.DEV || !authUser?.uid) {
+          if (active) setIsCodexDevAuth(false);
+          return;
+        }
+        const claims = await readTokenClaims(authUser);
+        if (!active) return;
+        setIsCodexDevAuth(isCodexDevIdentity({ claims, uid: authUser.uid }));
+      };
+      resolveCodexDevAuth();
+      return () => {
+        active = false;
+      };
+    }, [authUser]);
+    const allowDevSkipIdv = Boolean(import.meta.env.DEV && isCodexDevAuth && appConfig?.allowDevSkipIdv === true);
     const [emailVerificationPending, setEmailVerificationPending] = useState(false);
     const [emailVerificationMessage, setEmailVerificationMessage] = useState(null);
     const normalizeDisplayName = (value) => String(value || '').trim().toLowerCase();

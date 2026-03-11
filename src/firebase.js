@@ -38,6 +38,7 @@ import {
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
 import { SUPPORT_INTRO_TEXT } from './utils/supportChat';
+import { isCodexDevUser } from './utils/codexDevIdentity';
 import {
   makeAliasId,
   normalizeAliasValue,
@@ -301,7 +302,6 @@ export const observeAuth = (cb) => onAuthStateChanged(getFirebaseAuth(), async (
 
     console.log('[Auth Debug]', {
       uid: user?.uid ?? null,
-      isAnonymous: user?.isAnonymous ?? false,
       email: user?.email ?? null,
       emailVerified: user?.emailVerified ?? false,
       provider,
@@ -1166,11 +1166,11 @@ const resolveAuthProvider = (user) => {
   return user?.providerData?.[0]?.providerId ?? null;
 };
 
-const canWriteUserProfile = (user, providerId) => {
+const canWriteUserProfile = async (user) => {
   if (!user?.uid) return false;
   if (user.emailVerified === true) return true;
-  const isAnonymous = providerId === 'anonymous' || user?.isAnonymous === true;
-  return Boolean(import.meta.env.DEV && isAnonymous);
+  if (!import.meta.env.DEV) return false;
+  return isCodexDevUser(user);
 };
 
 export const ensureUserProfile = async (user) => {
@@ -1179,7 +1179,7 @@ export const ensureUserProfile = async (user) => {
   const defaultOnboardingStep = providerId === 'google.com' ? 2 : 1;
   const resolvedDisplayName = resolveDisplayName(user);
   const resolvedEmail = user.email ?? null;
-  const writeAllowed = canWriteUserProfile(user, providerId);
+  const writeAllowed = await canWriteUserProfile(user);
   const snapshot = await fetchUserProfile(user.uid, { authReady: authStateReady, user });
   if (!snapshot) return null;
   const isPermissionDenied = (error) => error?.code === 'permission-denied';

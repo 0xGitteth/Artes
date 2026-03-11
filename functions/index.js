@@ -730,6 +730,44 @@ const parseImageDataUrl = (image) => {
   return { buffer, mimeType };
 };
 
+const extractStoragePathFromFirebaseUrl = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const parsed = new URL(url);
+    const objectPath = parsed.pathname.match(/\/o\/(.+)$/)?.[1];
+    if (!objectPath) return null;
+    return decodeURIComponent(objectPath);
+  } catch (_error) {
+    return null;
+  }
+};
+
+const persistModerationPreview = async ({ buffer, mimeType, userId }) => {
+  if (!buffer || !mimeType) return null;
+  const bucket = admin.storage().bucket();
+  const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+  const objectId = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
+  const storagePath = `moderation-previews/${userId || 'anonymous'}/${objectId}.${extension}`;
+  const token = crypto.randomUUID();
+
+  await bucket.file(storagePath).save(buffer, {
+    contentType: mimeType,
+    resumable: false,
+    metadata: {
+      metadata: {
+        firebaseStorageDownloadTokens: token,
+      },
+    },
+  });
+
+  const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+  return {
+    storagePath,
+    imageUrl,
+    imageRef: storagePath,
+  };
+};
+
 const ensureJsonBody = (req) => {
   if (req.body && typeof req.body === 'object') {
     return req.body;
@@ -1491,7 +1529,44 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   };
 
   let uploadId = null;
+  let persistedPreview = null;
+  let previewField = null;
   try {
+    const matchedPreviewUrl = String(
+      matchedUpload?.data?.previewUrl
+      || matchedUpload?.data?.imageUrl
+      || matchedUpload?.data?.postDraft?.imageUrl
+      || ''
+    ).trim();
+
+    if (matchedPreviewUrl) {
+      const matchedStoragePath = matchedUpload?.data?.storagePath
+        || matchedUpload?.data?.imageRef
+        || extractStoragePathFromFirebaseUrl(matchedPreviewUrl)
+        || null;
+      persistedPreview = {
+        imageUrl: matchedPreviewUrl,
+        previewUrl: matchedPreviewUrl,
+        storagePath: matchedStoragePath,
+        imageRef: matchedStoragePath,
+      };
+      previewField = matchedUpload?.data?.previewUrl
+        ? 'previewUrl'
+        : matchedUpload?.data?.imageUrl
+          ? 'imageUrl'
+          : 'postDraft.imageUrl';
+    } else {
+      persistedPreview = await persistModerationPreview({
+        buffer: parsed.buffer,
+        mimeType: parsed.mimeType,
+        userId,
+      });
+      if (persistedPreview?.imageUrl) {
+        persistedPreview.previewUrl = persistedPreview.imageUrl;
+        previewField = 'imageUrl';
+      }
+    }
+
     const uploadPayload = {
       userId: userId || null,
       ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
@@ -1502,10 +1577,22 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
       reviewCaseId: reviewCaseId || null,
       fingerprints,
       matchedUploadId: matchedUpload?.id || null,
+      ...(persistedPreview?.imageUrl ? { imageUrl: persistedPreview.imageUrl } : {}),
+      ...(persistedPreview?.previewUrl ? { previewUrl: persistedPreview.previewUrl } : {}),
+      ...(persistedPreview?.imageRef ? { imageRef: persistedPreview.imageRef } : {}),
+      ...(persistedPreview?.storagePath ? { storagePath: persistedPreview.storagePath } : {}),
       createdAt: FieldValue.serverTimestamp(),
     };
     const uploadRef = await db.collection('uploads').add(uploadPayload);
     uploadId = uploadRef.id;
+
+    if (process.env.NODE_ENV === 'development') {
+      logger.debug('Moderation preview linked to upload', {
+        uploadId,
+        reviewCaseId: reviewCaseId || null,
+        previewField,
+      });
+    }
   } catch (error) {
     logger.error('Upload opslaan mislukt.', error);
   }
@@ -1526,6 +1613,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
 
   response.uploadId = uploadId;
+  response.previewField = previewField;
 
   if (includeDebug) {
     response.debug = {

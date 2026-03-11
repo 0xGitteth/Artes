@@ -5694,6 +5694,9 @@ function UploadModal({
         .filter(Boolean);
       const nextReviewCaseId = data?.reviewCaseId ?? null;
       const nextUploadId = data?.uploadId ?? null;
+      const nextPreviewField = typeof data?.previewField === 'string' && data.previewField.trim()
+        ? data.previewField.trim()
+        : null;
       const nextRequiredThemes = Array.isArray(data?.requiredThemes) ? data.requiredThemes : [];
       const nextAutoAppliedTriggers = (Array.isArray(data?.autoAppliedTriggers) ? data.autoAppliedTriggers : []).map(resolveTriggerKey).filter(Boolean);
       const normalizedAppliedTriggers = Array.from(new Set([...nextAppliedTriggers.map(resolveTriggerKey), ...nextAutoAppliedTriggers]));
@@ -5715,6 +5718,13 @@ function UploadModal({
           appliedTriggerKeys: normalizedAppliedTriggers,
           autoAppliedTriggers: nextAutoAppliedTriggers,
         });
+        if (nextUploadId && nextPreviewField) {
+          console.debug('[moderateImage.previewLinked]', {
+            uploadId: nextUploadId,
+            reviewCaseId: nextReviewCaseId,
+            previewField: nextPreviewField,
+          });
+        }
       }
 
       setAppliedTriggers(normalizedAppliedTriggers);

@@ -7,9 +7,6 @@ service cloud.firestore {
     function isVerifiedUser() {
       return request.auth != null && request.auth.token.email_verified == true;
     }
-    function signInProvider() {
-      return request.auth != null ? request.auth.token.firebase.sign_in_provider : null;
-    }
     function isOwner(userId) {
       return request.auth != null && request.auth.uid == userId;
     }
@@ -51,46 +48,6 @@ service cloud.firestore {
       return resource == null
         ? !request.resource.data.keys().hasAny(['fansCount', 'fanOfCount'])
         : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['fansCount', 'fanOfCount']);
-    }
-    function devAnonUserUpdateAllowed() {
-      let allowedOnboardingUpdateKeys = [
-        'uid',
-        'displayName',
-        'bio',
-        'avatar',
-        'photoURL',
-        'themes',
-        'roles',
-        'preferences',
-        'onboardingStep',
-        'onboardingComplete',
-        'linkedAgencyName',
-        'linkedCompanyName',
-        'updatedAt',
-        'email',
-        'authProvider',
-        'username'
-      ];
-      let docDiff = request.resource.data.diff(resource.data);
-      let affected = docDiff.affectedKeys();
-
-      return affected.hasOnly(allowedOnboardingUpdateKeys)
-        && (!('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid)
-        && noClientGateFieldWrites()
-        && (!affected.hasAny(['email'])
-          || request.resource.data.email is string
-          || request.resource.data.email == null)
-        && (!affected.hasAny(['authProvider'])
-          || request.resource.data.authProvider is string)
-        && (!affected.hasAny(['photoURL'])
-          || request.resource.data.photoURL is string
-          || request.resource.data.photoURL == null)
-        && (!affected.hasAny(['onboardingStep'])
-          || (
-            request.resource.data.onboardingStep is int
-            && request.resource.data.onboardingStep >= 0
-            && request.resource.data.onboardingStep <= 10
-          ));
     }
     function isModerator() {
       return request.auth != null

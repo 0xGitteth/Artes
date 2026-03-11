@@ -2303,6 +2303,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
   const auth = getFirebaseAuthInstance();
+  const showCodexDevLogin = import.meta.env.DEV && debugAllowed() && Boolean(functionsBase);
 
   const handleCodexDevLogin = async () => {
     try {
@@ -2337,7 +2338,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
           </div>
           <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700">
              <div className="space-y-4">
-               {import.meta.env.DEV && !authUser && (
+               {showCodexDevLogin && !authUser && (
                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
                    Je bent niet ingelogd. Gebruik Codex Dev login (vast) voor ontwikkeltoegang.
                  </div>
@@ -2400,7 +2401,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
               >
                 Continue with Apple {enableApple ? '' : '(soon)'}
               </button>
-              {debugAllowed() && (
+              {showCodexDevLogin && (
                 <div className="space-y-2">
                   <button
                     type="button"

@@ -1078,9 +1078,12 @@ const runGeminiClassifier = async ({ buffer, mimeType }) => {
   const model = vertex.getGenerativeModel({ model: modelName });
   const prompt = [
     'You are a moderation classifier. Return ONLY valid JSON.',
-    'Schema: {"triggers": [{"trigger": string, "confidence": number, "severity": "suggest"|"forbidden"}], "forbiddenReasons": [string]}',
+    'Schema: {"triggers": [{"trigger": string, "confidence": number, "severity": "suggest"|"forbidden"}], "forbiddenReasons": [string], "adultDecision": "none"|"borderline"|"explicit", "sexualExplicitConfidence": number}',
+    'Use adultDecision="explicit" only for clear explicit sexual activity (e.g. penetration, oral sex, masturbation with explicit intent).',
+    'Use adultDecision="borderline" for visible nudity/genitals without clear explicit sexual act.',
+    'If uncertain between borderline and explicit, choose borderline.',
     'Only include triggers that are NOT adultArtNude, adultEroticSuggestive, nudityErotic, explicit18, needlesInjections, spidersInsects.',
-    'If nothing is detected, return {"triggers": [], "forbiddenReasons": []}.',
+    'If nothing is detected, return {"triggers": [], "forbiddenReasons": [], "adultDecision": "none", "sexualExplicitConfidence": 0}.',
   ].join('\n');
 
   const result = await model.generateContent({
@@ -1342,6 +1345,16 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, a
               : 'gemini';
             forbiddenReasons.push({ trigger, reason: normalizedReason, score: 1 });
           }
+        });
+      }
+
+      const geminiAdultDecision = String(geminiResult?.adultDecision || '').trim().toLowerCase();
+      const geminiSexualExplicitConfidence = Number(geminiResult?.sexualExplicitConfidence) || 0;
+      if (geminiAdultDecision === 'explicit' && geminiSexualExplicitConfidence >= forbiddenThreshold) {
+        forbiddenReasons.push({
+          trigger: INTERNAL_SEXUAL_EXPLICIT_TRIGGER,
+          reason: 'Gemini explicit adult decision',
+          score: geminiSexualExplicitConfidence,
         });
       }
     } catch (error) {

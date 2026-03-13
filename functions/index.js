@@ -1314,10 +1314,15 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     logger.info('Medium log threshold labels bereikt.', { needlesScore, spidersScore });
   }
 
+  let geminiResult = null;
+  let geminiAttempted = false;
+  let geminiFailed = false;
+  let geminiAdultDecision = null;
+  let geminiSexualExplicitConfidence = 0;
+  let explicitDecisionBranchHit = false;
+  let explicitDecisionAddedForbiddenReason = false;
+
   if (!cachedResult) {
-    let geminiResult = null;
-    let geminiAttempted = false;
-    let geminiFailed = false;
     try {
       geminiAttempted = true;
       geminiResult = await runGeminiClassifier(parsed);
@@ -1348,14 +1353,16 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         });
       }
 
-      const geminiAdultDecision = String(geminiResult?.adultDecision || '').trim().toLowerCase();
-      const geminiSexualExplicitConfidence = Number(geminiResult?.sexualExplicitConfidence) || 0;
-      if (geminiAdultDecision === 'explicit' && geminiSexualExplicitConfidence >= forbiddenThreshold) {
+      geminiAdultDecision = String(geminiResult?.adultDecision || '').trim().toLowerCase() || null;
+      geminiSexualExplicitConfidence = Number(geminiResult?.sexualExplicitConfidence) || 0;
+      explicitDecisionBranchHit = geminiAdultDecision === 'explicit';
+      if (explicitDecisionBranchHit && geminiSexualExplicitConfidence >= forbiddenThreshold) {
         forbiddenReasons.push({
           trigger: INTERNAL_SEXUAL_EXPLICIT_TRIGGER,
           reason: 'Gemini explicit adult decision',
           score: geminiSexualExplicitConfidence,
         });
+        explicitDecisionAddedForbiddenReason = true;
       }
     } catch (error) {
       geminiFailed = true;
@@ -1534,6 +1541,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     autoAppliedTriggers,
     shouldReview,
     userMessage,
+    moderationSignals: {
+      adultDecision: geminiAdultDecision,
+      sexualExplicitConfidence: geminiSexualExplicitConfidence,
+      explicitDecisionBranchHit,
+      explicitDecisionAddedForbiddenReason,
+    },
     fingerprints,
     legacy: {
       labels: labels.map((label) => label.description).filter(Boolean),

@@ -1105,7 +1105,7 @@ const runGeminiClassifier = async ({ buffer, mimeType }) => {
   return parseGeminiJson(text);
 };
 
-export const moderateImage = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+export const moderateImage = onRequest({ cors: true, region: 'europe-west4', memory: '1GiB' }, async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.status(204).send('');
     return;

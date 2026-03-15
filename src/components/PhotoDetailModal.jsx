@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { X, MessageSquare, Calendar, Shield, Loader2, AlertTriangle } from 'lucide-react';
-import { addComment, subscribeToComments, subscribeToLikes, toggleLike } from '../firebase';
+import { X, MessageSquare, Calendar, Shield, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
+import { addComment, deleteComment, subscribeToComments, subscribeToLikes, toggleLike } from '../firebase';
 import { updatePost, deletePost } from '../services/firebaseClient';
 import { Badge, Button, Input } from './ui';
 import LikeIcon from './icons/LikeIcon';
@@ -49,6 +49,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
   const [actionError, setActionError] = useState(null);
   const [likeLoading, setLikeLoading] = useState(false);
   const [commentLoading, setCommentLoading] = useState(false);
+  const [deletingCommentId, setDeletingCommentId] = useState(null);
   const [reportState, setReportState] = useState({ status: 'idle', error: null });
   const [editState, setEditState] = useState({ saving: false, error: null, success: false });
   const [deleteState, setDeleteState] = useState({ confirm: false, deleting: false, error: null });
@@ -66,6 +67,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
     setDeleteState({ confirm: false, deleting: false, error: null });
     setReportState({ status: 'idle', error: null });
     setActionError(null);
+    setDeletingCommentId(null);
     setEditTitle(post?.title || '');
     setEditDescription(post?.description || '');
   }, [post?.id, post?.title, post?.description]);
@@ -120,6 +122,27 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
       setActionError(toActionErrorMessage(error, 'Reageren mislukt. Probeer het opnieuw.'));
     } finally {
       setCommentLoading(false);
+    }
+  };
+
+
+  const handleDeleteComment = async (comment) => {
+    if (!user?.uid || !post?.id || !comment?.id || deletingCommentId) return;
+    if (comment.authorId !== user.uid) {
+      setActionError('Je kunt alleen je eigen reacties verwijderen.');
+      return;
+    }
+    const shouldDelete = window.confirm('Weet je zeker dat je deze reactie wilt verwijderen?');
+    if (!shouldDelete) return;
+
+    setActionError(null);
+    setDeletingCommentId(comment.id);
+    try {
+      await deleteComment(post.id, comment.id);
+    } catch (error) {
+      setActionError(toActionErrorMessage(error, 'Reactie verwijderen mislukt. Probeer het opnieuw.'));
+    } finally {
+      setDeletingCommentId(null);
     }
   };
 
@@ -324,12 +347,30 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             <div className="border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 bg-slate-50/60 dark:bg-slate-800/50">
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Reacties</p>
               <div className="max-h-48 overflow-y-auto space-y-3">
-                {comments.map((comment) => (
-                  <div key={comment.id} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-                    <p className="text-sm font-semibold text-slate-800 dark:text-white">{comment.authorName || 'Anon'}</p>
-                    <p className="text-sm text-slate-600 dark:text-slate-300">{comment.text}</p>
-                  </div>
-                ))}
+                {comments.map((comment) => {
+                  const canDeleteComment = Boolean(user?.uid && comment.authorId === user.uid);
+                  return (
+                    <div key={comment.id} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800 dark:text-white">{comment.authorName || 'Anon'}</p>
+                          <p className="text-sm text-slate-600 dark:text-slate-300">{comment.text}</p>
+                        </div>
+                        {canDeleteComment && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteComment(comment)}
+                            className="inline-flex items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20"
+                            aria-label="Verwijder reactie"
+                            disabled={deletingCommentId === comment.id}
+                          >
+                            <Trash2 size={12} /> {deletingCommentId === comment.id ? 'Verwijderen...' : 'Verwijder'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
                 {!comments.length && <p className="text-sm text-slate-500">Nog geen reacties</p>}
               </div>
               <form onSubmit={handleComment} className="flex items-center gap-3">

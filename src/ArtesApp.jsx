@@ -92,6 +92,7 @@ import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/con
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
+import { resolvePublicDisplayName } from './utils/publicIdentity';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
 
 // --- Constants & Styling ---
@@ -692,6 +693,10 @@ export default function ArtesApp() {
   const viewRef = useRef('loading');
   const viewReasonRef = useRef('initial');
   const userProfile = profile;
+  const currentPublicProfile = useMemo(
+    () => users.find((entry) => entry?.uid === authUser?.uid) || null,
+    [users, authUser?.uid],
+  );
   const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
   const profileAgeVerifiedStrict = profile?.ageVerified === true;
   const canReadFirestore = canAccessFirestore({ authReady, user: authUser });
@@ -2242,7 +2247,6 @@ export default function ArtesApp() {
                   authUser={authUser}
                   functionsBase={functionsBase}
                   initialThreadId={supportThreadId}
-                  userProfile={userProfile}
                   onResumeApprovedUpload={handleResumeApprovedUpload}
                 />
               </div>
@@ -2277,6 +2281,7 @@ export default function ArtesApp() {
                 authUser={authUser}
                 functionsBase={functionsBase}
                 userProfile={userProfile}
+                currentPublicProfile={currentPublicProfile}
                 communities={communityConfig.communities}
                 initialTopicTitle={initialTopicTitle}
                 authReady={authReady}
@@ -2433,6 +2438,7 @@ export default function ArtesApp() {
             onClose={() => setSelectedPost(null)}
             currentUser={authUser}
             authUser={authUser}
+            currentPublicProfile={currentPublicProfile}
             moderationApiBase={moderationApiBase}
             onChallengeClick={() => setView('challenge_timeline')}
             contentPreference={getPostContentPreference(selectedPost, galleryTriggerVisibility)}
@@ -7610,7 +7616,7 @@ function CommunityList({ setView, communities, challenge, configLoading, onStart
   );
 }
 
-function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, communities, initialTopicTitle, authReady, logListenerStart, handleListenerError }) {
+function CommunityDetail({ id, setView, authUser, currentPublicProfile, communities, initialTopicTitle, authReady, logListenerStart, handleListenerError }) {
   const db = getFirebaseDbInstance();
   const communityList = Array.isArray(communities) && communities.length
     ? communities
@@ -7635,7 +7641,7 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
       isSuggested: true,
     }))
     : [];
-  const displayName = sanitizeHandle(userProfile?.displayName || userProfile?.username || authUser?.displayName || '');
+  const displayName = resolvePublicDisplayName(currentPublicProfile);
 
   useEffect(() => {
     if (!authReady || !db || !id) return undefined;
@@ -7694,7 +7700,7 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
         title: newTopicTitle.trim(),
         body: newTopicBody.trim(),
         authorId: authUser.uid,
-        authorName: displayName || sanitizeHandle(authUser?.email?.split('@')[0]) || 'Communitylid',
+        authorName: displayName || 'Gebruiker',
         createdAt: serverTimestamp(),
       });
       setNewTopicTitle('');
@@ -7744,16 +7750,16 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
       )}
       <div className="min-h-[60vh] space-y-6">
         {activeTopicId ? (
-          <CommunityTopicDetail
-            communityId={id}
-            topicId={activeTopicId}
-            onBack={() => setActiveTopicId(null)}
-            authUser={authUser}
-            userProfile={userProfile}
-            authReady={authReady}
-            logListenerStart={logListenerStart}
-            handleListenerError={handleListenerError}
-          />
+        <CommunityTopicDetail
+          communityId={id}
+          topicId={activeTopicId}
+          onBack={() => setActiveTopicId(null)}
+          authUser={authUser}
+          currentPublicProfile={currentPublicProfile}
+          authReady={authReady}
+          logListenerStart={logListenerStart}
+          handleListenerError={handleListenerError}
+        />
         ) : (
           <>
             <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 space-y-4">
@@ -7837,7 +7843,7 @@ function CommunityDetail({ id, setView, authUser, functionsBase, userProfile, co
   );
 }
 
-function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProfile, authReady, logListenerStart, handleListenerError }) {
+function CommunityTopicDetail({ communityId, topicId, onBack, authUser, currentPublicProfile, authReady, logListenerStart, handleListenerError }) {
   const db = getFirebaseDbInstance();
   const [topic, setTopic] = useState(null);
   const [topicLoading, setTopicLoading] = useState(true);
@@ -7845,9 +7851,7 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProf
   const [commentText, setCommentText] = useState('');
   const [commentError, setCommentError] = useState(null);
   const [commentSaving, setCommentSaving] = useState(false);
-  const commentAuthorName = sanitizeHandle(
-    userProfile?.displayName || userProfile?.username || authUser?.displayName || authUser?.email?.split('@')[0],
-  );
+  const commentAuthorName = resolvePublicDisplayName(currentPublicProfile);
 
   useEffect(() => {
     if (!authReady || !db || !communityId || !topicId) return undefined;
@@ -7903,7 +7907,7 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, userProf
       await addDoc(commentsRef, {
         text: commentText.trim(),
         authorId: authUser.uid,
-        authorName: commentAuthorName || 'Communitylid',
+        authorName: commentAuthorName || 'Gebruiker',
         createdAt: serverTimestamp(),
       });
       setCommentText('');

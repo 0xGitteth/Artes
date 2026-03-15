@@ -24,11 +24,6 @@ const formatTime = (timestamp) => {
 
 const normalizeQuery = (value) => value.trim().toLowerCase();
 
-const resolveSupportUserLabel = (userProfile, authUser) => {
-  const name = userProfile?.displayName || authUser?.displayName;
-  return name?.trim() || 'Jij';
-};
-
 const resolveDirectMessageLabel = ({ message, activeThreadIndex, activeThread }) => {
   const directName = message.senderName
     || message.senderDisplayName
@@ -44,8 +39,6 @@ const resolveDirectMessageLabel = ({ message, activeThreadIndex, activeThread })
     return username.trim().replace(/^@+/, '');
   }
 
-  const uid = message.senderUid || message.senderId;
-  if (uid) return uid.slice(0, 6);
   return 'Gebruiker';
 };
 
@@ -262,7 +255,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   );
 }
 
-export default function ChatPanel({ authUser, functionsBase, initialThreadId, userProfile, onResumeApprovedUpload }) {
+export default function ChatPanel({ authUser, functionsBase, initialThreadId, onResumeApprovedUpload }) {
   const [threads, setThreads] = useState([]);
   const [activeThreadId, setActiveThreadId] = useState(null);
   const [activeThread, setActiveThread] = useState(null);
@@ -272,7 +265,6 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
   const [sendError, setSendError] = useState(null);
   const [archivingThreadId, setArchivingThreadId] = useState(null);
   const [uploadOwnerById, setUploadOwnerById] = useState({});
-
   useEffect(() => {
     if (!initialThreadId) return;
     setActiveThreadId(initialThreadId);
@@ -586,10 +578,10 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, us
                   const bodyText = message.text || message.message || '';
                   const senderLabel = isSupportThread
                     ? (normalizedMessage?.senderRole === 'user'
-                      ? resolveSupportUserLabel(userProfile, authUser)
+                      ? 'Jij'
                       : 'ARTES MODERATIE')
                     : (isOwn
-                      ? resolveSupportUserLabel(userProfile, authUser)
+                      ? 'Jij'
                       : resolveDirectMessageLabel({ message, activeThreadIndex, activeThread }));
                   const hasSystemHeader = isSupportThread && isSystem && bodyText.toUpperCase().includes('ARTES MODERATIE');
                   const previousMessage = renderMessages[index - 1];

@@ -2335,7 +2335,7 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
       }
 
       const publicProfile = await fetchPublicUser(decoded.uid);
-      const senderLabel = publicProfile?.displayName || publicProfile?.username || decoded.name || 'Artes gebruiker';
+      const senderLabel = publicProfile?.displayName || publicProfile?.username || 'Gebruiker';
       const messageRef = threadRef.collection('messages').doc();
       transaction.set(messageRef, {
         text,

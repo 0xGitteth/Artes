@@ -65,6 +65,7 @@ import {
   collection,
   doc,
   addDoc,
+  deleteDoc,
   endAt,
   getDoc,
   getDocs,
@@ -7856,6 +7857,7 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, currentP
   const [commentText, setCommentText] = useState('');
   const [commentError, setCommentError] = useState(null);
   const [commentSaving, setCommentSaving] = useState(false);
+  const [deletingCommentId, setDeletingCommentId] = useState(null);
   const commentAuthorName = resolvePublicDisplayName(currentPublicProfile);
 
   useEffect(() => {
@@ -7924,6 +7926,38 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, currentP
     }
   };
 
+  const handleDeleteComment = async (commentId, authorId) => {
+    if (!authUser) {
+      setCommentError('Log in om reacties te verwijderen.');
+      return;
+    }
+    if (authorId !== authUser.uid) {
+      setCommentError('Je kunt alleen je eigen reacties verwijderen.');
+      return;
+    }
+    if (!db) {
+      setCommentError('Database niet beschikbaar.');
+      return;
+    }
+    if (deletingCommentId) return;
+
+    const shouldDelete = window.confirm('Weet je zeker dat je deze reactie wilt verwijderen?');
+    if (!shouldDelete) return;
+
+    try {
+      setDeletingCommentId(commentId);
+      const commentRef = doc(db, 'communities', communityId, 'topics', topicId, 'comments', commentId);
+      await deleteDoc(commentRef);
+      setCommentError(null);
+    } catch (error) {
+      console.error('Failed to delete comment', error);
+      setCommentError('Reactie kon niet worden verwijderd.');
+    } finally {
+      setDeletingCommentId(null);
+    }
+  };
+
+
   return (
     <div className="space-y-6">
       <button type="button" onClick={onBack} className="flex items-center text-slate-500 hover:text-slate-800 font-medium">
@@ -7947,14 +7981,31 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, currentP
         <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Reacties</h4>
         <div className="space-y-3">
           {comments.length > 0 ? (
-            comments.map((comment) => (
-              <div key={comment.id} className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  {sanitizeHandle(comment.authorName || 'Communitylid')}
-                </p>
-                <p className="text-sm text-slate-600 dark:text-slate-300">{comment.text}</p>
-              </div>
-            ))
+            comments.map((comment) => {
+              const canDeleteComment = Boolean(authUser?.uid && comment.authorId === authUser.uid);
+              return (
+                <div key={comment.id} className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        {sanitizeHandle(comment.authorName || 'Communitylid')}
+                      </p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300">{comment.text}</p>
+                    </div>
+                    {canDeleteComment && (
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded-full border border-red-200 text-red-600 text-xs hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20"
+                        onClick={() => handleDeleteComment(comment.id, comment.authorId)}
+                        disabled={deletingCommentId === comment.id}
+                      >
+                        {deletingCommentId === comment.id ? 'Verwijderen...' : 'Verwijder'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
           ) : (
             <p className="text-sm text-slate-500 dark:text-slate-400">Wees de eerste die reageert.</p>
           )}

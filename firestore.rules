@@ -309,6 +309,16 @@ service cloud.firestore {
       }
     }
 
+    match /communities/{communityId} {
+      match /topics/{topicId} {
+        match /comments/{commentId} {
+          allow read: if true;
+          allow create: if isSignedIn();
+          allow update, delete: if isSignedIn() && request.auth.uid == resource.data.authorId;
+        }
+      }
+    }
+
     match /contributors/{contributorId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();

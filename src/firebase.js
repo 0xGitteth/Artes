@@ -1417,6 +1417,9 @@ export const addComment = (postId, comment) =>
     createdAt: serverTimestamp(),
   });
 
+export const deleteComment = (postId, commentId) =>
+  deleteDoc(doc(getFirebaseDb(), 'posts', postId, 'comments', commentId));
+
 export const subscribeToComments = (postId, cb) =>
   onSnapshot(
     query(collection(getFirebaseDb(), 'posts', postId, 'comments'), orderBy('createdAt', 'asc')),

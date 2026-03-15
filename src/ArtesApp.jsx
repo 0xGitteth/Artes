@@ -693,10 +693,6 @@ export default function ArtesApp() {
   const viewRef = useRef('loading');
   const viewReasonRef = useRef('initial');
   const userProfile = profile;
-  const currentPublicProfile = useMemo(
-    () => users.find((entry) => entry?.uid === authUser?.uid) || null,
-    [users, authUser?.uid],
-  );
   const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
   const profileAgeVerifiedStrict = profile?.ageVerified === true;
   const canReadFirestore = canAccessFirestore({ authReady, user: authUser });
@@ -732,6 +728,10 @@ export default function ArtesApp() {
   // Data
   const [posts, setPosts] = useState([]);
   const [users, setUsers] = useState([]);
+  const currentPublicProfile = useMemo(
+    () => users.find((entry) => entry?.uid === authUser?.uid) || null,
+    [users, authUser?.uid],
+  );
   const [followingIds, setFollowingIds] = useState(() => new Set());
   const [followingLoaded, setFollowingLoaded] = useState(false);
   const [revealedSensitivePostsById, setRevealedSensitivePostsById] = useState({});

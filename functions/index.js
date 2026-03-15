@@ -1375,18 +1375,22 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     );
 
     const geminiUnavailableOrUnusable = geminiFailed || !geminiResult || !hasUsableGeminiOutput;
-    const hasStrongAdultSafeSearchSignal = safeSearch && scoreFromLikelihood(safeSearch.adult) >= forbiddenThreshold;
+    const adultSafeSearchScore = safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0;
+    const racySafeSearchScore = safeSearch ? scoreFromLikelihood(safeSearch.racy) : 0;
+    const hasStrongAdultSafeSearchSignal = adultSafeSearchScore >= forbiddenThreshold;
+    const hasStrongRacySafeSearchSignal = racySafeSearchScore >= forbiddenThreshold;
     if (geminiAttempted && geminiUnavailableOrUnusable && hasStrongAdultSafeSearchSignal) {
       const hasManualArtNudeContext = normalizedMakerTags.includes(ADULT_ART_NUDE_TRIGGER);
-      if (hasManualArtNudeContext) {
+      const hasFallbackForbiddenEscalationSignal = hasStrongRacySafeSearchSignal;
+      if (hasManualArtNudeContext || !hasFallbackForbiddenEscalationSignal) {
         suggestedTriggers.push(
-          buildTriggerRecord('gemini_uncertain_fallback', scoreFromLikelihood(safeSearch.adult), 'geminiFallback')
+          buildTriggerRecord('gemini_uncertain_fallback', adultSafeSearchScore, 'geminiFallback')
         );
       } else {
         forbiddenReasons.push({
           trigger: 'gemini_uncertain_fallback',
           reason: 'SafeSearch adult hoog, Gemini niet beschikbaar of output onbruikbaar.',
-          score: scoreFromLikelihood(safeSearch.adult),
+          score: adultSafeSearchScore,
         });
       }
     }

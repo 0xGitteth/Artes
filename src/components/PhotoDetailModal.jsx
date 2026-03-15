@@ -6,6 +6,7 @@ import { Badge, Button, Input } from './ui';
 import LikeIcon from './icons/LikeIcon';
 import CommentIcon from './icons/CommentIcon';
 import SensitiveOverlay from './SensitiveOverlay';
+import { resolvePublicDisplayName } from '../utils/publicIdentity';
 
 const TRIGGER_LABELS = {
   adultArtNude: '18+ Artistiek naakt',
@@ -39,7 +40,7 @@ const toActionErrorMessage = (error, fallbackMessage) => {
   return error.message || fallbackMessage;
 };
 
-export default function PhotoDetailModal({ post, onClose, currentUser, authUser, moderationApiBase, onChallengeClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost }) {
+export default function PhotoDetailModal({ post, onClose, currentUser, authUser, currentPublicProfile, moderationApiBase, onChallengeClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost }) {
   const user = currentUser || authUser || null;
   const [comments, setComments] = useState([]);
   const [likesCount, setLikesCount] = useState(post.likes || 0);
@@ -54,6 +55,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(post?.title || '');
   const [editDescription, setEditDescription] = useState(post?.description || '');
+  const publicCommentAuthorName = resolvePublicDisplayName(currentPublicProfile);
 
   const canReport = Boolean(user && moderationApiBase);
   const isOwner = Boolean(user?.uid && post?.authorId === user.uid);
@@ -111,7 +113,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
       await addComment(post.id, {
         text: commentText.trim(),
         authorId: user.uid,
-        authorName: user.displayName || 'Anoniem',
+        authorName: publicCommentAuthorName,
       });
       setCommentText('');
     } catch (error) {

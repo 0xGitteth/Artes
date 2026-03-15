@@ -12,6 +12,7 @@ import {
 import { getFirebaseDbInstance } from '../firebase';
 import { canAccessFirestore } from '../utils/firestoreGate';
 import { normalizeSupportMessage, SUPPORT_INTRO_TEXT } from '../utils/supportChat';
+import { resolvePublicDisplayName } from '../utils/publicIdentity';
 
 const MESSAGE_LIMIT = 80;
 
@@ -27,18 +28,7 @@ const formatDateTime = (timestamp) => {
   return date.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 
-const resolveDisplayName = (authUser, fallback) => {
-  if (authUser?.displayName) return authUser.displayName;
-  if (authUser?.email) return authUser.email.split('@')[0];
-  return fallback || 'Artes gebruiker';
-};
-
-const resolveUserLabel = (userProfile, authUser) => {
-  const name = userProfile?.displayName || authUser?.displayName;
-  return name?.trim() || 'Jij';
-};
-
-export default function SupportChatPanel({ authReady, authUser, userProfile }) {
+export default function SupportChatPanel({ authReady, authUser, currentPublicProfile }) {
   const [thread, setThread] = useState(null);
   const [messages, setMessages] = useState([]);
   const [composerText, setComposerText] = useState('');
@@ -56,7 +46,7 @@ export default function SupportChatPanel({ authReady, authUser, userProfile }) {
       await runTransaction(db, async (transaction) => {
         const snapshot = await transaction.get(threadRef);
         if (snapshot.exists()) return;
-        const displayName = resolveDisplayName(authUser);
+        const displayName = resolvePublicDisplayName(currentPublicProfile);
         transaction.set(threadRef, {
           type: 'support',
           threadKey: threadId,
@@ -188,7 +178,7 @@ export default function SupportChatPanel({ authReady, authUser, userProfile }) {
         senderId: authUser.uid,
         senderUid: authUser.uid,
         senderRole: 'user',
-        senderLabel: resolveDisplayName(authUser),
+        senderLabel: resolvePublicDisplayName(currentPublicProfile),
         type: 'text',
         createdAt: serverTimestamp(),
       });
@@ -233,7 +223,7 @@ export default function SupportChatPanel({ authReady, authUser, userProfile }) {
               : isOwn
                 ? 'bg-blue-600 text-white'
                 : 'bg-white dark:bg-slate-800 dark:text-white border border-slate-200 dark:border-slate-700';
-            const senderLabel = isOwn ? resolveUserLabel(userProfile, authUser) : 'ARTES MODERATIE';
+            const senderLabel = isOwn ? 'Jij' : 'ARTES MODERATIE';
             const bodyText = message.text || message.message || '';
             const hasSystemHeader = isSystem && bodyText.toUpperCase().includes('ARTES MODERATIE');
             const previousMessage = normalizedMessages[index - 1];

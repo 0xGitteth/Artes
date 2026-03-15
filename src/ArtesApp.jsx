@@ -4377,13 +4377,14 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   }, [authReady, authUser, isModeratorClient, isModerator, profileAgeVerified, profileAgeVerifiedStrict, profileIsAdult, logListenerStart, handleListenerError]);
 
   const filteredCases = useMemo(() => {
+    const activeCases = cases.filter((item) => item?.status === 'inReview');
     if (caseTypeFilter === 'report') {
-      return cases.filter((item) => item.caseType === 'report');
+      return activeCases.filter((item) => item.caseType === 'report');
     }
     if (caseTypeFilter === 'upload') {
-      return cases.filter((item) => item.caseType !== 'report');
+      return activeCases.filter((item) => item.caseType !== 'report');
     }
-    return cases;
+    return activeCases;
   }, [cases, caseTypeFilter]);
 
   useEffect(() => {
@@ -4626,6 +4627,8 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       if (!response.ok) {
         throw new Error(payload?.error || 'Kon override niet opslaan.');
       }
+      const closedCaseId = payload?.reviewCaseId || selectedCase.id;
+      setCases((prev) => prev.filter((item) => item.id !== closedCaseId));
       setFreshEvaluationMessage('De volgende upload van deze afbeelding wordt opnieuw beoordeeld.');
       setSelectedCaseId(null);
     } catch (error) {

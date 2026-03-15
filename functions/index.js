@@ -1098,6 +1098,14 @@ const extractLabelScore = (labels, keywords) => {
 
 const buildTriggerRecord = (trigger, score, source) => ({ trigger, score, source });
 
+const normalizeAdultDecision = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'none' || normalized === 'borderline' || normalized === 'explicit') {
+    return normalized;
+  }
+  return null;
+};
+
 const parseGeminiJson = (text) => {
   if (!text) return null;
   const firstBrace = text.indexOf('{');
@@ -1400,7 +1408,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         });
       }
 
-      geminiAdultDecision = String(geminiResult?.adultDecision || '').trim().toLowerCase() || null;
+      geminiAdultDecision = normalizeAdultDecision(geminiResult?.adultDecision);
       geminiSexualExplicitConfidence = Number(geminiResult?.sexualExplicitConfidence) || 0;
       explicitDecisionBranchHit = geminiAdultDecision === 'explicit';
       if (explicitDecisionBranchHit && geminiSexualExplicitConfidence >= forbiddenThreshold) {
@@ -1418,7 +1426,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
     const hasUsableGeminiOutput = Boolean(
       geminiResult
-      && (Array.isArray(geminiResult.triggers) || Array.isArray(geminiResult.forbiddenReasons))
+      && (
+        Array.isArray(geminiResult.triggers)
+        || Array.isArray(geminiResult.forbiddenReasons)
+        || geminiAdultDecision !== null
+        || geminiSexualExplicitConfidence > 0
+      )
     );
 
     const geminiUnavailableOrUnusable = geminiFailed || !geminiResult || !hasUsableGeminiOutput;

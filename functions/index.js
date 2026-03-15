@@ -715,6 +715,53 @@ const normalizeThemes = (themes) => {
   return [...new Set(raw.map((theme) => String(theme).trim()).filter(Boolean))];
 };
 
+const sanitizeUploaderSnapshot = (snapshot = {}) => {
+  const uid = String(snapshot?.uid || '').trim() || null;
+  const displayName = String(snapshot?.displayName || '').trim() || null;
+  const username = String(snapshot?.username || '').trim() || null;
+  if (!uid && !displayName && !username) return null;
+  return {
+    ...(uid ? { uid } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(username ? { username } : {}),
+  };
+};
+
+const buildAiSummary = (source = {}) => ({
+  classification: source?.classification || null,
+  shouldReview: (typeof source?.shouldReview === 'boolean') ? source.shouldReview : null,
+  forbiddenReasons: Array.isArray(source?.forbiddenReasons) ? source.forbiddenReasons : [],
+  appliedTriggers: Array.isArray(source?.appliedTriggers) ? source.appliedTriggers : [],
+  suggestedTriggers: Array.isArray(source?.suggestedTriggers) ? source.suggestedTriggers : [],
+  moderationSignals: source?.moderationSignals && typeof source.moderationSignals === 'object'
+    ? {
+        adultDecision: source.moderationSignals.adultDecision ?? null,
+        sexualExplicitConfidence: source.moderationSignals.sexualExplicitConfidence ?? null,
+        explicitDecisionBranchHit: Boolean(source.moderationSignals.explicitDecisionBranchHit),
+        explicitDecisionAddedForbiddenReason: Boolean(source.moderationSignals.explicitDecisionAddedForbiddenReason),
+      }
+    : null,
+});
+
+const getUploaderSnapshotFromPublicProfile = async (uid, fallback = {}) => {
+  const resolvedUid = String(uid || '').trim();
+  if (!resolvedUid) return sanitizeUploaderSnapshot(fallback);
+  try {
+    const publicSnap = await db.collection('publicUsers').doc(resolvedUid).get();
+    if (publicSnap.exists) {
+      const data = publicSnap.data() || {};
+      return sanitizeUploaderSnapshot({
+        uid: resolvedUid,
+        displayName: data.displayName || fallback?.displayName || null,
+        username: data.username || fallback?.username || null,
+      });
+    }
+  } catch (error) {
+    logger.warn('Uploader snapshot uit publicUsers ophalen mislukt.', { uid: resolvedUid, error: error?.message || String(error) });
+  }
+  return sanitizeUploaderSnapshot({ uid: resolvedUid, ...fallback });
+};
+
 const scoreFromLikelihood = (likelihood) => likelihoodScores[likelihood] ?? 0;
 
 const parseImageDataUrl = (image) => {
@@ -1436,12 +1483,29 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         const rightsLevel = Number(userModeration?.data?.reviewRightsLevel ?? 1);
         const openCount = Number(userModeration?.data?.openReviewCount ?? 0);
         if (rightsLevel > 0 && openCount < 1) {
+          const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
           const reviewRef = await db.collection('reviewCases').add({
+            caseType: 'upload',
             userId,
             status: 'inReview',
             decision: null,
             fingerprints: [fingerprints],
             linkedUploadIds: [],
+            reviewReason: 'forbiddenOutcomeAutoReview',
+            ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
+            aiSummary: buildAiSummary({
+              classification: null,
+              shouldReview: null,
+              forbiddenReasons: finalForbiddenReasons,
+              appliedTriggers: finalAppliedTriggers,
+              suggestedTriggers: finalSuggestedTriggers,
+              moderationSignals: {
+                adultDecision: geminiAdultDecision,
+                sexualExplicitConfidence: geminiSexualExplicitConfidence,
+                explicitDecisionBranchHit,
+                explicitDecisionAddedForbiddenReason,
+              },
+            }),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
           });
@@ -1468,7 +1532,9 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       const reviewSnapshot = await db.collection('reviewCases').doc(reviewCaseId).get();
       if (reviewSnapshot.exists) {
         const reviewData = reviewSnapshot.data();
-        if (reviewData?.status === 'resolved' && reviewData?.decision === 'rejected' && userModeration) {
+        const rejectedReview = reviewData?.status === 'rejected'
+          || (reviewData?.status === 'resolved' && reviewData?.decision === 'rejected');
+        if (rejectedReview && userModeration) {
           const newFalseAppealCount = Number(userModeration.data?.falseAppealCount ?? 0) + 1;
           const shouldCooldown = newFalseAppealCount >= falseAppealThreshold;
           await userModeration.ref.set(
@@ -1630,10 +1696,21 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
   if (reviewCaseId && uploadId) {
     try {
+      const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
       await db.collection('reviewCases').doc(reviewCaseId).set(
         {
           linkedUploadIds: FieldValue.arrayUnion(uploadId),
           fingerprints: FieldValue.arrayUnion(fingerprints),
+          reviewReason: 'forbiddenOutcomeAutoReview',
+          ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
+          aiSummary: buildAiSummary({
+            classification,
+            shouldReview,
+            forbiddenReasons: finalForbiddenReasons,
+            appliedTriggers: finalAppliedTriggers,
+            suggestedTriggers: finalSuggestedTriggers,
+            moderationSignals: response.moderationSignals,
+          }),
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -2345,11 +2422,18 @@ export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, asyn
       logger.error('Reported image fingerprint mislukt.', error);
     }
 
+    const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(authorId || null, {
+      uid: authorId || null,
+      displayName: authorName || null,
+    });
+
     const reviewRef = await db.collection('reviewCases').add({
       caseType: 'report',
       status: 'inReview',
       decision: null,
       userId: authorId || null,
+      ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
+      reviewReason: 'reportedPost',
       reportedPost: {
         id: postId,
         imageUrl,
@@ -2455,6 +2539,19 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
         }) || null;
     }
 
+    const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(decoded.uid, {
+      uid: decoded.uid,
+      displayName: postDraft?.authorName || null,
+    });
+    const aiSummary = buildAiSummary({
+      classification: uploadData?.classification || null,
+      shouldReview: Boolean(uploadData?.shouldReview),
+      forbiddenReasons: Array.isArray(uploadData?.forbiddenReasons) ? uploadData.forbiddenReasons : [],
+      appliedTriggers: Array.isArray(uploadData?.appliedTriggers) ? uploadData.appliedTriggers : [],
+      suggestedTriggers: Array.isArray(uploadData?.suggestedTriggers) ? uploadData.suggestedTriggers : [],
+      moderationSignals: uploadData?.moderationSignals || null,
+    });
+
     let reviewCaseId = existingCase?.id || null;
     let created = false;
 
@@ -2464,6 +2561,9 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
         status: 'inReview',
         decision: null,
         userId: decoded.uid,
+        ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
+        reviewReason: 'manualUserReviewRequest',
+        aiSummary,
         ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
         uploadId,
         linkedUploadIds: [uploadId],
@@ -2486,17 +2586,18 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       { merge: true }
     );
 
-    if (!existingCase) {
-      await db.collection('reviewCases').doc(reviewCaseId).set(
-        {
-          ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
-          uploadId,
-          linkedUploadIds: FieldValue.arrayUnion(uploadId),
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
+    await db.collection('reviewCases').doc(reviewCaseId).set(
+      {
+        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
+        uploadId,
+        linkedUploadIds: FieldValue.arrayUnion(uploadId),
+        ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
+        reviewReason: 'manualUserReviewRequest',
+        aiSummary,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     res.status(200).json({ ok: true, reviewCaseId, created });
   } catch (error) {
@@ -2820,6 +2921,7 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
     await ensureModerator(decoded);
     const body = parseJsonBody(req);
     const uploadId = String(body?.uploadId || '').trim();
+    const reviewCaseIdFromBody = String(body?.reviewCaseId || '').trim();
     if (!uploadId) {
       res.status(400).json({ error: 'uploadId is required' });
       return;
@@ -2868,7 +2970,54 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       );
     }
 
-    res.status(200).json({ ok: true, queued: !alreadyQueued });
+    let targetReviewCaseId = reviewCaseIdFromBody || String(uploadData.reviewCaseId || '').trim() || null;
+    if (!targetReviewCaseId) {
+      const byUploadId = await db.collection('reviewCases')
+        .where('uploadId', '==', uploadId)
+        .where('status', '==', 'inReview')
+        .limit(1)
+        .get();
+      if (!byUploadId.empty) {
+        targetReviewCaseId = byUploadId.docs[0].id;
+      }
+    }
+    if (!targetReviewCaseId) {
+      const byLinkedUpload = await db.collection('reviewCases')
+        .where('linkedUploadIds', 'array-contains', uploadId)
+        .where('status', '==', 'inReview')
+        .limit(1)
+        .get();
+      if (!byLinkedUpload.empty) {
+        targetReviewCaseId = byLinkedUpload.docs[0].id;
+      }
+    }
+
+    if (targetReviewCaseId) {
+      await db.collection('reviewCases').doc(targetReviewCaseId).set(
+        {
+          status: 'freshEvalQueued',
+          queueExitReason: 'reEvaluateOnNextUpload',
+          queuedFreshEvaluationAt: FieldValue.serverTimestamp(),
+          queuedFreshEvaluationByUid: decoded.uid,
+          lock: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      await uploadRef.set(
+        {
+          reviewStatus: 'freshEvalQueued',
+          queueExitReason: 'reEvaluateOnNextUpload',
+          queuedFreshEvaluationAt: FieldValue.serverTimestamp(),
+          queuedFreshEvaluationByUid: decoded.uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    res.status(200).json({ ok: true, queued: !alreadyQueued, reviewCaseId: targetReviewCaseId, status: targetReviewCaseId ? 'freshEvalQueued' : null });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to queue fresh evaluation override' });

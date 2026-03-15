@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, MessageSquare, Calendar, Shield, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
+import { X, MessageSquare, Calendar, Shield, Loader2, AlertTriangle } from 'lucide-react';
 import { addComment, deleteComment, subscribeToComments, subscribeToLikes, toggleLike } from '../firebase';
 import { updatePost, deletePost } from '../services/firebaseClient';
 import { Badge, Button, Input } from './ui';
@@ -350,7 +350,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                 {comments.map((comment) => {
                   const canDeleteComment = Boolean(user?.uid && comment.authorId === user.uid);
                   return (
-                    <div key={comment.id} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+                    <div key={comment.id} className="group p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-slate-800 dark:text-white">{comment.authorName || 'Anon'}</p>
@@ -360,11 +360,12 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                           <button
                             type="button"
                             onClick={() => handleDeleteComment(comment)}
-                            className="inline-flex items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20"
+                            className="px-1 text-slate-400 hover:text-red-500 transition opacity-100 md:opacity-0 md:group-hover:opacity-100"
                             aria-label="Verwijder reactie"
+                            title="Verwijder reactie"
                             disabled={deletingCommentId === comment.id}
                           >
-                            <Trash2 size={12} /> {deletingCommentId === comment.id ? 'Verwijderen...' : 'Verwijder'}
+                            <X className="w-4 h-4" />
                           </button>
                         )}
                       </div>

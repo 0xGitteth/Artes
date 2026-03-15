@@ -7984,7 +7984,7 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, currentP
             comments.map((comment) => {
               const canDeleteComment = Boolean(authUser?.uid && comment.authorId === authUser.uid);
               return (
-                <div key={comment.id} className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
+                <div key={comment.id} className="group rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
@@ -7995,11 +7995,13 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, currentP
                     {canDeleteComment && (
                       <button
                         type="button"
-                        className="px-2 py-1 rounded-full border border-red-200 text-red-600 text-xs hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20"
+                        className="px-1 text-slate-400 hover:text-red-500 transition opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                        aria-label="Verwijder reactie"
+                        title="Verwijder reactie"
                         onClick={() => handleDeleteComment(comment.id, comment.authorId)}
                         disabled={deletingCommentId === comment.id}
                       >
-                        {deletingCommentId === comment.id ? 'Verwijderen...' : 'Verwijder'}
+                        <X className="w-4 h-4" />
                       </button>
                     )}
                   </div>

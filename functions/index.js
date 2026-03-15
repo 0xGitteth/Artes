@@ -1118,6 +1118,15 @@ const parseGeminiJson = (text) => {
   }
 };
 
+const buildGeminiRawPreview = (text, maxLength = 400) => {
+  if (typeof text !== 'string') return null;
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength)}…`
+    : normalized;
+};
+
 const runGeminiClassifier = async ({ buffer, mimeType }) => {
   if (process.env.ENABLE_GEMINI_CLASSIFIER !== 'true') {
     return null;
@@ -1157,7 +1166,14 @@ const runGeminiClassifier = async ({ buffer, mimeType }) => {
   });
 
   const text = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
-  return parseGeminiJson(text);
+  const parsed = parseGeminiJson(text);
+  return {
+    parsed,
+    parseSucceeded: Boolean(parsed),
+    hasRawText: typeof text === 'string' && text.trim().length > 0,
+    rawPreview: buildGeminiRawPreview(text),
+    rawLength: typeof text === 'string' ? text.length : 0,
+  };
 };
 
 export const moderateImage = onRequest({ cors: true, region: 'europe-west4', memory: '1GiB' }, async (req, res) => {
@@ -1376,11 +1392,36 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let geminiSexualExplicitConfidence = 0;
   let explicitDecisionBranchHit = false;
   let explicitDecisionAddedForbiddenReason = false;
+  let geminiDebug = {
+    parseSucceeded: false,
+    hasRawText: false,
+    rawPreview: null,
+    rawLength: 0,
+    parsedKeys: [],
+    hasUsableGeminiOutput: false,
+    hasTriggersArray: false,
+    hasForbiddenReasonsArray: false,
+    rawAdultDecision: null,
+    rawSexualExplicitConfidence: null,
+    normalizedAdultDecision: null,
+    normalizedSexualExplicitConfidence: 0,
+  };
 
   if (!cachedResult) {
     try {
       geminiAttempted = true;
-      geminiResult = await runGeminiClassifier(parsed);
+      const geminiClassifierResult = await runGeminiClassifier(parsed);
+      geminiResult = geminiClassifierResult?.parsed || null;
+      geminiDebug = {
+        ...geminiDebug,
+        parseSucceeded: Boolean(geminiClassifierResult?.parseSucceeded),
+        hasRawText: Boolean(geminiClassifierResult?.hasRawText),
+        rawPreview: geminiClassifierResult?.rawPreview || null,
+        rawLength: Number(geminiClassifierResult?.rawLength) || 0,
+        parsedKeys: geminiResult && typeof geminiResult === 'object' ? Object.keys(geminiResult) : [],
+        rawAdultDecision: geminiResult?.adultDecision ?? null,
+        rawSexualExplicitConfidence: geminiResult?.sexualExplicitConfidence ?? null,
+      };
       if (geminiResult?.triggers?.length) {
         geminiResult.triggers.forEach((item) => {
           const rawTrigger = String(item.trigger || '').trim();
@@ -1410,6 +1451,11 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
       geminiAdultDecision = normalizeAdultDecision(geminiResult?.adultDecision);
       geminiSexualExplicitConfidence = Number(geminiResult?.sexualExplicitConfidence) || 0;
+      geminiDebug = {
+        ...geminiDebug,
+        normalizedAdultDecision: geminiAdultDecision,
+        normalizedSexualExplicitConfidence: geminiSexualExplicitConfidence,
+      };
       explicitDecisionBranchHit = geminiAdultDecision === 'explicit';
       if (explicitDecisionBranchHit && geminiSexualExplicitConfidence >= forbiddenThreshold) {
         forbiddenReasons.push({
@@ -1433,6 +1479,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         || geminiSexualExplicitConfidence > 0
       )
     );
+    geminiDebug = {
+      ...geminiDebug,
+      hasTriggersArray: Array.isArray(geminiResult?.triggers),
+      hasForbiddenReasonsArray: Array.isArray(geminiResult?.forbiddenReasons),
+      hasUsableGeminiOutput,
+    };
 
     const geminiUnavailableOrUnusable = geminiFailed || !geminiResult || !hasUsableGeminiOutput;
     const adultSafeSearchScore = safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0;
@@ -1751,6 +1803,11 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       matchedFingerprintType,
       forbiddenTriggerKeys: finalForbiddenReasons.map((reason) => reason?.trigger).filter(Boolean),
       suggestedTriggerKeys: finalSuggestedTriggers.map((item) => item?.trigger).filter(Boolean),
+      geminiDebug: {
+        ...geminiDebug,
+        geminiAttempted,
+        geminiFailed,
+      },
     };
   }
 

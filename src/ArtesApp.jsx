@@ -4627,8 +4627,10 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       if (!response.ok) {
         throw new Error(payload?.error || 'Kon override niet opslaan.');
       }
-      const closedCaseId = payload?.reviewCaseId || selectedCase.id;
-      setCases((prev) => prev.filter((item) => item.id !== closedCaseId));
+      const clickedCaseId = selectedCase.id;
+      const backendCaseId = typeof payload?.reviewCaseId === 'string' ? payload.reviewCaseId : null;
+      const caseIdsToRemove = new Set([clickedCaseId, backendCaseId].filter(Boolean));
+      setCases((prev) => prev.filter((item) => !caseIdsToRemove.has(item.id)));
       setFreshEvaluationMessage('De volgende upload van deze afbeelding wordt opnieuw beoordeeld.');
       setSelectedCaseId(null);
     } catch (error) {

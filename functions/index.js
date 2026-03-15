@@ -1381,8 +1381,9 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     const hasStrongRacySafeSearchSignal = racySafeSearchScore >= forbiddenThreshold;
     if (geminiAttempted && geminiUnavailableOrUnusable && hasStrongAdultSafeSearchSignal) {
       const hasManualArtNudeContext = normalizedMakerTags.includes(ADULT_ART_NUDE_TRIGGER);
+      const hasThemeArtNudeContext = normalizedThemes.includes(ART_NUDE_THEME);
       const hasFallbackForbiddenEscalationSignal = hasStrongRacySafeSearchSignal;
-      if (hasManualArtNudeContext || !hasFallbackForbiddenEscalationSignal) {
+      if (hasManualArtNudeContext || hasThemeArtNudeContext || !hasFallbackForbiddenEscalationSignal) {
         suggestedTriggers.push(
           buildTriggerRecord('gemini_uncertain_fallback', adultSafeSearchScore, 'geminiFallback')
         );

@@ -12,6 +12,7 @@ import { getFirebaseDbInstance } from '../firebase';
 import { canAccessFirestore } from '../utils/firestoreGate';
 
 const normalizeQuery = (value) => value.trim().toLowerCase();
+const getUserVisibleName = (user) => user?.displayName || user?.username || 'Gebruiker';
 
 const Avatar = ({ photoURL, name }) => {
   if (photoURL) {
@@ -131,10 +132,9 @@ export default function SearchWithAutocomplete({
                   onClick={() => onSelect?.(user)}
                   className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
-                  <Avatar photoURL={user.photoURL} name={user.displayName || user.username} />
+                  <Avatar photoURL={user.photoURL} name={getUserVisibleName(user)} />
                   <div>
-                    <p className="text-sm font-semibold dark:text-white">{user.displayName || 'Onbekend'}</p>
-                    <p className="text-xs text-slate-500">{user.username || 'onbekend'}</p>
+                    <p className="text-sm font-semibold dark:text-white">{getUserVisibleName(user)}</p>
                   </div>
                 </button>
               ))}

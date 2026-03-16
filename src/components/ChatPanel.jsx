@@ -60,6 +60,8 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   const [selectedUser, setSelectedUser] = useState(null);
   const [startingChat, setStartingChat] = useState(false);
 
+  const getUserVisibleName = (user) => user?.displayName || user?.username || 'Gebruiker';
+
   const normalizedQuery = useMemo(() => normalizeQuery(queryText), [queryText]);
 
   useEffect(() => {
@@ -207,10 +209,9 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
                   onClick={() => setSelectedUser(user)}
                   className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition"
                 >
-                  <Avatar photoURL={user.photoURL} name={user.displayName || user.username} />
+                  <Avatar photoURL={user.photoURL} name={getUserVisibleName(user)} />
                   <div className="text-left">
-                    <p className="text-sm font-semibold dark:text-white">{user.displayName || 'Onbekend'}</p>
-                    <p className="text-xs text-slate-500">{user.username}</p>
+                    <p className="text-sm font-semibold dark:text-white">{getUserVisibleName(user)}</p>
                   </div>
                 </button>
               ))}
@@ -224,10 +225,9 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
           {selectedUser && (
             <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
               <div className="flex items-center gap-3">
-                <Avatar photoURL={selectedUser.photoURL} name={selectedUser.displayName || selectedUser.username} />
+                <Avatar photoURL={selectedUser.photoURL} name={getUserVisibleName(selectedUser)} />
                 <div>
-                  <p className="text-sm font-semibold dark:text-white">{selectedUser.displayName || 'Onbekend'}</p>
-                  <p className="text-xs text-slate-500">{selectedUser.username}</p>
+                  <p className="text-sm font-semibold dark:text-white">{getUserVisibleName(selectedUser)}</p>
                 </div>
               </div>
               {selectedUser.uid === authUser.uid ? (

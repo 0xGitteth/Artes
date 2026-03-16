@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, Search, X } from 'lucide-react';
 import {
   collection,
   getDocs,
@@ -32,9 +32,16 @@ export default function SearchWithAutocomplete({
   onChange,
   onSelect,
   placeholder = 'Zoek op naam of gebruikersnaam',
+  selectedLabel = '',
+  onClearSelection,
+  selectedStateLabel = 'Geselecteerd',
 }) {
+  const containerRef = useRef(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [selectionLocked, setSelectionLocked] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
 
   const normalizedQuery = useMemo(() => normalizeQuery(value), [value]);
 
@@ -105,17 +112,87 @@ export default function SearchWithAutocomplete({
     };
   }, [normalizedQuery, authReady, authUser]);
 
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (!containerRef.current?.contains(event.target)) {
+        setIsFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const hasSelectedState = Boolean(selectedLabel);
+  const showDropdown = isFocused && !selectionLocked && normalizedQuery && (loading || results.length > 0);
+
+  useEffect(() => {
+    if (!showDropdown || loading || results.length === 0) {
+      setHighlightedIndex(-1);
+      return;
+    }
+    setHighlightedIndex(0);
+  }, [showDropdown, loading, results]);
+
+  const commitSelection = (user) => {
+    onSelect?.(user);
+    setSelectionLocked(true);
+    setIsFocused(false);
+    setHighlightedIndex(-1);
+  };
+
+  const handleInputKeyDown = (event) => {
+    if (!showDropdown || loading || results.length === 0) {
+      if (event.key === 'Escape') {
+        setIsFocused(false);
+      }
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setHighlightedIndex((prev) => (prev < 0 ? 0 : Math.min(prev + 1, results.length - 1)));
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setHighlightedIndex((prev) => (prev <= 0 ? 0 : prev - 1));
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const nextSelection = results[highlightedIndex] || results[0];
+      if (nextSelection) commitSelection(nextSelection);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setIsFocused(false);
+      setHighlightedIndex(-1);
+    }
+  };
+
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
       <input
         className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
         placeholder={placeholder}
         value={value}
-        onChange={(event) => onChange?.(event.target.value)}
+        onChange={(event) => {
+          setSelectionLocked(false);
+          onChange?.(event.target.value);
+        }}
+        onFocus={() => {
+          setIsFocused(true);
+          setSelectionLocked(false);
+        }}
+        onKeyDown={handleInputKeyDown}
       />
 
-      {(loading || results.length > 0) && (
+      {showDropdown && (
         <div className="absolute z-20 mt-2 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg">
           {loading && (
             <div className="p-3 text-sm text-slate-500">Zoeken...</div>
@@ -125,12 +202,12 @@ export default function SearchWithAutocomplete({
           )}
           {!loading && results.length > 0 && (
             <div className="max-h-64 overflow-y-auto">
-              {results.map((user) => (
+              {results.map((user, index) => (
                 <button
                   key={user.uid}
                   type="button"
-                  onClick={() => onSelect?.(user)}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800"
+                  onClick={() => commitSelection(user)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 text-left ${highlightedIndex === index ? 'bg-slate-100 dark:bg-slate-800' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                 >
                   <Avatar photoURL={user.photoURL} name={getUserVisibleName(user)} />
                   <div>
@@ -139,6 +216,27 @@ export default function SearchWithAutocomplete({
                 </button>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {hasSelectedState && (
+        <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-900/40 dark:text-emerald-200">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          <span className="font-semibold">{selectedStateLabel}:</span>
+          <span>{selectedLabel}</span>
+          {onClearSelection && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectionLocked(false);
+                onClearSelection();
+              }}
+              className="inline-flex items-center rounded-full p-0.5 text-emerald-700 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-800/60"
+              aria-label="Verwijder selectie"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           )}
         </div>
       )}

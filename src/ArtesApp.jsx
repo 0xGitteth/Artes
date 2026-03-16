@@ -2638,10 +2638,6 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
          theme: profile?.preferences?.theme || 'light',
        },
     }));
-    const [agencyInputMode, setAgencyInputMode] = useState(() => (profile?.linkedAgencyId ? 'existing' : 'manual'));
-    const [companyInputMode, setCompanyInputMode] = useState(() => (profile?.linkedCompanyId ? 'existing' : 'manual'));
-    const [agencySearch, setAgencySearch] = useState(() => profile?.linkedAgencyName || '');
-    const [companySearch, setCompanySearch] = useState(() => profile?.linkedCompanyName || '');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [accountCreated, setAccountCreated] = useState(!!authUser);
@@ -2858,16 +2854,12 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           linkedCompanyName: resolvedCompanyName,
         }));
       }
-      if (!agencySearch && resolvedAgencyName) setAgencySearch(resolvedAgencyName);
-      if (!companySearch && resolvedCompanyName) setCompanySearch(resolvedCompanyName);
     }, [
       users,
       profileData.linkedAgencyId,
       profileData.linkedCompanyId,
       profileData.linkedAgencyName,
       profileData.linkedCompanyName,
-      agencySearch,
-      companySearch,
     ]);
 
     const clearDiditReturnParam = useCallback(() => {
@@ -3521,87 +3513,47 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           <div className="flex gap-4">
              <div className="flex-1">
                  <label className="block text-sm font-medium mb-1 dark:text-slate-300">Agency (Optioneel)</label>
-                 <div className="mb-2 flex gap-2">
-                   <button
-                     type="button"
-                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${agencyInputMode === 'existing' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-                     onClick={() => setAgencyInputMode('existing')}
-                   >
-                     Bestaande pagina
-                   </button>
-                   <button
-                     type="button"
-                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${agencyInputMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-                     onClick={() => setAgencyInputMode('manual')}
-                   >
-                     Vrije tekst
-                   </button>
-                 </div>
-                 {agencyInputMode === 'existing' ? (
-                   <SearchWithAutocomplete
-                     authReady={authReady}
-                     authUser={authUser}
-                     value={agencySearch}
-                     onChange={(value) => {
-                       setAgencySearch(value);
-                       setProfileData((prev) => ({ ...prev, linkedAgencyId: null, linkedAgencyName: value }));
-                     }}
-                     onSelect={(selectedUser) => {
-                       const selectedName = selectedUser?.displayName || selectedUser?.username || '';
-                       setAgencySearch(selectedName);
-                       setProfileData((prev) => ({
-                         ...prev,
-                         linkedAgencyId: selectedUser?.uid || null,
-                         linkedAgencyName: selectedName,
-                       }));
-                     }}
-                     placeholder="Zoek agency profiel"
-                   />
-                 ) : (
-                   <input className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="Naam Agency" value={profileData.linkedAgencyName || ''} onChange={e => setProfileData({...profileData, linkedAgencyName: e.target.value, linkedAgencyId: null})} />
-                 )}
+                 <SearchWithAutocomplete
+                   authReady={authReady}
+                   authUser={authUser}
+                   value={profileData.linkedAgencyName || ''}
+                   onChange={(value) => {
+                     setProfileData((prev) => ({ ...prev, linkedAgencyId: null, linkedAgencyName: value }));
+                   }}
+                   onSelect={(selectedUser) => {
+                     const selectedName = selectedUser?.displayName || selectedUser?.username || '';
+                     setProfileData((prev) => ({
+                       ...prev,
+                       linkedAgencyId: selectedUser?.uid || null,
+                       linkedAgencyName: selectedName,
+                     }));
+                   }}
+                   selectedLabel={profileData.linkedAgencyId ? (profileData.linkedAgencyName || '') : ''}
+                   onClearSelection={() => setProfileData((prev) => ({ ...prev, linkedAgencyId: null }))}
+                   placeholder="Zoek of typ agency naam"
+                 />
              </div>
              <div className="flex-1">
                  <label className="block text-sm font-medium mb-1 dark:text-slate-300">Bedrijf/Studio (Optioneel)</label>
-                 <div className="mb-2 flex gap-2">
-                   <button
-                     type="button"
-                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${companyInputMode === 'existing' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-                     onClick={() => setCompanyInputMode('existing')}
-                   >
-                     Bestaande pagina
-                   </button>
-                   <button
-                     type="button"
-                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${companyInputMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-                     onClick={() => setCompanyInputMode('manual')}
-                   >
-                     Vrije tekst
-                   </button>
-                 </div>
-                 {companyInputMode === 'existing' ? (
-                   <SearchWithAutocomplete
-                     authReady={authReady}
-                     authUser={authUser}
-                     value={companySearch}
-                     onChange={(value) => {
-                       setCompanySearch(value);
-                       setProfileData((prev) => ({ ...prev, linkedCompanyId: null, linkedCompanyName: value }));
-                     }}
-                     onSelect={(selectedUser) => {
-                       const selectedName = selectedUser?.displayName || selectedUser?.username || '';
-                       setCompanySearch(selectedName);
-                       setProfileData((prev) => ({
-                         ...prev,
-                         linkedCompanyId: selectedUser?.uid || null,
-                         linkedCompanyName: selectedName,
-                       }));
-                     }}
-                     placeholder="Zoek bedrijfsprofiel"
-                   />
-                 ) : (
-                   <input className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="Naam Bedrijf" value={profileData.linkedCompanyName || ''} onChange={e => setProfileData({...profileData, linkedCompanyName: e.target.value, linkedCompanyId: null})} />
-                 )}
+                 <SearchWithAutocomplete
+                   authReady={authReady}
+                   authUser={authUser}
+                   value={profileData.linkedCompanyName || ''}
+                   onChange={(value) => {
+                     setProfileData((prev) => ({ ...prev, linkedCompanyId: null, linkedCompanyName: value }));
+                   }}
+                   onSelect={(selectedUser) => {
+                     const selectedName = selectedUser?.displayName || selectedUser?.username || '';
+                     setProfileData((prev) => ({
+                       ...prev,
+                       linkedCompanyId: selectedUser?.uid || null,
+                       linkedCompanyName: selectedName,
+                     }));
+                   }}
+                   selectedLabel={profileData.linkedCompanyId ? (profileData.linkedCompanyName || '') : ''}
+                   onClearSelection={() => setProfileData((prev) => ({ ...prev, linkedCompanyId: null }))}
+                   placeholder="Zoek of typ bedrijfsnaam"
+                 />
              </div>
           </div>
           <div>
@@ -7006,10 +6958,6 @@ function UploadModal({
 
 function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQuickProfile, onProfileUpdated }) {
   const [formData, setFormData] = useState({ ...profile });
-  const [agencySearch, setAgencySearch] = useState(profile?.linkedAgencyName || '');
-  const [companySearch, setCompanySearch] = useState(profile?.linkedCompanyName || '');
-  const [agencyInputMode, setAgencyInputMode] = useState(() => (profile?.linkedAgencyId ? 'existing' : 'manual'));
-  const [companyInputMode, setCompanyInputMode] = useState(() => (profile?.linkedCompanyId ? 'existing' : 'manual'));
   const [tab, setTab] = useState('general');
   const [pendingRoleRemoval, setPendingRoleRemoval] = useState(null);
   const [avatarInputMode, setAvatarInputMode] = useState(profile?.avatar?.startsWith('data:') ? 'upload' : 'url');
@@ -7029,22 +6977,6 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
     () => [...userPosts].sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a)),
     [userPosts]
   );
-  const searchableUsers = useMemo(() => (Array.isArray(users) ? users.map((entry) => normalizeUserForCollections(entry)) : []), [users]);
-  const agencySuggestions = useMemo(() => {
-    const term = String(agencySearch || '').trim().toLowerCase();
-    if (!term) return [];
-    return searchableUsers
-      .filter((entry) => (entry.displayName || '').toLowerCase().includes(term))
-      .slice(0, 5);
-  }, [searchableUsers, agencySearch]);
-  const companySuggestions = useMemo(() => {
-    const term = String(companySearch || '').trim().toLowerCase();
-    if (!term) return [];
-    return searchableUsers
-      .filter((entry) => (entry.displayName || '').toLowerCase().includes(term))
-      .slice(0, 5);
-  }, [searchableUsers, companySearch]);
-
   const handleSave = async () => {
      setSaveError(null);
      setIsSaving(true);
@@ -7228,87 +7160,47 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                         <div className="grid md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium mb-1 dark:text-slate-300">Agency</label>
-                            <div className="mb-2 flex gap-2">
-                              <button
-                                type="button"
-                                className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${agencyInputMode === 'existing' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-                                onClick={() => setAgencyInputMode('existing')}
-                              >
-                                Bestaande pagina
-                              </button>
-                              <button
-                                type="button"
-                                className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${agencyInputMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-                                onClick={() => setAgencyInputMode('manual')}
-                              >
-                                Vrije tekst
-                              </button>
-                            </div>
-                            {agencyInputMode === 'existing' ? (
-                              <SearchWithAutocomplete
-                                authReady={Boolean(user?.uid)}
-                                authUser={user}
-                                value={agencySearch}
-                                onChange={(value) => {
-                                  setAgencySearch(value);
-                                  setFormData((prev) => ({ ...prev, linkedAgencyName: value, linkedAgencyId: null }));
-                                }}
-                                onSelect={(selectedUser) => {
-                                  const selectedName = selectedUser?.displayName || selectedUser?.username || '';
-                                  setAgencySearch(selectedName);
-                                  setFormData((prev) => ({
-                                    ...prev,
-                                    linkedAgencyName: selectedName,
-                                    linkedAgencyId: selectedUser?.uid || null,
-                                  }));
-                                }}
-                                placeholder="Zoek agency profiel"
-                              />
-                            ) : (
-                              <input className="w-full p-3 rounded-xl border mb-2 dark:bg-slate-800 dark:text-white" placeholder="Typ naam..." value={formData.linkedAgencyName || ''} onChange={e => setFormData({...formData, linkedAgencyName: e.target.value, linkedAgencyId: null})} />
-                            )}
+                            <SearchWithAutocomplete
+                              authReady={Boolean(user?.uid)}
+                              authUser={user}
+                              value={formData.linkedAgencyName || ''}
+                              onChange={(value) => {
+                                setFormData((prev) => ({ ...prev, linkedAgencyName: value, linkedAgencyId: null }));
+                              }}
+                              onSelect={(selectedUser) => {
+                                const selectedName = selectedUser?.displayName || selectedUser?.username || '';
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  linkedAgencyName: selectedName,
+                                  linkedAgencyId: selectedUser?.uid || null,
+                                }));
+                              }}
+                              selectedLabel={formData.linkedAgencyId ? (formData.linkedAgencyName || '') : ''}
+                              onClearSelection={() => setFormData((prev) => ({ ...prev, linkedAgencyId: null }))}
+                              placeholder="Zoek of typ agency naam"
+                            />
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1 dark:text-slate-300">Bedrijf</label>
-                            <div className="mb-2 flex gap-2">
-                              <button
-                                type="button"
-                                className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${companyInputMode === 'existing' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-                                onClick={() => setCompanyInputMode('existing')}
-                              >
-                                Bestaande pagina
-                              </button>
-                              <button
-                                type="button"
-                                className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${companyInputMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-                                onClick={() => setCompanyInputMode('manual')}
-                              >
-                                Vrije tekst
-                              </button>
-                            </div>
-                            {companyInputMode === 'existing' ? (
-                              <SearchWithAutocomplete
-                                authReady={Boolean(user?.uid)}
-                                authUser={user}
-                                value={companySearch}
-                                onChange={(value) => {
-                                  setCompanySearch(value);
-                                  setFormData((prev) => ({ ...prev, linkedCompanyName: value, linkedCompanyId: null }));
-                                }}
-                                onSelect={(selectedUser) => {
-                                  const selectedName = selectedUser?.displayName || selectedUser?.username || '';
-                                  setCompanySearch(selectedName);
-                                  setFormData((prev) => ({
-                                    ...prev,
-                                    linkedCompanyName: selectedName,
-                                    linkedCompanyId: selectedUser?.uid || null,
-                                  }));
-                                }}
-                                placeholder="Zoek bedrijfsprofiel"
-                              />
-                            ) : (
-                              <input className="w-full p-3 rounded-xl border mb-2 dark:bg-slate-800 dark:text-white" placeholder="Typ naam..." value={formData.linkedCompanyName || ''} onChange={e => setFormData({...formData, linkedCompanyName: e.target.value, linkedCompanyId: null})} />
-                            )}
+                            <SearchWithAutocomplete
+                              authReady={Boolean(user?.uid)}
+                              authUser={user}
+                              value={formData.linkedCompanyName || ''}
+                              onChange={(value) => {
+                                setFormData((prev) => ({ ...prev, linkedCompanyName: value, linkedCompanyId: null }));
+                              }}
+                              onSelect={(selectedUser) => {
+                                const selectedName = selectedUser?.displayName || selectedUser?.username || '';
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  linkedCompanyName: selectedName,
+                                  linkedCompanyId: selectedUser?.uid || null,
+                                }));
+                              }}
+                              selectedLabel={formData.linkedCompanyId ? (formData.linkedCompanyName || '') : ''}
+                              onClearSelection={() => setFormData((prev) => ({ ...prev, linkedCompanyId: null }))}
+                              placeholder="Zoek of typ bedrijfsnaam"
+                            />
                         </div>
                         </div>
                     </div>

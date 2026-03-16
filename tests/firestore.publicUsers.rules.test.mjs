@@ -226,6 +226,51 @@ async function run() {
 
     await assertSucceeds(deleteDoc(doc(ownerDb, 'users', ownerUid, 'following', 'target_a')));
 
+    const communityId = 'community_1';
+    const topicId = 'topic_1';
+    const commentId = 'comment_1';
+
+    await assertSucceeds(
+      setDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId), {
+        text: 'Legit owner comment',
+        authorId: ownerUid,
+        authorName: 'Owner One',
+        createdAt: serverTimestamp(),
+      }),
+    );
+
+    await assertFails(
+      setDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', 'spoofed'), {
+        text: 'Spoofed author',
+        authorId: otherUid,
+        authorName: 'Bad Actor',
+        createdAt: serverTimestamp(),
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId), {
+        text: 'Updated owner text',
+        updatedAt: serverTimestamp(),
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId), {
+        authorId: otherUid,
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId), {
+        authorName: 'Tampered Name',
+      }),
+    );
+
+    await assertFails(deleteDoc(doc(otherDb, 'communities', communityId, 'topics', topicId, 'comments', commentId)));
+
+    await assertSucceeds(deleteDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId)));
+
     console.log('PASS firestore.publicUsers.rules.test');
   } finally {
     await testEnv.cleanup();

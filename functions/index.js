@@ -72,6 +72,21 @@ if (!admin.apps.length) {
 
 const db = getFirestore();
 const lockDurationMs = 10 * 60 * 1000;
+const MODERATION_EXAMPLE_REASON_CODES = new Set([
+  'allowed_art_nude',
+  'allowed_boudoir',
+  'allowed_non_sensitive',
+  'review_borderline_adult',
+  'forbidden_explicit_sexual',
+  'forbidden_non_consensual_context',
+  'wrong_theme_or_label',
+  'unclear_ai_result',
+]);
+const MODERATION_EXAMPLE_REASON_CODES_BY_ACTION = {
+  approve: new Set(['allowed_art_nude', 'allowed_boudoir', 'allowed_non_sensitive', 'wrong_theme_or_label']),
+  reject: new Set(['forbidden_explicit_sexual', 'forbidden_non_consensual_context', 'wrong_theme_or_label']),
+  queueFreshEvaluation: new Set(['review_borderline_adult', 'unclear_ai_result', 'wrong_theme_or_label']),
+};
 const visionClient = new ImageAnnotatorClient();
 
 const generateClaimCode = () => `ARTES-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
@@ -2778,6 +2793,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
     const {
       reviewCaseId,
       decision,
+      reasonCode,
       decisionMessagePublic,
       decisionReasons = [],
       moderatorNoteInternal = null,
@@ -2789,6 +2805,20 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
     }
     if (!['approved', 'rejected'].includes(decision)) {
       res.status(400).json({ error: 'Invalid decision' });
+      return;
+    }
+    const normalizedReasonCode = String(reasonCode || '').trim();
+    if (!normalizedReasonCode) {
+      res.status(400).json({ error: 'reasonCode is required' });
+      return;
+    }
+    if (!MODERATION_EXAMPLE_REASON_CODES.has(normalizedReasonCode)) {
+      res.status(400).json({ error: 'Invalid reasonCode' });
+      return;
+    }
+    const normalizedAction = decision === 'approved' ? 'approve' : 'reject';
+    if (!MODERATION_EXAMPLE_REASON_CODES_BY_ACTION[normalizedAction]?.has(normalizedReasonCode)) {
+      res.status(400).json({ error: `Invalid reasonCode for action ${normalizedAction}` });
       return;
     }
     const trimmedMessage = String(decisionMessagePublic || '').trim();
@@ -2813,6 +2843,8 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
     let caseType = 'upload';
     let finalDecisionMessage = trimmedMessage;
     let reviewSnapshotData = null;
+    let uploadSnapshotData = null;
+    let moderationExamplePayload = null;
 
     await db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(reviewRef);
@@ -2867,6 +2899,8 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
 
       if (uploadId) {
         const uploadRef = db.collection('uploads').doc(uploadId);
+        const uploadSnapshot = await transaction.get(uploadRef);
+        uploadSnapshotData = uploadSnapshot.exists ? (uploadSnapshot.data() || null) : null;
         const isApproved = decision === 'approved';
         transaction.update(uploadRef, {
           reviewStatus: decision,
@@ -2896,6 +2930,54 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         reviewUpdate.reportedPostId = reportPostId;
       }
       transaction.update(reviewRef, reviewUpdate);
+
+      const uploadFingerprints = uploadSnapshotData?.fingerprints || reviewSnapshotData?.reportedFingerprints || {};
+      const uploadInputThemes = Array.isArray(uploadSnapshotData?.themes) ? uploadSnapshotData.themes : [];
+      const uploadInputMakerTags = Array.isArray(uploadSnapshotData?.makerTags) ? uploadSnapshotData.makerTags : [];
+      const moderationSignals = uploadSnapshotData?.moderationSignals || reviewSnapshotData?.moderationSignals || {};
+      const aiResult = uploadSnapshotData?.aiResult || reviewSnapshotData?.aiResult || {};
+      moderationExamplePayload = {
+        uploadId: uploadId || null,
+        reviewCaseId: reviewCaseId || null,
+        userId: userId || null,
+        fingerprints: {
+          sha256: uploadFingerprints?.sha256 || null,
+          dhash: uploadFingerprints?.dhash || null,
+          dhashPrefix: uploadFingerprints?.dhashPrefix || null,
+        },
+        uploaderInput: {
+          themes: uploadInputThemes,
+          makerTags: uploadInputMakerTags,
+          title: uploadSnapshotData?.title || null,
+          description: uploadSnapshotData?.description || null,
+        },
+        aiSnapshot: {
+          outcome: aiResult?.outcome || null,
+          classification: aiResult?.classification || null,
+          shouldReview: typeof aiResult?.shouldReview === 'boolean' ? aiResult.shouldReview : null,
+          appliedTriggers: Array.isArray(aiResult?.appliedTriggers) ? aiResult.appliedTriggers : [],
+          suggestedTriggers: Array.isArray(aiResult?.suggestedTriggers) ? aiResult.suggestedTriggers : [],
+          forbiddenReasons: Array.isArray(aiResult?.forbiddenReasons) ? aiResult.forbiddenReasons : [],
+          requiredThemes: Array.isArray(aiResult?.requiredThemes) ? aiResult.requiredThemes : [],
+          adultDecision: moderationSignals?.adultDecision ?? null,
+          sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
+        },
+        moderatorDecision: {
+          action: normalizedAction,
+          finalOutcome: decision === 'approved' ? 'allowed' : 'forbidden',
+          reasonCode: normalizedReasonCode,
+          notes: moderatorNoteInternal || null,
+          decidedBy: decoded.uid,
+          decidedAt: FieldValue.serverTimestamp(),
+        },
+        provenance: {
+          source: 'moderatorDecide',
+          policyVersion: uploadSnapshotData?.policyVersion || reviewSnapshotData?.policyVersion || null,
+          createdAt: FieldValue.serverTimestamp(),
+        },
+      };
+      const moderationExampleId = `${reviewCaseId}_${normalizedAction}`;
+      transaction.set(db.collection('moderationExamples').doc(moderationExampleId), moderationExamplePayload, { merge: true });
     });
 
     if (caseType === 'report' && decision === 'approved' && reportPostId) {
@@ -2992,8 +3074,21 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
     const body = parseJsonBody(req);
     const uploadId = String(body?.uploadId || '').trim();
     const reviewCaseIdFromBody = String(body?.reviewCaseId || '').trim();
+    const reasonCode = String(body?.reasonCode || '').trim();
     if (!uploadId) {
       res.status(400).json({ error: 'uploadId is required' });
+      return;
+    }
+    if (!reasonCode) {
+      res.status(400).json({ error: 'reasonCode is required' });
+      return;
+    }
+    if (!MODERATION_EXAMPLE_REASON_CODES.has(reasonCode)) {
+      res.status(400).json({ error: 'Invalid reasonCode' });
+      return;
+    }
+    if (!MODERATION_EXAMPLE_REASON_CODES_BY_ACTION.queueFreshEvaluation.has(reasonCode)) {
+      res.status(400).json({ error: 'Invalid reasonCode for action queueFreshEvaluation' });
       return;
     }
 
@@ -3085,6 +3180,52 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
         },
         { merge: true }
       );
+    }
+
+    if (targetReviewCaseId || uploadId) {
+      const moderationExampleId = `${targetReviewCaseId || uploadId}_queueFreshEvaluation`;
+      const aiResult = uploadData?.aiResult || {};
+      const moderationSignals = uploadData?.moderationSignals || {};
+      await db.collection('moderationExamples').doc(moderationExampleId).set({
+        uploadId: uploadId || null,
+        reviewCaseId: targetReviewCaseId || reviewCaseIdFromBody || null,
+        userId: userId || null,
+        fingerprints: {
+          sha256: fingerprints?.sha256 || null,
+          dhash: fingerprints?.dhash || null,
+          dhashPrefix: fingerprints?.dhashPrefix || null,
+        },
+        uploaderInput: {
+          themes: Array.isArray(uploadData?.themes) ? uploadData.themes : [],
+          makerTags: Array.isArray(uploadData?.makerTags) ? uploadData.makerTags : [],
+          title: uploadData?.title || null,
+          description: uploadData?.description || null,
+        },
+        aiSnapshot: {
+          outcome: aiResult?.outcome || null,
+          classification: aiResult?.classification || null,
+          shouldReview: typeof aiResult?.shouldReview === 'boolean' ? aiResult.shouldReview : null,
+          appliedTriggers: Array.isArray(aiResult?.appliedTriggers) ? aiResult.appliedTriggers : [],
+          suggestedTriggers: Array.isArray(aiResult?.suggestedTriggers) ? aiResult.suggestedTriggers : [],
+          forbiddenReasons: Array.isArray(aiResult?.forbiddenReasons) ? aiResult.forbiddenReasons : [],
+          requiredThemes: Array.isArray(aiResult?.requiredThemes) ? aiResult.requiredThemes : [],
+          adultDecision: moderationSignals?.adultDecision ?? null,
+          sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
+        },
+        moderatorDecision: {
+          action: 'queueFreshEvaluation',
+          finalOutcome: 'review',
+          reasonCode,
+          notes: null,
+          decidedBy: decoded.uid,
+          decidedAt: FieldValue.serverTimestamp(),
+        },
+        provenance: {
+          source: 'moderatorQueueFreshEvaluation',
+          policyVersion: uploadData?.policyVersion || null,
+          createdAt: FieldValue.serverTimestamp(),
+        },
+      }, { merge: true });
     }
 
     res.status(200).json({ ok: true, queued: !alreadyQueued, reviewCaseId: targetReviewCaseId, status: targetReviewCaseId ? 'freshEvalQueued' : null });

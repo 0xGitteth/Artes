@@ -212,6 +212,9 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
   const resolvedTriggers = Array.from(new Set([...(post.appliedTriggers || []), ...(post.makerTags || []), ...(post.triggers || [])].map(resolveTriggerKey)))
     .map((trigger) => TRIGGER_LABELS[trigger] || trigger);
   const sensitiveFlag = post.sensitive || (post.appliedTriggers || []).length > 0 || (post.makerTags || []).length > 0;
+  const contributorCredits = Array.isArray(post?.credits)
+    ? post.credits.filter((credit) => credit && !credit.isSelf && credit.uid !== post.authorId)
+    : [];
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
@@ -245,6 +248,27 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                 >
                   Challenge
                 </Badge>
+              )}
+            </div>
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-4 space-y-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Maker</p>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{post.authorName || 'Onbekend'}</p>
+              </div>
+              {contributorCredits.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Bijdragers</p>
+                  <div className="flex flex-wrap gap-2">
+                    {contributorCredits.map((credit, index) => (
+                      <Badge
+                        key={`${credit.uid || credit.contributorId || credit.name || 'credit'}-${index}`}
+                        colorClass="bg-white text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700"
+                      >
+                        {credit.role ? `${credit.role}: ` : ''}{credit.name || 'Onbekend'}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
             <p className="text-slate-700 dark:text-slate-200 leading-relaxed">{post.description}</p>

@@ -646,7 +646,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
                                 </button>
                               </div>
                           )}
-                          <div className="mt-1 text-[10px] text-slate-400 text-right">
+                          <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 text-right">
                             {formatTime(message.createdAt)}
                           </div>
                         </div>
@@ -661,7 +661,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
               {activeThread.type === 'dm' || activeThread.type === 'support' ? (
                 <div className="flex gap-2">
                   <input
-                    className="flex-1 rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm dark:bg-slate-800 dark:text-white"
+                    className="flex-1 rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm placeholder:text-slate-400 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
                     placeholder={activeThread.type === 'support' && !canSendSupport ? 'Wacht op reactie van moderatie...' : 'Typ een bericht...'}
                     value={composerText}
                     onChange={(event) => setComposerText(event.target.value)}

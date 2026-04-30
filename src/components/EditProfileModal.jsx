@@ -67,7 +67,7 @@ export default function EditProfileModal({ profile, onSave, onClose }) {
                   type="button"
                   key={role.id}
                   onClick={() => toggleRole(role.id)}
-                  className={`px-3 py-2 rounded-full text-sm border ${form.roles?.includes(role.id) ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-800' : 'border-slate-200 dark:border-slate-800 text-slate-500'}`}
+                  className={`px-3 py-2 rounded-full text-sm border ${form.roles?.includes(role.id) ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-800' : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300'}`}
                 >
                   {role.label}
                 </button>
@@ -88,4 +88,3 @@ export default function EditProfileModal({ profile, onSave, onClose }) {
     </div>
   );
 }
-

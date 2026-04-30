@@ -7827,7 +7827,7 @@ function CommunityDetail({ id, setView, authUser, currentPublicProfile, communit
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-      <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 font-medium">
+      <button onClick={() => setView('community')} className="flex items-center text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white font-medium">
         <ChevronLeft className="w-4 h-4 mr-1" /> Terug
       </button>
       <div>
@@ -8066,7 +8066,7 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, currentP
 
   return (
     <div className="space-y-6">
-      <button type="button" onClick={onBack} className="flex items-center text-slate-500 hover:text-slate-800 font-medium">
+      <button type="button" onClick={onBack} className="flex items-center text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white font-medium">
         <ChevronLeft className="w-4 h-4 mr-1" /> Terug naar topics
       </button>
       <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 space-y-2">
@@ -8151,7 +8151,7 @@ function ChallengeDetail({ setView, posts, onPostClick, challenge, triggerVisibi
    );
    return (
       <div className="max-w-4xl mx-auto px-4 py-6">
-         <button onClick={() => setView('community')} className="flex items-center text-slate-500 hover:text-slate-800 mb-6 font-medium"><ChevronLeft className="w-4 h-4 mr-1"/> Terug</button>
+         <button onClick={() => setView('community')} className="flex items-center text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white mb-6 font-medium"><ChevronLeft className="w-4 h-4 mr-1"/> Terug</button>
          <div className="bg-amber-100 dark:bg-amber-900/20 p-8 rounded-3xl border border-amber-200 dark:border-amber-800 mb-8 text-center relative overflow-hidden">
             <p className="text-sm uppercase tracking-widest text-amber-700 dark:text-amber-200 mb-2">{challengeData.title}</p>
             <h1 className="text-4xl font-bold text-amber-900 dark:text-amber-100 mb-2">{challengeData.theme}</h1>

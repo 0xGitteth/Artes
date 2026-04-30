@@ -264,7 +264,7 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
       <aside className="md:w-80 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
         <div className="p-4 border-b border-slate-200 dark:border-slate-800">
           <h2 className="text-lg font-semibold dark:text-white">Berichten</h2>
-          <p className="text-xs text-slate-500">Support chats</p>
+          <p className="text-xs text-slate-500 dark:text-slate-300">Support chats</p>
           <div className="mt-3">
             <SearchWithAutocomplete
               authReady={authReady}
@@ -285,7 +285,7 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
         </div>
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {filteredThreads.length === 0 ? (
-            <div className="p-4 text-sm text-slate-500">Geen support chats gevonden.</div>
+            <div className="p-4 text-sm text-slate-500 dark:text-slate-300">Geen support chats gevonden.</div>
           ) : (
             filteredThreads.map((thread) => {
               const profile = userProfiles[thread.userUid];
@@ -315,11 +315,11 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-500">{info.username || 'onbekend'}</p>
-                        <p className="text-xs text-slate-500 mt-1 line-clamp-1">
+                        <p className="text-xs text-slate-500 dark:text-slate-300">{info.username || 'onbekend'}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-300 mt-1 line-clamp-1">
                           {thread.lastMessagePreview || 'Nog geen berichten'}
                         </p>
-                        <p className="text-[10px] text-slate-400 mt-1">
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
                           {thread.lastMessageAt ? formatDate(thread.lastMessageAt) : ''}
                         </p>
                       </div>
@@ -347,14 +347,14 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
               <div>
                 <h3 className="text-lg font-semibold dark:text-white">{display.displayName}</h3>
-                <p className="text-xs text-slate-500">{display.username || 'onbekend'}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-300">{display.username || 'onbekend'}</p>
               </div>
-              <span className="text-xs text-slate-400">{formatDate(activeThread.lastMessageAt)}</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500">{formatDate(activeThread.lastMessageAt)}</span>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
               {normalizedMessages.length === 0 ? (
-                <div className="text-sm text-slate-500">Nog geen berichten.</div>
+                <div className="text-sm text-slate-500 dark:text-slate-300">Nog geen berichten.</div>
               ) : (
                 normalizedMessages.map((message) => {
                   const isModeratorMessage = message.senderRole === 'moderator' || message.senderRole === 'system';
@@ -376,7 +376,7 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
                       <div className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${bubbleStyle}`}>
                         <div className="text-[11px] uppercase font-semibold mb-1 opacity-70">{senderName}</div>
                         <p>{message.text || message.message}</p>
-                        <div className="mt-1 text-[10px] text-slate-400 text-right">
+                        <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 text-right">
                           {formatTime(message.createdAt)}
                         </div>
                       </div>
@@ -389,7 +389,7 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
             <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4">
               <div className="flex gap-2">
                 <input
-                  className="flex-1 rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm dark:bg-slate-800 dark:text-white"
+                  className="flex-1 rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm placeholder:text-slate-400 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
                   placeholder="Typ een antwoord..."
                   value={composerText}
                   onChange={(event) => setComposerText(event.target.value)}

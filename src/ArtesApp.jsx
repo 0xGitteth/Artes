@@ -5,7 +5,7 @@ import {
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
-  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle, GitMerge
+  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle, GitMerge, Smartphone
 } from 'lucide-react';
 import {
   fetchUserIndex,
@@ -675,6 +675,7 @@ export default function ArtesApp() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [showTour, setShowTour] = useState(false);
+  const [appShortcutInfoMode, setAppShortcutInfoMode] = useState(null); // null | 'popup' | 'settings'
   const [verificationNote, setVerificationNote] = useState(null);
   const [verificationPending, setVerificationPending] = useState(false);
   const [verificationGateState, setVerificationGateState] = useState(() => buildVerificationGateState(null));
@@ -719,6 +720,10 @@ export default function ArtesApp() {
   const viewRef = useRef('loading');
   const viewReasonRef = useRef('initial');
   const userProfile = profile;
+  const appShortcutInfoStorageKey = useMemo(
+    () => (authUser?.uid ? `artes.appShortcutInfoDismissed.${authUser.uid}` : null),
+    [authUser?.uid],
+  );
   const profileAgeVerified = profile?.ageVerified === true || profile?.isAdult === true;
   const profileAgeVerifiedStrict = profile?.ageVerified === true;
   const canReadFirestore = canAccessFirestore({ authReady, user: authUser });
@@ -1821,8 +1826,22 @@ export default function ArtesApp() {
 
   const handleTourComplete = (targetView) => {
     setShowTour(false);
+    if (appShortcutInfoStorageKey) {
+      localStorage.setItem(appShortcutInfoStorageKey, '1');
+    }
     if(typeof targetView === 'string') setView(targetView);
   };
+
+  const handleDismissAppShortcutInfo = useCallback(() => {
+    if (appShortcutInfoStorageKey) {
+      localStorage.setItem(appShortcutInfoStorageKey, '1');
+    }
+    setAppShortcutInfoMode(null);
+  }, [appShortcutInfoStorageKey]);
+
+  const handleCloseAppShortcutInfoSettings = useCallback(() => {
+    setAppShortcutInfoMode(null);
+  }, []);
 
   const handleLogin = async (email, password) => {
     try {
@@ -1898,7 +1917,17 @@ export default function ArtesApp() {
     setDarkMode(finalProfile?.preferences?.theme === 'dark');
     setView('gallery');
     setShowTour(true);
+    setAppShortcutInfoMode(null);
   };
+
+  useEffect(() => {
+    if (!authReady || !authUser?.uid || !profile || !hasCompletedOnboarding(profile) || showTour) return;
+    if (!appShortcutInfoStorageKey) return;
+    const dismissed = localStorage.getItem(appShortcutInfoStorageKey) === '1';
+    if (!dismissed) {
+      setAppShortcutInfoMode('popup');
+    }
+  }, [authReady, authUser?.uid, profile, showTour, appShortcutInfoStorageKey]);
 
   const handleResendVerification = async () => {
     try {
@@ -2385,6 +2414,10 @@ export default function ArtesApp() {
               setShowSettingsModal(false);
               setView('support');
             }}
+            onOpenAppShortcutInfo={() => {
+              setShowSettingsModal(false);
+              setAppShortcutInfoMode('settings');
+            }}
             onOpenVouchRequests={() => {
               setShowSettingsModal(false);
               setView('vouch');
@@ -2414,6 +2447,12 @@ export default function ArtesApp() {
           />
         )}
         {showTour && <WelcomeTour onClose={handleTourComplete} setView={setView} />}
+        {appShortcutInfoMode === 'popup' && !showTour && (
+          <AppShortcutInfoModal onClose={handleDismissAppShortcutInfo} primaryLabel="Niet meer tonen" secondaryLabel="Bekijk later" />
+        )}
+        {appShortcutInfoMode === 'settings' && (
+          <AppShortcutInfoModal onClose={handleCloseAppShortcutInfoSettings} primaryLabel="Sluiten" />
+        )}
         {toastMessage && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-slate-900 text-white text-sm px-4 py-2 rounded-full shadow-lg">
             {toastMessage}
@@ -9959,7 +9998,36 @@ function ClaimEmailPage({ authUser, setView }) {
     </div>
   );
 }
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false }) { 
+function AppShortcutInfoContent() {
+  return (
+    <div className="space-y-4 text-sm leading-relaxed text-slate-700 dark:text-slate-200">
+      <p>Helaas is Artes nog niet te downloaden als app in de App Store of Play Store. Maar je kunt Artes wel als snelkoppeling op je telefoon, tablet of computer zetten. Zo kun je Artes toch gebruiken zoals je dat bij je andere apps gewend bent.</p>
+      <p className="font-semibold text-slate-900 dark:text-slate-100">Zo doe je dat:</p>
+      <p><span className="font-semibold text-slate-900 dark:text-slate-100">Chrome:</span><br />1. Open Artes in Chrome.<br />2. Tik of klik op het menu met de drie puntjes.<br />3. Kies Casten, opslaan en delen.<br />4. Kies Snelkoppeling maken of App installeren.<br />5. Kies eventueel Openen als venster.</p>
+      <p><span className="font-semibold text-slate-900 dark:text-slate-100">Edge:</span><br />1. Open Artes in Edge.<br />2. Tik of klik op het menu met de drie puntjes.<br />3. Kies Apps.<br />4. Kies Deze site installeren als app.</p>
+      <p><span className="font-semibold text-slate-900 dark:text-slate-100">Safari op iPhone of iPad:</span><br />1. Open Artes in Safari.<br />2. Tik op de deelknop.<br />3. Kies Zet op beginscherm.<br />4. Bevestig met Voeg toe.</p>
+      <p><span className="font-semibold text-slate-900 dark:text-slate-100">Safari op Mac:</span><br />1. Open Artes in Safari.<br />2. Klik op de deelknop of ga naar Archief.<br />3. Kies Voeg toe aan Dock.</p>
+      <p>Je kunt deze uitleg later altijd terugvinden in de sidebar bij Artes als app gebruiken.</p>
+    </div>
+  );
+}
+
+function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabel = null }) {
+  return (
+    <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-xl rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 md:p-8 shadow-2xl">
+        <h3 className="text-2xl font-bold mb-4 text-slate-900 dark:text-white">Artes als app gebruiken</h3>
+        <AppShortcutInfoContent />
+        <div className="mt-6 flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
+          {secondaryLabel && <Button variant="secondary" onClick={onClose}>{secondaryLabel}</Button>}
+          <Button onClick={onClose}>{primaryLabel}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white dark:bg-slate-900 w-80 h-full p-6 flex flex-col gap-6 text-slate-900 dark:text-slate-100">
@@ -10036,6 +10104,14 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     >
                       <span>Support</span>
                       <HelpCircle className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onOpenAppShortcutInfo}
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                    >
+                      <span>Artes als app gebruiken</span>
+                      <Smartphone className="w-4 h-4" />
                     </button>
                 </div>
             </div>
@@ -10202,6 +10278,13 @@ function WelcomeTour({ onClose, setView }) {
       action: null,
     },
     { title: 'De Galerij', desc: 'Hier vind je inspirerend werk van makers waarvan je fan bent.', icon: ImageIcon, action: 'gallery' },
+    {
+      title: 'Artes als app gebruiken',
+      desc: <AppShortcutInfoContent />,
+      icon: Smartphone,
+      action: null,
+      buttonLabel: 'Verder',
+    },
     { title: 'Ontdekken', desc: 'Zoek nieuwe makers, ideeën en connecties.', icon: Search, action: 'discover' },
     { title: 'Community', desc: 'Praat mee over veiligheid, techniek en samenwerkingen.', icon: Users, action: 'community' },
     { title: 'Jouw Portfolio', desc: 'Je visitekaartje. Beheer je werk en connecties.', icon: User, action: 'profile' },
@@ -10218,11 +10301,11 @@ function WelcomeTour({ onClose, setView }) {
              <Star className="w-8 h-8" />
           </div>
           <h2 className="text-2xl font-bold mb-3 dark:text-white">{steps[step].title}</h2>
-          <p className="text-slate-600 dark:text-slate-400 mb-8">{steps[step].desc}</p>
+          <div className="text-slate-600 dark:text-slate-400 mb-8 max-h-[50vh] overflow-y-auto text-left">{steps[step].desc}</div>
           
           {step < steps.length - 1 ? (
              <div className="flex gap-3">
-               <Button onClick={() => setStep(step + 1)} className="w-full">Volgende</Button>
+               <Button onClick={() => setStep(step + 1)} className="w-full">{steps[step].buttonLabel || 'Volgende'}</Button>
              </div>
           ) : (
              <div className="flex gap-3 flex-col">

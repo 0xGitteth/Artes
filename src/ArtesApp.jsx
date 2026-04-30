@@ -4812,6 +4812,39 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   };
   const currentStatusLabel = statusLabelMap[selectedCase?.status] || selectedCase?.status || 'Onbekend';
   const currentReviewReasonLabel = reviewReasonLabelMap[selectedReviewReason] || selectedReviewReason;
+  const casePreviousModeratorExample = selectedCase?.previousModeratorExample;
+  const uploadPreviousModeratorExample = selectedUpload?.moderationMetadata?.previousModeratorExample
+    || selectedUpload?.moderation?.previousModeratorExample
+    || null;
+  const previousModeratorExample = (casePreviousModeratorExample || uploadPreviousModeratorExample)
+    ? {
+        ...(uploadPreviousModeratorExample && typeof uploadPreviousModeratorExample === 'object' ? uploadPreviousModeratorExample : {}),
+        ...(casePreviousModeratorExample && typeof casePreviousModeratorExample === 'object' ? casePreviousModeratorExample : {}),
+      }
+    : null;
+  const previousActionLabelMap = {
+    approve: 'Goedgekeurd',
+    reject: 'Afgewezen',
+    queueFreshEvaluation: 'Nieuwe beoordeling gevraagd',
+  };
+  const previousOutcomeLabelMap = {
+    allowed: 'Toegestaan',
+    forbidden: 'Geblokkeerd',
+    review: 'Review nodig',
+  };
+  const previousReasonLabelMap = {
+    allowed_art_nude: 'Artistiek naakt toegestaan',
+    allowed_boudoir: 'Boudoir toegestaan',
+    allowed_non_sensitive: 'Niet gevoelig toegestaan',
+    review_borderline_adult: 'Grensgeval 18 plus, review nodig',
+    forbidden_explicit_sexual: 'Expliciet seksueel, geblokkeerd',
+    forbidden_non_consensual_context: 'Niet consensuele context, geblokkeerd',
+    wrong_theme_or_label: 'Thema of label klopt niet',
+    unclear_ai_result: 'Onduidelijke AI uitkomst',
+  };
+  const previousAction = previousModeratorExample?.action || null;
+  const previousOutcome = previousModeratorExample?.finalOutcome || null;
+  const previousReason = previousModeratorExample?.reasonCode || null;
   const queueTitle = caseTypeFilter === 'report' ? 'Gerapporteerde foto’s' : 'Foto’s in review';
 
   return (
@@ -4959,6 +4992,25 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                       {currentStatusLabel}
                     </div>
                   </div>
+                  {previousModeratorExample && (
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3 text-xs text-slate-600 dark:text-slate-200 space-y-1">
+                      <p className="font-semibold text-slate-700 dark:text-slate-100">Eerdere moderatorbeoordeling gevonden</p>
+                      <p><span className="font-semibold">Match:</span> Exacte SHA 256 match</p>
+                      <p>
+                        <span className="font-semibold">Vorige beslissing:</span>{' '}
+                        {previousActionLabelMap[previousAction] || 'Onbekend'}
+                      </p>
+                      {previousAction === 'queueFreshEvaluation' && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                          Dit was een verzoek voor een nieuwe beoordeling, geen definitieve goed- of afkeuring.
+                        </p>
+                      )}
+                      <p><span className="font-semibold">Einduitkomst:</span> {previousOutcomeLabelMap[previousOutcome] || 'Onbekend'}</p>
+                      <p><span className="font-semibold">Reden:</span> {previousReasonLabelMap[previousReason] || 'Onbekend'}</p>
+                      <p><span className="font-semibold">Beoordeeld op:</span> {formatDateTimeNl(previousModeratorExample?.decidedAt) || 'Onbekend'}</p>
+                      <p><span className="font-semibold">Policy versie:</span> {previousModeratorExample?.policyVersion || 'Onbekend'}</p>
+                    </div>
+                  )}
                   <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
                     <button
                       type="button"

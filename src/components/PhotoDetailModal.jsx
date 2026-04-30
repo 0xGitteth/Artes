@@ -41,7 +41,7 @@ const toActionErrorMessage = (error, fallbackMessage) => {
   return error.message || fallbackMessage;
 };
 
-export default function PhotoDetailModal({ post, onClose, currentUser, authUser, currentPublicProfile, moderationApiBase, onChallengeClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost }) {
+export default function PhotoDetailModal({ post, onClose, currentUser, authUser, currentPublicProfile, moderationApiBase, onChallengeClick, onUserClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost }) {
   const user = currentUser || authUser || null;
   const [comments, setComments] = useState([]);
   const [likesCount, setLikesCount] = useState(post.likes || 0);
@@ -216,6 +216,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
   const contributorCredits = Array.isArray(post?.credits)
     ? post.credits.filter((credit) => credit && !credit.isSelf && credit.uid !== post.authorId)
     : [];
+  const canOpenAuthorQuickProfile = Boolean(post?.authorId && onUserClick);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
@@ -259,7 +260,14 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-4 space-y-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Maker</p>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{post.authorName || 'Onbekend'}</p>
+                <button
+                  type="button"
+                  onClick={() => canOpenAuthorQuickProfile && onUserClick(post.authorId)}
+                  disabled={!canOpenAuthorQuickProfile}
+                  className={`text-sm font-semibold ${canOpenAuthorQuickProfile ? 'text-slate-800 dark:text-slate-100 hover:underline underline-offset-2 cursor-pointer' : 'text-slate-800 dark:text-slate-100 cursor-default'}`}
+                >
+                  {post.authorName || 'Onbekend'}
+                </button>
               </div>
               {contributorCredits.length > 0 && (
                 <div className="space-y-2">
@@ -269,6 +277,8 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                       <Badge
                         key={`${credit.uid || credit.contributorId || credit.name || 'credit'}-${index}`}
                         colorClass="bg-white text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700"
+                        className={credit.uid && onUserClick ? 'cursor-pointer hover:opacity-90' : ''}
+                        onClick={credit.uid && onUserClick ? () => onUserClick(credit.uid) : undefined}
                       >
                         {credit.role ? `${credit.role}: ` : ''}{credit.name || 'Onbekend'}
                       </Badge>

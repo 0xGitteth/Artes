@@ -2523,6 +2523,7 @@ export default function ArtesApp() {
             currentPublicProfile={currentPublicProfile}
             moderationApiBase={moderationApiBase}
             onChallengeClick={() => setView('challenge_timeline')}
+            onUserClick={setQuickProfileId}
             contentPreference={getPostContentPreference(selectedPost, galleryTriggerVisibility)}
             shouldCover={shouldCoverPost(selectedPost, galleryTriggerVisibility, revealedSensitivePostsById)}
             onRevealSensitivePost={handleRevealSensitivePost}

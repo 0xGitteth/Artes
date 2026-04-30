@@ -134,6 +134,30 @@ const getTimestampMs = (value) => {
   return 0;
 };
 
+
+const isPostVisibleOnProfile = (post, targetUid, targetContributorId = null) => {
+  if (!post || !targetUid) return false;
+  if (post.authorId === targetUid) return true;
+  if (!Array.isArray(post.credits)) return false;
+  return post.credits.some((credit) => {
+    if (!credit) return false;
+    if (credit.uid === targetUid) return true;
+    return Boolean(targetContributorId && credit.contributorId && credit.contributorId === targetContributorId);
+  });
+};
+
+// Uploader + collaborators zien dezelfde gedeelde post op hun profielgrid.
+const getProfileVisiblePosts = (posts, targetUid, targetContributorId = null) => {
+  const filteredPosts = (Array.isArray(posts) ? posts : []).filter((post) => isPostVisibleOnProfile(post, targetUid, targetContributorId));
+  const uniquePosts = Array.from(new Map(filteredPosts.map((post) => [post.id, post])).values());
+  const resolvePostTimestamp = (post) => {
+    if (post?.createdAt?.seconds) return post.createdAt.seconds * 1000;
+    if (post?.createdAt?.toMillis) return post.createdAt.toMillis();
+    if (typeof post?.createdAt === 'number') return post.createdAt;
+    return 0;
+  };
+  return uniquePosts.sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a));
+};
 const formatDateTimeNl = (value) => {
   const ms = getTimestampMs(value);
   if (!ms) return 'Onbekend';
@@ -2297,7 +2321,7 @@ export default function ArtesApp() {
             <ImmersiveProfile 
               profile={profile} 
               isOwn={true} 
-              posts={posts.filter(p => p.authorId === user?.uid)}
+              posts={getProfileVisiblePosts(posts, user?.uid, profile?.contributorId)}
               onOpenSettings={() => setShowEditProfile(true)}
               onPostClick={handleOpenPost}
               allUsers={users}
@@ -7980,7 +8004,7 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, current
     });
   }, [userId, allUsers, currentUserId, currentProfile]);
   if (!fetchedUser) return <div>Loading...</div>;
-  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={posts.filter(p => p.authorId === userId)} onPostClick={onPostClick} allUsers={allUsers} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
+  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={getProfileVisiblePosts(posts, userId, fetchedUser?.contributorId)} onPostClick={onPostClick} allUsers={allUsers} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
 }
 function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
   const targetSeedProfile = useMemo(
@@ -8116,13 +8140,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   const roles = userProfile?.roles || [];
   const themes = userProfile?.themes || [];
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
-  const userPosts = posts.filter((post) => post.authorId === userId);
-  const resolvePostTimestamp = (post) => {
-    if (post?.createdAt?.seconds) return post.createdAt.seconds * 1000;
-    if (post?.createdAt?.toMillis) return post.createdAt.toMillis();
-    if (typeof post?.createdAt === 'number') return post.createdAt;
-    return 0;
-  };
+  const userPosts = useMemo(() => getProfileVisiblePosts(posts, userId, userProfile?.contributorId), [posts, userId, userProfile?.contributorId]);
   const previewMode = userProfile?.quickProfilePreviewMode || 'latest';
   const manualIds = Array.isArray(userProfile?.quickProfilePostIds) ? userProfile.quickProfilePostIds : [];
   const previewPosts = useMemo(() => {
@@ -8138,8 +8156,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
         .sort((a, b) => (b.likes || 0) - (a.likes || 0));
     }
     if (!rankedPosts.length) {
-      rankedPosts = [...userPosts]
-        .sort((a, b) => resolvePostTimestamp(b) - resolvePostTimestamp(a));
+      rankedPosts = [...userPosts];
     }
     return rankedPosts
       .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed')

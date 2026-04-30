@@ -5,6 +5,12 @@
 body {
   @apply bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-50;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+body::-webkit-scrollbar {
+  display: none;
 }
 
 a {

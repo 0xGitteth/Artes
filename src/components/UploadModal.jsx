@@ -165,7 +165,7 @@ export default function UploadModal({ onClose, onPublish, initialStyles = [] }) 
                     type="button"
                     key={trigger.id}
                     onClick={() => toggleArrayValue('makerTags', trigger.id)}
-                    className={`px-3 py-2 rounded-full text-sm border ${form.makerTags.includes(trigger.id) ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800' : 'border-slate-200 dark:border-slate-800 text-slate-500'}`}
+                    className={`px-3 py-2 rounded-full text-sm border transition-colors ${form.makerTags.includes(trigger.id) ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}
                   >
                     {trigger.label}
                   </button>
@@ -173,10 +173,10 @@ export default function UploadModal({ onClose, onPublish, initialStyles = [] }) 
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-slate-500">
+          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300">
             <UploadCloud size={14} /> Bewaar direct in Firestore
           </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-sm text-red-500 dark:text-red-300">{error}</p>}
           <div className="flex items-center justify-end gap-3">
             <Button type="button" variant="secondary" onClick={onClose} className="justify-center">
               Annuleren

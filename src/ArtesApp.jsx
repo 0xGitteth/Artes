@@ -409,6 +409,22 @@ const MODERATION_REASON_PRESETS = [
   { id: 'tooExplicitForPlatform', label: 'Te expliciet voor Artes' },
 ];
 
+const MODERATOR_REASON_CODES = [
+  { id: 'allowed_art_nude', label: 'Allowed: art nude' },
+  { id: 'allowed_boudoir', label: 'Allowed: boudoir' },
+  { id: 'allowed_non_sensitive', label: 'Allowed: non-sensitive' },
+  { id: 'review_borderline_adult', label: 'Review: borderline adult' },
+  { id: 'forbidden_explicit_sexual', label: 'Forbidden: explicit sexual' },
+  { id: 'forbidden_non_consensual_context', label: 'Forbidden: non-consensual context' },
+  { id: 'wrong_theme_or_label', label: 'Wrong theme or label' },
+  { id: 'unclear_ai_result', label: 'Unclear AI result' },
+];
+const MODERATOR_REASON_CODES_BY_ACTION = {
+  approved: ['allowed_art_nude', 'allowed_boudoir', 'allowed_non_sensitive', 'wrong_theme_or_label'],
+  rejected: ['forbidden_explicit_sexual', 'forbidden_non_consensual_context', 'wrong_theme_or_label'],
+  queueFreshEvaluation: ['review_borderline_adult', 'unclear_ai_result', 'wrong_theme_or_label'],
+};
+
 const buildDecisionTemplate = (decision, reasons) => {
   if (decision === 'approved') {
     if (reasons.includes('missingOrIncorrectTags')) {
@@ -4343,6 +4359,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [claimState, setClaimState] = useState({ claimed: false, claimedBy: null, loading: false });
   const [decision, setDecision] = useState('approved');
   const [selectedReasons, setSelectedReasons] = useState([]);
+  const [decisionReasonCode, setDecisionReasonCode] = useState('');
   const [decisionMessage, setDecisionMessage] = useState('');
   const [messageTouched, setMessageTouched] = useState(false);
   const [moderatorNote, setModeratorNote] = useState('');
@@ -4354,6 +4371,14 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [freshEvaluationError, setFreshEvaluationError] = useState('');
   const [showRawDebug, setShowRawDebug] = useState(false);
   const reviewCasesListenerLogRef = useRef(null);
+  const validDecisionReasonCodes = useMemo(
+    () => new Set(MODERATOR_REASON_CODES_BY_ACTION[decision] || []),
+    [decision]
+  );
+  const visibleReasonCodes = useMemo(
+    () => MODERATOR_REASON_CODES.filter((code) => validDecisionReasonCodes.has(code.id)),
+    [validDecisionReasonCodes]
+  );
 
   const usersByUid = useMemo(() => {
     if (!Array.isArray(allUsers)) return new Map();
@@ -4549,12 +4574,19 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   useEffect(() => {
     if (!selectedCase) return;
     setDecision('approved');
+    setDecisionReasonCode('');
     setSelectedReasons([]);
     setDecisionMessage(buildDecisionTemplate('approved', []));
     setMessageTouched(false);
     setModeratorNote('');
     setDecisionError(null);
   }, [selectedCase?.id]);
+
+  useEffect(() => {
+    if (!decisionReasonCode) return;
+    if (validDecisionReasonCodes.has(decisionReasonCode)) return;
+    setDecisionReasonCode('');
+  }, [decisionReasonCode, validDecisionReasonCodes]);
 
   useEffect(() => {
     const handler = (event) => {
@@ -4620,6 +4652,10 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       setDecisionError('Triggers ontbreken of kloppen niet kan niet alleen tot afkeuring leiden.');
       return;
     }
+    if (!decisionReasonCode) {
+      setDecisionError('Kies eerst een reason code.');
+      return;
+    }
     setDecisionPending(true);
     setDecisionError(null);
     try {
@@ -4633,6 +4669,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         body: JSON.stringify({
           reviewCaseId: selectedCase.id,
           decision,
+          reasonCode: decisionReasonCode,
           decisionMessagePublic: decisionMessage.trim(),
           decisionReasons: selectedReasons,
           moderatorNoteInternal: moderatorNote || null,
@@ -4642,6 +4679,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         const payload = await response.json();
         throw new Error(payload?.error || 'Beslissing opslaan mislukt.');
       }
+      setDecisionReasonCode('');
       setSelectedCaseId(null);
     } catch (error) {
       setDecisionError(error.message);
@@ -4655,6 +4693,10 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     const uploadId = selectedUpload?.id || selectedCase.uploadId || selectedCase.linkedUploadIds?.[0] || null;
     if (!uploadId) {
       setFreshEvaluationError('Geen upload-ID beschikbaar voor deze case.');
+      return;
+    }
+    if (!decisionReasonCode) {
+      setFreshEvaluationError('Kies eerst een reason code.');
       return;
     }
     setFreshEvaluationPending(true);
@@ -4671,6 +4713,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         body: JSON.stringify({
           reviewCaseId: selectedCase.id,
           uploadId,
+          reasonCode: decisionReasonCode,
         }),
       });
       const payload = await response.json();
@@ -4682,6 +4725,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       const caseIdsToRemove = new Set([clickedCaseId, backendCaseId].filter(Boolean));
       setCases((prev) => prev.filter((item) => !caseIdsToRemove.has(item.id)));
       setFreshEvaluationMessage('De volgende upload van deze afbeelding wordt opnieuw beoordeeld.');
+      setDecisionReasonCode('');
       setSelectedCaseId(null);
     } catch (error) {
       setFreshEvaluationError(error.message || 'Kon override niet opslaan.');
@@ -4920,6 +4964,19 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                       <Button variant={decision === 'rejected' ? 'danger' : 'secondary'} onClick={() => { setDecision('rejected'); setMessageTouched(false); }}>
                         Afkeuren (R)
                       </Button>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Reason code *</label>
+                      <select
+                        className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                        value={decisionReasonCode}
+                        onChange={(event) => setDecisionReasonCode(event.target.value)}
+                      >
+                        <option value="">Selecteer reason code</option>
+                        {visibleReasonCodes.map((code) => (
+                          <option key={code.id} value={code.id}>{code.label}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Redenen (max 3)</label>

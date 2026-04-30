@@ -289,106 +289,116 @@ const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) 
   return { status: normalizedStatus, isAdult };
 };
 
-export const createDiditSession = onCall({ region: 'europe-west4', secrets: ['DIDIT_API_KEY'] }, async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError('unauthenticated', 'Authentication required');
-  }
+export const createDiditSession = onCall(
+  {
+    region: 'europe-west4',
+    // Cloud Functions v2 only exposes secret-backed env vars when attached here.
+    secrets: ['DIDIT_API_KEY', 'DIDIT_WORKFLOW_ID'],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
 
-  const workflowId = process.env.DIDIT_WORKFLOW_ID;
-  const appBaseUrl = process.env.APP_BASE_URL;
+    const workflowId = process.env.DIDIT_WORKFLOW_ID;
+    const appBaseUrl = process.env.APP_BASE_URL || 'https://artes.app';
 
-  if (!workflowId) {
-    throw new HttpsError('failed-precondition', 'Missing DIDIT_WORKFLOW_ID');
-  }
-  if (!appBaseUrl) {
-    throw new HttpsError('failed-precondition', 'Missing APP_BASE_URL');
-  }
+    if (!workflowId) {
+      logger.error('Didit configuration missing', { missing: 'DIDIT_WORKFLOW_ID' });
+      throw new HttpsError('failed-precondition', 'Verificatie is tijdelijk niet beschikbaar');
+    }
+    if (!process.env.APP_BASE_URL) {
+      logger.warn('APP_BASE_URL is not configured, using default for Didit callback', {
+        fallback: 'https://artes.app',
+      });
+    }
 
-  const appBaseOrigin = normalizeOrigin(appBaseUrl);
-  if (!appBaseOrigin) {
-    throw new HttpsError('failed-precondition', 'Invalid APP_BASE_URL');
-  }
+    const appBaseOrigin = normalizeOrigin(appBaseUrl);
+    if (!appBaseOrigin) {
+      throw new HttpsError('failed-precondition', 'Invalid APP_BASE_URL');
+    }
 
-  const requestedOrigin = normalizeOrigin(request.data?.returnToOrigin);
-  const allowedOrigins = resolveAllowedDiditOrigins(appBaseOrigin);
-  const finalBaseOrigin = isAllowedDiditOrigin(requestedOrigin, allowedOrigins)
-    ? requestedOrigin
-    : appBaseOrigin;
+    const requestedOrigin = normalizeOrigin(request.data?.returnToOrigin);
+    const allowedOrigins = resolveAllowedDiditOrigins(appBaseOrigin);
+    const finalBaseOrigin = isAllowedDiditOrigin(requestedOrigin, allowedOrigins)
+      ? requestedOrigin
+      : appBaseOrigin;
 
-  const redirectUrl = `${finalBaseOrigin.replace(/\/$/, '')}/onboarding?step=2&diditReturn=1`;
+    const redirectUrl = `${finalBaseOrigin.replace(/\/$/, '')}/onboarding?step=2&diditReturn=1`;
 
   // Didit v2 verwacht workflow_id + callback + vendor_data (je eigen user id) + metadata.
-  const payload = {
-    workflow_id: workflowId,
-    callback: redirectUrl,
-    vendor_data: request.auth.uid,
-    metadata: {
-      uid: request.auth.uid,
-    },
-  };
-
-  logger.info('Creating Didit session', {
-    uid: request.auth.uid,
-    workflowId,
-    finalBaseOrigin,
-  });
-
-  let response;
-  try {
-    response = await fetch(`${DIDIT_API_BASE}/session/`, {
-      method: 'POST',
-      headers: getDiditHeaders(),
-      body: JSON.stringify(payload),
-    });
-  } catch (error) {
-    logger.error('Didit session create fetch failed', { error: error?.message });
-    throw new HttpsError('unavailable', 'Failed to reach Didit');
-  }
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    logger.error('Didit session create failed', {
-      status: response.status,
-      body: toSafeDiditErrorBody(data),
-      uid: request.auth.uid,
-    });
-    const detail =
-      data?.detail ||
-      data?.message ||
-      data?.error ||
-      'Didit session create failed';
-    throw new HttpsError('permission-denied', detail);
-  }
-
-  const sessionId = data?.session_id || data?.sessionId || data?.id || null;
-  const verificationUrl = data?.url || data?.verificationUrl || data?.verification_url || null;
-
-  await db
-    .collection('users')
-    .doc(request.auth.uid)
-    .collection('idv')
-    .doc('status')
-    .set(
-      {
-        status: 'pending',
-        sessionId,
-        workflowId,
-        verificationUrl,
-        callback: redirectUrl,
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
+    const payload = {
+      workflow_id: workflowId,
+      callback: redirectUrl,
+      vendor_data: request.auth.uid,
+      metadata: {
+        uid: request.auth.uid,
       },
-      { merge: true }
-    );
+    };
 
-  logger.info('Didit session created', {
-    uid: request.auth.uid,
-    sessionId,
-  });
+    logger.info('Creating Didit session', {
+      uid: request.auth.uid,
+      hasWorkflowId: Boolean(workflowId),
+      finalBaseOrigin,
+    });
 
-  return { sessionId, verificationUrl };
-});
+    let response;
+    try {
+      response = await fetch(`${DIDIT_API_BASE}/session/`, {
+        method: 'POST',
+        headers: getDiditHeaders(),
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      logger.error('Didit session create fetch failed', { error: error?.message });
+      throw new HttpsError('unavailable', 'Failed to reach Didit');
+    }
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      logger.error('Didit session create failed', {
+        status: response.status,
+        body: toSafeDiditErrorBody(data),
+        uid: request.auth.uid,
+      });
+      const detail =
+        data?.detail ||
+        data?.message ||
+        data?.error ||
+        'Didit session create failed';
+      throw new HttpsError('permission-denied', detail);
+    }
+
+    const sessionId = data?.session_id || data?.sessionId || data?.id || null;
+    const verificationUrl = data?.url || data?.verificationUrl || data?.verification_url || null;
+
+    await db
+      .collection('users')
+      .doc(request.auth.uid)
+      .collection('idv')
+      .doc('status')
+      .set(
+        {
+          status: 'pending',
+          sessionId,
+          workflowId,
+          verificationUrl,
+          callback: redirectUrl,
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+    logger.info('Didit session created', {
+      uid: request.auth.uid,
+      sessionId,
+    });
+
+    return { sessionId, verificationUrl };
+  }
+);
 
 export const refreshDiditSession = onCall({ region: 'europe-west4', secrets: ['DIDIT_API_KEY', 'DIDIT_ASSUME_ADULT_ON_VERIFIED'] }, async (request) => {
   if (!request.auth?.uid) {

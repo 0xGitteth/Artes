@@ -22,10 +22,10 @@ export default function SettingsModal({ onClose, darkMode, onToggleDark, prefere
           </button>
         </div>
         <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between gap-3 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40">
+          <div className="flex items-center justify-between gap-3 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 text-slate-700 dark:text-slate-200">
             <div>
               <p className="text-sm font-semibold text-slate-800 dark:text-white">Dark mode</p>
-              <p className="text-sm text-slate-500">Wordt ook bewaard in je profiel</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Wordt ook bewaard in je profiel</p>
             </div>
             <Button variant="secondary" onClick={onToggleDark} className="justify-center">
               {darkMode ? <Sun size={16} /> : <Moon size={16} />} {darkMode ? 'Light' : 'Dark'}

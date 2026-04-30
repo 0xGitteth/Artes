@@ -344,7 +344,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                   <div className="space-y-2">
                     <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} placeholder="Titel" />
                     <textarea
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
+                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                       value={editDescription}
                       onChange={(event) => setEditDescription(event.target.value)}
                       rows={3}
@@ -402,7 +402,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                     </div>
                   );
                 })}
-                {!comments.length && <p className="text-sm text-slate-500">Nog geen reacties</p>}
+                {!comments.length && <p className="text-sm text-slate-500 dark:text-slate-300">Nog geen reacties</p>}
               </div>
               <form onSubmit={handleComment} className="flex items-center gap-3">
                 <Input
@@ -416,7 +416,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                   {commentLoading ? <Loader2 size={16} className="animate-spin" /> : <MessageSquare size={16} />} Plaats
                 </Button>
               </form>
-              {!user && <p className="text-sm text-slate-500">Log in om te liken of te reageren.</p>}
+              {!user && <p className="text-sm text-slate-500 dark:text-slate-300">Log in om te liken of te reageren.</p>}
               {actionError && <p className="text-sm text-red-500">{actionError}</p>}
             </div>
           </div>

@@ -176,7 +176,7 @@ export default function SearchWithAutocomplete({
 
   return (
     <div className="relative" ref={containerRef}>
-      <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
+      <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400 dark:text-slate-500" />
       <input
         className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
         placeholder={placeholder}
@@ -195,10 +195,10 @@ export default function SearchWithAutocomplete({
       {showDropdown && (
         <div className="absolute z-20 mt-2 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg">
           {loading && (
-            <div className="p-3 text-sm text-slate-500">Zoeken...</div>
+            <div className="p-3 text-sm text-slate-500 dark:text-slate-300">Zoeken...</div>
           )}
           {!loading && results.length === 0 && (
-            <div className="p-3 text-sm text-slate-500">Geen resultaten.</div>
+            <div className="p-3 text-sm text-slate-500 dark:text-slate-300">Geen resultaten.</div>
           )}
           {!loading && results.length > 0 && (
             <div className="max-h-64 overflow-y-auto">

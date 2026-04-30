@@ -44,7 +44,7 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
   const imgRef = useRef(null);
   const avatarFrameRef = useRef(null);
   const headerFrameRef = useRef(null);
-  const pointerRef = useRef({ id: null, x: 0, y: 0 });
+  const pointerRef = useRef({ id: null, x: 0, y: 0, key: null, target: null });
   const previewDebounceRef = useRef(null);
 
   const [active, setActive] = useState('avatar');
@@ -202,32 +202,36 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameByKey, areaSize.width, areaSize.height, imgNatural.width, imgNatural.height, headerAspect]);
 
-  const onPointerDown = (e) => {
-    pointerRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  const onFramePointerDown = (key) => (e) => {
+    e.stopPropagation();
+    setActive(key);
+    pointerRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, key, target: e.currentTarget };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
-  const onPointerMove = (e) => {
-    if (pointerRef.current.id !== e.pointerId) return;
+  const onFramePointerMove = (e) => {
+    if (pointerRef.current.id !== e.pointerId || !pointerRef.current.key) return;
     const dx = e.clientX - pointerRef.current.x;
     const dy = e.clientY - pointerRef.current.y;
+    const dragKey = pointerRef.current.key;
     pointerRef.current = { ...pointerRef.current, x: e.clientX, y: e.clientY };
 
     setFrameByKey((prev) => {
       if (!areaSize.width || !areaSize.height) return prev;
-      const current = prev[active];
+      const current = prev[dragKey];
       const moved = {
         ...current,
         cx: current.cx + (dx / areaSize.width),
         cy: current.cy + (dy / areaSize.height),
       };
-      return { ...prev, [active]: clampFrameModel(active, moved) };
+      return { ...prev, [dragKey]: clampFrameModel(dragKey, moved) };
     });
   };
 
-  const onPointerUp = (e) => {
-    if (pointerRef.current.id === e.pointerId) pointerRef.current = { id: null, x: 0, y: 0 };
-    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  const onFramePointerUp = (e) => {
+    if (pointerRef.current.id !== e.pointerId) return;
+    pointerRef.current.target?.releasePointerCapture?.(e.pointerId);
+    pointerRef.current = { id: null, x: 0, y: 0, key: null, target: null };
   };
 
   const setFrameScale = (key, nextScale) => {
@@ -258,16 +262,13 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
           ref={imageAreaRef}
           className="relative w-full max-w-2xl bg-slate-200 rounded-xl overflow-hidden touch-none"
           style={{ aspectRatio: String(imageAspect), maxHeight: 480 }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
+
         >
           <img
             ref={imgRef}
             src={source}
             alt="Crop source"
-            className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none"
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
             draggable={false}
             onLoad={(e) => setImgNatural({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
           />
@@ -275,21 +276,27 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
           <button
             type="button"
             ref={avatarFrameRef}
-            onClick={() => setActive('avatar')}
-            className={`absolute border-2 rounded-md bg-transparent ${active === 'avatar' ? 'border-blue-500 ring-2 ring-blue-300' : 'border-white/70 opacity-70'}`}
-            style={{ left: avatarRect.left, top: avatarRect.top, width: avatarRect.width, height: avatarRect.height }}
+            onPointerDown={onFramePointerDown('avatar')}
+            onPointerMove={onFramePointerMove}
+            onPointerUp={onFramePointerUp}
+            onPointerCancel={onFramePointerUp}
+            className={`absolute border-2 rounded-md bg-transparent ${active === 'avatar' ? 'border-blue-500 ring-2 ring-blue-300 opacity-100' : 'border-white/70 opacity-80'} touch-none`}
+            style={{ left: avatarRect.left, top: avatarRect.top, width: avatarRect.width, height: avatarRect.height, zIndex: active === 'avatar' ? 20 : 30 }}
           >
-            <span className="absolute -top-6 left-0 text-xs bg-black/70 text-white px-2 py-0.5 rounded">Profielfoto</span>
+            <span className="absolute -top-6 left-0 text-xs bg-black/70 text-white px-2 py-0.5 rounded pointer-events-none">Profielfoto</span>
           </button>
 
           <button
             type="button"
             ref={headerFrameRef}
-            onClick={() => setActive('header')}
-            className={`absolute border-2 rounded-md bg-transparent ${active === 'header' ? 'border-blue-500 ring-2 ring-blue-300' : 'border-white/70 opacity-70'}`}
-            style={{ left: headerRect.left, top: headerRect.top, width: headerRect.width, height: headerRect.height }}
+            onPointerDown={onFramePointerDown('header')}
+            onPointerMove={onFramePointerMove}
+            onPointerUp={onFramePointerUp}
+            onPointerCancel={onFramePointerUp}
+            className={`absolute border-2 rounded-md bg-transparent ${active === 'header' ? 'border-blue-500 ring-2 ring-blue-300 opacity-100' : 'border-white/70 opacity-80'} touch-none`}
+            style={{ left: headerRect.left, top: headerRect.top, width: headerRect.width, height: headerRect.height, zIndex: active === 'header' ? 20 : 30 }}
           >
-            <span className="absolute -top-6 left-0 text-xs bg-black/70 text-white px-2 py-0.5 rounded">Header</span>
+            <span className="absolute -top-6 left-0 text-xs bg-black/70 text-white px-2 py-0.5 rounded pointer-events-none">Header</span>
           </button>
         </div>
       </div>

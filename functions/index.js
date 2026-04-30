@@ -949,6 +949,35 @@ const findExactUpload = async (sha256) => {
   return { id: doc.id, data: doc.data() };
 };
 
+const FINAL_MODERATOR_ACTIONS = new Set(['approve', 'reject']);
+
+const getModerationExampleDecisionTimeMs = (exampleData = {}) => {
+  const decidedAt = resolveTimestamp(exampleData?.moderatorDecision?.decidedAt);
+  if (decidedAt) return decidedAt.getTime();
+  const createdAt = resolveTimestamp(exampleData?.provenance?.createdAt);
+  if (createdAt) return createdAt.getTime();
+  return 0;
+};
+
+const findExactModerationExample = async (sha256) => {
+  if (!sha256) return null;
+  const snapshot = await db.collection('moderationExamples').where('fingerprints.sha256', '==', sha256).limit(25).get();
+  if (snapshot.empty) return null;
+  const ranked = snapshot.docs
+    .map((doc) => ({ id: doc.id, data: doc.data() }))
+    .sort((a, b) => {
+      const aAction = String(a?.data?.moderatorDecision?.action || '');
+      const bAction = String(b?.data?.moderatorDecision?.action || '');
+      const aFinal = FINAL_MODERATOR_ACTIONS.has(aAction) ? 1 : 0;
+      const bFinal = FINAL_MODERATOR_ACTIONS.has(bAction) ? 1 : 0;
+      if (aFinal !== bFinal) return bFinal - aFinal;
+      const timeDiff = getModerationExampleDecisionTimeMs(b.data) - getModerationExampleDecisionTimeMs(a.data);
+      if (timeDiff !== 0) return timeDiff;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  return ranked[0] || null;
+};
+
 const findNearDuplicateUpload = async ({ dhash, dhashPrefix }) => {
   if (!dhash) return null;
   const snapshot = await db
@@ -1237,6 +1266,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
   let matchedUpload = null;
   let matchedFingerprintType = null;
+  let matchedModerationExample = null;
   let userModeration = null;
   let blockedByReport = false;
   try {
@@ -1286,6 +1316,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const skipUploadReuse = Boolean(overrideReservation);
 
   try {
+    matchedModerationExample = await findExactModerationExample(fingerprints.sha256);
+
     if (!skipUploadReuse) {
       matchedUpload = await findExactUpload(fingerprints.sha256);
       if (matchedUpload) {
@@ -1300,6 +1332,9 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
 
   let cachedResult = null;
+  const previousExampleAction = String(matchedModerationExample?.data?.moderatorDecision?.action || '');
+  const previousExampleIsFinalDecision = FINAL_MODERATOR_ACTIONS.has(previousExampleAction);
+  const shouldRouteByPreviousExample = Boolean(matchedModerationExample?.id) && previousExampleIsFinalDecision && !skipUploadReuse;
   if (matchedUpload?.data) {
     cachedResult = {
       outcome: matchedUpload.data.outcome,
@@ -1605,6 +1640,36 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
   }
 
+  if (userId && shouldRouteByPreviousExample && !reviewCaseId) {
+    try {
+      openReviewCase = openReviewCase || await findOpenReviewCase(userId);
+      if (openReviewCase) {
+        reviewCaseId = openReviewCase.id;
+      } else {
+        const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
+        const reviewRef = await db.collection('reviewCases').add({
+          caseType: 'upload',
+          userId,
+          status: 'inReview',
+          decision: null,
+          fingerprints: [fingerprints],
+          linkedUploadIds: [],
+          reviewReason: 'previousModeratorExampleExactMatch',
+          previousModeratorExample: {
+            exampleId: matchedModerationExample.id,
+            matchedFingerprintType: 'sha256',
+          },
+          ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        reviewCaseId = reviewRef.id;
+      }
+    } catch (error) {
+      logger.error('Review case voor previous moderator example mislukt.', error);
+    }
+  }
+
   canRequestReview = outcome === 'forbidden' && !inCooldown && !openReviewCase && !reviewCreated;
 
   if (reviewCaseId && userId && !openReviewCase) {
@@ -1669,6 +1734,18 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   }
 
   const shouldReview = classification === 'uncertain_possible_explicit';
+  const previousModeratorExample = matchedModerationExample?.data
+    ? {
+        exampleId: matchedModerationExample.id,
+        matchedFingerprintType: 'sha256',
+        action: matchedModerationExample.data?.moderatorDecision?.action || null,
+        finalOutcome: matchedModerationExample.data?.moderatorDecision?.finalOutcome || null,
+        reasonCode: matchedModerationExample.data?.moderatorDecision?.reasonCode || null,
+        decidedAt: matchedModerationExample.data?.moderatorDecision?.decidedAt || null,
+        policyVersion: matchedModerationExample.data?.provenance?.policyVersion || null,
+      }
+    : null;
+  const shouldReviewWithPreviousExample = shouldReview || shouldRouteByPreviousExample;
   const userMessage = classification === 'disallowed_sexual_explicit'
     ? 'Deze publicatie is geblokkeerd: Pornografisch / Seksueel expliciet.'
     : requiredThemes.length > 0
@@ -1690,7 +1767,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     classification,
     requiredThemes,
     autoAppliedTriggers,
-    shouldReview,
+    shouldReview: shouldReviewWithPreviousExample,
     userMessage,
     moderationSignals: {
       adultDecision: geminiAdultDecision,
@@ -1698,6 +1775,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       explicitDecisionBranchHit,
       explicitDecisionAddedForbiddenReason,
     },
+    previousModeratorExample,
     fingerprints,
     legacy: {
       labels: labels.map((label) => label.description).filter(Boolean),
@@ -1752,6 +1830,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       suggestedTriggers: finalSuggestedTriggers,
       forbiddenReasons: finalForbiddenReasons,
       reviewCaseId: reviewCaseId || null,
+      previousModeratorExample,
       fingerprints,
       matchedUploadId: matchedUpload?.id || null,
       ...(persistedPreview?.imageUrl ? { imageUrl: persistedPreview.imageUrl } : {}),
@@ -1785,12 +1864,13 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
           ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
           aiSummary: buildAiSummary({
             classification,
-            shouldReview,
+            shouldReview: shouldReviewWithPreviousExample,
             forbiddenReasons: finalForbiddenReasons,
             appliedTriggers: finalAppliedTriggers,
             suggestedTriggers: finalSuggestedTriggers,
             moderationSignals: response.moderationSignals,
           }),
+          previousModeratorExample,
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -1815,6 +1895,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
               ? 'nearReuse'
               : 'none',
       matchedUploadId: matchedUpload?.id || null,
+      matchedModerationExampleId: matchedModerationExample?.id || null,
       matchedFingerprintType,
       forbiddenTriggerKeys: finalForbiddenReasons.map((reason) => reason?.trigger).filter(Boolean),
       suggestedTriggerKeys: finalSuggestedTriggers.map((item) => item?.trigger).filter(Boolean),

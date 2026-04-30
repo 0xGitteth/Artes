@@ -226,9 +226,9 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
           </button>
         </div>
         <div className="grid md:grid-cols-2 gap-0">
-          <div className="relative w-full h-full max-h-[520px]">
-            {shouldCover ? <SensitiveOverlay onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
-            <img src={post.imageUrl} alt={post.title} className="w-full h-full object-cover max-h-[520px]" />
+          <div className="relative isolate overflow-hidden w-full h-full max-h-[520px]">
+            {shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
+            <img src={post.imageUrl} alt={post.title} className="relative z-0 w-full h-full object-cover max-h-[520px]" />
           </div>
           <div className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">

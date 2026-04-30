@@ -1645,6 +1645,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       openReviewCase = openReviewCase || await findOpenReviewCase(userId);
       if (openReviewCase) {
         reviewCaseId = openReviewCase.id;
+        reviewCreated = true;
       } else {
         const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
         const reviewRef = await db.collection('reviewCases').add({
@@ -1664,6 +1665,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
           updatedAt: FieldValue.serverTimestamp(),
         });
         reviewCaseId = reviewRef.id;
+        reviewCreated = true;
       }
     } catch (error) {
       logger.error('Review case voor previous moderator example mislukt.', error);
@@ -1746,11 +1748,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       }
     : null;
   const shouldReviewWithPreviousExample = shouldReview || shouldRouteByPreviousExample;
+  const effectiveShouldReview = shouldReviewWithPreviousExample;
   const userMessage = classification === 'disallowed_sexual_explicit'
     ? 'Deze publicatie is geblokkeerd: Pornografisch / Seksueel expliciet.'
     : requiredThemes.length > 0
       ? 'Deze content is toegestaan, maar voeg eerst het thema Art Nude toe voordat je publiceert.'
-      : shouldReview
+      : effectiveShouldReview
         ? 'Deze content lijkt toegestaan, maar is borderline expliciet. Vraag een review aan als je twijfelt.'
         : autoAppliedTriggers.length > 0
           ? 'Deze content is toegestaan met 18+ labeling.'
@@ -1767,7 +1770,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     classification,
     requiredThemes,
     autoAppliedTriggers,
-    shouldReview: shouldReviewWithPreviousExample,
+    shouldReview: effectiveShouldReview,
     userMessage,
     moderationSignals: {
       adultDecision: geminiAdultDecision,

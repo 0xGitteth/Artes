@@ -4361,6 +4361,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [decision, setDecision] = useState('approved');
   const [selectedReasons, setSelectedReasons] = useState([]);
   const [decisionReasonCode, setDecisionReasonCode] = useState('');
+  const [queueFreshEvaluationReasonCode, setQueueFreshEvaluationReasonCode] = useState('');
   const [decisionMessage, setDecisionMessage] = useState('');
   const [messageTouched, setMessageTouched] = useState(false);
   const [moderatorNote, setModeratorNote] = useState('');
@@ -4379,6 +4380,11 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const visibleReasonCodes = useMemo(
     () => MODERATOR_REASON_CODES.filter((code) => validDecisionReasonCodes.has(code.id)),
     [validDecisionReasonCodes]
+  );
+
+  const queueFreshEvaluationReasonCodes = useMemo(
+    () => MODERATOR_REASON_CODES.filter((code) => (MODERATOR_REASON_CODES_BY_ACTION.queueFreshEvaluation || []).includes(code.id)),
+    []
   );
 
   const usersByUid = useMemo(() => {
@@ -4467,6 +4473,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     if (!selectedCaseId) {
       setSelectedCase(null);
       setSelectedUpload(null);
+      setQueueFreshEvaluationReasonCode('');
       return;
     }
     const found = filteredCases.find((item) => item.id === selectedCaseId) || null;
@@ -4576,6 +4583,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     if (!selectedCase) return;
     setDecision('approved');
     setDecisionReasonCode('');
+    setQueueFreshEvaluationReasonCode('');
     setSelectedReasons([]);
     setDecisionMessage(buildDecisionTemplate('approved', []));
     setMessageTouched(false);
@@ -4588,6 +4596,13 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     if (validDecisionReasonCodes.has(decisionReasonCode)) return;
     setDecisionReasonCode('');
   }, [decisionReasonCode, validDecisionReasonCodes]);
+
+  useEffect(() => {
+    if (!queueFreshEvaluationReasonCode) return;
+    const allowedCodes = MODERATOR_REASON_CODES_BY_ACTION.queueFreshEvaluation || [];
+    if (allowedCodes.includes(queueFreshEvaluationReasonCode)) return;
+    setQueueFreshEvaluationReasonCode('');
+  }, [queueFreshEvaluationReasonCode]);
 
   useEffect(() => {
     const handler = (event) => {
@@ -4622,6 +4637,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       }
       if (event.key === 'Escape') {
         setSelectedCaseId(null);
+        setQueueFreshEvaluationReasonCode('');
       }
     };
     window.addEventListener('keydown', handler);
@@ -4696,7 +4712,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       setFreshEvaluationError('Geen upload-ID beschikbaar voor deze case.');
       return;
     }
-    if (!decisionReasonCode) {
+    if (!queueFreshEvaluationReasonCode) {
       setFreshEvaluationError('Kies eerst een reason code.');
       return;
     }
@@ -4714,7 +4730,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         body: JSON.stringify({
           reviewCaseId: selectedCase.id,
           uploadId,
-          reasonCode: decisionReasonCode,
+          reasonCode: queueFreshEvaluationReasonCode,
         }),
       });
       const payload = await response.json();
@@ -4726,7 +4742,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       const caseIdsToRemove = new Set([clickedCaseId, backendCaseId].filter(Boolean));
       setCases((prev) => prev.filter((item) => !caseIdsToRemove.has(item.id)));
       setFreshEvaluationMessage('De volgende upload van deze afbeelding wordt opnieuw beoordeeld.');
-      setDecisionReasonCode('');
+      setQueueFreshEvaluationReasonCode('');
       setSelectedCaseId(null);
     } catch (error) {
       setFreshEvaluationError(error.message || 'Kon override niet opslaan.');
@@ -5033,6 +5049,19 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                       </button>
                       {advancedOpen && (
                         <div className="space-y-2">
+                          <div>
+                            <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Queue reason code *</label>
+                            <select
+                              className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
+                              value={queueFreshEvaluationReasonCode}
+                              onChange={(event) => setQueueFreshEvaluationReasonCode(event.target.value)}
+                            >
+                              <option value="">Selecteer queue reason code</option>
+                              {queueFreshEvaluationReasonCodes.map((code) => (
+                                <option key={code.id} value={code.id}>{code.label}</option>
+                              ))}
+                            </select>
+                          </div>
                           <Button
                             type="button"
                             variant="secondary"

@@ -5657,6 +5657,7 @@ function UploadModal({
 
   const [step, setStep] = useState(1);
   const [image, setImage] = useState(null);
+  const [imageMeta, setImageMeta] = useState(null);
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [selectedStyles, setSelectedStyles] = useState([]);
@@ -5804,6 +5805,8 @@ function UploadModal({
         }
         setResumeUpload({ id: uploadSnap.id, ...uploadData });
         setImage(nextImage);
+        const draftImageMeta = draft.imageMeta && typeof draft.imageMeta === 'object' ? draft.imageMeta : null;
+        setImageMeta(draftImageMeta);
         setTitle(String(draft.title || uploadData.title || uploadData.caption || '').trim());
         setDesc(String(draft.description || draft.caption || uploadData.description || uploadData.caption || '').trim());
         setSelectedStyles(Array.isArray(draft.styles)
@@ -5881,38 +5884,72 @@ function UploadModal({
     return Math.floor((base64.length * 3) / 4);
   };
 
-  const compressImage = (file) => new Promise((resolve, reject) => {
+  const resolveImageOrientation = (aspectRatio) => {
+    if (aspectRatio >= 2.8) return 'panorama';
+    if (aspectRatio >= 1.2) return 'landscape';
+    if (aspectRatio <= 0.8) return 'portrait';
+    return 'square';
+  };
+
+  const preprocessImage = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Kon het bestand niet lezen.'));
+    reader.onerror = () => reject(new Error('file-read-failed'));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error('Kon de afbeelding niet laden.'));
+      img.onerror = () => reject(new Error('image-processing-failed'));
       img.onload = () => {
         const scale = Math.min(1, MAX_DIMENSION / img.width, MAX_DIMENSION / img.height);
         const canvas = document.createElement('canvas');
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
         const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('image-processing-failed'));
+          return;
+        }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         let quality = 0.9;
+        const initialQuality = quality;
         let dataUrl = canvas.toDataURL('image/jpeg', quality);
         while (toDataUrlSize(dataUrl) > MAX_UPLOAD_BYTES && quality > 0.5) {
           quality -= 0.1;
           dataUrl = canvas.toDataURL('image/jpeg', quality);
         }
 
+        let outputCanvas = canvas;
+        let forcedResize = false;
         if (toDataUrlSize(dataUrl) > MAX_UPLOAD_BYTES) {
           const ratio = Math.sqrt(MAX_UPLOAD_BYTES / toDataUrlSize(dataUrl));
           const resizedCanvas = document.createElement('canvas');
           resizedCanvas.width = Math.max(1, Math.floor(canvas.width * ratio));
           resizedCanvas.height = Math.max(1, Math.floor(canvas.height * ratio));
           const resizedCtx = resizedCanvas.getContext('2d');
+          if (!resizedCtx) {
+            reject(new Error('image-processing-failed'));
+            return;
+          }
           resizedCtx.drawImage(canvas, 0, 0, resizedCanvas.width, resizedCanvas.height);
           dataUrl = resizedCanvas.toDataURL('image/jpeg', 0.7);
+          outputCanvas = resizedCanvas;
+          forcedResize = true;
+          quality = 0.7;
         }
 
-        resolve(dataUrl);
+        const width = outputCanvas.width;
+        const height = outputCanvas.height;
+        const aspectRatio = Number((width / Math.max(height, 1)).toFixed(4));
+
+        resolve({
+          dataUrl,
+          width,
+          height,
+          sizeBytes: toDataUrlSize(dataUrl),
+          aspectRatio,
+          orientation: resolveImageOrientation(aspectRatio),
+          wasResized: scale < 1 || forcedResize,
+          wasCompressed: quality < initialQuality,
+        });
       };
       img.src = reader.result;
     };
@@ -5939,10 +5976,11 @@ function UploadModal({
     logModerationDebug('file-selected', initialTrace);
 
     try {
-      const dataUrl = await compressImage(file);
-      setImage(dataUrl);
+      const processedImage = await preprocessImage(file);
+      setImage(processedImage.dataUrl);
+      setImageMeta(processedImage);
       setStep(2);
-      setErrors(prev => ({ ...prev, image: undefined }));
+      setErrors(prev => ({ ...prev, image: undefined, upload: undefined }));
       setAiError('');
       setMakerTags([]);
       setAppliedTriggers([]);
@@ -5964,7 +6002,8 @@ function UploadModal({
         finalResult: 'error',
         finalReason: error?.message || 'image-processing-failed',
       });
-      setErrors(prev => ({ ...prev, image: 'Afbeelding verwerken mislukt. Probeer een ander bestand.' }));
+      const reason = error?.message === 'file-read-failed' ? 'Bestand lezen mislukt. Kies een ander bestand en probeer opnieuw.' : 'Afbeelding verwerken mislukt. Probeer een ander bestand.';
+      setErrors(prev => ({ ...prev, image: reason }));
     }
   };
 
@@ -6017,7 +6056,7 @@ function UploadModal({
           finalResult: 'error',
           finalReason: 'moderate-image-http-error',
         });
-        throw new Error('AI-service gaf een fout terug.');
+        throw new Error('ai-moderation-endpoint-failed');
       }
 
       const data = await response.json();
@@ -6150,7 +6189,7 @@ function UploadModal({
         finalReason: error?.message || 'ai-check-failed',
       });
       if (!silent) {
-        setAiError('AI-check mislukt. Probeer het opnieuw.');
+        setAiError(error?.message === 'ai-moderation-endpoint-failed' ? 'AI moderatie endpoint is niet bereikbaar. Probeer het opnieuw.' : 'Afbeelding modereren mislukt. Probeer het opnieuw.');
       }
       setAppliedTriggers([]);
       setSuggestedTriggers([]);
@@ -6203,6 +6242,15 @@ function UploadModal({
             title,
             description: desc,
             imageUrl: image,
+            ...(imageMeta ? {
+              imageMeta: {
+                width: imageMeta.width,
+                height: imageMeta.height,
+                aspectRatio: imageMeta.aspectRatio,
+                orientation: imageMeta.orientation,
+                sizeBytes: imageMeta.sizeBytes,
+              },
+            } : {}),
             authorName: profile.displayName,
             authorRole: uploaderRole,
             styles: selectedStyles,
@@ -6395,8 +6443,8 @@ function UploadModal({
     };
 
     if (!image) validationErrors.image = 'Voeg een afbeelding toe.';
-    if (!title.trim()) validationErrors.title = 'Titel is verplicht.';
-    if (selectedStyles.length === 0) validationErrors.styles = 'Kies minstens één thema.';
+    if (!title.trim()) validationErrors.title = 'Titel ontbreekt. Voeg een titel toe.';
+    if (selectedStyles.length === 0) validationErrors.styles = 'Thema ontbreekt. Kies minstens één thema.';
     const missingRequiredThemes = getMissingRequiredThemes(requiredThemes);
     if (missingRequiredThemes.length > 0) validationErrors.moderation = `Voeg eerst thema toe: ${missingRequiredThemes.join(', ')}.`;
     if (shouldReview) validationErrors.moderation = 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.';
@@ -6503,6 +6551,15 @@ function UploadModal({
               title,
               description: desc,
               imageUrl: image,
+              ...(imageMeta ? {
+                imageMeta: {
+                  width: imageMeta.width,
+                  height: imageMeta.height,
+                  aspectRatio: imageMeta.aspectRatio,
+                  orientation: imageMeta.orientation,
+                  sizeBytes: imageMeta.sizeBytes,
+                },
+              } : {}),
               authorName: profile.displayName,
               authorRole: uploaderRole,
               styles: selectedStyles,
@@ -6548,6 +6605,15 @@ function UploadModal({
         credits,
         likes: 0,
         isChallenge,
+        ...(imageMeta ? {
+          imageMeta: {
+            width: imageMeta.width,
+            height: imageMeta.height,
+            aspectRatio: imageMeta.aspectRatio,
+            orientation: imageMeta.orientation,
+            sizeBytes: imageMeta.sizeBytes,
+          },
+        } : {}),
       });
       const postId = publishedDoc?.id || null;
       logModerationDebug('after-firestore-write-result', {
@@ -6558,6 +6624,7 @@ function UploadModal({
 
       setErrors({});
       setImage(null);
+      setImageMeta(null);
       setTitle('');
       setDesc('');
       setSelectedStyles([]);
@@ -6715,14 +6782,30 @@ function UploadModal({
              step === 1 ? <div className="h-full border-2 border-dashed rounded-3xl flex items-center justify-center relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-10 h-10 text-slate-400"/></div> : (
                 <div className="grid md:grid-cols-2 gap-8">
                    <div className="space-y-4">
-                      <div className="aspect-[4/5] bg-slate-100 rounded-xl overflow-hidden relative">
-                         <img src={image} className="w-full h-full object-cover"/>
-                         {outcome === 'forbidden' && (
-                           <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center text-orange-400 font-bold">
-                             <AlertOctagon className="w-6 h-6 mr-2"/> Publicatie geblokkeerd
+                      <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border dark:border-slate-700 space-y-3">
+                         <p className="text-sm font-semibold dark:text-white">Preview voor timeline & overzichten</p>
+                         <div className="bg-slate-100 rounded-xl overflow-hidden relative max-h-[520px]">
+                           <img src={image} className="w-full h-auto object-contain"/>
+                           {outcome === 'forbidden' && (
+                             <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center text-orange-400 font-bold">
+                               <AlertOctagon className="w-6 h-6 mr-2"/> Publicatie geblokkeerd
+                             </div>
+                           )}
+                         </div>
+                         <div>
+                           <p className="text-xs text-slate-500 dark:text-slate-300 mb-2">Grid/card preview (sommige overzichten tonen een uitsnede):</p>
+                           <div className="w-full aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-200 dark:border-slate-700">
+                             <img src={image} className="w-full h-full object-cover" />
                            </div>
+                         </div>
+                         <p className="text-xs text-slate-500 dark:text-slate-300">Je foto wordt automatisch verkleind zodat hij sneller laadt.</p>
+                         {imageMeta?.orientation === 'panorama' && (
+                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg breed. In sommige overzichten wordt hij als panorama weergegeven.</p>
                          )}
-                      </div>
+                         {imageMeta?.aspectRatio && imageMeta.aspectRatio <= 0.5 && (
+                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg hoog. In sommige overzichten kan een uitsnede worden getoond.</p>
+                         )}
+                       </div>
                       {errors.image && <p className="text-xs text-red-500">{errors.image}</p>}
                       <div className="bg-slate-50 p-4 rounded-xl border dark:bg-slate-800 dark:border-slate-700">
                          <div className="flex justify-between items-center mb-3">

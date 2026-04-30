@@ -7,6 +7,7 @@ import LikeIcon from './icons/LikeIcon';
 import CommentIcon from './icons/CommentIcon';
 import SensitiveOverlay from './SensitiveOverlay';
 import { resolvePublicDisplayName } from '../utils/publicIdentity';
+import PostImageDisplay from './PostImageDisplay';
 
 const TRIGGER_LABELS = {
   adultArtNude: '18+ Artistiek naakt',
@@ -229,10 +230,15 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
           </button>
         </div>
         <div className="grid md:grid-cols-2 gap-0">
-          <div className="relative isolate overflow-hidden w-full h-full max-h-[520px]">
-            {shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
-            <img src={post.imageUrl} alt={post.title} className="relative z-0 w-full h-full object-cover max-h-[520px]" />
-          </div>
+          <PostImageDisplay
+            src={post.imageUrl}
+            alt={post.title}
+            imageMeta={post.imageMeta}
+            className="w-full h-full max-h-[520px] bg-slate-100 dark:bg-slate-800"
+            panoramaFrameClassName="h-[420px] md:h-[520px]"
+            shouldCover={shouldCover}
+            overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+          />
           <div className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Calendar size={16} />

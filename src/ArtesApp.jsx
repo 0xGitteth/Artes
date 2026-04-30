@@ -87,6 +87,7 @@ import CommentIcon from './components/icons/CommentIcon';
 import SupportLanding from './components/SupportLanding';
 import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import PhotoDetailModal from './components/PhotoDetailModal';
+import PostImageDisplay, { isPanoramaImage } from './components/PostImageDisplay';
 import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
 import ProfileImageCropper from './components/ProfileImageCropper';
@@ -3821,13 +3822,39 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
         const liked = engagement.liked === true;
         const likeBusy = likeBusyByPost[post.id] === true;
 
+        const panorama = isPanoramaImage(post.imageMeta);
+
         return (
         <div key={post.id} className="relative group">
-           <div className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`} onClick={() => onPostClick(post)}>
-             {shouldCover ? (
-               <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />
-             ) : null}
-             <img src={post.imageUrl} className="relative z-0 w-full h-auto object-cover block" loading="lazy" />
+           <div
+             data-dragged="false"
+             className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`}
+             onClick={(event) => {
+               if (event.currentTarget.dataset.dragged === 'true') {
+                 event.currentTarget.dataset.dragged = 'false';
+                 return;
+               }
+               onPostClick(post);
+             }}
+             onPointerDownCapture={panorama ? (event) => {
+               event.currentTarget.dataset.pointerStartX = String(event.clientX);
+               event.currentTarget.dataset.dragged = 'false';
+             } : undefined}
+             onPointerUpCapture={panorama ? (event) => {
+               const startX = Number(event.currentTarget.dataset.pointerStartX || event.clientX);
+               if (Math.abs(event.clientX - startX) > 12) {
+                 event.currentTarget.dataset.dragged = 'true';
+               }
+             } : undefined}
+           >
+             <PostImageDisplay
+               src={post.imageUrl}
+               alt={post.title}
+               imageMeta={post.imageMeta}
+               className="w-full"
+               shouldCover={shouldCover}
+               overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+             />
            </div>
            <div className="bg-white dark:bg-slate-800 rounded-b-xl shadow-xl p-5 mt-2 border border-slate-100 dark:border-slate-700 flex gap-6">
               <div className="flex-1 space-y-3">

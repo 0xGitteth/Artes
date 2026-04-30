@@ -40,112 +40,128 @@ function renderCrop(imageEl, imageRect, frameRect, outputWidth, outputHeight) {
 }
 
 export default function ProfileImageCropper({ source, measuredHeaderAspectRatio = 3, onApply, onCancel }) {
-  const viewportRef = useRef(null);
+  const imageAreaRef = useRef(null);
   const imgRef = useRef(null);
   const avatarFrameRef = useRef(null);
   const headerFrameRef = useRef(null);
   const pointerRef = useRef({ id: null, x: 0, y: 0 });
+  const previewDebounceRef = useRef(null);
 
   const [active, setActive] = useState('avatar');
-  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [imgNatural, setImgNatural] = useState({ width: 0, height: 0 });
-  const [zoomByKey, setZoomByKey] = useState({ avatar: 1, header: 1 });
-  const [offsetByKey, setOffsetByKey] = useState({ avatar: { x: 0, y: 0 }, header: { x: 0, y: 0 } });
+  const [areaSize, setAreaSize] = useState({ width: 0, height: 0 });
+  const [frameByKey, setFrameByKey] = useState({
+    avatar: { cx: 0.3, cy: 0.35, scale: 0.45 },
+    header: { cx: 0.5, cy: 0.72, scale: 0.72 },
+  });
   const [preview, setPreview] = useState({ avatar: '', header: '' });
   const [lowQualityWarning, setLowQualityWarning] = useState(false);
 
   const headerAspect = Number.isFinite(measuredHeaderAspectRatio) && measuredHeaderAspectRatio > 0 ? measuredHeaderAspectRatio : 3;
 
-  const frameStyles = useMemo(() => ({
-    avatar: { width: 140, height: 140, left: '6%', top: '10%' },
-    header: { width: '88%', aspectRatio: String(headerAspect), left: '6%', bottom: '10%' },
-  }), [headerAspect]);
+  const imageAspect = useMemo(() => {
+    if (!imgNatural.width || !imgNatural.height) return 1;
+    return imgNatural.width / imgNatural.height;
+  }, [imgNatural.width, imgNatural.height]);
 
   const headerPreviewHeight = Math.max(1, Math.round(220 / headerAspect));
 
-  const baseScale = useMemo(() => {
-    if (!viewportSize.width || !viewportSize.height || !imgNatural.width || !imgNatural.height) return 1;
-    return Math.min(viewportSize.width / imgNatural.width, viewportSize.height / imgNatural.height);
-  }, [viewportSize.width, viewportSize.height, imgNatural.width, imgNatural.height]);
+  useEffect(() => {
+    if (!imageAreaRef.current) return undefined;
+    const el = imageAreaRef.current;
+    const measure = () => setAreaSize({ width: el.clientWidth, height: el.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  const getFrameRect = (key) => {
-    const frameEl = key === 'avatar' ? avatarFrameRef.current : headerFrameRef.current;
-    return frameEl?.getBoundingClientRect() || null;
+  useEffect(() => {
+    setFrameByKey({
+      avatar: { cx: 0.3, cy: 0.35, scale: 0.45 },
+      header: { cx: 0.5, cy: 0.72, scale: 0.72 },
+    });
+    setPreview({ avatar: '', header: '' });
+    setLowQualityWarning(false);
+  }, [source]);
+
+  const getFrameRatio = (key) => (key === 'avatar' ? 1 : headerAspect);
+
+  const getScaleLimits = (key) => {
+    const ratio = getFrameRatio(key);
+    const minDim = 72;
+    if (!areaSize.width || !areaSize.height) return { min: 0.2, max: 0.95 };
+    const minByWidth = minDim / areaSize.width;
+    const minByHeight = (minDim * ratio) / areaSize.height;
+    const maxByWidth = 0.98;
+    const maxByHeight = (areaSize.height * 0.98 * ratio) / areaSize.width;
+    const maxScale = Math.max(0.01, Math.min(maxByWidth, maxByHeight));
+    const desiredMinScale = Math.max(minByWidth, minByHeight, 0.12);
+    const minScale = Math.min(desiredMinScale, maxScale);
+    return { min: minScale, max: maxScale };
   };
 
-  const getViewportRect = () => viewportRef.current?.getBoundingClientRect() || null;
-
-  const getImageLayout = (key, offsetOverride = null, zoomOverride = null) => {
-    const viewportRect = getViewportRect();
-    if (!viewportRect || !imgNatural.width || !imgNatural.height) return null;
-    const zoom = zoomOverride ?? zoomByKey[key] ?? 1;
-    const renderedWidth = imgNatural.width * baseScale * zoom;
-    const renderedHeight = imgNatural.height * baseScale * zoom;
-    const centerLeft = (viewportRect.width - renderedWidth) / 2;
-    const centerTop = (viewportRect.height - renderedHeight) / 2;
-    const offset = offsetOverride || offsetByKey[key] || { x: 0, y: 0 };
-    const left = viewportRect.left + centerLeft + offset.x;
-    const top = viewportRect.top + centerTop + offset.y;
+  const toFrameRect = (key, model = frameByKey[key]) => {
+    const ratio = getFrameRatio(key);
+    const width = areaSize.width * model.scale;
+    const height = width / ratio;
+    const cx = model.cx * areaSize.width;
+    const cy = model.cy * areaSize.height;
     return {
-      viewportRect,
-      imageRect: {
-        left,
-        top,
-        width: renderedWidth,
-        height: renderedHeight,
-        right: left + renderedWidth,
-        bottom: top + renderedHeight,
-      },
+      width,
+      height,
+      left: cx - width / 2,
+      top: cy - height / 2,
+      right: cx + width / 2,
+      bottom: cy + height / 2,
     };
   };
 
-  const getMinZoomForFrame = (key) => {
-    const viewportRect = getViewportRect();
-    const frameRect = getFrameRect(key);
-    if (!viewportRect || !frameRect || !imgNatural.width || !imgNatural.height || !baseScale) return 1;
-    const frameW = frameRect.width;
-    const frameH = frameRect.height;
-    const minZoomW = frameW / (imgNatural.width * baseScale);
-    const minZoomH = frameH / (imgNatural.height * baseScale);
-    return Math.max(1, minZoomW, minZoomH);
+  const clampFrameModel = (key, model) => {
+    const { min, max } = getScaleLimits(key);
+    const scale = clamp(model.scale, min, max);
+    if (!areaSize.width || !areaSize.height) return { ...model, scale };
+    const rect = toFrameRect(key, { ...model, scale });
+    const halfW = rect.width / 2;
+    const halfH = rect.height / 2;
+    const minCx = halfW / areaSize.width;
+    const maxCx = 1 - minCx;
+    const minCy = halfH / areaSize.height;
+    const maxCy = 1 - minCy;
+    return {
+      scale,
+      cx: clamp(model.cx, minCx, maxCx),
+      cy: clamp(model.cy, minCy, maxCy),
+    };
   };
 
-  const clampOffset = (key, candidateOffset, zoomOverride = null) => {
-    const frameRect = getFrameRect(key);
-    const layout = getImageLayout(key, candidateOffset, zoomOverride);
-    if (!frameRect || !layout) return candidateOffset;
-
-    const { viewportRect, imageRect } = layout;
-    const centerLeft = imageRect.left - viewportRect.left - candidateOffset.x;
-    const centerTop = imageRect.top - viewportRect.top - candidateOffset.y;
-
-    const minX = frameRect.right - viewportRect.left - centerLeft - imageRect.width;
-    const maxX = frameRect.left - viewportRect.left - centerLeft;
-    const minY = frameRect.bottom - viewportRect.top - centerTop - imageRect.height;
-    const maxY = frameRect.top - viewportRect.top - centerTop;
-
+  const toDomFrameRect = (frameRect) => {
+    const area = imageAreaRef.current?.getBoundingClientRect();
+    if (!area) return null;
     return {
-      x: clamp(candidateOffset.x, minX, maxX),
-      y: clamp(candidateOffset.y, minY, maxY),
+      left: area.left + frameRect.left,
+      top: area.top + frameRect.top,
+      right: area.left + frameRect.right,
+      bottom: area.top + frameRect.bottom,
+      width: frameRect.width,
+      height: frameRect.height,
     };
   };
 
   const computeOutputs = () => {
     const img = imgRef.current;
-    const avatarFrame = avatarFrameRef.current;
-    const headerFrame = headerFrameRef.current;
-    if (!img || !avatarFrame || !headerFrame) return null;
+    const area = imageAreaRef.current?.getBoundingClientRect();
+    if (!img || !area || !imgNatural.width || !imgNatural.height) return null;
 
-    const avatarLayout = getImageLayout('avatar');
-    const headerLayout = getImageLayout('header');
-    if (!avatarLayout || !headerLayout) return null;
+    const avatarRect = toFrameRect('avatar');
+    const headerRect = toFrameRect('header');
+    const avatarDomRect = toDomFrameRect(avatarRect);
+    const headerDomRect = toDomFrameRect(headerRect);
+    if (!avatarDomRect || !headerDomRect) return null;
 
-    const avatarRect = avatarFrame.getBoundingClientRect();
-    const headerRect = headerFrame.getBoundingClientRect();
     const headerHeight = Math.max(1, Math.round(HEADER_WIDTH / headerAspect));
-
-    const avatarOut = renderCrop(img, avatarLayout.imageRect, avatarRect, AVATAR_SIZE, AVATAR_SIZE);
-    const headerOut = renderCrop(img, headerLayout.imageRect, headerRect, HEADER_WIDTH, headerHeight);
+    const avatarOut = renderCrop(img, area, avatarDomRect, AVATAR_SIZE, AVATAR_SIZE);
+    const headerOut = renderCrop(img, area, headerDomRect, HEADER_WIDTH, headerHeight);
 
     return {
       avatar: avatarOut.dataUrl,
@@ -158,46 +174,33 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
   };
 
   useEffect(() => {
-    setZoomByKey({ avatar: 1, header: 1 });
-    setOffsetByKey({ avatar: { x: 0, y: 0 }, header: { x: 0, y: 0 } });
-    setPreview({ avatar: '', header: '' });
-    setLowQualityWarning(false);
-  }, [source]);
-
-  useEffect(() => {
-    if (!viewportRef.current) return undefined;
-    const viewport = viewportRef.current;
-    const measure = () => setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!imgNatural.width || !viewportSize.width) return;
-    setZoomByKey((prev) => {
-      const minAvatar = getMinZoomForFrame('avatar');
-      const minHeader = getMinZoomForFrame('header');
-      return {
-        avatar: clamp(prev.avatar, minAvatar, 4),
-        header: clamp(prev.header, minHeader, 4),
-      };
-    });
-    setOffsetByKey((prev) => ({
-      avatar: clampOffset('avatar', prev.avatar),
-      header: clampOffset('header', prev.header),
+    if (!areaSize.width) return;
+    setFrameByKey((prev) => ({
+      avatar: clampFrameModel('avatar', prev.avatar),
+      header: clampFrameModel('header', prev.header),
     }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imgNatural.width, imgNatural.height, viewportSize.width, viewportSize.height, headerAspect]);
+  }, [areaSize.width, areaSize.height, headerAspect]);
 
   useEffect(() => {
-    const outputs = computeOutputs();
-    if (!outputs) return;
-    setPreview({ avatar: outputs.avatar, header: outputs.header });
-    setLowQualityWarning(outputs.lowQuality);
+    if (previewDebounceRef.current) {
+      clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = null;
+    }
+    previewDebounceRef.current = setTimeout(() => {
+      const outputs = computeOutputs();
+      if (!outputs) return;
+      setPreview({ avatar: outputs.avatar, header: outputs.header });
+      setLowQualityWarning(outputs.lowQuality);
+    }, 150);
+    return () => {
+      if (previewDebounceRef.current) {
+        clearTimeout(previewDebounceRef.current);
+        previewDebounceRef.current = null;
+      }
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoomByKey, offsetByKey, imgNatural.width, imgNatural.height, viewportSize.width, viewportSize.height, headerAspect]);
+  }, [frameByKey, areaSize.width, areaSize.height, imgNatural.width, imgNatural.height, headerAspect]);
 
   const onPointerDown = (e) => {
     pointerRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -209,10 +212,16 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
     const dx = e.clientX - pointerRef.current.x;
     const dy = e.clientY - pointerRef.current.y;
     pointerRef.current = { ...pointerRef.current, x: e.clientX, y: e.clientY };
-    setOffsetByKey((prev) => {
+
+    setFrameByKey((prev) => {
+      if (!areaSize.width || !areaSize.height) return prev;
       const current = prev[active];
-      const next = { x: current.x + dx, y: current.y + dy };
-      return { ...prev, [active]: clampOffset(active, next) };
+      const moved = {
+        ...current,
+        cx: current.cx + (dx / areaSize.width),
+        cy: current.cy + (dy / areaSize.height),
+      };
+      return { ...prev, [active]: clampFrameModel(active, moved) };
     });
   };
 
@@ -221,14 +230,11 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
     e.currentTarget.releasePointerCapture?.(e.pointerId);
   };
 
-  const setZoom = (nextZoom) => {
-    const minZoom = getMinZoomForFrame(active);
-    const zoom = clamp(nextZoom, minZoom, 4);
-    setZoomByKey((prev) => ({ ...prev, [active]: zoom }));
-    setOffsetByKey((prev) => {
-      const current = prev[active];
-      return { ...prev, [active]: clampOffset(active, current, zoom) };
-    });
+  const setFrameScale = (key, nextScale) => {
+    setFrameByKey((prev) => ({
+      ...prev,
+      [key]: clampFrameModel(key, { ...prev[key], scale: nextScale }),
+    }));
   };
 
   const save = () => {
@@ -237,60 +243,68 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
     onApply?.({ avatar: outputs.avatar, headerImage: outputs.header });
   };
 
-  const activeZoom = zoomByKey[active] || 1;
-  const activeOffset = offsetByKey[active] || { x: 0, y: 0 };
-  const layout = getImageLayout(active, activeOffset, activeZoom);
+  const avatarRect = toFrameRect('avatar');
+  const headerRect = toFrameRect('header');
+  const activeScale = frameByKey[active]?.scale ?? 0.4;
+  const activeScaleLimits = getScaleLimits(active);
 
   return (
     <div className="space-y-4 border rounded-2xl p-4 bg-slate-50 dark:bg-slate-900/40">
       <p className="text-xs text-slate-500 dark:text-slate-400">Je afbeelding wordt automatisch verkleind zodat je profiel sneller laadt.</p>
       {lowQualityWarning ? <p className="text-xs text-amber-600">Deze uitsnede kan onscherp worden.</p> : null}
 
-      <div
-        ref={viewportRef}
-        className="relative w-full h-72 md:h-96 rounded-xl overflow-hidden bg-slate-200 touch-none"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-      >
-        {layout ? (
+      <div className="w-full flex justify-center">
+        <div
+          ref={imageAreaRef}
+          className="relative w-full max-w-2xl bg-slate-200 rounded-xl overflow-hidden touch-none"
+          style={{ aspectRatio: String(imageAspect), maxHeight: 480 }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        >
           <img
             ref={imgRef}
             src={source}
             alt="Crop source"
-            className="absolute pointer-events-none select-none"
+            className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none"
             draggable={false}
-            style={{
-              left: layout.imageRect.left - layout.viewportRect.left,
-              top: layout.imageRect.top - layout.viewportRect.top,
-              width: layout.imageRect.width,
-              height: layout.imageRect.height,
-            }}
             onLoad={(e) => setImgNatural({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
           />
-        ) : (
-          <img
-            ref={imgRef}
-            src={source}
-            alt="Crop source"
-            className="absolute opacity-0 pointer-events-none"
-            onLoad={(e) => setImgNatural({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
-          />
-        )}
 
-        <button type="button" ref={avatarFrameRef} onClick={() => setActive('avatar')} className={`absolute border-2 rounded-md bg-transparent ${active === 'avatar' ? 'border-blue-500 ring-2 ring-blue-300' : 'border-white/70 opacity-70'}`} style={frameStyles.avatar}>
-          <span className="absolute -top-6 left-0 text-xs bg-black/70 text-white px-2 py-0.5 rounded">Profielfoto</span>
-        </button>
-        <button type="button" ref={headerFrameRef} onClick={() => setActive('header')} className={`absolute border-2 rounded-md bg-transparent ${active === 'header' ? 'border-blue-500 ring-2 ring-blue-300' : 'border-white/70 opacity-70'}`} style={frameStyles.header}>
-          <span className="absolute -top-6 left-0 text-xs bg-black/70 text-white px-2 py-0.5 rounded">Header</span>
-        </button>
+          <button
+            type="button"
+            ref={avatarFrameRef}
+            onClick={() => setActive('avatar')}
+            className={`absolute border-2 rounded-md bg-transparent ${active === 'avatar' ? 'border-blue-500 ring-2 ring-blue-300' : 'border-white/70 opacity-70'}`}
+            style={{ left: avatarRect.left, top: avatarRect.top, width: avatarRect.width, height: avatarRect.height }}
+          >
+            <span className="absolute -top-6 left-0 text-xs bg-black/70 text-white px-2 py-0.5 rounded">Profielfoto</span>
+          </button>
+
+          <button
+            type="button"
+            ref={headerFrameRef}
+            onClick={() => setActive('header')}
+            className={`absolute border-2 rounded-md bg-transparent ${active === 'header' ? 'border-blue-500 ring-2 ring-blue-300' : 'border-white/70 opacity-70'}`}
+            style={{ left: headerRect.left, top: headerRect.top, width: headerRect.width, height: headerRect.height }}
+          >
+            <span className="absolute -top-6 left-0 text-xs bg-black/70 text-white px-2 py-0.5 rounded">Header</span>
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <button type="button" className="px-3 py-1 border rounded" onClick={() => setZoom(activeZoom - 0.1)}>-</button>
-        <input type="range" min={getMinZoomForFrame(active)} max={4} step={0.01} value={activeZoom} onChange={(e) => setZoom(Number(e.target.value))} />
-        <button type="button" className="px-3 py-1 border rounded" onClick={() => setZoom(activeZoom + 0.1)}>+</button>
+        <button type="button" className="px-3 py-1 border rounded" onClick={() => setFrameScale(active, activeScale - 0.03)}>-</button>
+        <input
+          type="range"
+          min={activeScaleLimits.min}
+          max={activeScaleLimits.max}
+          step={0.005}
+          value={activeScale}
+          onChange={(e) => setFrameScale(active, Number(e.target.value))}
+        />
+        <button type="button" className="px-3 py-1 border rounded" onClick={() => setFrameScale(active, activeScale + 0.03)}>+</button>
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">

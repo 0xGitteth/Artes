@@ -89,6 +89,7 @@ import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import PhotoDetailModal from './components/PhotoDetailModal';
 import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
+import ProfileImageCropper from './components/ProfileImageCropper';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
@@ -6988,6 +6989,9 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
   const [manualPostIds, setManualPostIds] = useState(profile?.quickProfilePostIds || []);
   const [saveError, setSaveError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [cropSource, setCropSource] = useState('');
+  const headerMeasureRef = useRef(null);
+  const [headerAspectRatio, setHeaderAspectRatio] = useState(3);
   const selectedRoles = formData.roles || [];
   const selectedThemes = formData.themes || [];
   const userPosts = useMemo(() => (posts || []).filter((post) => post.authorId === user?.uid), [posts, user?.uid]);
@@ -7080,13 +7084,28 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
     if (!file) return;
     const reader = new FileReader();
     reader.onloadend = () => {
-      setFormData((prev) => ({
-        ...prev,
-        [key]: reader.result,
-      }));
+      if (key === 'avatar') {
+        setCropSource(String(reader.result || ''));
+        return;
+      }
+      setFormData((prev) => ({ ...prev, [key]: reader.result }));
     };
     reader.readAsDataURL(file);
   };
+
+  useEffect(() => {
+    if (!headerMeasureRef.current) return undefined;
+    const element = headerMeasureRef.current;
+    const updateAspect = () => {
+      const width = element.clientWidth || 1;
+      const height = element.clientHeight || 1;
+      setHeaderAspectRatio(width / height);
+    };
+    updateAspect();
+    const observer = new ResizeObserver(updateAspect);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const handleManualPostToggle = (postId) => {
     setManualPostIds((prev) => (
@@ -7177,6 +7196,25 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         Deze profielfoto wordt overal gebruikt, inclusief de header van je profiel en quick profile.
                       </p>
+                      {cropSource ? (
+                        <ProfileImageCropper
+                          source={cropSource}
+                          measuredHeaderAspectRatio={headerAspectRatio}
+                          onCancel={() => setCropSource('')}
+                          onApply={({ avatar, headerImage }) => {
+                            setFormData((prev) => ({ ...prev, avatar, headerImage }));
+                            setCropSource('');
+                          }}
+                        />
+                      ) : null}
+                      {formData.headerImage ? (
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Header preview</p>
+                          <div className="w-full h-24 rounded-xl overflow-hidden border">
+                            <img src={formData.headerImage} alt="Header preview" className="w-full h-full object-cover" />
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="border-t pt-6">
@@ -8182,8 +8220,8 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   return (
     <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4 md:p-6">
       <div className="bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-3xl xl:max-w-4xl max-h-[calc(100vh-2rem)] shadow-2xl overflow-hidden border border-white/10 flex flex-col">
-        <div className="relative h-56 md:h-72 w-full shrink-0">
-          <img src={headerImage} className="w-full h-full object-cover scale-105" />
+        <div ref={headerMeasureRef} className="relative h-56 md:h-72 w-full shrink-0">
+          <img src={headerImage} className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
           <div className="absolute inset-x-0 bottom-0 p-8 text-white">
             <h2 className="text-4xl font-bold mb-3">{userProfile.displayName}</h2>

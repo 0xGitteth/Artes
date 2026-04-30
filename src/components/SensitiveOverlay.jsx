@@ -2,10 +2,10 @@ import React from 'react';
 import { AlertOctagon } from 'lucide-react';
 import { Button } from './ui';
 
-export default function SensitiveOverlay({ onReveal }) {
+export default function SensitiveOverlay({ onReveal, className = '' }) {
   return (
     <div
-      className="absolute inset-0 z-20 backdrop-blur-3xl bg-slate-900/80 flex flex-col items-center justify-center p-6 text-center"
+      className={`absolute inset-0 z-20 backdrop-blur-3xl bg-slate-900/80 flex flex-col items-center justify-center p-6 text-center pointer-events-auto ${className}`}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();

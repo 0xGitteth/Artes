@@ -7120,6 +7120,9 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
        <div className="bg-white dark:bg-slate-900 w-full max-w-2xl h-[80vh] rounded-3xl overflow-hidden flex flex-col">
           <div className="p-6 border-b flex justify-between"><h3 className="font-bold text-lg dark:text-white">Profiel Bewerken</h3><button onClick={onClose}><X/></button></div>
           <div className="flex-1 overflow-y-auto p-8 space-y-6">
+             <div aria-hidden="true" className="pointer-events-none absolute -z-10 opacity-0 w-full max-w-2xl px-8">
+               <div ref={headerMeasureRef} className="w-full h-56 md:h-72" />
+             </div>
              {/* Simple Tabs for this view */}
              <div className="flex gap-4 border-b mb-4">
                  {[
@@ -8220,7 +8223,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   return (
     <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4 md:p-6">
       <div className="bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-3xl xl:max-w-4xl max-h-[calc(100vh-2rem)] shadow-2xl overflow-hidden border border-white/10 flex flex-col">
-        <div ref={headerMeasureRef} className="relative h-56 md:h-72 w-full shrink-0">
+        <div className="relative h-56 md:h-72 w-full shrink-0">
           <img src={headerImage} className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
           <div className="absolute inset-x-0 bottom-0 p-8 text-white">

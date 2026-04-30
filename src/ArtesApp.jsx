@@ -6962,9 +6962,9 @@ function UploadModal({
                    </div>
                    <div className="space-y-6">
                       <Input label="Titel" value={title} onChange={e => { setTitle(e.target.value); setErrors(prev => ({ ...prev, title: undefined })); }} error={errors.title} />
-                      <div><label className="text-sm font-normal block mb-2 dark:text-white">Bijschrift</label><textarea className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white" value={desc} onChange={e => setDesc(e.target.value)} /></div>
+                      <div><label className="text-sm font-normal block mb-2 text-slate-700 dark:text-slate-200">Bijschrift</label><textarea className="w-full p-3 rounded-xl border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500" value={desc} onChange={e => setDesc(e.target.value)} /></div>
                       
-                      <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border">
+                      <div className="bg-slate-50 dark:bg-slate-800/70 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
                          <div className="flex items-center justify-between mb-2">
                             <label className="text-sm font-bold block dark:text-white">Bijdragers</label>
                             {profile.roles.length === 1 && <span className="text-[11px] uppercase text-slate-500">{ROLES.find(x => x.id === uploaderRole)?.label}</span>}
@@ -6972,9 +6972,9 @@ function UploadModal({
 
                          {profile.roles.length > 1 && (
                             <div className="mb-4">
-                               <p className="text-xs font-semibold text-slate-500 mb-1">Jouw rol in deze publicatie</p>
+                               <p className="text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Jouw rol in deze publicatie</p>
                                <div className="flex gap-2 flex-wrap">{profile.roles.map(r => <button key={r} onClick={() => setUploaderRole(r)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${uploaderRole === r ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white'}`}>{ROLES.find(x => x.id === r)?.label}</button>)}</div>
-                               <p className="text-[11px] text-slate-500 mt-1">Wordt toegevoegd als jouw eigen credit.</p>
+                               <p className="text-[11px] text-slate-500 dark:text-slate-300 mt-1">Wordt toegevoegd als jouw eigen credit.</p>
                             </div>
                          )}
 
@@ -6982,11 +6982,11 @@ function UploadModal({
                             {credits.map((c, i) => (
                                <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-700 p-2 rounded border dark:border-slate-600">
                                   <div className="flex items-center gap-2 dark:text-white">
-                                     {c.isSelf && <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">Jij</span>}
+                                     {c.isSelf && <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200 rounded">Jij</span>}
                                      <span><span className="font-bold capitalize">{ROLES.find(r => r.id === c.role)?.label}:</span> {c.name}</span>
                                   </div>
                                   <div className="flex gap-2 items-center">
-                                     {c.isExternal && <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">Extern</span>}
+                                     {c.isExternal && <span className="bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-100 px-1.5 py-0.5 rounded text-[10px]">Extern</span>}
                                      {!c.isSelf && <button onClick={() => setCredits(credits.filter((_, idx) => idx !== i))}><Trash2 className="w-3 h-3 text-red-500"/></button>}
                                   </div>
                                </div>
@@ -6994,10 +6994,10 @@ function UploadModal({
                          </div>
 
                          <div className="flex gap-2 mb-2">
-                            <select className="p-2 border rounded text-sm w-1/3" value={newCredit.role} onChange={e => setNewCredit((prev) => ({...prev, role: e.target.value}))}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
+                            <select className="p-2 border border-slate-300 rounded text-sm w-1/3 bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100" value={newCredit.role} onChange={e => setNewCredit((prev) => ({...prev, role: e.target.value}))}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
                             <div className="relative flex-1">
                                 <input 
-                                   className="w-full p-2 border rounded text-sm" 
+                                   className="w-full p-2 border border-slate-300 rounded text-sm bg-white text-slate-800 placeholder:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500" 
                                    placeholder="Zoek naam..." 
                                    value={contributorSearch || newCredit.name} 
                                    onChange={e => {
@@ -7008,14 +7008,14 @@ function UploadModal({
                                    }} 
                                 />
                                 {contributorSearch && searchResults.length > 0 && (
-                                   <div className="absolute top-full left-0 right-0 bg-white border mt-1 rounded shadow-lg max-h-40 overflow-y-auto z-10">
-                                      <p className="px-2 pt-2 text-[11px] text-slate-500">Selecteer een bestaande bijdrager.</p>
+                                   <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 dark:border-slate-700 dark:bg-slate-900 mt-1 rounded shadow-lg max-h-40 overflow-y-auto z-10">
+                                      <p className="px-2 pt-2 text-[11px] text-slate-500 dark:text-slate-300">Selecteer een bestaande bijdrager.</p>
                                       {searchResults.map(u => (
-                                         <div key={u.uid} className="p-2 hover:bg-slate-100 cursor-pointer text-sm" onClick={() => void addCredit(u)}>{u.displayName}</div>
+                                         <div key={u.uid} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-sm text-slate-700 dark:text-slate-100" onClick={() => void addCredit(u)}>{u.displayName}</div>
                                       ))}
                                       <button
                                         type="button"
-                                        className="w-full border-t text-xs text-slate-600 px-2 py-2 text-left hover:bg-slate-50"
+                                        className="w-full border-t border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-200 px-2 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800"
                                         onClick={() => {
                                           setAllowExternalOverride(true);
                                           setShowInvite(true);
@@ -7026,15 +7026,15 @@ function UploadModal({
                                    </div>
                                 )}
                                 {contributorSearch && searchResults.length === 0 && (
-                                    <div className="absolute top-full left-0 right-0 bg-white border mt-1 rounded shadow-lg p-2 z-10">
-                                        <p className="text-xs text-orange-500 mb-2">Geen gebruiker gevonden.</p>
+                                    <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 dark:border-slate-700 dark:bg-slate-900 mt-1 rounded shadow-lg p-2 z-10">
+                                        <p className="text-xs text-orange-600 dark:text-orange-300 mb-2">Geen gebruiker gevonden.</p>
                                         <button
                                           type="button"
                                           onClick={() => {
                                             setAllowExternalOverride(true);
                                             setShowInvite(true);
                                           }}
-                                          className="text-xs bg-slate-100 p-1 rounded w-full"
+                                          className="text-xs bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100 p-1 rounded w-full"
                                         >
                                           Voeg toe als extern
                                         </button>
@@ -7044,22 +7044,22 @@ function UploadModal({
                          </div>
                          
                          {showInvite && (
-                            <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 mb-2 border border-yellow-200">
+                            <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-100 mb-2 border border-yellow-200 dark:border-yellow-800">
                                <p className="mb-2 font-semibold">Ongeclaimd profiel aanmaken voor {newCredit.name}</p>
                                <input
-                                 className="w-full p-2 rounded border mb-2"
+                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-2"
                                  placeholder="Instagram handle (optioneel)"
                                  value={newCredit.instagramHandle}
                                  onChange={e => setNewCredit((prev) => ({...prev, instagramHandle: e.target.value}))}
                                />
                                <input
-                                 className="w-full p-2 rounded border mb-2"
+                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-2"
                                  placeholder="Website domein (optioneel)"
                                  value={newCredit.website}
                                  onChange={e => setNewCredit((prev) => ({...prev, website: e.target.value}))}
                                />
                                <input
-                                 className="w-full p-2 rounded border mb-2"
+                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-2"
                                  placeholder="Email (optioneel)"
                                  value={newCredit.email}
                                  onChange={e => setNewCredit((prev) => ({...prev, email: e.target.value}))}
@@ -7077,7 +7077,7 @@ function UploadModal({
                          {errors.styles && <p className="mt-2 text-xs text-red-500">{errors.styles}</p>}
                       </div>
                       {publishError && <p className="text-sm text-red-500 text-center">{publishError}</p>}
-                      {showSuggestionUI && <p className="text-xs text-amber-700 text-center">Kies hoe je met de AI-suggesties wilt omgaan om te publiceren.</p>}
+                      {showSuggestionUI && <p className="text-xs text-amber-700 dark:text-amber-300 text-center">Kies hoe je met de AI-suggesties wilt omgaan om te publiceren.</p>}
                       <Button onClick={handlePublish} className="w-full" disabled={publishing || showSuggestionUI || outcome === 'forbidden'}>
                         {publishing ? <><Loader2 className="w-4 h-4 animate-spin" /> Publiceren...</> : 'Publiceren'}
                       </Button>

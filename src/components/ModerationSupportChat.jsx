@@ -352,7 +352,7 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
               <span className="text-xs text-slate-400 dark:text-slate-500">{formatDate(activeThread.lastMessageAt)}</span>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+            <div className="flex-1 overflow-y-auto no-scrollbar px-6 py-6 space-y-4">
               {normalizedMessages.length === 0 ? (
                 <div className="text-sm text-slate-500 dark:text-slate-300">Nog geen berichten.</div>
               ) : (

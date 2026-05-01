@@ -760,6 +760,7 @@ export default function ArtesApp() {
   }) && !!resolvedModerationThreadId;
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
   const appAccessReady = authReady && Boolean(authUser?.uid) && !profileLoading && !onboardingLocked;
+  const showActiveAppAnnouncement = Boolean(activeAppAnnouncement) && announcementVisible;
   useEffect(() => {
     if (!appAccessReady || !canReadFirestore) {
       setActiveAppAnnouncement(null);
@@ -6002,7 +6003,7 @@ function ModerationPortal({
           currentUserUid={authUser?.uid || null}
         />
       )}
-      {announcementVisible && activeAppAnnouncement && (
+      {showActiveAppAnnouncement && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-xl border border-slate-200 dark:border-slate-700">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">

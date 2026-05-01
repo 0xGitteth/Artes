@@ -240,7 +240,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             shouldCover={shouldCover}
             overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
           />
-          <div className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
+          <div className="p-6 space-y-4 overflow-y-auto no-scrollbar max-h-[80vh]">
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Calendar size={16} />
               <span>{post.createdAt?.toDate ? post.createdAt.toDate().toLocaleDateString() : 'Nieuw'}</span>
@@ -386,7 +386,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
 
             <div className="border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 bg-slate-50/60 dark:bg-slate-800/50">
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Reacties</p>
-              <div className="max-h-48 overflow-y-auto space-y-3">
+              <div className="max-h-48 overflow-y-auto no-scrollbar space-y-3">
                 {comments.map((comment) => {
                   const canDeleteComment = Boolean(user?.uid && comment.authorId === user.uid);
                   return (

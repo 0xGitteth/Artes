@@ -2164,11 +2164,6 @@ export default function ArtesApp() {
     <div className={`${darkMode ? 'dark' : ''} h-screen w-full flex flex-col transition-colors duration-300`}>
       <div className="flex-1 bg-[#F0F4F8] dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden relative font-sans">
         
-        {/* Style tag to hide scrollbars */}
-        <style dangerouslySetInnerHTML={{__html: `
-           .no-scrollbar::-webkit-scrollbar { display: none; }
-           .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        `}} />
 
         {/* Nav visible if profile loaded */}
         {profile && !onboardingLocked && (
@@ -2180,7 +2175,7 @@ export default function ArtesApp() {
           />
         )}
 
-        <main className="h-full overflow-y-auto pb-24 pt-16 scroll-smooth">
+        <main className="h-full overflow-y-auto no-scrollbar pb-24 pt-16 scroll-smooth">
           {(view === 'loading' || profileLoading) && (
             <div className="h-full flex items-center justify-center">
               <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -7190,7 +7185,7 @@ function UploadModal({
                                    }} 
                                 />
                                 {contributorSearch && searchResults.length > 0 && (
-                                   <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 dark:border-slate-700 dark:bg-slate-900 mt-1 rounded shadow-lg max-h-40 overflow-y-auto z-10">
+                                   <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 dark:border-slate-700 dark:bg-slate-900 mt-1 rounded shadow-lg max-h-40 overflow-y-auto no-scrollbar z-10">
                                       <p className="px-2 pt-2 text-[11px] text-slate-500 dark:text-slate-300">Selecteer een bestaande bijdrager.</p>
                                       {searchResults.map(u => (
                                          <div key={u.uid} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-sm text-slate-700 dark:text-slate-100" onClick={() => void addCredit(u)}>{u.displayName}</div>
@@ -7424,7 +7419,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
     <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4">
        <div className="bg-white dark:bg-slate-900 w-full max-w-2xl h-[80vh] rounded-3xl overflow-hidden flex flex-col">
           <div className="p-6 border-b flex justify-between"><h3 className="font-bold text-lg dark:text-white">Profiel Bewerken</h3><button onClick={onClose}><X/></button></div>
-          <div className="flex-1 overflow-y-auto p-8 space-y-6">
+          <div className="flex-1 overflow-y-auto no-scrollbar p-8 space-y-6">
              <div aria-hidden="true" className="pointer-events-none fixed -left-[9999px] top-0 opacity-0 w-[calc(100vw-2rem)] max-w-3xl xl:max-w-4xl">
                <div ref={headerMeasureRef} className="w-full h-56 md:h-72" />
              </div>
@@ -8562,7 +8557,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
           </button>
         </div>
 
-        <div className="p-5 md:p-8 space-y-6 overflow-y-auto">
+        <div className="p-5 md:p-8 space-y-6 overflow-y-auto no-scrollbar">
           <div className="flex flex-wrap gap-2">
             {themes && themes.length > 0 ? (
               themes.map((theme) => (
@@ -10484,7 +10479,7 @@ function WelcomeTour({ onClose, setView }) {
              <Star className="w-8 h-8" />
           </div>
           <h2 className="text-2xl font-bold mb-3 dark:text-white">{steps[step].title}</h2>
-          <div className="text-slate-600 dark:text-slate-400 mb-8 max-h-[50vh] overflow-y-auto text-left">{steps[step].desc}</div>
+          <div className="text-slate-600 dark:text-slate-400 mb-8 max-h-[50vh] overflow-y-auto no-scrollbar text-left">{steps[step].desc}</div>
           
           {step < steps.length - 1 ? (
              <div className="flex gap-3">

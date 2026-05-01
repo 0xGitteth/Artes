@@ -4713,7 +4713,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       return;
     }
     if (!queueFreshEvaluationReasonCode) {
-      setFreshEvaluationError('Kies eerst een reason code.');
+      setFreshEvaluationError('Kies eerst een queue reason code.');
       return;
     }
     setFreshEvaluationPending(true);
@@ -4741,11 +4741,15 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       const backendCaseId = typeof payload?.reviewCaseId === 'string' ? payload.reviewCaseId : null;
       const caseIdsToRemove = new Set([clickedCaseId, backendCaseId].filter(Boolean));
       setCases((prev) => prev.filter((item) => !caseIdsToRemove.has(item.id)));
-      setFreshEvaluationMessage('De volgende upload van deze afbeelding wordt opnieuw beoordeeld.');
+      if (payload?.queueFreshEvaluationMode === 'fingerprintOverride' || payload?.fingerprintQueued === true) {
+        setFreshEvaluationMessage('Nieuwe upload met dezelfde fingerprint wordt opnieuw beoordeeld.');
+      } else {
+        setFreshEvaluationMessage('Case uit actieve review gehaald. Geen fingerprint override aangemaakt.');
+      }
       setQueueFreshEvaluationReasonCode('');
       setSelectedCaseId(null);
     } catch (error) {
-      setFreshEvaluationError(error.message || 'Kon override niet opslaan.');
+      setFreshEvaluationError(error.message || 'Kon aanvraag niet opslaan.');
     } finally {
       setFreshEvaluationPending(false);
     }
@@ -5118,14 +5122,14 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                             type="button"
                             variant="secondary"
                             onClick={handleQueueFreshEvaluation}
-                            disabled={freshEvaluationPending || isLockedByOther || isReportCase || !selectedUpload?.fingerprints}
+                            disabled={freshEvaluationPending || isLockedByOther || isReportCase}
                             className="w-full"
                           >
                             {freshEvaluationPending ? 'Opslaan...' : 'Bij volgende upload opnieuw beoordelen'}
                           </Button>
                           {isReportCase && <p className="text-[11px] text-slate-500 dark:text-slate-400">Alleen beschikbaar voor upload-cases.</p>}
                           {!isReportCase && !selectedUpload?.fingerprints && (
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400">Geen fingerprint-data gevonden op de geselecteerde upload.</p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">Geen fingerprint-data gevonden; case wordt wel uit actieve review gehaald.</p>
                           )}
                           {freshEvaluationError && <p className="text-xs text-red-500">{freshEvaluationError}</p>}
                           {freshEvaluationMessage && <p className="text-xs text-emerald-600 dark:text-emerald-400">{freshEvaluationMessage}</p>}

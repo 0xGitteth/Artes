@@ -1705,6 +1705,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const hasReportedContentReason = finalForbiddenReasons.some((reason) => reason?.trigger === 'reportedContent');
   const hasArtNudeTrigger = finalAppliedTriggers.some((item) => item.trigger === ADULT_ART_NUDE_TRIGGER);
   const hasEroticSuggestiveTrigger = finalAppliedTriggers.some((item) => item.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER);
+  const hasManualEroticSuggestiveTag = normalizedMakerTags.includes(ADULT_EROTIC_SUGGESTIVE_TRIGGER);
+  const hasGeminiEroticSuggestiveSignal = finalSuggestedTriggers.some((item) => item?.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER && item?.source === 'gemini');
+  const hasGeminiExplicitDecision = geminiAdultDecision === 'explicit';
+  const hasGeminiAdultSupportSignal = geminiAdultDecision === 'adult';
+  const hasStrongEroticSuggestiveCorroboration = hasEroticSuggestiveTrigger
+    || hasManualEroticSuggestiveTag
+    || hasGeminiEroticSuggestiveSignal
+    || hasGeminiAdultSupportSignal;
   const safeSearchNudityScore = safeSearch ? scoreFromLikelihood(safeSearch.racy) : 0;
   const safeSearchAdultScore = safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0;
   const hasGeminiForbiddenSignal = finalForbiddenReasons.some((reason) => reason?.trigger === 'gemini' || reason?.trigger === 'gemini_uncertain_fallback');
@@ -1715,11 +1723,11 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let classification = 'allowed_general';
   if (hasSexualExplicitReason || hasReportedContentReason) {
     classification = 'disallowed_sexual_explicit';
-  } else if (shouldEscalateToUncertain) {
+  } else if (shouldEscalateToUncertain || hasGeminiExplicitDecision) {
     classification = 'uncertain_possible_explicit';
   } else if (hasArtNudeTrigger || normalizedThemes.includes(ART_NUDE_THEME)) {
     classification = 'allowed_adult_art_nude';
-  } else if (hasEroticSuggestiveTrigger || safeSearchNudityScore >= suggestThreshold || safeSearchAdultScore >= suggestThreshold) {
+  } else if (hasStrongEroticSuggestiveCorroboration) {
     classification = 'allowed_adult_erotic_suggestive';
   }
 

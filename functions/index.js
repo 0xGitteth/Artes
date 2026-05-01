@@ -3156,11 +3156,11 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
     const decoded = await verifyToken(req);
     await ensureModerator(decoded);
     const body = parseJsonBody(req);
-    const uploadId = String(body?.uploadId || '').trim();
-    const reviewCaseIdFromBody = String(body?.reviewCaseId || '').trim();
+    const uploadIdFromBody = String(body?.uploadId || '').trim();
+    const reviewCaseId = String(body?.reviewCaseId || '').trim();
     const reasonCode = String(body?.reasonCode || '').trim();
-    if (!uploadId) {
-      res.status(400).json({ error: 'uploadId is required' });
+    if (!reviewCaseId) {
+      res.status(400).json({ error: 'reviewCaseId is required' });
       return;
     }
     if (!reasonCode) {
@@ -3176,19 +3176,6 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       return;
     }
 
-    const uploadRef = db.collection('uploads').doc(uploadId);
-    const uploadSnapshot = await uploadRef.get();
-    if (!uploadSnapshot.exists) {
-      res.status(404).json({ error: 'Upload not found' });
-      return;
-    }
-
-    const uploadData = uploadSnapshot.data() || {};
-    const userId = String(uploadData.userId || '').trim();
-    if (!userId) {
-      res.status(400).json({ error: 'Upload has no userId' });
-      return;
-    }
     const pickFingerprint = (value) => {
       if (!value || typeof value !== 'object') return null;
       const sha256 = typeof value.sha256 === 'string' ? value.sha256.trim() : '';
@@ -3198,22 +3185,79 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       return { sha256, dhash, dhashPrefix };
     };
 
-    const moderation = await getUserModeration(userId);
-    const reviewCaseRef = reviewCaseIdFromBody ? db.collection('reviewCases').doc(reviewCaseIdFromBody) : null;
-    const reviewCaseSnapshot = reviewCaseRef ? await reviewCaseRef.get() : null;
-    const reviewCaseData = reviewCaseSnapshot?.exists ? (reviewCaseSnapshot.data() || {}) : {};
-    const fingerprints = pickFingerprint(uploadData?.fingerprints)
-      || pickFingerprint(uploadData?.metadata?.fingerprints)
-      || pickFingerprint(reviewCaseData?.fingerprints)
-      || pickFingerprint(reviewCaseData?.uploadSnapshot?.fingerprints)
-      || null;
+    const pickString = (...values) => {
+      for (const value of values) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+      }
+      return '';
+    };
+
+    const pickFingerprintFromCandidates = (...candidates) => {
+      for (const candidate of candidates) {
+        const entry = pickFingerprint(candidate);
+        if (entry) return entry;
+      }
+      return null;
+    };
+
+    const reviewCaseRef = db.collection('reviewCases').doc(reviewCaseId);
+    const reviewCaseSnapshot = await reviewCaseRef.get();
+    if (!reviewCaseSnapshot.exists) {
+      res.status(404).json({ error: 'Review case not found' });
+      return;
+    }
+
+    const reviewCaseData = reviewCaseSnapshot.data() || {};
+    const effectiveUploadId = String(
+      uploadIdFromBody
+      || reviewCaseData.uploadId
+      || (Array.isArray(reviewCaseData.linkedUploadIds) ? reviewCaseData.linkedUploadIds[0] : '')
+      || ''
+    ).trim() || null;
+
+    const alreadyFinal = reviewCaseData.status === 'freshEvalQueued' || reviewCaseData.status === 'closedNoFingerprint';
+
+    let uploadSnapshot = null;
+    let uploadData = {};
+    let uploadFound = false;
+    if (effectiveUploadId) {
+      uploadSnapshot = await db.collection('uploads').doc(effectiveUploadId).get();
+      uploadFound = uploadSnapshot.exists;
+      uploadData = uploadFound ? (uploadSnapshot.data() || {}) : {};
+    }
+
+    const userId = pickString(
+      reviewCaseData?.userId,
+      reviewCaseData?.uploaderUid,
+      reviewCaseData?.ownerUid,
+      reviewCaseData?.uploaderSnapshot?.uid,
+      reviewCaseData?.uploadSnapshot?.userId,
+      reviewCaseData?.uploadSnapshot?.ownerUid,
+      uploadData?.userId,
+      uploadData?.ownerUid
+    );
+    const fingerprints = pickFingerprintFromCandidates(
+      reviewCaseData?.fingerprints,
+      reviewCaseData?.fingerprint,
+      {
+        sha256: reviewCaseData?.sha256,
+        dhash: reviewCaseData?.dhash,
+        dhashPrefix: reviewCaseData?.dhashPrefix,
+      },
+      reviewCaseData?.uploadSnapshot?.fingerprints,
+      reviewCaseData?.uploadSnapshot?.metadata?.fingerprints,
+      uploadData?.fingerprints,
+      uploadData?.metadata?.fingerprints
+    );
+
+    const moderation = userId ? await getUserModeration(userId) : null;
     const existingOverrides = Array.isArray(moderation?.data?.freshEvaluationOverrides)
       ? moderation.data.freshEvaluationOverrides
       : [];
     const alreadyQueued = fingerprints
       ? existingOverrides.some((item) => matchesFingerprintEntry(fingerprints, item))
       : false;
-    const shouldQueueFingerprintOverride = Boolean(fingerprints) && !alreadyQueued;
+    const shouldQueueFingerprintOverride = Boolean(fingerprints) && !alreadyQueued && Boolean(moderation?.ref);
 
     if (shouldQueueFingerprintOverride) {
       await moderation.ref.set(
@@ -3222,8 +3266,8 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
             sha256: fingerprints.sha256,
             dhash: fingerprints.dhash,
             dhashPrefix: fingerprints.dhashPrefix,
-            uploadId,
-            reviewCaseId: reviewCaseIdFromBody || null,
+            uploadId: effectiveUploadId,
+            reviewCaseId,
             createdByUid: decoded.uid,
             createdAtMs: Date.now(),
           }),
@@ -3233,33 +3277,12 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       );
     }
 
-    let targetReviewCaseId = reviewCaseIdFromBody || String(uploadData.reviewCaseId || '').trim() || null;
-    if (!targetReviewCaseId) {
-      const byUploadId = await db.collection('reviewCases')
-        .where('uploadId', '==', uploadId)
-        .where('status', '==', 'inReview')
-        .limit(1)
-        .get();
-      if (!byUploadId.empty) {
-        targetReviewCaseId = byUploadId.docs[0].id;
-      }
-    }
-    if (!targetReviewCaseId) {
-      const byLinkedUpload = await db.collection('reviewCases')
-        .where('linkedUploadIds', 'array-contains', uploadId)
-        .where('status', '==', 'inReview')
-        .limit(1)
-        .get();
-      if (!byLinkedUpload.empty) {
-        targetReviewCaseId = byLinkedUpload.docs[0].id;
-      }
-    }
+    const fingerprintQueued = shouldQueueFingerprintOverride || alreadyQueued;
+    const queueMode = fingerprintQueued ? 'fingerprintOverride' : 'closeOnlyNoFingerprint';
+    const nextStatus = fingerprintQueued ? 'freshEvalQueued' : 'closedNoFingerprint';
 
-    const queueMode = fingerprints ? 'fingerprintOverride' : 'closeOnlyNoFingerprint';
-    const nextStatus = fingerprints ? 'freshEvalQueued' : 'closedNoFingerprint';
-
-    if (targetReviewCaseId) {
-      await db.collection('reviewCases').doc(targetReviewCaseId).set(
+    if (!alreadyFinal || reviewCaseData.status !== nextStatus) {
+      await reviewCaseRef.set(
         {
           status: nextStatus,
           queueExitReason: 'reEvaluateOnNextUpload',
@@ -3267,15 +3290,17 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
           queuedFreshEvaluationBy: decoded.uid,
           queuedFreshEvaluationByUid: decoded.uid,
           queueReasonCode: reasonCode,
-          fingerprintQueued: shouldQueueFingerprintOverride || alreadyQueued,
+          fingerprintQueued,
           queueFreshEvaluationMode: queueMode,
           lock: FieldValue.delete(),
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
       );
+    }
 
-      await uploadRef.set(
+    if (effectiveUploadId && uploadFound) {
+      await db.collection('uploads').doc(effectiveUploadId).set(
         {
           reviewStatus: nextStatus,
           queueExitReason: 'reEvaluateOnNextUpload',
@@ -3290,13 +3315,14 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       );
     }
 
-    if (targetReviewCaseId || uploadId) {
-      const moderationExampleId = `${targetReviewCaseId || uploadId}_queueFreshEvaluation`;
-      const aiResult = uploadData?.aiResult || {};
-      const moderationSignals = uploadData?.moderationSignals || {};
-      await db.collection('moderationExamples').doc(moderationExampleId).set({
-        uploadId: uploadId || null,
-        reviewCaseId: targetReviewCaseId || reviewCaseIdFromBody || null,
+    if (reviewCaseId || effectiveUploadId) {
+      const moderationExampleId = `${reviewCaseId || effectiveUploadId}_queueFreshEvaluation`;
+      const aiResult = uploadData?.aiResult || reviewCaseData?.uploadSnapshot?.aiResult || {};
+      const moderationSignals = uploadData?.moderationSignals || reviewCaseData?.uploadSnapshot?.moderationSignals || {};
+      try {
+        await db.collection('moderationExamples').doc(moderationExampleId).set({
+        uploadId: effectiveUploadId,
+        reviewCaseId,
         userId: userId || null,
         fingerprints: fingerprints ? { ...fingerprints } : null,
         uploaderInput: {
@@ -3330,16 +3356,25 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
           createdAt: FieldValue.serverTimestamp(),
         },
       }, { merge: true });
+      } catch (exampleError) {
+        logger.warn('moderatorQueueFreshEvaluation: moderationExample write skipped', {
+          reviewCaseId,
+          uploadId: effectiveUploadId,
+          error: exampleError?.message || String(exampleError),
+        });
+      }
     }
 
     res.status(200).json({
       ok: true,
-      reviewCaseId: targetReviewCaseId,
-      uploadId,
-      status: targetReviewCaseId ? nextStatus : null,
-      fingerprintQueued: shouldQueueFingerprintOverride || alreadyQueued,
+      reviewCaseId,
+      uploadId: effectiveUploadId,
+      uploadFound,
+      uploadUpdateSkipped: Boolean(effectiveUploadId) && !uploadFound,
+      fingerprintQueued,
       queueFreshEvaluationMode: queueMode,
-      message: fingerprints
+      status: nextStatus,
+      message: queueMode === 'fingerprintOverride'
         ? 'Fresh evaluation queued for next matching upload.'
         : 'Case removed from active review; no fingerprint override created.',
     });

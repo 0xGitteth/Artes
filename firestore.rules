@@ -105,6 +105,19 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if isOwner(userId);
       }
+
+      match /announcementReads/{announcementId} {
+        allow read, create, update: if request.auth != null && request.auth.uid == userId;
+        allow delete: if false;
+      }
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if request.auth != null
+        && resource.data.type == 'appUpdate'
+        && resource.data.status == 'active'
+        && resource.data.isCurrent == true;
+      allow create, update, delete: if isModerator();
     }
 
     match /publicUsers/{uid} {

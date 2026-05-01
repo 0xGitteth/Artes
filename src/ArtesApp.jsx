@@ -7255,7 +7255,20 @@ function UploadModal({
                       </div>
                       <div>
                      <label className="text-sm font-bold block mb-2 dark:text-white">Thema&apos;s</label>
-                         <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar">{THEMES.map(t => <button key={t} onClick={() => toggleStyle(t)} className={`px-2 py-1 rounded text-xs border ${selectedStyles.includes(t) ? 'bg-blue-600 text-white' : ''} ${getThemeStyle(t)}`}>{t}</button>)}</div>
+                         <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar">{THEMES.map(t => {
+                           const isSelected = selectedStyles.includes(t);
+                           return (
+                             <button
+                               key={t}
+                               onClick={() => toggleStyle(t)}
+                               className={`px-2 py-1 rounded text-xs border transition-all ${isSelected
+                                 ? 'bg-blue-600 text-white border-blue-500 dark:bg-blue-500 dark:text-white dark:border-blue-400 ring-2 ring-blue-300/80 dark:ring-blue-300/50'
+                                 : getThemeStyle(t)}`}
+                             >
+                               {t}
+                             </button>
+                           );
+                         })}</div>
                          {errors.styles && <p className="mt-2 text-xs text-red-500">{errors.styles}</p>}
                       </div>
                       {publishError && <p className="text-sm text-red-500 text-center">{publishError}</p>}

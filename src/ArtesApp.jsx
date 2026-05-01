@@ -4734,8 +4734,8 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         }),
       });
       const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload?.error || 'Kon override niet opslaan.');
+      if (!response.ok || payload?.ok !== true) {
+        throw new Error('Kon aanvraag niet opslaan. Probeer het opnieuw.');
       }
       const clickedCaseId = selectedCase.id;
       const backendCaseId = typeof payload?.reviewCaseId === 'string' ? payload.reviewCaseId : null;
@@ -4749,7 +4749,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       setQueueFreshEvaluationReasonCode('');
       setSelectedCaseId(null);
     } catch (error) {
-      setFreshEvaluationError(error.message || 'Kon aanvraag niet opslaan.');
+      setFreshEvaluationError(error?.message || 'Kon aanvraag niet opslaan. Probeer het opnieuw.');
     } finally {
       setFreshEvaluationPending(false);
     }

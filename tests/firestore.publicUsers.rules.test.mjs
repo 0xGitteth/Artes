@@ -52,11 +52,52 @@ async function run() {
         targetUid: 'target_a',
         createdAt: new Date(),
       });
+      await setDoc(doc(db, 'config', 'moderation'), {
+        moderatorEmails: ['mod_1@example.com'],
+      });
+      await setDoc(doc(db, 'announcements', 'active_update'), {
+        type: 'appUpdate',
+        title: 'Nieuwe versie',
+        body: 'Welkom bij de nieuwe app update',
+        status: 'active',
+        isCurrent: true,
+        version: 2,
+      });
+      await setDoc(doc(db, 'announcements', 'draft_update'), {
+        type: 'appUpdate',
+        title: 'Draft',
+        body: 'Niet zichtbaar',
+        status: 'draft',
+        isCurrent: false,
+        version: 1,
+      });
     });
 
     const ownerDb = authedContext(testEnv, ownerUid, { email_verified: true }).firestore();
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
+    const moderatorDb = authedContext(testEnv, 'mod_1', { email_verified: true, email: 'mod_1@example.com' }).firestore();
+
+    await assertSucceeds(getDoc(doc(ownerDb, 'announcements', 'active_update')));
+    await assertFails(getDoc(doc(ownerDb, 'announcements', 'draft_update')));
+    await assertFails(setDoc(doc(ownerDb, 'announcements', 'hacked'), { title: 'x' }));
+    await assertSucceeds(setDoc(doc(moderatorDb, 'announcements', 'mod_update'), {
+      type: 'appUpdate',
+      title: 'Moderator update',
+      body: 'Nieuwe release',
+      status: 'active',
+      isCurrent: true,
+      version: 3,
+    }));
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'users', ownerUid, 'announcementReads', 'active_update'), {
+      dismissedAt: serverTimestamp(),
+      version: 2,
+    }));
+    await assertFails(setDoc(doc(otherDb, 'users', ownerUid, 'announcementReads', 'active_update'), {
+      dismissedAt: serverTimestamp(),
+      version: 2,
+    }));
 
     await assertFails(
       updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {

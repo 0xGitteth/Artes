@@ -5,7 +5,7 @@ import { Button } from './ui';
 export default function SensitiveOverlay({ onReveal, className = '' }) {
   return (
     <div
-      className={`absolute inset-0 z-20 bg-slate-900/92 flex flex-col items-center justify-center p-6 text-center pointer-events-auto ${className}`}
+      className={`absolute inset-0 z-20 bg-black/90 flex flex-col items-center justify-center p-6 text-center pointer-events-auto ${className}`}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();

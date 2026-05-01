@@ -26,7 +26,7 @@ export default function PostImageDisplay({
   const isPanorama = isPanoramaImage(imageMeta);
 
   return (
-    <div className={`relative isolate overflow-hidden ${className}`}>
+    <div className={`relative overflow-hidden ${className}`}>
       {shouldCover ? overlay : null}
       {isPanorama ? (
         <>

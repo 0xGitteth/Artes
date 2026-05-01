@@ -201,7 +201,7 @@ export default function SearchWithAutocomplete({
             <div className="p-3 text-sm text-slate-500 dark:text-slate-300">Geen resultaten.</div>
           )}
           {!loading && results.length > 0 && (
-            <div className="max-h-64 overflow-y-auto">
+            <div className="max-h-64 overflow-y-auto no-scrollbar">
               {results.map((user, index) => (
                 <button
                   key={user.uid}

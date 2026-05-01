@@ -712,6 +712,9 @@ export default function ArtesApp() {
   const [isModeratorClient, setIsModeratorClient] = useState(false);
   const [moderationUnreadBlocked, setModerationUnreadBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+  const [activeAppAnnouncement, setActiveAppAnnouncement] = useState(null);
+  const [announcementVisible, setAnnouncementVisible] = useState(false);
+  const [announcementDismissPending, setAnnouncementDismissPending] = useState(false);
   const [supportThreadId, setSupportThreadId] = useState(null);
   const [resolvedModerationThreadId, setResolvedModerationThreadId] = useState('');
   const [latestActionableReviewMs, setLatestActionableReviewMs] = useState(0);
@@ -756,6 +759,63 @@ export default function ArtesApp() {
     config: appConfig,
   }) && !!resolvedModerationThreadId;
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
+  const appAccessReady = authReady && Boolean(authUser?.uid) && !profileLoading && !onboardingLocked;
+  useEffect(() => {
+    if (!appAccessReady || !canReadFirestore) {
+      setActiveAppAnnouncement(null);
+      setAnnouncementVisible(false);
+      return;
+    }
+    let cancelled = false;
+    const loadAnnouncement = async () => {
+      try {
+        const db = getFirebaseDbInstance();
+        const announcementQuery = query(
+          collection(db, 'announcements'),
+          where('type', '==', 'appUpdate'),
+          where('status', '==', 'active'),
+          where('isCurrent', '==', true),
+          limit(1),
+        );
+        const announcementSnap = await getDocs(announcementQuery);
+        if (cancelled || announcementSnap.empty) {
+          setActiveAppAnnouncement(null);
+          setAnnouncementVisible(false);
+          return;
+        }
+        const announcementDoc = announcementSnap.docs[0];
+        const announcement = { id: announcementDoc.id, ...announcementDoc.data() };
+        const readSnap = await getDoc(doc(db, 'users', authUser.uid, 'announcementReads', announcement.id));
+        if (cancelled) return;
+        setActiveAppAnnouncement(announcement);
+        setAnnouncementVisible(!readSnap.exists());
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.debug('[announcement] load failed', error);
+        }
+      }
+    };
+    loadAnnouncement();
+    return () => {
+      cancelled = true;
+    };
+  }, [appAccessReady, canReadFirestore, authUser?.uid, moderationLastSeenMs]);
+
+  const handleDismissAnnouncement = useCallback(async () => {
+    if (!authUser?.uid || !activeAppAnnouncement?.id || announcementDismissPending) return;
+    setAnnouncementDismissPending(true);
+    try {
+      const db = getFirebaseDbInstance();
+      await setDoc(doc(db, 'users', authUser.uid, 'announcementReads', activeAppAnnouncement.id), {
+        dismissedAt: serverTimestamp(),
+        version: Number(activeAppAnnouncement.version || 1),
+      }, { merge: true });
+      setAnnouncementVisible(false);
+    } finally {
+      setAnnouncementDismissPending(false);
+    }
+  }, [authUser?.uid, activeAppAnnouncement, announcementDismissPending]);
+
   useEffect(() => {
     const uid = authUser?.uid || null;
     if (lastUidRef.current && lastUidRef.current !== uid) {
@@ -4353,6 +4413,10 @@ function ModerationDecisionModal({ message, onClose, onOpenComposer, pending, cu
 }
 
 function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFilter, authReady, isModeratorClient, profileAgeVerified, profileAgeVerifiedStrict, profileIsAdult, logListenerStart, handleListenerError, allUsers = [] }) {
+  const [announcementDraft, setAnnouncementDraft] = useState({ id: null, title: '', body: '', version: 1 });
+  const [announcementCurrent, setAnnouncementCurrent] = useState(null);
+  const [announcementHistory, setAnnouncementHistory] = useState([]);
+  const [announcementSaving, setAnnouncementSaving] = useState(false);
   const [cases, setCases] = useState([]);
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [selectedCase, setSelectedCase] = useState(null);
@@ -4386,6 +4450,85 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     () => MODERATOR_REASON_CODES.filter((code) => (MODERATOR_REASON_CODES_BY_ACTION.queueFreshEvaluation || []).includes(code.id)),
     []
   );
+  const loadAnnouncements = useCallback(async () => {
+    const db = getFirebaseDbInstance();
+    const snap = await getDocs(query(collection(db, 'announcements'), where('type', '==', 'appUpdate')));
+    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => getTimestampMs(b.updatedAt || b.createdAt) - getTimestampMs(a.updatedAt || a.createdAt));
+    const current = docs.find((item) => item.status === 'active' && item.isCurrent === true) || null;
+    const latestDraft = docs.find((item) => item.status === 'draft') || null;
+    setAnnouncementCurrent(current);
+    setAnnouncementHistory(docs.filter((item) => item.id !== current?.id).slice(0, 10));
+    setAnnouncementDraft({
+      id: latestDraft?.id || null,
+      title: latestDraft?.title || '',
+      body: latestDraft?.body || '',
+      version: Number(latestDraft?.version || (current?.version || 0) + 1 || 1),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isModerator !== true) return;
+    loadAnnouncements().catch(() => {});
+  }, [isModerator, loadAnnouncements]);
+
+  const handleSaveAnnouncementDraft = useCallback(async () => {
+    if (!authUser?.uid) return;
+    setAnnouncementSaving(true);
+    const db = getFirebaseDbInstance();
+    const payload = {
+      type: 'appUpdate',
+      title: announcementDraft.title.trim(),
+      body: announcementDraft.body.trim(),
+      status: 'draft',
+      isCurrent: false,
+      version: Number(announcementDraft.version || 1),
+      createdBy: authUser.uid,
+      updatedAt: serverTimestamp(),
+      publishedAt: null,
+    };
+    try {
+      if (!payload.title || !payload.body) return;
+      if (announcementDraft.id) {
+        await setDoc(doc(db, 'announcements', announcementDraft.id), payload, { merge: true });
+      } else {
+        await addDoc(collection(db, 'announcements'), { ...payload, createdAt: serverTimestamp() });
+      }
+      await loadAnnouncements();
+    } finally {
+      setAnnouncementSaving(false);
+    }
+  }, [announcementDraft, authUser?.uid, loadAnnouncements]);
+
+  const handlePublishAnnouncement = useCallback(async () => {
+    if (!authUser?.uid || !announcementDraft.title.trim() || !announcementDraft.body.trim()) return;
+    setAnnouncementSaving(true);
+    const db = getFirebaseDbInstance();
+    try {
+      const activeSnap = await getDocs(query(collection(db, 'announcements'), where('type', '==', 'appUpdate'), where('status', '==', 'active'), where('isCurrent', '==', true)));
+      const batch = writeBatch(db);
+      activeSnap.docs.forEach((item) => {
+        batch.update(item.ref, { status: 'archived', isCurrent: false, updatedAt: serverTimestamp() });
+      });
+      const nextRef = announcementDraft.id ? doc(db, 'announcements', announcementDraft.id) : doc(collection(db, 'announcements'));
+      batch.set(nextRef, {
+        type: 'appUpdate',
+        title: announcementDraft.title.trim(),
+        body: announcementDraft.body.trim(),
+        status: 'active',
+        isCurrent: true,
+        version: Number(announcementDraft.version || 1),
+        createdBy: authUser.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        publishedAt: serverTimestamp(),
+      }, { merge: true });
+      await batch.commit();
+      await loadAnnouncements();
+    } finally {
+      setAnnouncementSaving(false);
+    }
+  }, [announcementDraft, authUser?.uid, loadAnnouncements]);
 
   const usersByUid = useMemo(() => {
     if (!Array.isArray(allUsers)) return new Map();
@@ -4852,7 +4995,27 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const queueTitle = caseTypeFilter === 'report' ? 'Gerapporteerde foto’s' : 'Foto’s in review';
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
+    <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+        <h2 className="font-semibold dark:text-white">App update announcement</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <input className="md:col-span-2 p-3 rounded-xl border dark:bg-slate-800 dark:text-white" placeholder="Titel" value={announcementDraft.title} onChange={(e) => setAnnouncementDraft((prev) => ({ ...prev, title: e.target.value }))} />
+          <input className="p-3 rounded-xl border dark:bg-slate-800 dark:text-white" type="number" min="1" value={announcementDraft.version} onChange={(e) => setAnnouncementDraft((prev) => ({ ...prev, version: Number(e.target.value || 1) }))} />
+        </div>
+        <textarea className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white" rows={3} placeholder="Bericht" value={announcementDraft.body} onChange={(e) => setAnnouncementDraft((prev) => ({ ...prev, body: e.target.value }))} />
+        <div className="flex gap-3">
+          <Button variant="secondary" onClick={handleSaveAnnouncementDraft} disabled={announcementSaving}>Draft opslaan</Button>
+          <Button onClick={handlePublishAnnouncement} disabled={announcementSaving}>Publiceer als huidige update</Button>
+        </div>
+        {announcementCurrent && <p className="text-xs text-slate-500 dark:text-slate-400">Huidig: v{announcementCurrent.version} · {announcementCurrent.title}</p>}
+        {announcementHistory.length > 0 && (
+          <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
+            <p className="font-semibold text-slate-600 dark:text-slate-300">Geschiedenis</p>
+            {announcementHistory.map((item) => <p key={item.id}>v{item.version} · {item.title} · {item.status}</p>)}
+          </div>
+        )}
+      </div>
+    <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
       <div className="space-y-4">
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 flex items-center justify-between">
           <div>
@@ -5152,6 +5315,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
           </>
         )}
       </div>
+    </div>
     </div>
   );
 }
@@ -5842,6 +6006,26 @@ function ModerationPortal({
           pending={moderationActionPending}
           currentUserUid={authUser?.uid || null}
         />
+      )}
+      {announcementVisible && activeAppAnnouncement && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-xl border border-slate-200 dark:border-slate-700">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+              <h3 className="font-semibold text-lg dark:text-white">{activeAppAnnouncement.title || 'App update'}</h3>
+              <button onClick={handleDismissAnnouncement} disabled={announcementDismissPending} className="text-slate-500">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{activeAppAnnouncement.body || ''}</p>
+            </div>
+            <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end">
+              <Button onClick={handleDismissAnnouncement} disabled={announcementDismissPending}>
+                {announcementDismissPending ? 'Opslaan...' : 'Sluiten'}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

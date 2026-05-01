@@ -93,6 +93,7 @@ const generateClaimCode = () => `ARTES-${crypto.randomBytes(3).toString('hex').t
 
 const setCorsHeaders = (req, res) => {
   const allowedOrigins = [
+    'https://artes.app',
     'https://artis.sliplane.app',
     'http://localhost:5173',
     'http://localhost:3000',

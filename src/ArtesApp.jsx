@@ -4037,7 +4037,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
          const shouldCover = item.type === 'post' ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
          return (
           <div key={i} onClick={() => item.type === 'post' ? onPostClick(item.data) : onUserClick(item.data.uid)} className="break-inside-avoid bg-white dark:bg-slate-800 rounded-xl overflow-hidden shadow-sm cursor-pointer mb-4">
-             <div className="relative isolate overflow-hidden">
+             <div className="relative overflow-hidden">
                {shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(item.data.id)} /> : null}
                <img src={item.type === 'post' ? item.data.imageUrl : item.data.avatar} className="relative z-0 w-full h-auto" />
              </div>
@@ -4050,7 +4050,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
           <div className="flex flex-wrap gap-2 mb-6">{displayedThemes.map(t => <button key={t} onClick={() => toggleTheme(t)} className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${activeThemes.includes(t) ? 'ring-2 ring-blue-500 ' + getThemeStyle(t) : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{t}</button>)}<button onClick={() => setShowAllThemes(!showAllThemes)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button></div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">{filteredPosts.map((p) => {
             const shouldCover = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
-            return <div key={p.id} onClick={() => onPostClick(p)} className="relative isolate aspect-[4/5] bg-slate-200 rounded-lg overflow-hidden cursor-pointer">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => setView('challenge_timeline')}>Challenge</Badge></div>}{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
+            return <div key={p.id} onClick={() => onPostClick(p)} className="relative aspect-[4/5] bg-slate-200 rounded-lg overflow-hidden cursor-pointer">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => setView('challenge_timeline')}>Challenge</Badge></div>}{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
           })}</div>
        </div>}
 
@@ -4284,7 +4284,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {visiblePosts.map((p) => {
                 const shouldCover = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
-                return <div key={p.id} onClick={() => onPostClick(p)} className={`relative isolate aspect-[4/5] bg-slate-200 rounded-sm overflow-hidden cursor-pointer ${p.isChallenge ? 'ring-2 ring-amber-400' : ''}`}>{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
+                return <div key={p.id} onClick={() => onPostClick(p)} className={`relative aspect-[4/5] bg-slate-200 rounded-sm overflow-hidden cursor-pointer ${p.isChallenge ? 'ring-2 ring-amber-400' : ''}`}>{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
               })}
            </div>
            {visiblePosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
@@ -8584,7 +8584,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
                   const covered = shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById);
                   return (
                   <div key={post.id} className="bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden">
-                    <div className="relative isolate aspect-[4/5] overflow-hidden">
+                    <div className="relative aspect-[4/5] overflow-hidden">
                       {covered ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
                       <img src={post.imageUrl} className="relative z-0 w-full h-full object-cover" />
                     </div>
@@ -9438,7 +9438,7 @@ function ShadowProfileModal({
                 .map((p) => {
                   const covered = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
                   return (
-                <div key={p.id} onClick={() => onPostClick(p)} className="relative isolate aspect-square bg-slate-800 overflow-hidden">
+                <div key={p.id} onClick={() => onPostClick(p)} className="relative aspect-square bg-slate-800 overflow-hidden">
                   {covered ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}
                   <img src={p.imageUrl} className="relative z-0 w-full h-full object-cover" />
                 </div>

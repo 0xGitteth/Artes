@@ -760,7 +760,9 @@ export default function ArtesApp() {
   }) && !!resolvedModerationThreadId;
   const onboardingLocked = Boolean(authUser?.uid && profile && !hasCompletedOnboarding(profile));
   const appAccessReady = authReady && Boolean(authUser?.uid) && !profileLoading && !onboardingLocked;
-  const showActiveAppAnnouncement = Boolean(activeAppAnnouncement) && announcementVisible;
+  const showActiveAppAnnouncement = Boolean(
+    activeAppAnnouncement && announcementVisible
+  );
   useEffect(() => {
     if (!appAccessReady || !canReadFirestore) {
       setActiveAppAnnouncement(null);
@@ -2531,6 +2533,27 @@ export default function ArtesApp() {
             {toastMessage}
           </div>
         )}
+
+      {showActiveAppAnnouncement && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-xl border border-slate-200 dark:border-slate-700">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+              <h3 className="font-semibold text-lg dark:text-white">{activeAppAnnouncement.title || 'App update'}</h3>
+              <button onClick={handleDismissAnnouncement} disabled={announcementDismissPending} className="text-slate-500">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{activeAppAnnouncement.body || ''}</p>
+            </div>
+            <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end">
+              <Button onClick={handleDismissAnnouncement} disabled={announcementDismissPending}>
+                {announcementDismissPending ? 'Opslaan...' : 'Sluiten'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
         {pendingApprovedReminder && (
           <div className="fixed top-5 right-5 z-[75] w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-blue-200 bg-white/95 dark:bg-slate-900/95 dark:border-slate-700 shadow-2xl p-4">
             <p className="text-sm font-semibold text-slate-900 dark:text-white">Je goedgekeurde upload wacht nog op publicatie.</p>
@@ -6002,26 +6025,6 @@ function ModerationPortal({
           pending={moderationActionPending}
           currentUserUid={authUser?.uid || null}
         />
-      )}
-      {showActiveAppAnnouncement && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-xl border border-slate-200 dark:border-slate-700">
-            <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
-              <h3 className="font-semibold text-lg dark:text-white">{activeAppAnnouncement.title || 'App update'}</h3>
-              <button onClick={handleDismissAnnouncement} disabled={announcementDismissPending} className="text-slate-500">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6">
-              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{activeAppAnnouncement.body || ''}</p>
-            </div>
-            <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end">
-              <Button onClick={handleDismissAnnouncement} disabled={announcementDismissPending}>
-                {announcementDismissPending ? 'Opslaan...' : 'Sluiten'}
-              </Button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

@@ -639,7 +639,7 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
     secondary: "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700",
     ghost: "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800",
     danger: "bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400",
-    outline: "border border-white/40 bg-white/10 text-white hover:bg-white/20 backdrop-blur-md", 
+    outline: "border border-slate-300 bg-white text-slate-800 hover:bg-slate-100 dark:border-white/40 dark:bg-white/10 dark:text-white dark:hover:bg-white/20 backdrop-blur-md", 
   };
   
   if (asChild) return <span className={`${baseStyle} ${variants[variant]} ${className}`}>{children}</span>;

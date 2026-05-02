@@ -117,9 +117,9 @@ const ROLES = [
   { id: 'fan', label: 'Fan', desc: 'Word fan van je favoriete makers en bewaar inspiratie.' },
 ];
 
-const DIDIT_SUPPORT_EMAIL = 'support@artes.app';
-const DIDIT_APPROVED_STATUSES = ['verified', 'approved', 'completed', 'success'];
-const DIDIT_REJECTED_STATUSES = ['rejected', 'denied', 'declined', 'failed'];
+const DIDIT_SUPPORT_EMAIL = 'admin@artes.app';
+const DIDIT_APPROVED_STATUSES = ['approved'];
+const DIDIT_REJECTED_STATUSES = ['declined'];
 
 const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().toLowerCase() || null;
 
@@ -201,7 +201,7 @@ const computeOnboardingStep = (profileData, authUserData, queryParams, authIsRea
     if (import.meta.env.DEV) devLog('[onboarding-step:compute]', { traceId: DIAG_TRACE_ID, ...debugPayload, resolvedStep: 5, reason: 'onboarding-complete' });
     return 5;
   }
-  const statusFromProfile = normalizeDiditStatus(profileData?.idv?.status || profileData?.diditStatus);
+  const statusFromProfile = normalizeDiditStatus(profileData?.didit?.status || profileData?.idv?.status || profileData?.diditStatus);
   const ageVerified = profileData?.ageVerified;
   const isAdult = profileData?.isAdult;
   const storedStep = Number(profileData?.onboardingStep || 0);
@@ -3106,15 +3106,25 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
             return;
           }
 
-          if (status === 'in_review' || status === 'review' || status === 'manual_review') {
+          if (status === 'in_review') {
             setDiditPending(false);
             setDiditUiState('in_review');
             return;
           }
 
-          if (status === 'pending' || status === 'unknown' || !status) {
+          if (status === 'started' || status === 'in_progress' || status === 'unknown' || !status) {
             setDiditPending(false);
             setDiditUiState(hasSession ? 'pending' : 'no_session');
+            return;
+          }
+          if (status === 'expired') {
+            setDiditPending(false);
+            setDiditUiState('expired');
+            return;
+          }
+          if (status === 'abandoned') {
+            setDiditPending(false);
+            setDiditUiState('abandoned');
           }
         },
         (err) => {
@@ -3157,11 +3167,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           resolvedSessionId = diditSessionId || diditReturnContext.sessionIdFromUrl || null;
         }
 
-        if (!resolvedSessionId) {
-          throw new Error('Technische fout: Didit sessie ontbreekt. Neem contact op met support.');
-        }
-
-        await refreshDiditSession(resolvedSessionId);
+        await refreshDiditSession(resolvedSessionId || null);
       } catch (refreshError) {
         setDiditUiState('error');
         setDiditError(refreshError?.message || 'Technische fout bij controleren van Didit. Probeer opnieuw of neem contact op met support.');
@@ -3202,7 +3208,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
     useEffect(() => {
       if (!authReady || !authUser?.uid || !shouldHandleDiditReturn || diditRefreshAttempted || allowDevSkipIdv) return;
-      const hasKnownSession = Boolean(diditSessionId || diditReturnContext.sessionIdFromUrl || profile?.idv?.sessionId);
+      const hasKnownSession = Boolean(diditSessionId || diditReturnContext.sessionIdFromUrl || profile?.idv?.sessionId || profile?.didit?.status);
       if (!hasKnownSession) return;
       handleRefreshDiditStatus();
     }, [
@@ -3312,13 +3318,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       handleStartPendingClaim();
     }, [resolvedPendingClaimContributorId, profile?.ageVerified, handleStartPendingClaim]);
 
-    const hasDiditSession = Boolean(diditSessionId);
-    const isPendingStatus = diditStatus === 'pending';
-    const isReviewStatus = diditStatus === 'in_review' || diditStatus === 'review' || diditStatus === 'manual_review';
+    const hasDiditStatus = Boolean(diditStatus || profile?.didit?.status);
+    const hasRefreshableDiditSession = Boolean(diditSessionId || profile?.didit?.sessionId || profile?.idv?.sessionId);
+    const hasDiditSession = hasDiditStatus || hasRefreshableDiditSession;
+    const isReviewStatus = diditStatus === 'in_review';
     const isRejectedState = diditUiState === 'rejected' || diditUiState === 'underage';
-    const canRefreshDidit = hasDiditSession && (isPendingStatus || isReviewStatus || diditUiState === 'verified_missing_age');
+    const canRefreshDidit = hasRefreshableDiditSession && profile?.ageVerified !== true;
     const showStartDiditAction = !isReviewStatus;
-    const showSupportActions = isRejectedState || (diditUiState === 'verified_missing_age' && diditRefreshAttempts >= 2);
+    const showSupportActions = isRejectedState || diditUiState === 'error';
     const showDeleteAction = diditUiState === 'no_session' || diditUiState === 'idle' || isRejectedState;
 
 
@@ -3540,8 +3547,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
            )}
            {(diditUiState === 'pending' || diditUiState === 'in_review' || shouldHandleDiditReturn) && !diditError && (
              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
-               <p className="font-semibold">Verificatie loopt</p>
-               <p>Didit verwerkt je controle nog. Klik op ‘Opnieuw controleren’ om de nieuwste status op te halen.</p>
+               <p className="font-semibold">{diditUiState === 'in_review' ? 'Verificatie wordt gecontroleerd' : 'Verificatie bezig'}</p>
+               <p>{diditUiState === 'in_review' ? 'Je verificatie is ontvangen en wordt handmatig gecontroleerd. Dit kan even duren. Je hoeft niets opnieuw te doen. Kom later terug of gebruik Status opnieuw controleren.' : 'Je verificatie is gestart. Rond de stappen bij Didit af. Als je al klaar bent, kun je hieronder je status opnieuw controleren.'}</p>
              </div>
            )}
            {(diditUiState === 'rejected' || diditUiState === 'underage') && (
@@ -3572,10 +3579,13 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
            {diditUiState === 'no_session' && !hasDiditSession && (
              <p className="text-sm text-slate-600 dark:text-slate-300">Nog geen Didit sessie gevonden. Start de verificatie om verder te gaan.</p>
            )}
+           {hasDiditStatus && !hasRefreshableDiditSession && profile?.ageVerified !== true && (
+             <p className="text-xs text-slate-500 dark:text-slate-400">Status beschikbaar, maar er is geen actieve sessie om te verversen. Start een nieuwe verificatie.</p>
+           )}
            <div className="flex flex-col gap-3">
              {canRefreshDidit && (
                <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending || requiresEmailVerificationForIdv || allowDevSkipIdv}>
-                 Opnieuw controleren
+                 Status opnieuw controleren
                </Button>
              )}
              {showStartDiditAction && (
@@ -3605,7 +3615,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                  className="w-full"
                  disabled={diditPending || requiresEmailVerificationForIdv || allowDevSkipIdv}
                >
-                 {showSupportActions ? 'Start opnieuw' : 'Start Didit verificatie'}
+                 {diditUiState === 'expired' ? 'Nieuwe verificatie starten' : showSupportActions || diditUiState === 'abandoned' ? 'Verificatie opnieuw starten' : 'Start verificatie'}
                </Button>
              )}
              {showDeleteAction && (
@@ -3630,10 +3640,11 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                </Button>
              )}
              {showSupportActions && (
-               <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}`)} className="w-full">
+               <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}?subject=${encodeURIComponent('Vraag over afgewezen leeftijdsverificatie')}`)} className="w-full">
                  Mail support
                </Button>
              )}
+             {showSupportActions && <p className="text-xs text-slate-500 select-all">{DIDIT_SUPPORT_EMAIL}</p>}
              {import.meta.env.DEV === true && (
                <>
                  <Button variant="secondary" onClick={handleDebugRefreshDiditStatus} className="w-full" disabled={diditPending}>

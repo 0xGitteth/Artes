@@ -99,7 +99,7 @@ const resolveDiditReference = (payload) =>
 
 const resolveDiditSession = (payload) => payload?.session || payload?.data || payload;
 
-const resolveDiditStatus = (payload) => {
+export const normalizeDiditStatus = (payload) => {
   const session = resolveDiditSession(payload);
 
   const raw =
@@ -111,10 +111,26 @@ const resolveDiditStatus = (payload) => {
 
   const status = normalizeStatus(raw);
 
-  if (status === 'approved') return 'verified';
-  if (status === 'rejected') return 'rejected';
-
-  return status;
+  const mapped = {
+    approved: 'approved',
+    verified: 'approved',
+    completed: 'approved',
+    success: 'approved',
+    rejected: 'declined',
+    declined: 'declined',
+    denied: 'declined',
+    failed: 'declined',
+    review: 'in_review',
+    manual_review: 'in_review',
+    in_review: 'in_review',
+    pending: 'in_progress',
+    processing: 'in_progress',
+    started: 'started',
+    initiated: 'started',
+    expired: 'expired',
+    abandoned: 'abandoned',
+  };
+  return mapped[status] || 'error';
 };
 
 
@@ -204,75 +220,57 @@ const toSafeDiditErrorBody = (data) => {
   }
 };
 
-const updateIdvStatus = async ({ uid, sessionId, status, age, reason, source }) => {
+const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, source, verificationUrl = null }) => {
   if (!uid) {
     throw new Error('Missing uid for idv update');
   }
 
-  const idvRef = db.collection('users').doc(uid).collection('idv').doc('status');
   const userRef = db.collection('users').doc(uid);
   const now = FieldValue.serverTimestamp();
-  const { normalizedStatus, ageIsNumber, isAdult } = resolveDiditAdultDecision(status, age);
+  const normalizedStatus = String(status || 'error').trim().toLowerCase();
+  const isApproved = normalizedStatus === 'approved';
+  const ageIsNumber = Number.isFinite(Number(age));
+  const isAdult = isApproved ? true : null;
   const normalizedReason = normalizeReason(reason);
 
-  const updates = {
-    status: normalizedStatus || 'unknown',
+  const diditPayload = {
+    status: normalizedStatus,
     sessionId: sessionId || null,
-    age: ageIsNumber ? age : null,
-    isAdult: isAdult ?? null,
     reason: normalizedReason,
-    updatedAt: now,
+    verificationUrl: verificationUrl || null,
     lastSource: source || 'unknown',
+    lastSyncedAt: now,
   };
-
-  if (isApprovedStatus(normalizedStatus)) {
-    if (isAdult === true) {
-      updates.verifiedAt = now;
-      updates.isAdult = true;
-    }
-  }
-
-  if (isRejectedStatus(normalizedStatus)) {
-    updates.rejectedAt = now;
-    updates.isAdult = false;
-  }
-
-  await idvRef.set(updates, { merge: true });
 
   const existingUserSnapshot = await userRef.get();
   const existingStepRaw = existingUserSnapshot.exists ? existingUserSnapshot.get('onboardingStep') : null;
   const existingStep = Number.isFinite(Number(existingStepRaw)) ? Number(existingStepRaw) : 0;
 
-  if (isApprovedStatus(normalizedStatus)) {
+  if (isApproved) {
     const approvedStep = Math.max(existingStep, 3);
     await userRef.set(
       {
-        ageVerified: isAdult === true,
-        isAdult: isAdult === true,
-        ...(isAdult === true
-          ? {
-            ageVerifiedAt: now,
-            onboardingStep: approvedStep,
-          }
-          : {}),
+        ageVerified: true,
+        isAdult: true,
+        ageVerifiedAt: now,
+        onboardingStep: approvedStep,
+        didit: diditPayload,
+        idv: diditPayload,
+        ageVerificationSource: 'didit',
       },
       { merge: true }
     );
-  }
-
-  if (isRejectedStatus(normalizedStatus)) {
-    const rejectedStep = Math.max(existingStep, 2);
+  } else {
     await userRef.set(
       {
-        ageVerified: false,
-        isAdult: false,
-        onboardingStep: rejectedStep,
+        didit: diditPayload,
+        idv: diditPayload,
       },
       { merge: true }
     );
   }
 
-  if (isApprovedStatus(normalizedStatus)) {
+  if (isApproved) {
     try {
       await admin.auth().setCustomUserClaims(uid, {
         idvVerified: true,
@@ -400,14 +398,21 @@ export const createDiditSession = onCall(
   }
 );
 
-export const refreshDiditSession = onCall({ region: 'europe-west4', secrets: ['DIDIT_API_KEY', 'DIDIT_ASSUME_ADULT_ON_VERIFIED'] }, async (request) => {
+export const refreshDiditVerificationStatus = onCall({ region: 'europe-west4', secrets: ['DIDIT_API_KEY', 'DIDIT_ASSUME_ADULT_ON_VERIFIED'] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
 
-  const sessionId = request.data?.sessionId;
+  const userRef = db.collection('users').doc(request.auth.uid);
+  const userSnap = await userRef.get();
+  const storedSessionId = userSnap.get('didit.sessionId') || userSnap.get('idv.sessionId') || null;
+  const requestedSessionId = request.data?.sessionId || null;
+  const sessionId = storedSessionId || requestedSessionId;
   if (!sessionId) {
     throw new HttpsError('invalid-argument', 'Missing sessionId');
+  }
+  if (storedSessionId && requestedSessionId && storedSessionId !== requestedSessionId) {
+    throw new HttpsError('permission-denied', 'Session mismatch');
   }
 
   let response;
@@ -431,15 +436,19 @@ export const refreshDiditSession = onCall({ region: 'europe-west4', secrets: ['D
   }
 
   const session = resolveDiditSession(data);
-  const status = resolveDiditStatus(data);
+  const status = normalizeDiditStatus(data);
   const age = resolveDiditAge(session);
   const reason = resolveDiditReason(data);
   const reference = resolveDiditReference(data);
-  const resolvedUid = reference || request.auth.uid;
-  const decision = resolveDiditAdultDecision(status, age);
+  if (reference && reference !== request.auth.uid) {
+    throw new HttpsError('permission-denied', 'Session does not belong to user');
+  }
+  if (!storedSessionId && reference !== request.auth.uid) {
+    throw new HttpsError('permission-denied', 'Could not prove session ownership');
+  }
 
   logger.info('Didit session refresh response', {
-    uid: resolvedUid,
+    uid: request.auth.uid,
     sessionId,
     status,
     age,
@@ -450,15 +459,11 @@ export const refreshDiditSession = onCall({ region: 'europe-west4', secrets: ['D
 
   logger.info('Didit refresh resolved decision for idv update', {
     sessionId,
-    resolvedUid,
-    resolvedStatus: decision.normalizedStatus || 'unknown',
-    resolvedAge: decision.ageIsNumber ? age : null,
-    diditAssumeAdultOnVerified: DIDIT_ASSUME_ADULT_ON_VERIFIED,
-    isAdultForUpdate: decision.isAdult,
+    resolvedStatus: status || 'unknown',
   });
 
-  const result = await updateIdvStatus({
-    uid: resolvedUid,
+  const result = await applyDiditStatusToUser({
+    uid: request.auth.uid,
     sessionId,
     status,
     age,
@@ -472,6 +477,8 @@ export const refreshDiditSession = onCall({ region: 'europe-west4', secrets: ['D
     sessionId,
   };
 });
+
+export const refreshDiditSession = refreshDiditVerificationStatus;
 
 const verifyWebhookSecret = (req) => {
   const secret = process.env.DIDIT_WEBHOOK_SECRET;
@@ -523,7 +530,7 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
 
   const reference = resolveDiditReference(payload);
   const sessionId = resolveDiditSessionId(payload);
-  const status = resolveDiditStatus(payload);
+  const status = normalizeDiditStatus(payload);
   const reason = resolveDiditReason(payload);
   const session = resolveDiditSession(payload);
   const age = resolveDiditAge(session);
@@ -541,7 +548,7 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
   }
 
   try {
-    await updateIdvStatus({
+    await applyDiditStatusToUser({
       uid: reference,
       sessionId,
       status,

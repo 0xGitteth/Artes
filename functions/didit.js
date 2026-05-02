@@ -100,38 +100,43 @@ const resolveDiditReference = (payload) =>
 const resolveDiditSession = (payload) => payload?.session || payload?.data || payload;
 
 export const normalizeDiditStatus = (payload) => {
-  const session = resolveDiditSession(payload);
+  const statusCandidates = [
+    ['payload.status', payload?.status],
+    ['payload.session.status', payload?.session?.status],
+    ['payload.verification.status', payload?.verification?.status],
+    ['payload.data.status', payload?.data?.status],
+    ['payload.decision', payload?.decision],
+    ['payload.result', payload?.result],
+    ['payload.kyc.status', payload?.kyc?.status],
+    ['payload.workflow.status', payload?.workflow?.status],
+    ['payload.event.status', payload?.event?.status],
+    ['payload.review.status', payload?.review?.status],
+    ['payload.session.result.status', payload?.session?.result?.status],
+    ['payload.decision.status', payload?.decision?.status],
+  ];
 
-  const raw =
-    session?.status ||
-    payload?.status ||
-    session?.result?.status ||
-    session?.decision?.status ||
-    payload?.decision?.status;
-
+  const match = statusCandidates.find(([, value]) => value != null && String(value).trim() !== '');
+  const raw = match ? match[1] : null;
   const status = normalizeStatus(raw);
 
   const mapped = {
-    approved: 'approved',
-    verified: 'approved',
-    completed: 'approved',
-    success: 'approved',
-    rejected: 'declined',
-    declined: 'declined',
-    denied: 'declined',
-    failed: 'declined',
-    review: 'in_review',
-    manual_review: 'in_review',
-    in_review: 'in_review',
-    pending: 'in_progress',
-    processing: 'in_progress',
-    started: 'started',
-    initiated: 'started',
-    expired: 'expired',
-    abandoned: 'abandoned',
+    approved: 'approved', verified: 'approved', completed: 'approved', success: 'approved',
+    review: 'in_review', manual_review: 'in_review', in_review: 'in_review',
+    pending: 'in_progress', processing: 'in_progress', in_progress: 'in_progress',
+    started: 'started', initiated: 'started', created: 'started',
+    rejected: 'declined', declined: 'declined', denied: 'declined', failed: 'declined',
+    expired: 'expired', abandoned: 'abandoned', cancelled: 'abandoned', canceled: 'abandoned',
+    not_started: 'not_started',
   };
-  return mapped[status] || 'error';
+
+  return {
+    status: mapped[status] || 'error',
+    rawStatusPath: match ? match[0] : null,
+    rawStatusValueSafe: raw == null ? null : String(raw).slice(0, 120),
+  };
 };
+
+
 
 
 const normalizeOrigin = (value) => {
@@ -220,7 +225,56 @@ const toSafeDiditErrorBody = (data) => {
   }
 };
 
-const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, source, verificationUrl = null }) => {
+const STATUS_PRIORITY = {
+  approved: 0,
+  in_review: 1,
+  in_progress: 2,
+  started: 2,
+  declined: 3,
+  expired: 4,
+  abandoned: 4,
+  error: 5,
+  not_started: 6,
+};
+
+const getStatusPriority = (status) => STATUS_PRIORITY[status] ?? 99;
+const sessionSuffix = (sessionId) => (sessionId ? String(sessionId).slice(-8) : null);
+
+const selectBestCandidate = (candidates) => {
+  if (!Array.isArray(candidates) || !candidates.length) return null;
+  return [...candidates].sort((a, b) => {
+    const p = getStatusPriority(a.status) - getStatusPriority(b.status);
+    if (p !== 0) return p;
+    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+  })[0];
+};
+
+const fetchDiditDecisionForSession = async (sessionId) => {
+  const response = await fetch(`${DIDIT_API_BASE}/session/${sessionId}/decision/`, { headers: getDiditHeaders() });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error('Didit session retrieve failed');
+    err.httpStatus = response.status;
+    err.safeBody = toSafeDiditErrorBody(data);
+    throw err;
+  }
+  const normalized = normalizeDiditStatus(data);
+  const session = resolveDiditSession(data);
+  const reference = resolveDiditReference(data);
+  return {
+    sessionId,
+    status: normalized.status,
+    age: resolveDiditAge(session),
+    reason: resolveDiditReason(data),
+    reference,
+    rawStatusPath: normalized.rawStatusPath,
+    rawStatusValueSafe: normalized.rawStatusValueSafe,
+    createdAt: session?.created_at || session?.createdAt || data?.created_at || data?.createdAt || null,
+    verificationUrl: session?.url || session?.verificationUrl || session?.verification_url || null,
+  };
+};
+
+const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, source, verificationUrl = null, diagnostics = {} }) => {
   if (!uid) {
     throw new Error('Missing uid for idv update');
   }
@@ -229,7 +283,6 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
   const now = FieldValue.serverTimestamp();
   const normalizedStatus = String(status || 'error').trim().toLowerCase();
   const isApproved = normalizedStatus === 'approved';
-  const ageIsNumber = Number.isFinite(Number(age));
   const isAdult = isApproved ? true : null;
   const normalizedReason = normalizeReason(reason);
 
@@ -240,12 +293,21 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     verificationUrl: verificationUrl || null,
     lastSource: source || 'unknown',
     lastSyncedAt: now,
+    lastSyncSource: source || 'unknown',
+    lastSyncAttemptAt: now,
+    lastRawStatusPath: diagnostics.rawStatusPath || null,
+    lastRawStatusValueSafe: diagnostics.rawStatusValueSafe || null,
+    lastSelectedSessionIdSuffix: sessionId ? String(sessionId).slice(-8) : null,
+    lastMatchedSessionCount: Number.isFinite(Number(diagnostics.matchedSessionCount)) ? Number(diagnostics.matchedSessionCount) : null,
+    lastMatchedApprovedCount: Number.isFinite(Number(diagnostics.matchedApprovedCount)) ? Number(diagnostics.matchedApprovedCount) : null,
+    lastReferenceMatch: diagnostics.referenceMatch === true,
   };
 
   const existingUserSnapshot = await userRef.get();
   const existingStepRaw = existingUserSnapshot.exists ? existingUserSnapshot.get('onboardingStep') : null;
   const existingStep = Number.isFinite(Number(existingStepRaw)) ? Number(existingStepRaw) : 0;
 
+  const alreadyApproved = existingUserSnapshot.exists && existingUserSnapshot.get('ageVerified') === true;
   if (isApproved) {
     const approvedStep = Math.max(existingStep, 3);
     await userRef.set(
@@ -257,6 +319,24 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
         didit: diditPayload,
         idv: diditPayload,
         ageVerificationSource: 'didit',
+      },
+      { merge: true }
+    );
+  } else if (alreadyApproved) {
+    await userRef.set(
+      {
+        didit: {
+          lastSyncAttemptAt: now,
+          lastSyncSource: source || 'unknown',
+          lastRawStatusPath: diagnostics.rawStatusPath || null,
+          lastRawStatusValueSafe: diagnostics.rawStatusValueSafe || null,
+          lastSelectedSessionIdSuffix: sessionSuffix(sessionId),
+          lastMatchedSessionCount: Number.isFinite(Number(diagnostics.matchedSessionCount)) ? Number(diagnostics.matchedSessionCount) : null,
+          lastMatchedApprovedCount: Number.isFinite(Number(diagnostics.matchedApprovedCount)) ? Number(diagnostics.matchedApprovedCount) : null,
+          lastReferenceMatch: diagnostics.referenceMatch === true,
+          lastSyncErrorCode: diagnostics.errorCode || null,
+          lastSyncErrorSafeMessage: diagnostics.errorSafeMessage || null,
+        },
       },
       { merge: true }
     );
@@ -287,6 +367,18 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
   return { status: normalizedStatus, isAdult };
 };
 
+const reconcileDiditSessionsForUid = async (uid) => {
+  // Didit list/search endpoint is not available in current integration.
+  return {
+    available: false,
+    sessions: [],
+    diagnostics: {
+      errorCode: 'didit_uid_reconcile_unavailable',
+      errorSafeMessage: 'Didit API uid-based list/search endpoint unavailable in this integration.',
+    },
+  };
+};
+
 export const createDiditSession = onCall(
   {
     region: 'europe-west4',
@@ -309,6 +401,30 @@ export const createDiditSession = onCall(
       logger.warn('APP_BASE_URL is not configured, using default for Didit callback', {
         fallback: 'https://artes.app',
       });
+    }
+    const existingUser = await db.collection('users').doc(request.auth.uid).get();
+    if (existingUser.exists && existingUser.get('ageVerified') === true) {
+      return { status: 'approved', sessionId: existingUser.get('didit.sessionId') || null, verificationUrl: null };
+    }
+    const reconciled = await reconcileDiditSessionsForUid(request.auth.uid);
+    const bestReconciled = selectBestCandidate(reconciled.sessions || []);
+    if (bestReconciled?.status === 'approved') {
+      await applyDiditStatusToUser({
+        uid: request.auth.uid,
+        sessionId: bestReconciled.sessionId,
+        status: 'approved',
+        age: bestReconciled.age,
+        reason: bestReconciled.reason,
+        source: 'create_preflight_reconcile',
+        diagnostics: {
+          rawStatusPath: bestReconciled.rawStatusPath,
+          rawStatusValueSafe: bestReconciled.rawStatusValueSafe,
+          matchedSessionCount: reconciled.sessions.length,
+          matchedApprovedCount: reconciled.sessions.filter((s) => s.status === 'approved').length,
+          referenceMatch: true,
+        },
+      });
+      return { status: 'approved', sessionId: bestReconciled.sessionId, verificationUrl: null };
     }
 
     const appBaseOrigin = normalizeOrigin(appBaseUrl);
@@ -371,23 +487,22 @@ export const createDiditSession = onCall(
     const sessionId = data?.session_id || data?.sessionId || data?.id || null;
     const verificationUrl = data?.url || data?.verificationUrl || data?.verification_url || null;
 
-    await db
-      .collection('users')
-      .doc(request.auth.uid)
-      .collection('idv')
-      .doc('status')
-      .set(
-        {
-          status: 'pending',
-          sessionId,
-          workflowId,
-          verificationUrl,
-          callback: redirectUrl,
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+    await db.collection('users').doc(request.auth.uid).set({
+      didit: {
+        status: 'started',
+        sessionId,
+        verificationUrl,
+        callback: redirectUrl,
+        workflowId,
+        lastSyncSource: 'create-session',
+        lastSyncAttemptAt: FieldValue.serverTimestamp(),
+      },
+      idv: {
+        status: 'started',
+        sessionId,
+        verificationUrl,
+      },
+    }, { merge: true });
 
     logger.info('Didit session created', {
       uid: request.auth.uid,
@@ -407,74 +522,52 @@ export const refreshDiditVerificationStatus = onCall({ region: 'europe-west4', s
   const userSnap = await userRef.get();
   const storedSessionId = userSnap.get('didit.sessionId') || userSnap.get('idv.sessionId') || null;
   const requestedSessionId = request.data?.sessionId || null;
-  const sessionId = storedSessionId || requestedSessionId;
-  if (!sessionId) {
+  if (!storedSessionId && !requestedSessionId) {
     throw new HttpsError('invalid-argument', 'Missing sessionId');
   }
-  if (storedSessionId && requestedSessionId && storedSessionId !== requestedSessionId) {
-    throw new HttpsError('permission-denied', 'Session mismatch');
-  }
-
-  let response;
-  try {
-    response = await fetch(`${DIDIT_API_BASE}/session/${sessionId}/decision/`, {
-      headers: getDiditHeaders(),
+  const candidateSessionIds = [...new Set([storedSessionId, requestedSessionId].filter(Boolean))];
+  const candidates = [];
+  for (const candidateSessionId of candidateSessionIds) {
+    const decision = await fetchDiditDecisionForSession(candidateSessionId).catch((error) => {
+      logger.warn('Didit candidate poll failed', { sessionIdSuffix: sessionSuffix(candidateSessionId), error: error?.message, httpStatus: error?.httpStatus || null });
+      return null;
     });
-  } catch (error) {
-    logger.error('Didit session retrieve failed', { error: error?.message });
-    throw new HttpsError('unavailable', 'Failed to reach Didit');
+    if (!decision) continue;
+    const ownedByReference = decision.reference === request.auth.uid;
+    if (candidateSessionId === requestedSessionId && !ownedByReference) {
+      throw new HttpsError('permission-denied', 'Requested session ownership could not be proven');
+    }
+    if (!ownedByReference && candidateSessionId !== storedSessionId) continue;
+    candidates.push(decision);
   }
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    logger.error('Didit session retrieve error', {
-      status: response.status,
-      body: toSafeDiditErrorBody(data),
-      sessionId,
-    });
-    throw new HttpsError('internal', 'Didit session retrieve failed');
-  }
-
-  const session = resolveDiditSession(data);
-  const status = normalizeDiditStatus(data);
-  const age = resolveDiditAge(session);
-  const reason = resolveDiditReason(data);
-  const reference = resolveDiditReference(data);
-  if (reference && reference !== request.auth.uid) {
-    throw new HttpsError('permission-denied', 'Session does not belong to user');
-  }
-  if (!storedSessionId && reference !== request.auth.uid) {
-    throw new HttpsError('permission-denied', 'Could not prove session ownership');
-  }
-
-  logger.info('Didit session refresh response', {
-    uid: request.auth.uid,
-    sessionId,
-    status,
-    age,
-    reason,
-    responseStatus: response.status,
-    hasSession: Boolean(session),
-  });
-
-  logger.info('Didit refresh resolved decision for idv update', {
-    sessionId,
-    resolvedStatus: status || 'unknown',
-  });
+  const reconciled = await reconcileDiditSessionsForUid(request.auth.uid);
+  const allCandidates = [...candidates, ...(reconciled.sessions || [])];
+  const selected = selectBestCandidate(allCandidates);
+  if (!selected) throw new HttpsError('internal', 'No session decision available');
 
   const result = await applyDiditStatusToUser({
     uid: request.auth.uid,
-    sessionId,
-    status,
-    age,
-    reason,
-    source: 'poll',
+    sessionId: selected.sessionId,
+    status: selected.status,
+    age: selected.age,
+    reason: selected.reason,
+    source: selected.status === 'approved' ? 'refresh_reconcile' : 'poll',
+    verificationUrl: selected.verificationUrl || null,
+    diagnostics: {
+      rawStatusPath: selected.rawStatusPath,
+      rawStatusValueSafe: selected.rawStatusValueSafe,
+      matchedSessionCount: allCandidates.length,
+      matchedApprovedCount: allCandidates.filter((s) => s.status === 'approved').length,
+      referenceMatch: selected.reference === request.auth.uid,
+      errorCode: reconciled.available ? null : reconciled.diagnostics.errorCode,
+      errorSafeMessage: reconciled.available ? null : reconciled.diagnostics.errorSafeMessage,
+    },
   });
 
   return {
     status: result.status,
     isAdult: result.isAdult,
-    sessionId,
+    sessionId: selected.sessionId,
   };
 });
 
@@ -530,7 +623,8 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
 
   const reference = resolveDiditReference(payload);
   const sessionId = resolveDiditSessionId(payload);
-  const status = normalizeDiditStatus(payload);
+  const normalized = normalizeDiditStatus(payload);
+  const status = normalized.status;
   const reason = resolveDiditReason(payload);
   const session = resolveDiditSession(payload);
   const age = resolveDiditAge(session);
@@ -542,20 +636,63 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
     age,
   });
 
-  if (!reference) {
-    logger.error('Didit webhook missing reference', { payload });
+  let resolvedUid = reference;
+  if (!resolvedUid && sessionId) {
+    const [directSnap, idvSnap] = await Promise.all([
+      db.collection('users').where('didit.sessionId', '==', sessionId).get(),
+      db.collection('users').where('idv.sessionId', '==', sessionId).get(),
+    ]);
+    const unique = new Set([...directSnap.docs, ...idvSnap.docs].map((d) => d.id));
+    if (unique.size === 1) resolvedUid = [...unique][0];
+    if (unique.size !== 1) {
+      logger.warn('Didit webhook unresolved uid', {
+        hasReference: Boolean(reference),
+        hasSessionId: Boolean(sessionId),
+        sessionIdSuffix: sessionSuffix(sessionId),
+        status,
+        rawStatusPath: normalized.rawStatusPath,
+        rawStatusValueSafe: normalized.rawStatusValueSafe,
+      });
+      return res.status(400).json({ error: 'Missing reference' });
+    }
+  }
+  if (!resolvedUid) {
+    logger.warn('Didit webhook missing reference', {
+      hasReference: false,
+      hasSessionId: Boolean(sessionId),
+      sessionIdSuffix: sessionSuffix(sessionId),
+      status,
+      rawStatusPath: normalized.rawStatusPath,
+      rawStatusValueSafe: normalized.rawStatusValueSafe,
+      eventType: String(payload?.event?.type || payload?.type || 'unknown'),
+    });
     return res.status(400).json({ error: 'Missing reference' });
   }
 
   try {
     await applyDiditStatusToUser({
-      uid: reference,
+      uid: resolvedUid,
       sessionId,
       status,
       age,
       reason,
       source: 'webhook',
+      diagnostics: {
+        rawStatusPath: normalized.rawStatusPath,
+        rawStatusValueSafe: normalized.rawStatusValueSafe,
+        matchedSessionCount: 1,
+        matchedApprovedCount: status === 'approved' ? 1 : 0,
+        referenceMatch: true,
+      },
     });
+    await db.collection('users').doc(resolvedUid).set({
+      didit: {
+        lastWebhookReceivedAt: FieldValue.serverTimestamp(),
+        lastWebhookEventType: String(payload?.event?.type || payload?.type || 'unknown'),
+        lastWebhookStatusSafe: status,
+        lastWebhookSessionIdSuffix: sessionId ? String(sessionId).slice(-8) : null,
+      },
+    }, { merge: true });
   } catch (error) {
     logger.error('Failed to update Didit webhook status', {
       error: error?.message,

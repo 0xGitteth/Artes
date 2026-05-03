@@ -174,9 +174,10 @@ export const createDiditSession = async ({ returnToOrigin } = {}) => {
   return result?.data || null;
 };
 
-export const refreshDiditSession = async (sessionId) => {
+export const refreshDiditSession = async (sessionId = null) => {
   const callable = httpsCallable(getFirebaseFunctions(), 'refreshDiditSession');
-  const result = await callable({ sessionId });
+  const payload = sessionId ? { sessionId } : {};
+  const result = await callable(payload);
   return result?.data || null;
 };
 

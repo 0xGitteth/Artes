@@ -27,7 +27,10 @@ service cloud.firestore {
       return resource == null ? true : !request.resource.data.diff(resource.data).affectedKeys().hasAny([
         'ageVerified',
         'isAdult',
-        'ageVerifiedAt'
+        'ageVerifiedAt',
+        'ageVerificationSource',
+        'didit',
+        'idv'
       ]);
     }
     function noServerManagedUserFieldWrites() {
@@ -35,6 +38,9 @@ service cloud.firestore {
         'ageVerified',
         'isAdult',
         'ageVerifiedAt',
+        'ageVerificationSource',
+        'didit',
+        'idv',
         'moderator',
         'isModerator',
         'moderationRole',

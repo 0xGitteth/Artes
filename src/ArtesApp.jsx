@@ -3318,7 +3318,13 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       handleStartPendingClaim();
     }, [resolvedPendingClaimContributorId, profile?.ageVerified, handleStartPendingClaim]);
 
-    const hasDiditStatus = Boolean(diditStatus || profile?.didit?.status);
+    const persistedDiditStatus = normalizeDiditStatus(
+      profile?.didit?.status
+      || profile?.idv?.status
+      || profile?.diditStatus
+      || diditStatus
+    );
+    const hasDiditStatus = Boolean(persistedDiditStatus);
     const hasRefreshableDiditSession = Boolean(diditSessionId || profile?.didit?.sessionId || profile?.idv?.sessionId);
     const hasDiditSession = hasDiditStatus || hasRefreshableDiditSession;
     const isRejectedState = diditUiState === 'rejected' || diditUiState === 'underage';
@@ -3326,13 +3332,17 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const diditVerificationUrl = profile?.didit?.verificationUrl || profile?.idv?.verificationUrl || null;
     const showSupportActions = isRejectedState || diditUiState === 'error';
     const effectiveDiditState = (() => {
-      if (profile?.ageVerified === true || diditStatus === 'approved') return 'approved';
+      if (profile?.ageVerified === true || persistedDiditStatus === 'approved') return 'approved';
       if (diditUiState === 'in_review') return 'in_review';
       if (diditUiState === 'rejected' || diditUiState === 'underage') return 'declined';
       if (diditUiState === 'expired') return 'expired';
       if (diditUiState === 'abandoned') return 'abandoned';
       if (diditUiState === 'error') return 'error';
-      if (diditUiState === 'pending' || diditStatus === 'started' || diditStatus === 'in_progress') return 'in_progress';
+      if (persistedDiditStatus && ['in_review', 'declined', 'expired', 'abandoned', 'error', 'started', 'in_progress', 'not_started'].includes(persistedDiditStatus)) {
+        if ((persistedDiditStatus === 'not_started' || persistedDiditStatus === 'started') && hasRefreshableDiditSession) return 'in_progress';
+        return persistedDiditStatus;
+      }
+      if (diditUiState === 'pending' || (hasRefreshableDiditSession && !persistedDiditStatus)) return 'in_progress';
       return 'not_started';
     })();
     const canReopenInProgress = effectiveDiditState === 'in_progress' && Boolean(diditVerificationUrl);
@@ -3612,6 +3622,13 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                      const session = await createDiditSession({
                        returnToOrigin: window.location.origin,
                      });
+                     if (session?.status === 'approved' || session?.ageVerified === true) {
+                       setDiditStatus('approved');
+                       setDiditUiState('idle');
+                       setStep((prevStep) => Math.max(prevStep, 3));
+                       setDiditPending(false);
+                       return;
+                     }
                      if (!session?.verificationUrl) {
                        throw new Error('Geen verificatielink ontvangen.');
                      }

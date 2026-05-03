@@ -100,24 +100,32 @@ const resolveDiditReference = (payload) =>
 const resolveDiditSession = (payload) => payload?.session || payload?.data || payload;
 
 export const normalizeDiditStatus = (payload) => {
+  const primitiveStatus = (path, value) => {
+    if (value == null) return null;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return [path, value];
+    }
+    return null;
+  };
   const statusCandidates = [
-    ['payload.status', payload?.status],
-    ['payload.session.status', payload?.session?.status],
-    ['payload.verification.status', payload?.verification?.status],
-    ['payload.data.status', payload?.data?.status],
-    ['payload.decision', payload?.decision],
-    ['payload.result', payload?.result],
-    ['payload.kyc.status', payload?.kyc?.status],
-    ['payload.workflow.status', payload?.workflow?.status],
-    ['payload.event.status', payload?.event?.status],
-    ['payload.review.status', payload?.review?.status],
-    ['payload.session.result.status', payload?.session?.result?.status],
-    ['payload.decision.status', payload?.decision?.status],
-  ];
+    primitiveStatus('payload.status', payload?.status),
+    primitiveStatus('payload.session.status', payload?.session?.status),
+    primitiveStatus('payload.verification.status', payload?.verification?.status),
+    primitiveStatus('payload.data.status', payload?.data?.status),
+    primitiveStatus('payload.decision.status', payload?.decision?.status),
+    primitiveStatus('payload.result.status', payload?.result?.status),
+    primitiveStatus('payload.kyc.status', payload?.kyc?.status),
+    primitiveStatus('payload.workflow.status', payload?.workflow?.status),
+    primitiveStatus('payload.event.status', payload?.event?.status),
+    primitiveStatus('payload.review.status', payload?.review?.status),
+    primitiveStatus('payload.session.result.status', payload?.session?.result?.status),
+    primitiveStatus('payload.decision', payload?.decision),
+    primitiveStatus('payload.result', payload?.result),
+  ].filter(Boolean);
 
-  const match = statusCandidates.find(([, value]) => value != null && String(value).trim() !== '');
+  const match = statusCandidates.find(([, value]) => String(value).trim() !== '');
   const raw = match ? match[1] : null;
-  const status = normalizeStatus(raw);
+  const status = normalizeStatus(String(raw).replace(/\s+/g, '_'));
 
   const mapped = {
     approved: 'approved', verified: 'approved', completed: 'approved', success: 'approved',
@@ -404,7 +412,7 @@ export const createDiditSession = onCall(
     }
     const existingUser = await db.collection('users').doc(request.auth.uid).get();
     if (existingUser.exists && existingUser.get('ageVerified') === true) {
-      return { status: 'approved', sessionId: existingUser.get('didit.sessionId') || null, verificationUrl: null };
+      return { status: 'approved', ageVerified: true, sessionId: existingUser.get('didit.sessionId') || null, verificationUrl: null };
     }
     const reconciled = await reconcileDiditSessionsForUid(request.auth.uid);
     const bestReconciled = selectBestCandidate(reconciled.sessions || []);
@@ -424,7 +432,7 @@ export const createDiditSession = onCall(
           referenceMatch: true,
         },
       });
-      return { status: 'approved', sessionId: bestReconciled.sessionId, verificationUrl: null };
+      return { status: 'approved', ageVerified: true, sessionId: bestReconciled.sessionId, verificationUrl: null };
     }
 
     const appBaseOrigin = normalizeOrigin(appBaseUrl);
@@ -534,16 +542,27 @@ export const refreshDiditVerificationStatus = onCall({ region: 'europe-west4', s
     });
     if (!decision) continue;
     const ownedByReference = decision.reference === request.auth.uid;
-    if (candidateSessionId === requestedSessionId && !ownedByReference) {
-      throw new HttpsError('permission-denied', 'Requested session ownership could not be proven');
+    if (!ownedByReference) {
+      if (candidateSessionId === requestedSessionId) {
+        throw new HttpsError('permission-denied', 'Requested session ownership could not be proven');
+      }
+
+      logger.warn('Didit candidate ownership mismatch', {
+        uid: request.auth.uid,
+        sessionIdSuffix: sessionSuffix(candidateSessionId),
+        candidateType: candidateSessionId === storedSessionId ? 'stored' : 'requested',
+      });
+
+      continue;
     }
-    if (!ownedByReference && candidateSessionId !== storedSessionId) continue;
     candidates.push(decision);
   }
   const reconciled = await reconcileDiditSessionsForUid(request.auth.uid);
   const allCandidates = [...candidates, ...(reconciled.sessions || [])];
   const selected = selectBestCandidate(allCandidates);
-  if (!selected) throw new HttpsError('internal', 'No session decision available');
+  if (!selected) {
+    throw new HttpsError('failed-precondition', 'Geen eigendom-gevalideerde Didit sessie gevonden');
+  }
 
   const result = await applyDiditStatusToUser({
     uid: request.auth.uid,

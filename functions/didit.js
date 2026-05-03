@@ -535,32 +535,46 @@ export const refreshDiditVerificationStatus = onCall({ region: 'europe-west4', s
   }
   const candidateSessionIds = [...new Set([storedSessionId, requestedSessionId].filter(Boolean))];
   const candidates = [];
+  let lastSyncErrorCode = null;
   for (const candidateSessionId of candidateSessionIds) {
     const decision = await fetchDiditDecisionForSession(candidateSessionId).catch((error) => {
       logger.warn('Didit candidate poll failed', { sessionIdSuffix: sessionSuffix(candidateSessionId), error: error?.message, httpStatus: error?.httpStatus || null });
+      lastSyncErrorCode = error?.code || error?.httpStatus || 'decision_fetch_failed';
       return null;
     });
     if (!decision) continue;
-    const ownedByReference = decision.reference === request.auth.uid;
-    if (!ownedByReference) {
-      if (candidateSessionId === requestedSessionId) {
-        throw new HttpsError('permission-denied', 'Requested session ownership could not be proven');
-      }
+    const hasReference = Boolean(decision.reference);
+    const referenceMatches = decision.reference === request.auth.uid;
+    const isStoredCandidate = candidateSessionId === storedSessionId;
+    const isRequestedOnlyCandidate =
+      candidateSessionId === requestedSessionId && candidateSessionId !== storedSessionId;
 
-      logger.warn('Didit candidate ownership mismatch', {
+    if (isRequestedOnlyCandidate && !referenceMatches) {
+      throw new HttpsError('permission-denied', 'Requested session ownership could not be proven');
+    }
+
+    if (isStoredCandidate && hasReference && !referenceMatches) {
+      logger.warn('Didit stored candidate ownership mismatch', {
         uid: request.auth.uid,
         sessionIdSuffix: sessionSuffix(candidateSessionId),
-        candidateType: candidateSessionId === storedSessionId ? 'stored' : 'requested',
       });
-
       continue;
     }
-    candidates.push(decision);
+
+    if (!isStoredCandidate && !isRequestedOnlyCandidate) {
+      continue;
+    }
+
+    candidates.push({
+      ...decision,
+      ownershipMode: referenceMatches ? 'didit_reference' : 'stored_trusted',
+    });
   }
   const reconciled = await reconcileDiditSessionsForUid(request.auth.uid);
   const allCandidates = [...candidates, ...(reconciled.sessions || [])];
   const selected = selectBestCandidate(allCandidates);
   if (!selected) {
+    lastSyncErrorCode = lastSyncErrorCode || (reconciled.available ? null : reconciled.diagnostics.errorCode) || 'no_candidate';
     throw new HttpsError('failed-precondition', 'Geen eigendom-gevalideerde Didit sessie gevonden');
   }
 
@@ -578,6 +592,8 @@ export const refreshDiditVerificationStatus = onCall({ region: 'europe-west4', s
       matchedSessionCount: allCandidates.length,
       matchedApprovedCount: allCandidates.filter((s) => s.status === 'approved').length,
       referenceMatch: selected.reference === request.auth.uid,
+      ownershipMode: selected.ownershipMode || (selected.reference === request.auth.uid ? 'didit_reference' : 'stored_trusted'),
+      lastSyncErrorCode,
       errorCode: reconciled.available ? null : reconciled.diagnostics.errorCode,
       errorSafeMessage: reconciled.available ? null : reconciled.diagnostics.errorSafeMessage,
     },

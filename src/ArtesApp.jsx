@@ -2808,6 +2808,9 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditError, setDiditError] = useState(null);
     const [diditStatus, setDiditStatus] = useState(null);
     const [diditUiState, setDiditUiState] = useState('idle');
+    const DIDIT_SAFE_ERROR_TITLE = 'Verificatiestatus kon niet worden gecontroleerd';
+    const DIDIT_SAFE_ERROR_MESSAGE = 'We konden je verificatiesessie niet goed controleren. Probeer je status opnieuw te controleren. Blijft dit gebeuren? Mail naar admin@artes.app.';
+    const isDiditSessionRefreshError = (errorCode) => ['permission-denied', 'failed-precondition', 'invalid-argument'].includes(errorCode);
     const [diditSessionId, setDiditSessionId] = useState(null);
     const [diditRejectReason, setDiditRejectReason] = useState('');
     const [diditIsAdult, setDiditIsAdult] = useState(null);
@@ -3154,10 +3157,12 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         }
 
         let resolvedSessionId = null;
+        let hasStoredSessionId = false;
         const currentSnap = await getDoc(profileIdvRef);
         if (currentSnap.exists()) {
           const currentData = currentSnap.data() || {};
           resolvedSessionId = currentData.sessionId || null;
+          hasStoredSessionId = Boolean(currentData.sessionId);
           if (typeof currentData.isAdult === 'boolean') setDiditIsAdult(currentData.isAdult);
           if (currentData.status) setDiditStatus(normalizeDiditStatus(currentData.status));
           setDiditRejectReason(currentData.reason || '');
@@ -3167,10 +3172,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
           resolvedSessionId = diditSessionId || diditReturnContext.sessionIdFromUrl || null;
         }
 
-        await refreshDiditSession(resolvedSessionId || null);
+        await refreshDiditSession(hasStoredSessionId ? null : (resolvedSessionId || null));
       } catch (refreshError) {
         setDiditUiState('error');
-        setDiditError(refreshError?.message || 'Technische fout bij controleren van Didit. Probeer opnieuw of neem contact op met support.');
+        if (isDiditSessionRefreshError(refreshError?.code)) {
+          setDiditError(DIDIT_SAFE_ERROR_MESSAGE);
+        } else {
+          setDiditError(refreshError?.message || 'Technische fout bij controleren van Didit. Probeer opnieuw of neem contact op met support.');
+        }
       } finally {
         setDiditRefreshAttempts((previous) => previous + 1);
         setDiditRefreshAttempted(true);
@@ -3195,7 +3204,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
         const functions = getFirebaseFunctionsInstance();
         const refreshDiditCallable = httpsCallable(functions, 'refreshDiditSession');
-        const response = await refreshDiditCallable({ sessionId });
+        const response = await refreshDiditCallable({});
         const payload = response?.data ?? response;
         setDiditDebugResult(`DEBUG result: ${JSON.stringify(payload)}`);
         console.log('[Onboarding][DEBUG] refreshDiditSession response', payload);
@@ -3594,7 +3603,12 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
            {diditStatus && !diditError && (
              <p className="text-xs text-slate-500 dark:text-slate-400">Status: {diditStatus}</p>
            )}
-           {diditError && <p className="text-sm text-red-500">{diditError}</p>}
+           {diditError && (
+             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+               <p className="font-semibold">{diditError === DIDIT_SAFE_ERROR_MESSAGE ? DIDIT_SAFE_ERROR_TITLE : 'Status kon niet worden opgehaald'}</p>
+               <p>{diditError}</p>
+             </div>
+           )}
            {diditUiState === 'no_session' && !hasDiditSession && (
              <p className="text-sm text-slate-600 dark:text-slate-300">Nog geen Didit sessie gevonden. Start de verificatie om verder te gaan.</p>
            )}

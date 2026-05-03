@@ -2810,7 +2810,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditUiState, setDiditUiState] = useState('idle');
     const DIDIT_SAFE_ERROR_TITLE = 'Verificatiestatus kon niet worden gecontroleerd';
     const DIDIT_SAFE_ERROR_MESSAGE = 'We konden je verificatiesessie niet goed controleren. Probeer je status opnieuw te controleren. Blijft dit gebeuren? Mail naar admin@artes.app.';
-    const isDiditSessionRefreshError = (errorCode) => ['permission-denied', 'failed-precondition', 'invalid-argument'].includes(errorCode);
+    const normalizeCallableErrorCode = (code) => String(code || '').replace(/^functions\//, '');
+    const isDiditSessionRefreshError = (errorCode) => ['permission-denied', 'failed-precondition', 'invalid-argument'].includes(normalizeCallableErrorCode(errorCode));
     const [diditSessionId, setDiditSessionId] = useState(null);
     const [diditRejectReason, setDiditRejectReason] = useState('');
     const [diditIsAdult, setDiditIsAdult] = useState(null);
@@ -3132,9 +3133,10 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         },
         (err) => {
           setDiditPending(false);
-          if (err?.code === 'permission-denied' || err?.code === 'failed-precondition') {
+          const normalizedListenerErrorCode = normalizeCallableErrorCode(err?.code);
+          if (normalizedListenerErrorCode === 'permission-denied' || normalizedListenerErrorCode === 'failed-precondition') {
             if (import.meta.env.DEV) {
-              console.log('[Onboarding] Didit status listener skipped', err?.code);
+              console.log('[Onboarding] Didit status listener skipped', normalizedListenerErrorCode || err?.code);
             }
             return;
           }

@@ -608,40 +608,110 @@ export const refreshDiditVerificationStatus = onCall({ region: 'europe-west4', s
 
 export const refreshDiditSession = refreshDiditVerificationStatus;
 
-const verifyWebhookSecret = (req) => {
-  const secret = process.env.DIDIT_WEBHOOK_SECRET;
-  if (!secret) return true;
+const safeEqualHex = (a, b) => {
+  if (!a || !b) return false;
+  const left = String(a).trim().toLowerCase();
+  const right = String(b).trim().toLowerCase();
+  if (!/^[a-f0-9]+$/.test(left) || !/^[a-f0-9]+$/.test(right) || left.length !== right.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'));
+  } catch (error) {
+    return false;
+  }
+};
 
-  const signature = req.get('x-didit-signature');
-  if (signature) {
-    const rawBody = req.rawBody || '';
-    const hmac = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    const normalizedSignature = signature.startsWith('sha256=')
-      ? signature.slice('sha256='.length)
-      : signature;
-    try {
-      return crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(normalizedSignature));
-    } catch (error) {
-      return false;
+const sortJsonKeysRecursively = (value) => {
+  if (Array.isArray(value)) return value.map((item) => sortJsonKeysRecursively(item));
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = sortJsonKeysRecursively(value[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+};
+
+const computeDiditSignatureV2FromPayload = (payload) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  return JSON.stringify(sortJsonKeysRecursively(payload));
+};
+
+const verifyDiditWebhookSignature = (req, payload) => {
+  const secret = process.env.DIDIT_WEBHOOK_SECRET;
+  const isProd = process.env.NODE_ENV === 'production';
+  if (!secret) {
+    if (!isProd) {
+      logger.warn('Didit webhook secret missing; rejecting in non-production too');
+    } else {
+      logger.error('Didit webhook secret missing in production');
+    }
+    return { ok: false, reason: 'missing_secret' };
+  }
+
+  const signatureV2 = req.get('x-signature-v2');
+  const signatureSimple = req.get('x-signature-simple');
+  const signatureRaw = req.get('x-signature');
+  const timestampHeader = req.get('x-timestamp');
+  const rawBodyBuffer = Buffer.isBuffer(req.rawBody) ? req.rawBody : null;
+
+  if (signatureV2) {
+    const canonicalPayload = computeDiditSignatureV2FromPayload(payload);
+    const signedInput = canonicalPayload ? `${timestampHeader || ''}.${canonicalPayload}` : null;
+    if (signedInput) {
+      const expectedV2 = crypto.createHmac('sha256', secret).update(signedInput).digest('hex');
+      const normalizedV2 = String(signatureV2).replace(/^sha256=/i, '');
+      if (safeEqualHex(expectedV2, normalizedV2)) return { ok: true, mode: 'v2' };
     }
   }
 
-  const headerSecret =
-    req.get('x-didit-webhook-secret') ||
-    req.get('x-didit-secret') ||
-    req.get('x-webhook-secret');
+  if (signatureV2 && rawBodyBuffer && timestampHeader) {
+    const rawPayload = rawBodyBuffer.toString('utf8');
+    const expectedV2Raw = crypto.createHmac('sha256', secret).update(`${timestampHeader}.${rawPayload}`).digest('hex');
+    const normalizedV2Raw = String(signatureV2).replace(/^sha256=/i, '');
+    if (safeEqualHex(expectedV2Raw, normalizedV2Raw)) return { ok: true, mode: 'v2_raw_fallback' };
+  }
 
-  return headerSecret === secret;
+  if (signatureSimple) {
+    const rawSessionId = payload?.session_id;
+    const rawStatus = payload?.status;
+    const rawWebhookType = payload?.webhook_type;
+    const rawTimestamp = timestampHeader || payload?.timestamp;
+    if (rawSessionId != null && rawStatus != null && rawWebhookType != null && rawTimestamp != null) {
+      const messageCurrent = `${rawTimestamp}:${rawSessionId}:${rawStatus}:${rawWebhookType}`;
+      const expectedSimpleCurrent = crypto.createHmac('sha256', secret).update(messageCurrent).digest('hex');
+      const normalizedSimple = String(signatureSimple).replace(/^sha256=/i, '');
+      if (safeEqualHex(expectedSimpleCurrent, normalizedSimple)) return { ok: true, mode: 'simple_current_docs' };
+    }
+
+    const rawCreatedAt = payload?.created_at;
+    if (rawSessionId != null && rawStatus != null && rawCreatedAt != null) {
+      const messageLegacy = `${rawSessionId}|${rawStatus}|${rawCreatedAt}`;
+      const expectedSimpleLegacy = crypto.createHmac('sha256', secret).update(messageLegacy).digest('hex');
+      const normalizedSimple = String(signatureSimple).replace(/^sha256=/i, '');
+      if (safeEqualHex(expectedSimpleLegacy, normalizedSimple)) return { ok: true, mode: 'simple_legacy_demo' };
+    }
+  }
+
+  if (signatureRaw && rawBodyBuffer) {
+    const expectedV2 = crypto.createHmac('sha256', secret).update(rawBodyBuffer).digest('hex');
+    const normalizedRaw = String(signatureRaw).replace(/^sha256=/i, '');
+    if (safeEqualHex(expectedV2, normalizedRaw)) return { ok: true, mode: 'raw' };
+  }
+
+  return { ok: false, reason: 'invalid_signature' };
+};
+
+export const __diditWebhookTestUtils = {
+  safeEqualHex,
+  computeDiditSignatureV2FromPayload,
+  verifyDiditWebhookSignature,
 };
 
 export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT_API_KEY', 'DIDIT_WEBHOOK_SECRET', 'DIDIT_ASSUME_ADULT_ON_VERIFIED'] }, async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  if (!verifyWebhookSecret(req)) {
-    logger.warn('Didit webhook signature verification failed');
-    return res.status(401).json({ error: 'Invalid signature' });
   }
 
   let payload = {};
@@ -656,6 +726,12 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
     payload = req.body || {};
   }
 
+  const signatureResult = verifyDiditWebhookSignature(req, payload);
+  if (!signatureResult.ok) {
+    logger.warn('Didit webhook signature verification failed', { code: signatureResult.reason });
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
   const reference = resolveDiditReference(payload);
   const sessionId = resolveDiditSessionId(payload);
   const normalized = normalizeDiditStatus(payload);
@@ -665,10 +741,15 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
   const age = resolveDiditAge(session);
 
   logger.info('Didit webhook received', {
-    reference,
-    sessionId,
+    hasReference: Boolean(reference),
+    hasMetadataUid: Boolean(payload?.metadata?.uid || payload?.data?.metadata?.uid || payload?.session?.metadata?.uid),
+    hasVendorData: Boolean(payload?.vendor_data || payload?.data?.vendor_data || payload?.session?.vendor_data),
+    sessionIdSuffix: sessionSuffix(sessionId),
     status,
-    age,
+    rawStatusPath: normalized.rawStatusPath,
+    rawStatusValueSafe: normalized.rawStatusValueSafe,
+    eventType: String(payload?.webhook_type || payload?.event?.type || payload?.type || 'unknown'),
+    signatureMode: signatureResult.mode,
   });
 
   let resolvedUid = reference;
@@ -718,21 +799,30 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
         matchedSessionCount: 1,
         matchedApprovedCount: status === 'approved' ? 1 : 0,
         referenceMatch: true,
+        signatureMode: signatureResult.mode || null,
       },
     });
     await db.collection('users').doc(resolvedUid).set({
       didit: {
         lastWebhookReceivedAt: FieldValue.serverTimestamp(),
-        lastWebhookEventType: String(payload?.event?.type || payload?.type || 'unknown'),
+        lastWebhookEventType: String(payload?.webhook_type || payload?.event?.type || payload?.type || 'unknown'),
         lastWebhookStatusSafe: status,
-        lastWebhookSessionIdSuffix: sessionId ? String(sessionId).slice(-8) : null,
+        lastWebhookSessionIdSuffix: sessionSuffix(sessionId),
+        lastWebhookSignatureMode: signatureResult.mode || null,
+        lastSyncSource: 'webhook',
+        lastRawStatusPath: normalized.rawStatusPath,
+        lastRawStatusValueSafe: normalized.rawStatusValueSafe,
+        lastReferenceMatch: true,
+        lastSyncErrorCode: null,
+        lastSyncErrorSafeMessage: null,
       },
     }, { merge: true });
   } catch (error) {
     logger.error('Failed to update Didit webhook status', {
       error: error?.message,
-      reference,
-      sessionId,
+      uid: resolvedUid,
+      hasReference: Boolean(reference),
+      sessionIdSuffix: sessionSuffix(sessionId),
       status,
     });
     return res.status(500).json({ error: 'Failed to update status' });

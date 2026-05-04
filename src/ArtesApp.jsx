@@ -412,6 +412,26 @@ const TRIGGERS = [
   { id: 'spidersInsects', label: 'Spinnen / insecten' },
 ];
 
+const TAXONOMY_CORRECTION_TYPES = {
+  SAFE: 'safeCorrection',
+  SENSITIVE: 'sensitiveCorrection',
+  REVIEW_REQUIRED: 'reviewRequiredCorrection',
+  FORBIDDEN: 'noCorrectionForbidden',
+};
+const SENSITIVE_THEME_KEYS = ['art nude', 'boudoir'];
+const isSensitiveThemeValue = (theme) => SENSITIVE_THEME_KEYS.includes(String(theme || '').trim().toLowerCase());
+const SENSITIVE_TRIGGER_KEY_ALIASES = {
+  kinkbdsm: 'kinkBdsm',
+  horrorscary: 'horrorScare',
+};
+const SENSITIVE_TRIGGER_KEYS = new Set(['adultArtNude', 'adultEroticSuggestive', 'kinkBdsm', 'breathRestriction', 'bloodInjury', 'horrorScare', 'needlesInjections', 'spidersInsects']);
+const normalizeSensitiveTriggerKey = (key) => {
+  const raw = String(key || '').trim();
+  if (!raw) return '';
+  const normalized = raw.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  return SENSITIVE_TRIGGER_KEY_ALIASES[normalized] || resolveTriggerKey(raw);
+};
+
 const TRIGGER_PREFERENCE_OPTIONS = [
   { id: 'show', label: 'Show', desc: 'Direct tonen' },
   { id: 'cover', label: 'Cover', desc: 'Cover overlay tonen' },
@@ -6258,6 +6278,10 @@ function UploadModal({
   const [shouldReview, setShouldReview] = useState(false);
   const [classification, setClassification] = useState(null);
   const [reviewRequested, setReviewRequested] = useState(false);
+  const [taxonomyCorrection, setTaxonomyCorrection] = useState(null);
+  const [correctionAcceptedAt, setCorrectionAcceptedAt] = useState(null);
+  const [correctionRejectedAt, setCorrectionRejectedAt] = useState(null);
+  const [correctionReviewRequestedAt, setCorrectionReviewRequestedAt] = useState(null);
   const [reviewRequestPending, setReviewRequestPending] = useState(false);
   const [resumeUpload, setResumeUpload] = useState(null);
   const [resumeLoading, setResumeLoading] = useState(false);
@@ -6431,6 +6455,78 @@ function UploadModal({
   }, [resumeUploadId, user?.uid, defaultRole]);
   const [allowExternalOverride, setAllowExternalOverride] = useState(false);
 
+  const deriveTaxonomyCorrection = useCallback((payload = {}) => {
+    const nextOutcome = payload?.outcome ?? outcome;
+    const nextRequiredThemes = Array.isArray(payload?.requiredThemes) ? payload.requiredThemes : requiredThemes;
+    const nextSuggestedTriggers = Array.isArray(payload?.suggestedTriggers) ? payload.suggestedTriggers : suggestedTriggers;
+    const nextShouldReview = payload?.shouldReview ?? shouldReview;
+    const nextForbiddenReasons = Array.isArray(payload?.forbiddenReasons) ? payload.forbiddenReasons : forbiddenReasons;
+    const nextMessage = payload?.userMessage ?? userMessage;
+
+    if (nextOutcome === 'forbidden') {
+      return {
+        type: TAXONOMY_CORRECTION_TYPES.FORBIDDEN,
+        suggestedThemes: [],
+        suggestedTriggers: [],
+        reason: nextForbiddenReasons[0] || 'Inhoud is expliciet of verboden.',
+        requiresUserAcceptance: false,
+        requiresModeratorReview: true,
+        publishBlocked: true,
+      };
+    }
+    if (nextShouldReview) {
+      return {
+        type: TAXONOMY_CORRECTION_TYPES.REVIEW_REQUIRED,
+        suggestedThemes: nextRequiredThemes,
+        suggestedTriggers: nextSuggestedTriggers,
+        reason: nextMessage || 'Onzekere classificatie; handmatige review vereist.',
+        requiresUserAcceptance: false,
+        requiresModeratorReview: true,
+        publishBlocked: true,
+      };
+    }
+    if (nextRequiredThemes.length > 0) {
+      const suggestedTriggerKeys = nextSuggestedTriggers.map(normalizeSensitiveTriggerKey).filter(Boolean);
+      const selectedTriggerKeys = makerTags.map(normalizeSensitiveTriggerKey).filter(Boolean);
+      const sensitiveBoundary = nextRequiredThemes.some(isSensitiveThemeValue)
+        || selectedStyles.some(isSensitiveThemeValue)
+        || suggestedTriggerKeys.some((key) => SENSITIVE_TRIGGER_KEYS.has(key))
+        || selectedTriggerKeys.some((key) => SENSITIVE_TRIGGER_KEYS.has(key));
+      return {
+        type: sensitiveBoundary ? TAXONOMY_CORRECTION_TYPES.SENSITIVE : TAXONOMY_CORRECTION_TYPES.SAFE,
+        suggestedThemes: nextRequiredThemes,
+        suggestedTriggers: suggestedTriggerKeys,
+        originalThemes: [...selectedStyles],
+        originalTriggers: [...makerTags],
+        reason: nextMessage || 'De gekozen categorie lijkt niet te passen.',
+        requiresUserAcceptance: true,
+        requiresModeratorReview: sensitiveBoundary,
+        publishBlocked: true,
+      };
+    }
+    return null;
+  }, [forbiddenReasons, makerTags, outcome, requiredThemes, selectedStyles, shouldReview, suggestedTriggers, userMessage]);
+
+  const handleAcceptTaxonomyCorrection = () => {
+    if (!taxonomyCorrection || taxonomyCorrection.type !== TAXONOMY_CORRECTION_TYPES.SAFE) return;
+    const nextThemes = Array.from(new Set((taxonomyCorrection.suggestedThemes || []).filter(Boolean)));
+    const nextTriggers = Array.from(new Set((taxonomyCorrection.suggestedTriggers || []).map(resolveTriggerKey).filter(Boolean)));
+    setSelectedStyles(nextThemes);
+    setMakerTags(nextTriggers);
+    setCorrectionAcceptedAt(new Date().toISOString());
+    setOutcome('allowed');
+    setShouldReview(false);
+    setTaxonomyCorrection((prev) => (prev ? {
+      ...prev,
+      type: TAXONOMY_CORRECTION_TYPES.SAFE,
+      requiresModeratorReview: false,
+      publishBlocked: false,
+      finalAcceptedThemes: nextThemes,
+      finalAcceptedTriggers: nextTriggers,
+    } : prev));
+    setErrors((prev) => ({ ...prev, moderation: undefined, styles: undefined }));
+  };
+
   // Contributor search logic
   const [contributorSearch, setContributorSearch] = useState('');
   const normalizeDisplayName = (value) => String(value || '').trim().toLowerCase();
@@ -6565,6 +6661,10 @@ function UploadModal({
       setShouldReview(false);
       setClassification(null);
       setReviewRequested(false);
+      setTaxonomyCorrection(null);
+      setCorrectionAcceptedAt(null);
+      setCorrectionRejectedAt(null);
+      setCorrectionReviewRequestedAt(null);
       logModerationDebug('file-processed', { previewSource: 'local-file', previewField: null });
     } catch (error) {
       console.error('Image processing failed', error);
@@ -6742,6 +6842,17 @@ function UploadModal({
       setClassification(nextClassification);
       setShowSuggestionUI(shouldShowSuggestions);
       setReviewRequested(false);
+      setTaxonomyCorrection(deriveTaxonomyCorrection({
+        outcome: nextOutcome,
+        requiredThemes: nextRequiredThemes,
+        suggestedTriggers: nextSuggestedTriggers.map(resolveTriggerKey),
+        shouldReview: Boolean(data?.shouldReview),
+        forbiddenReasons: nextForbiddenReasons,
+        userMessage: data?.userMessage || '',
+      }));
+      setCorrectionAcceptedAt(null);
+      setCorrectionRejectedAt(null);
+      setCorrectionReviewRequestedAt(null);
       return {
         ...data,
         appliedTriggers: normalizedAppliedTriggers,
@@ -6773,6 +6884,10 @@ function UploadModal({
       setShouldReview(false);
       setClassification(null);
       setReviewRequested(false);
+      setTaxonomyCorrection(null);
+      setCorrectionAcceptedAt(null);
+      setCorrectionRejectedAt(null);
+      setCorrectionReviewRequestedAt(null);
       return null;
     } finally {
       setAiLoading(false);
@@ -6878,6 +6993,7 @@ function UploadModal({
       }
 
       setReviewRequested(true);
+      setCorrectionReviewRequestedAt(new Date().toISOString());
     } catch (error) {
       setReviewRequested(false);
       setAiError(error?.message || 'Reviewverzoek versturen mislukt. Probeer opnieuw.');
@@ -7014,6 +7130,15 @@ function UploadModal({
 
     if (!image) validationErrors.image = 'Voeg een afbeelding toe.';
     if (selectedStyles.length === 0) validationErrors.styles = 'Thema ontbreekt. Kies minstens één thema.';
+    if (taxonomyCorrection?.type === TAXONOMY_CORRECTION_TYPES.FORBIDDEN) {
+      validationErrors.moderation = 'Deze publicatie is geblokkeerd door de safety check.';
+    }
+    if (taxonomyCorrection?.type === TAXONOMY_CORRECTION_TYPES.REVIEW_REQUIRED || taxonomyCorrection?.requiresModeratorReview) {
+      validationErrors.moderation = 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.';
+    }
+    if (taxonomyCorrection?.requiresUserAcceptance && !correctionAcceptedAt) {
+      validationErrors.moderation = 'Accepteer eerst de taxonomie-correctie of vraag review aan.';
+    }
     const missingRequiredThemes = getMissingRequiredThemes(requiredThemes);
     if (missingRequiredThemes.length > 0) validationErrors.moderation = `Voeg eerst thema toe: ${missingRequiredThemes.join(', ')}.`;
     if (shouldReview) validationErrors.moderation = 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.';
@@ -7089,6 +7214,24 @@ function UploadModal({
       ? Array.from(new Set([...baseTriggers, ...suggestedTriggers]))
       : baseTriggers;
     const triggerFlag = finalAppliedTriggers.length > 0;
+    const correctionMetadata = taxonomyCorrection ? {
+      correction: {
+        type: taxonomyCorrection.type,
+        suggestedThemes: taxonomyCorrection.suggestedThemes || [],
+        suggestedTriggers: taxonomyCorrection.suggestedTriggers || [],
+        originalSelectedThemes: taxonomyCorrection.originalThemes || selectedStyles,
+        originalSelectedTriggers: taxonomyCorrection.originalTriggers || makerTags,
+        finalAcceptedThemes: [...selectedStyles],
+        finalAcceptedTriggers: [...makerTags],
+        reason: taxonomyCorrection.reason || '',
+        requiresUserAcceptance: Boolean(taxonomyCorrection.requiresUserAcceptance),
+        requiresModeratorReview: taxonomyCorrection.type === TAXONOMY_CORRECTION_TYPES.SAFE ? false : Boolean(taxonomyCorrection.requiresModeratorReview),
+        publishBlocked: taxonomyCorrection.type === TAXONOMY_CORRECTION_TYPES.SAFE ? false : Boolean(taxonomyCorrection.publishBlocked),
+        userAcceptedAt: correctionAcceptedAt || null,
+        userRejectedAt: correctionRejectedAt || null,
+        reviewRequestedAt: correctionReviewRequestedAt || null,
+      },
+    } : {};
 
     setPublishing(true);
     setPublishError('');
@@ -7136,6 +7279,7 @@ function UploadModal({
               appliedTriggers,
               credits,
               isChallenge,
+              ...correctionMetadata,
             },
           }),
         });
@@ -7171,6 +7315,7 @@ function UploadModal({
         outcome: nextOutcome || 'unchecked',
         forbiddenReasons: effectiveForbiddenReasons,
         reviewCaseId: effectiveReviewCaseId,
+        ...correctionMetadata,
         credits,
         likes: 0,
         isChallenge,
@@ -7213,6 +7358,10 @@ function UploadModal({
       setShouldReview(false);
       setClassification(null);
       setReviewRequested(false);
+      setTaxonomyCorrection(null);
+      setCorrectionAcceptedAt(null);
+      setCorrectionRejectedAt(null);
+      setCorrectionReviewRequestedAt(null);
       setAiLoading(false);
       setUploaderRole(defaultRole);
       setStep(1);
@@ -7436,6 +7585,23 @@ function UploadModal({
                                {reviewRequested && (
                                  <span className="text-xs text-red-600 dark:text-red-300">Review aangevraagd. We nemen contact op.</span>
                                )}
+                             </div>
+                           </div>
+                         )}
+                         {taxonomyCorrection && taxonomyCorrection.type !== TAXONOMY_CORRECTION_TYPES.FORBIDDEN && (
+                           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-900/30 dark:text-amber-100">
+                             <p className="font-semibold">De gekozen categorie lijkt niet te passen.</p>
+                             <p className="mt-1">AI voorstel: {taxonomyCorrection.suggestedThemes?.join(', ') || 'controleer thema en triggers'}.</p>
+                             <p className="mt-1">{taxonomyCorrection.reason}</p>
+                             {taxonomyCorrection.suggestedTriggers?.length > 0 && (
+                               <p className="mt-1">Triggers: {taxonomyCorrection.suggestedTriggers.map(getTriggerLabel).join(', ')}</p>
+                             )}
+                             <div className="mt-2 flex flex-wrap gap-2">
+                               {taxonomyCorrection.type === TAXONOMY_CORRECTION_TYPES.SAFE && taxonomyCorrection.requiresUserAcceptance && (
+                                 <button type="button" className="text-xs bg-amber-600 text-white px-3 py-1 rounded" onClick={handleAcceptTaxonomyCorrection}>Pas categorie aan</button>
+                               )}
+                               <button type="button" className="text-xs border border-amber-400 px-3 py-1 rounded" onClick={() => setCorrectionRejectedAt(new Date().toISOString())}>Ik ben het oneens</button>
+                               <button type="button" className="text-xs underline" onClick={handleRequestReview}>Vraag review aan</button>
                              </div>
                            </div>
                          )}

@@ -66,6 +66,60 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(uid)).data.ageVerified == true
         || get(/databases/$(database)/documents/users/$(uid)).data.onboardingStep >= 2;
     }
+    function isAllowedCorrectionType(value) {
+      return value == 'safeCorrection'
+        || value == 'sensitiveCorrection'
+        || value == 'reviewRequiredCorrection'
+        || value == 'noCorrectionForbidden';
+    }
+    function isCorrectionPublishAllowed(data) {
+      return !('correction' in data)
+        || (
+          data.correction is map
+          && (!('type' in data.correction) || isAllowedCorrectionType(data.correction.type))
+          && (!('requiresModeratorReview' in data.correction) || data.correction.requiresModeratorReview is bool)
+          && (!('publishBlocked' in data.correction) || data.correction.publishBlocked is bool)
+          && (!('userAcceptedAt' in data.correction) || data.correction.userAcceptedAt is timestamp || data.correction.userAcceptedAt == null)
+          && (
+            data.correction.type == 'safeCorrection'
+              ? (
+                (!('requiresModeratorReview' in data.correction) || data.correction.requiresModeratorReview == false)
+                && (!('publishBlocked' in data.correction) || data.correction.publishBlocked == false)
+                && ('userAcceptedAt' in data.correction && data.correction.userAcceptedAt != null)
+              )
+              : (
+                data.correction.type == 'sensitiveCorrection'
+                || data.correction.type == 'reviewRequiredCorrection'
+                || data.correction.type == 'noCorrectionForbidden'
+              )
+                ? false
+                : true
+          )
+        );
+    }
+    function isPostModerationPublishAllowed(data) {
+      return ('outcome' in data)
+        && data.outcome is string
+        && data.outcome == 'allowed'
+        && ('shouldReview' in data)
+        && data.shouldReview is bool
+        && data.shouldReview == false
+        && isCorrectionPublishAllowed(data);
+    }
+    function keepsPostModerationFieldsOnUpdate() {
+      return (('correction' in resource.data)
+        ? (('correction' in request.resource.data) && request.resource.data.correction is map)
+        : true)
+        && request.resource.data.diff(resource.data).affectedKeys().hasAny(['outcome', 'shouldReview', 'correction'])
+        ? (
+          ('outcome' in request.resource.data)
+          && ('shouldReview' in request.resource.data)
+          && request.resource.data.outcome == 'allowed'
+          && request.resource.data.shouldReview == false
+          && isCorrectionPublishAllowed(request.resource.data)
+        )
+        : true;
+    }
 
     match /config/moderation {
       allow read: if request.auth != null;
@@ -316,8 +370,14 @@ service cloud.firestore {
 
     match /posts/{postId} {
       allow read: if true;
-      allow create: if isVerifiedOrDev();
-      allow update: if isVerifiedOrDev() && request.resource.data.authorId == request.auth.uid;
+      allow create: if isVerifiedOrDev()
+        && request.resource.data.authorId == request.auth.uid
+        && isPostModerationPublishAllowed(request.resource.data);
+      allow update: if isVerifiedOrDev()
+        && request.resource.data.authorId == request.auth.uid
+        && resource.data.authorId == request.auth.uid
+        && isPostModerationPublishAllowed(request.resource.data)
+        && keepsPostModerationFieldsOnUpdate();
       allow delete: if isVerifiedOrDev() && resource.data.authorId == request.auth.uid;
 
       match /comments/{commentId} {

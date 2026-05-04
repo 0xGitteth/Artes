@@ -312,6 +312,133 @@ async function run() {
 
     await assertSucceeds(deleteDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId)));
 
+    const basePost = {
+      authorId: ownerUid,
+      title: 'Taxonomy post',
+      imageUrl: 'https://example.com/test.jpg',
+      styles: ['Portrait'],
+      makerTags: [],
+      appliedTriggers: [],
+      outcome: 'allowed',
+      shouldReview: false,
+      correction: {
+        type: 'safeCorrection',
+        requiresModeratorReview: false,
+        publishBlocked: false,
+        userAcceptedAt: new Date(),
+      },
+    };
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), basePost));
+
+    const { outcome: _unusedOutcome, ...postWithoutOutcome } = basePost;
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'missing_outcome'), postWithoutOutcome));
+
+    const { shouldReview: _unusedShouldReview, ...postWithoutShouldReview } = basePost;
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'missing_should_review'), postWithoutShouldReview));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'missing_all_moderation'), {
+      authorId: ownerUid,
+      title: 'No moderation',
+      imageUrl: 'https://example.com/test.jpg',
+      styles: ['Portrait'],
+      makerTags: [],
+      appliedTriggers: [],
+    }));
+
+    const { correction: _unusedCorrection, ...postWithoutCorrection } = basePost;
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'allowed_without_correction'), postWithoutCorrection));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'safe_correction_missing_accept'), {
+      ...basePost,
+      correction: {
+        type: 'safeCorrection',
+        requiresModeratorReview: false,
+        publishBlocked: false,
+        userAcceptedAt: null,
+      },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'sensitive_correction_blocked'), {
+      ...basePost,
+      correction: {
+        type: 'sensitiveCorrection',
+        requiresModeratorReview: true,
+        publishBlocked: true,
+        userAcceptedAt: new Date(),
+      },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'review_required_correction_blocked'), {
+      ...basePost,
+      correction: {
+        type: 'reviewRequiredCorrection',
+        requiresModeratorReview: true,
+        publishBlocked: true,
+      },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'forbidden_correction_blocked'), {
+      ...basePost,
+      outcome: 'forbidden',
+      correction: {
+        type: 'noCorrectionForbidden',
+        requiresModeratorReview: true,
+        publishBlocked: true,
+      },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'should_review_blocked'), {
+      ...basePost,
+      shouldReview: true,
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'needs_correction_outcome_blocked'), {
+      ...basePost,
+      outcome: 'needsCorrection',
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'review_outcome_blocked'), {
+      ...basePost,
+      outcome: 'review',
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'safe_correction_publish_blocked_true'), {
+      ...basePost,
+      correction: {
+        ...basePost.correction,
+        publishBlocked: true,
+      },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'safe_correction_requires_review_true'), {
+      ...basePost,
+      correction: {
+        ...basePost.correction,
+        requiresModeratorReview: true,
+      },
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      outcome: deleteField(),
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      shouldReview: deleteField(),
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      correction: {
+        type: 'sensitiveCorrection',
+        requiresModeratorReview: true,
+        publishBlocked: true,
+      },
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      correction: null,
+    }));
+
     console.log('PASS firestore.publicUsers.rules.test');
   } finally {
     await testEnv.cleanup();

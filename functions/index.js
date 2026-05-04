@@ -49,6 +49,7 @@ const dataUrlPattern = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/
 
 const needlesKeywords = ['needle', 'syringe', 'injection', 'injections', 'hypodermic', 'vaccination'];
 const spidersKeywords = ['spider', 'spiders', 'insect', 'insects', 'bug', 'bugs', 'beetle', 'mosquito', 'cockroach', 'ant', 'fly'];
+const VISION_DIAGNOSTIC_ONLY_TRIGGERS = new Set(['spidersInsects', 'needlesInjections']);
 const dhashPrefixLength = 4;
 const dhashThreshold = Number.parseInt(process.env.DHASH_HAMMING_THRESHOLD || '8', 10);
 const freshEvaluationReservationMs = Number.parseInt(process.env.FRESH_EVAL_RESERVATION_MS || '120000', 10);
@@ -757,6 +758,15 @@ const buildAiSummary = (source = {}) => ({
         explicitDecisionAddedForbiddenReason: Boolean(source.moderationSignals.explicitDecisionAddedForbiddenReason),
       }
     : null,
+  userSelectedTaxonomy: source?.userSelectedTaxonomy && typeof source.userSelectedTaxonomy === 'object'
+    ? source.userSelectedTaxonomy
+    : { themes: [], triggers: [] },
+  aiSuggestedTaxonomy: source?.aiSuggestedTaxonomy && typeof source.aiSuggestedTaxonomy === 'object'
+    ? source.aiSuggestedTaxonomy
+    : { triggers: [] },
+  aiSafetySignals: Array.isArray(source?.aiSafetySignals) ? source.aiSafetySignals : [],
+  aiVisionLabels: Array.isArray(source?.aiVisionLabels) ? source.aiVisionLabels : [],
+  policyAppliedTriggers: Array.isArray(source?.policyAppliedTriggers) ? source.policyAppliedTriggers : [],
 });
 
 const getUploaderSnapshotFromPublicProfile = async (uid, fallback = {}) => {
@@ -1142,6 +1152,24 @@ const extractLabelScore = (labels, keywords) => {
 };
 
 const buildTriggerRecord = (trigger, score, source) => ({ trigger, score, source });
+const isVisionDiagnosticOnlyTrigger = (trigger) => VISION_DIAGNOSTIC_ONLY_TRIGGERS.has(String(trigger || '').trim());
+const isVisionDiagnosticOnlyAppliedTrigger = (item) => {
+  const trigger = typeof item === 'string' ? item : item?.trigger;
+  return isVisionDiagnosticOnlyTrigger(trigger);
+};
+const normalizeArray = (value) => (Array.isArray(value) ? value : []);
+const extractTriggerKey = (item) => (typeof item === 'string' ? item : item?.trigger);
+const normalizeSource = (value) => String(value || '').trim().toLowerCase();
+const isRawVisionSource = (value) => ['labeldetection', 'visionlabel', 'vision', 'cloudvision'].includes(normalizeSource(value));
+const isRawVisionDerivedRecord = (item) => isRawVisionSource(typeof item === 'object' ? item?.source : null);
+const isSourceLessLegacyDiagnosticRecord = (item) => {
+  if (!item || typeof item === 'string') return isVisionDiagnosticOnlyTrigger(item);
+  const hasSource = Object.prototype.hasOwnProperty.call(item, 'source') && item.source !== null && item.source !== undefined && String(item.source).trim() !== '';
+  return !hasSource && isVisionDiagnosticOnlyTrigger(item?.trigger);
+};
+const sanitizeRawVisionDerivedRecords = (items) => normalizeArray(items)
+  .filter((item) => !isRawVisionDerivedRecord(item))
+  .filter((item) => !isSourceLessLegacyDiagnosticRecord(item));
 
 const normalizeAdultDecision = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -1351,6 +1379,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const appliedTriggers = normalizedMakerTags.map((tag) => buildTriggerRecord(tag, 1, 'makerTag'));
   const suggestedTriggers = [];
   const forbiddenReasons = [];
+  const aiSafetySignals = [];
 
   const imageAnnotator = new ImageAnnotatorClient();
   let labels = [];
@@ -1416,19 +1445,17 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
   if (!cachedResult) {
     if (needlesScore >= forbiddenThreshold) {
-      appliedTriggers.push(buildTriggerRecord('needlesInjections', needlesScore, 'labelDetection'));
-      forbiddenReasons.push({ trigger: 'needlesInjections', reason: 'Vision labels', score: needlesScore });
+      aiSafetySignals.push({ signal: 'needlesInjections', score: needlesScore, source: 'visionLabel' });
     } else if (needlesScore >= suggestThreshold) {
-      suggestedTriggers.push(buildTriggerRecord('needlesInjections', needlesScore, 'labelDetection'));
+      aiSafetySignals.push({ signal: 'needlesInjections', score: needlesScore, source: 'visionLabel' });
     }
   }
 
   if (!cachedResult) {
     if (spidersScore >= forbiddenThreshold) {
-      appliedTriggers.push(buildTriggerRecord('spidersInsects', spidersScore, 'labelDetection'));
-      forbiddenReasons.push({ trigger: 'spidersInsects', reason: 'Vision labels', score: spidersScore });
+      aiSafetySignals.push({ signal: 'spidersInsects', score: spidersScore, source: 'visionLabel' });
     } else if (spidersScore >= suggestThreshold) {
-      suggestedTriggers.push(buildTriggerRecord('spidersInsects', spidersScore, 'labelDetection'));
+      aiSafetySignals.push({ signal: 'spidersInsects', score: spidersScore, source: 'visionLabel' });
     }
   }
 
@@ -1561,22 +1588,39 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
   }
 
-  const outcome = cachedResult
-    ? cachedResult.outcome
-    : forbiddenReasons.length
-      ? 'forbidden'
-      : suggestedTriggers.length
-        ? 'suggested'
-        : 'allowed';
-
-  const cachedAppliedTriggers = cachedResult ? cachedResult.appliedTriggers : [];
-  const finalAppliedTriggers = cachedResult
+  const cachedAppliedTriggers = normalizeArray(cachedResult?.appliedTriggers);
+  const cachedSuggestedTriggers = normalizeArray(cachedResult?.suggestedTriggers);
+  const cachedForbiddenReasons = normalizeArray(cachedResult?.forbiddenReasons);
+  if (cachedResult) {
+    aiSafetySignals.push(...normalizeArray(cachedResult?.aiSafetySignals));
+  }
+  const aiVisionLabels = cachedResult
+    ? normalizeArray(cachedResult?.aiVisionLabels)
+    : labels.map((label) => label?.description).filter(Boolean);
+  if (cachedResult && !aiSafetySignals.length) {
+    [...cachedAppliedTriggers, ...cachedSuggestedTriggers, ...cachedForbiddenReasons].forEach((item) => {
+      const trigger = extractTriggerKey(item);
+      if (isRawVisionDerivedRecord(item) || isVisionDiagnosticOnlyTrigger(trigger)) {
+        aiSafetySignals.push({ signal: trigger, score: Number(item?.score) || 0, source: 'cachedLegacy' });
+      }
+    });
+  }
+  const finalAppliedTriggersRaw = cachedResult
     ? [...cachedAppliedTriggers, ...appliedTriggers.filter((item) =>
-        !cachedAppliedTriggers.some((cached) => cached.trigger === item.trigger && cached.source === item.source)
+        !cachedAppliedTriggers.some((cached) => cached?.trigger === item?.trigger && cached?.source === item?.source)
       )]
-    : appliedTriggers;
-  const finalSuggestedTriggers = cachedResult ? cachedResult.suggestedTriggers : suggestedTriggers;
-  const finalForbiddenReasons = cachedResult ? cachedResult.forbiddenReasons : forbiddenReasons;
+    : normalizeArray(appliedTriggers);
+  const finalAppliedTriggers = sanitizeRawVisionDerivedRecords(finalAppliedTriggersRaw);
+  const finalSuggestedTriggersRaw = cachedResult ? cachedSuggestedTriggers : normalizeArray(suggestedTriggers);
+  const finalSuggestedTriggers = sanitizeRawVisionDerivedRecords(finalSuggestedTriggersRaw);
+  const finalForbiddenReasonsRaw = cachedResult ? cachedForbiddenReasons : normalizeArray(forbiddenReasons);
+  const finalPolicyAppliedTriggers = sanitizeRawVisionDerivedRecords(finalAppliedTriggers);
+  const finalForbiddenReasons = sanitizeRawVisionDerivedRecords(finalForbiddenReasonsRaw);
+  const outcome = finalForbiddenReasons.length
+    ? 'forbidden'
+    : finalSuggestedTriggers.length
+      ? 'suggested'
+      : 'allowed';
 
   let reviewCaseId = cachedResult?.reviewCaseId || null;
   let canRequestReview = outcome === 'forbidden';
@@ -1615,6 +1659,16 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
               forbiddenReasons: finalForbiddenReasons,
               appliedTriggers: finalAppliedTriggers,
               suggestedTriggers: finalSuggestedTriggers,
+              userSelectedTaxonomy: {
+                themes: normalizedThemes,
+                triggers: normalizedMakerTags,
+              },
+              aiSuggestedTaxonomy: {
+                triggers: finalSuggestedTriggers,
+              },
+              aiSafetySignals,
+              aiVisionLabels: labels.map((label) => label?.description).filter(Boolean),
+              policyAppliedTriggers: finalPolicyAppliedTriggers,
               moderationSignals: {
                 adultDecision: geminiAdultDecision,
                 sexualExplicitConfidence: geminiSexualExplicitConfidence,
@@ -1704,8 +1758,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
   const hasSexualExplicitReason = finalForbiddenReasons.some((reason) => reason?.trigger === INTERNAL_SEXUAL_EXPLICIT_TRIGGER);
   const hasReportedContentReason = finalForbiddenReasons.some((reason) => reason?.trigger === 'reportedContent');
-  const hasArtNudeTrigger = finalAppliedTriggers.some((item) => item.trigger === ADULT_ART_NUDE_TRIGGER);
-  const hasEroticSuggestiveTrigger = finalAppliedTriggers.some((item) => item.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER);
+  const hasArtNudeTrigger = finalPolicyAppliedTriggers.some((item) => item.trigger === ADULT_ART_NUDE_TRIGGER);
+  const hasEroticSuggestiveTrigger = finalPolicyAppliedTriggers.some((item) => item.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER);
   const hasManualEroticSuggestiveTag = normalizedMakerTags.includes(ADULT_EROTIC_SUGGESTIVE_TRIGGER);
   const hasGeminiEroticSuggestiveSignal = finalSuggestedTriggers.some((item) => item?.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER && item?.source === 'gemini');
   const hasGeminiExplicitDecision = geminiAdultDecision === 'explicit';
@@ -1787,6 +1841,16 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       explicitDecisionBranchHit,
       explicitDecisionAddedForbiddenReason,
     },
+    userSelectedTaxonomy: {
+      themes: normalizedThemes,
+      triggers: normalizedMakerTags,
+    },
+    aiSuggestedTaxonomy: {
+      triggers: finalSuggestedTriggers,
+    },
+    aiSafetySignals,
+    aiVisionLabels: labels.map((label) => label?.description).filter(Boolean),
+    policyAppliedTriggers: finalPolicyAppliedTriggers,
     previousModeratorExample,
     fingerprints,
     legacy: {
@@ -1841,6 +1905,11 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       appliedTriggers: finalAppliedTriggers,
       suggestedTriggers: finalSuggestedTriggers,
       forbiddenReasons: finalForbiddenReasons,
+      userSelectedTaxonomy: response.userSelectedTaxonomy,
+      aiSuggestedTaxonomy: response.aiSuggestedTaxonomy,
+      aiSafetySignals: response.aiSafetySignals,
+      aiVisionLabels: response.aiVisionLabels,
+      policyAppliedTriggers: response.policyAppliedTriggers,
       reviewCaseId: reviewCaseId || null,
       previousModeratorExample,
       fingerprints,
@@ -1881,6 +1950,11 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
             appliedTriggers: finalAppliedTriggers,
             suggestedTriggers: finalSuggestedTriggers,
             moderationSignals: response.moderationSignals,
+            userSelectedTaxonomy: response.userSelectedTaxonomy,
+            aiSuggestedTaxonomy: response.aiSuggestedTaxonomy,
+            aiSafetySignals: response.aiSafetySignals,
+            aiVisionLabels: response.aiVisionLabels,
+            policyAppliedTriggers: response.policyAppliedTriggers,
           }),
           previousModeratorExample,
           updatedAt: FieldValue.serverTimestamp(),
@@ -2728,6 +2802,11 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       appliedTriggers: Array.isArray(uploadData?.appliedTriggers) ? uploadData.appliedTriggers : [],
       suggestedTriggers: Array.isArray(uploadData?.suggestedTriggers) ? uploadData.suggestedTriggers : [],
       moderationSignals: uploadData?.moderationSignals || null,
+      userSelectedTaxonomy: uploadData?.userSelectedTaxonomy || null,
+      aiSuggestedTaxonomy: uploadData?.aiSuggestedTaxonomy || null,
+      aiSafetySignals: Array.isArray(uploadData?.aiSafetySignals) ? uploadData.aiSafetySignals : [],
+      aiVisionLabels: Array.isArray(uploadData?.aiVisionLabels) ? uploadData.aiVisionLabels : [],
+      policyAppliedTriggers: Array.isArray(uploadData?.policyAppliedTriggers) ? uploadData.policyAppliedTriggers : [],
     });
 
     let reviewCaseId = existingCase?.id || null;

@@ -7689,8 +7689,8 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
        linkedCompanyId: formData.linkedCompanyId || null,
        quickProfilePreviewMode: formData.quickProfilePreviewMode || 'latest',
        quickProfilePostIds,
-       avatarBlob: pendingCroppedImages?.avatarBlob || null,
-       headerImageBlob: pendingCroppedImages?.headerImageBlob || null,
+       avatarBlob: pendingCroppedImages?.avatar === formData.avatar ? (pendingCroppedImages?.avatarBlob || null) : null,
+       headerImageBlob: pendingCroppedImages?.headerImage === formData.headerImage ? (pendingCroppedImages?.headerImageBlob || null) : null,
        preferences: {
          ...formData.preferences,
          triggerVisibility: normalizeTriggerPreferences(formData.preferences?.triggerVisibility),
@@ -7751,6 +7751,23 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
       };
     });
   };
+
+
+  useEffect(() => {
+    setPendingCroppedImages((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      if (prev.avatar && prev.avatar !== formData.avatar) {
+        next.avatar = null;
+        next.avatarBlob = null;
+      }
+      if (prev.headerImage && prev.headerImage !== formData.headerImage) {
+        next.headerImage = null;
+        next.headerImageBlob = null;
+      }
+      return next;
+    });
+  }, [formData.avatar, formData.headerImage]);
 
   const handleImageUpload = (event, key) => {
     const file = event.target.files?.[0];
@@ -7852,7 +7869,13 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                             className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
                             placeholder="https://"
                             value={formData.avatar || ''}
-                            onChange={(event) => setFormData({ ...formData, avatar: event.target.value })}
+                            onChange={(event) => {
+                              const nextAvatar = event.target.value;
+                              setFormData((prev) => ({ ...prev, avatar: nextAvatar }));
+                              setPendingCroppedImages((prev) => (prev?.avatar && prev.avatar !== nextAvatar
+                                ? { ...prev, avatarBlob: null, avatar: null }
+                                : prev));
+                            }}
                           />
                         )}
                         {formData.avatar && (
@@ -7861,7 +7884,10 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                             <button
                               type="button"
                               className="text-xs text-slate-500 hover:text-slate-700"
-                              onClick={() => setFormData({ ...formData, avatar: '' })}
+                              onClick={() => {
+                                setFormData((prev) => ({ ...prev, avatar: '' }));
+                                setPendingCroppedImages((prev) => (prev ? { ...prev, avatarBlob: null, avatar: null } : prev));
+                              }}
                             >
                               Verwijderen
                             </button>
@@ -7883,7 +7909,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                               return;
                             }
                             setFormData((prev) => ({ ...prev, avatar, headerImage }));
-                            setPendingCroppedImages({ avatarBlob, headerImageBlob });
+                            setPendingCroppedImages({ avatarBlob, headerImageBlob, avatar, headerImage });
                             setSaveError(null);
                             setCropSource('');
                           }}

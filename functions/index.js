@@ -3194,6 +3194,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       const uploadInputMakerTags = Array.isArray(uploadSnapshotData?.makerTags) ? uploadSnapshotData.makerTags : [];
       const moderationSignals = uploadSnapshotData?.moderationSignals || reviewSnapshotData?.moderationSignals || {};
       const aiResult = uploadSnapshotData?.aiResult || reviewSnapshotData?.aiResult || {};
+      const correctionSnapshot = uploadSnapshotData?.correction || uploadSnapshotData?.postDraft?.correction || reviewSnapshotData?.uploadSnapshot?.correction || null;
       moderationExamplePayload = {
         uploadId: uploadId || null,
         reviewCaseId: reviewCaseId || null,
@@ -3220,6 +3221,20 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
           adultDecision: moderationSignals?.adultDecision ?? null,
           sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
           geminiDiagnostics: aiResult?.geminiDiagnostics || null,
+          correction: correctionSnapshot ? {
+            type: correctionSnapshot?.type || null,
+            originalSelectedThemes: Array.isArray(correctionSnapshot?.originalSelectedThemes) ? correctionSnapshot.originalSelectedThemes : [],
+            originalSelectedTriggers: Array.isArray(correctionSnapshot?.originalSelectedTriggers) ? correctionSnapshot.originalSelectedTriggers : [],
+            suggestedThemes: Array.isArray(correctionSnapshot?.suggestedThemes) ? correctionSnapshot.suggestedThemes : [],
+            suggestedTriggers: Array.isArray(correctionSnapshot?.suggestedTriggers) ? correctionSnapshot.suggestedTriggers : [],
+            finalAcceptedThemes: Array.isArray(correctionSnapshot?.finalAcceptedThemes) ? correctionSnapshot.finalAcceptedThemes : [],
+            finalAcceptedTriggers: Array.isArray(correctionSnapshot?.finalAcceptedTriggers) ? correctionSnapshot.finalAcceptedTriggers : [],
+            userAcceptedAt: correctionSnapshot?.userAcceptedAt || null,
+            userRejectedAt: correctionSnapshot?.userRejectedAt || null,
+            reviewRequestedAt: correctionSnapshot?.reviewRequestedAt || null,
+            requiresModeratorReview: correctionSnapshot?.requiresModeratorReview === true,
+            publishBlocked: correctionSnapshot?.publishBlocked === true,
+          } : null,
         },
         moderatorDecision: {
           action: normalizedAction,
@@ -3494,6 +3509,7 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       const moderationExampleId = `${reviewCaseId || effectiveUploadId}_queueFreshEvaluation`;
       const aiResult = uploadData?.aiResult || reviewCaseData?.uploadSnapshot?.aiResult || {};
       const moderationSignals = uploadData?.moderationSignals || reviewCaseData?.uploadSnapshot?.moderationSignals || {};
+      const correctionSnapshot = uploadData?.correction || uploadData?.postDraft?.correction || reviewCaseData?.uploadSnapshot?.correction || null;
       try {
         await db.collection('moderationExamples').doc(moderationExampleId).set({
         uploadId: effectiveUploadId,
@@ -3517,6 +3533,20 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
           adultDecision: moderationSignals?.adultDecision ?? null,
           sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
           geminiDiagnostics: aiResult?.geminiDiagnostics || null,
+          correction: correctionSnapshot ? {
+            type: correctionSnapshot?.type || null,
+            originalSelectedThemes: Array.isArray(correctionSnapshot?.originalSelectedThemes) ? correctionSnapshot.originalSelectedThemes : [],
+            originalSelectedTriggers: Array.isArray(correctionSnapshot?.originalSelectedTriggers) ? correctionSnapshot.originalSelectedTriggers : [],
+            suggestedThemes: Array.isArray(correctionSnapshot?.suggestedThemes) ? correctionSnapshot.suggestedThemes : [],
+            suggestedTriggers: Array.isArray(correctionSnapshot?.suggestedTriggers) ? correctionSnapshot.suggestedTriggers : [],
+            finalAcceptedThemes: Array.isArray(correctionSnapshot?.finalAcceptedThemes) ? correctionSnapshot.finalAcceptedThemes : [],
+            finalAcceptedTriggers: Array.isArray(correctionSnapshot?.finalAcceptedTriggers) ? correctionSnapshot.finalAcceptedTriggers : [],
+            userAcceptedAt: correctionSnapshot?.userAcceptedAt || null,
+            userRejectedAt: correctionSnapshot?.userRejectedAt || null,
+            reviewRequestedAt: correctionSnapshot?.reviewRequestedAt || null,
+            requiresModeratorReview: correctionSnapshot?.requiresModeratorReview === true,
+            publishBlocked: correctionSnapshot?.publishBlocked === true,
+          } : null,
         },
         moderatorDecision: {
           action: 'queueFreshEvaluation',

@@ -3857,7 +3857,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                   onClick={() =>
                     setProfileData((prev) => ({
                       ...prev,
-                      preferences: {
+       preferences: {
                         ...prev.preferences,
                         theme: opt.id,
                       },
@@ -3892,7 +3892,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                         onClick={() =>
                           setProfileData((prev) => ({
                             ...prev,
-                            preferences: {
+       preferences: {
                               ...prev.preferences,
                               triggerVisibility: {
                                 ...prev.preferences?.triggerVisibility,
@@ -7655,6 +7655,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
   const [saveError, setSaveError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [cropSource, setCropSource] = useState('');
+  const [pendingCroppedImages, setPendingCroppedImages] = useState(null);
   const headerMeasureRef = useRef(null);
   const [headerAspectRatio, setHeaderAspectRatio] = useState(3);
   const selectedRoles = formData.roles || [];
@@ -7672,6 +7673,10 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
   );
   const handleSave = async () => {
      setSaveError(null);
+     if (cropSource) {
+       setSaveError('Je hebt een nieuwe foto gekozen. Klik eerst op "Gebruik uitsnede" voordat je opslaat.');
+       return;
+     }
      setIsSaving(true);
      const quickProfilePostIds = Array.from(new Set(manualPostIds));
      const payload = {
@@ -7684,6 +7689,8 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
        linkedCompanyId: formData.linkedCompanyId || null,
        quickProfilePreviewMode: formData.quickProfilePreviewMode || 'latest',
        quickProfilePostIds,
+       avatarBlob: pendingCroppedImages?.avatarBlob || null,
+       headerImageBlob: pendingCroppedImages?.headerImageBlob || null,
        preferences: {
          ...formData.preferences,
          triggerVisibility: normalizeTriggerPreferences(formData.preferences?.triggerVisibility),
@@ -7700,6 +7707,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
        await updateUserProfile(user.uid, payload);
        const normalized = normalizeProfileData({ ...profile, ...payload, uid: user.uid }, user.uid);
        onProfileUpdated?.(normalized);
+       setPendingCroppedImages(null);
        if (import.meta.env.DEV) {
          console.log('[EditProfileModal] Profile save completed, snapshot listener will update UI');
        }
@@ -7869,8 +7877,14 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                           source={cropSource}
                           measuredHeaderAspectRatio={headerAspectRatio}
                           onCancel={() => setCropSource('')}
-                          onApply={({ avatar, headerImage }) => {
+                          onApply={({ avatar, headerImage, avatarBlob, headerImageBlob, error }) => {
+                            if (error) {
+                              setSaveError(error);
+                              return;
+                            }
                             setFormData((prev) => ({ ...prev, avatar, headerImage }));
+                            setPendingCroppedImages({ avatarBlob, headerImageBlob });
+                            setSaveError(null);
                             setCropSource('');
                           }}
                         />
@@ -8047,7 +8061,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                              onClick={() =>
                                setFormData((prev) => ({
                                  ...prev,
-                                 preferences: {
+       preferences: {
                                    ...prev.preferences,
                                    triggerVisibility: {
                                      ...prev.preferences?.triggerVisibility,

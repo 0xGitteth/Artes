@@ -20,7 +20,7 @@ const encodeJpeg = (canvas) => {
     quality -= 0.1;
     result = canvas.toDataURL('image/jpeg', quality);
   }
-  return result;
+  return { dataUrl: result, quality };
 };
 
 function renderCrop(imageEl, imageRect, frameRect, outputWidth, outputHeight) {
@@ -36,7 +36,8 @@ function renderCrop(imageEl, imageRect, frameRect, outputWidth, outputHeight) {
   canvas.height = outputHeight;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(imageEl, sx, sy, sw, sh, 0, 0, outputWidth, outputHeight);
-  return { dataUrl: encodeJpeg(canvas), sourceRect: { sw, sh } };
+  const encoded = encodeJpeg(canvas);
+  return { dataUrl: encoded.dataUrl, quality: encoded.quality, sourceRect: { sw, sh } };
 }
 
 export default function ProfileImageCropper({ source, measuredHeaderAspectRatio = 3, onApply, onCancel }) {
@@ -166,6 +167,8 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
     return {
       avatar: avatarOut.dataUrl,
       header: headerOut.dataUrl,
+      avatarQuality: avatarOut.quality,
+      headerQuality: headerOut.quality,
       lowQuality: avatarOut.sourceRect.sw < AVATAR_SIZE
         || avatarOut.sourceRect.sh < AVATAR_SIZE
         || headerOut.sourceRect.sw < HEADER_WIDTH
@@ -241,10 +244,29 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
     }));
   };
 
-  const save = () => {
+  const save = async () => {
     const outputs = computeOutputs();
     if (!outputs) return;
-    onApply?.({ avatar: outputs.avatar, headerImage: outputs.header });
+
+    try {
+      const [avatarBlob, headerBlob] = await Promise.all([
+        fetch(outputs.avatar).then((res) => res.blob()),
+        fetch(outputs.header).then((res) => res.blob()),
+      ]);
+
+      if (avatarBlob.size > MAX_OUTPUT_BYTES || headerBlob.size > MAX_OUTPUT_BYTES) {
+        throw new Error('Afbeelding blijft te groot na comprimeren. Zoom iets verder in en probeer opnieuw.');
+      }
+
+      onApply?.({
+        avatar: outputs.avatar,
+        headerImage: outputs.header,
+        avatarBlob,
+        headerImageBlob: headerBlob,
+      });
+    } catch (error) {
+      onApply?.({ error: error?.message || 'Uitsnede verwerken mislukt.' });
+    }
   };
 
   const avatarRect = toFrameRect('avatar');

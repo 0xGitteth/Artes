@@ -2896,7 +2896,12 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       res.status(400).json({ error: 'reviewCaseId is required' });
       return;
     }
-    if (!['approved', 'rejected'].includes(decision)) {
+    const normalizedDecision = decision === 'approve'
+      ? 'approved'
+      : decision === 'reject'
+        ? 'rejected'
+        : decision;
+    if (!['approved', 'rejected'].includes(normalizedDecision)) {
       res.status(400).json({ error: 'Invalid decision' });
       return;
     }
@@ -2909,7 +2914,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       res.status(400).json({ error: 'Invalid reasonCode' });
       return;
     }
-    const normalizedAction = decision === 'approved' ? 'approve' : 'reject';
+    const normalizedAction = normalizedDecision === 'approved' ? 'approve' : 'reject';
     if (!MODERATION_EXAMPLE_REASON_CODES_BY_ACTION[normalizedAction]?.has(normalizedReasonCode)) {
       res.status(400).json({ error: `Invalid reasonCode for action ${normalizedAction}` });
       return;
@@ -2951,7 +2956,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       caseType = data?.caseType || 'upload';
       const reportedPost = data?.reportedPost || null;
       reportPostId = reportedPost?.id || data?.reportedPostId || null;
-      if (caseType === 'report' && decision === 'approved') {
+      if (caseType === 'report' && normalizedDecision === 'approved') {
         finalDecisionMessage = buildReportRemovalMessage(trimmedMessage);
       }
       if (data?.status !== 'inReview') {
@@ -2994,9 +2999,9 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         const uploadRef = db.collection('uploads').doc(uploadId);
         const uploadSnapshot = await transaction.get(uploadRef);
         uploadSnapshotData = uploadSnapshot.exists ? (uploadSnapshot.data() || null) : null;
-        const isApproved = decision === 'approved';
+        const isApproved = normalizedDecision === 'approved';
         transaction.update(uploadRef, {
-          reviewStatus: decision,
+          reviewStatus: normalizedDecision,
           reviewDecisionMessagePublic: finalDecisionMessage,
           reviewDecisionReasons: decisionReasons,
           reviewDecisionAt: FieldValue.serverTimestamp(),
@@ -3007,7 +3012,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       }
 
       const reviewUpdate = {
-        status: decision,
+        status: normalizedDecision,
         decisionMessagePublic: finalDecisionMessage,
         decisionReasons,
         moderatorNoteInternal: moderatorNoteInternal || null,
@@ -3057,7 +3062,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         },
         moderatorDecision: {
           action: normalizedAction,
-          finalOutcome: decision === 'approved' ? 'allowed' : 'forbidden',
+          finalOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
           reasonCode: normalizedReasonCode,
           notes: moderatorNoteInternal || null,
           decidedBy: decoded.uid,
@@ -3073,7 +3078,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       transaction.set(db.collection('moderationExamples').doc(moderationExampleId), moderationExamplePayload, { merge: true });
     });
 
-    if (caseType === 'report' && decision === 'approved' && reportPostId) {
+    if (caseType === 'report' && normalizedDecision === 'approved' && reportPostId) {
       const reportedPostPath = reviewSnapshotData?.reportedPostPath || buildReportedPostPath(reportPostId);
       const deleteRef = reportedPostPath ? db.doc(reportedPostPath) : db.collection('posts').doc(reportPostId);
       try {
@@ -3083,7 +3088,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       }
     }
 
-    if (caseType === 'report' && decision === 'approved' && userId && reviewSnapshotData?.reportedFingerprints) {
+    if (caseType === 'report' && normalizedDecision === 'approved' && userId && reviewSnapshotData?.reportedFingerprints) {
       try {
         const moderation = await getUserModeration(userId);
         if (moderation) {
@@ -3110,7 +3115,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
     const recipientUids = [...new Set([userId, ...contributorUids].filter(Boolean))];
     if (recipientUids.length > 0) {
       const decisionMessage = createDecisionMessage({
-        decision,
+        decision: normalizedDecision,
         decisionMessagePublic: finalDecisionMessage,
         decisionReasons,
         caseType,

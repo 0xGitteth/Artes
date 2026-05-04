@@ -1157,11 +1157,19 @@ const isVisionDiagnosticOnlyAppliedTrigger = (item) => {
   const trigger = typeof item === 'string' ? item : item?.trigger;
   return isVisionDiagnosticOnlyTrigger(trigger);
 };
-const isVisionDiagnosticOnlyForbiddenReason = (item) => {
-  const trigger = typeof item === 'string' ? item : item?.trigger;
-  return isVisionDiagnosticOnlyTrigger(trigger);
-};
 const normalizeArray = (value) => (Array.isArray(value) ? value : []);
+const extractTriggerKey = (item) => (typeof item === 'string' ? item : item?.trigger);
+const normalizeSource = (value) => String(value || '').trim().toLowerCase();
+const isRawVisionSource = (value) => ['labeldetection', 'visionlabel', 'vision', 'cloudvision'].includes(normalizeSource(value));
+const isRawVisionDerivedRecord = (item) => isRawVisionSource(typeof item === 'object' ? item?.source : null);
+const isSourceLessLegacyDiagnosticRecord = (item) => {
+  if (!item || typeof item === 'string') return isVisionDiagnosticOnlyTrigger(item);
+  const hasSource = Object.prototype.hasOwnProperty.call(item, 'source') && item.source !== null && item.source !== undefined && String(item.source).trim() !== '';
+  return !hasSource && isVisionDiagnosticOnlyTrigger(item?.trigger);
+};
+const sanitizeRawVisionDerivedRecords = (items) => normalizeArray(items)
+  .filter((item) => !isRawVisionDerivedRecord(item))
+  .filter((item) => !isSourceLessLegacyDiagnosticRecord(item));
 
 const normalizeAdultDecision = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -1581,16 +1589,33 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   }
 
   const cachedAppliedTriggers = normalizeArray(cachedResult?.appliedTriggers);
-  const finalAppliedTriggers = cachedResult
+  const cachedSuggestedTriggers = normalizeArray(cachedResult?.suggestedTriggers);
+  const cachedForbiddenReasons = normalizeArray(cachedResult?.forbiddenReasons);
+  if (cachedResult) {
+    aiSafetySignals.push(...normalizeArray(cachedResult?.aiSafetySignals));
+  }
+  const aiVisionLabels = cachedResult
+    ? normalizeArray(cachedResult?.aiVisionLabels)
+    : labels.map((label) => label?.description).filter(Boolean);
+  if (cachedResult && !aiSafetySignals.length) {
+    [...cachedAppliedTriggers, ...cachedSuggestedTriggers, ...cachedForbiddenReasons].forEach((item) => {
+      const trigger = extractTriggerKey(item);
+      if (isRawVisionDerivedRecord(item) || isVisionDiagnosticOnlyTrigger(trigger)) {
+        aiSafetySignals.push({ signal: trigger, score: Number(item?.score) || 0, source: 'cachedLegacy' });
+      }
+    });
+  }
+  const finalAppliedTriggersRaw = cachedResult
     ? [...cachedAppliedTriggers, ...appliedTriggers.filter((item) =>
         !cachedAppliedTriggers.some((cached) => cached?.trigger === item?.trigger && cached?.source === item?.source)
       )]
     : normalizeArray(appliedTriggers);
-  const finalSuggestedTriggersRaw = cachedResult ? normalizeArray(cachedResult?.suggestedTriggers) : normalizeArray(suggestedTriggers);
-  const finalSuggestedTriggers = finalSuggestedTriggersRaw.filter((item) => !isVisionDiagnosticOnlyAppliedTrigger(item));
-  const finalForbiddenReasonsRaw = cachedResult ? normalizeArray(cachedResult?.forbiddenReasons) : normalizeArray(forbiddenReasons);
-  const finalPolicyAppliedTriggers = finalAppliedTriggers.filter((item) => !isVisionDiagnosticOnlyAppliedTrigger(item));
-  const finalForbiddenReasons = finalForbiddenReasonsRaw.filter((item) => !isVisionDiagnosticOnlyForbiddenReason(item));
+  const finalAppliedTriggers = sanitizeRawVisionDerivedRecords(finalAppliedTriggersRaw);
+  const finalSuggestedTriggersRaw = cachedResult ? cachedSuggestedTriggers : normalizeArray(suggestedTriggers);
+  const finalSuggestedTriggers = sanitizeRawVisionDerivedRecords(finalSuggestedTriggersRaw);
+  const finalForbiddenReasonsRaw = cachedResult ? cachedForbiddenReasons : normalizeArray(forbiddenReasons);
+  const finalPolicyAppliedTriggers = sanitizeRawVisionDerivedRecords(finalAppliedTriggers);
+  const finalForbiddenReasons = sanitizeRawVisionDerivedRecords(finalForbiddenReasonsRaw);
   const outcome = finalForbiddenReasons.length
     ? 'forbidden'
     : finalSuggestedTriggers.length

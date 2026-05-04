@@ -5114,6 +5114,32 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const previousOutcome = previousModeratorExample?.finalOutcome || null;
   const previousReason = previousModeratorExample?.reasonCode || null;
   const queueTitle = caseTypeFilter === 'report' ? 'Gerapporteerde foto’s' : 'Foto’s in review';
+  const resolveGeminiDiagnostics = (caseItem, uploadItem = null) => {
+    const candidates = [
+      caseItem?.geminiDiagnostics,
+      caseItem?.aiSummary?.geminiDiagnostics,
+      uploadItem?.geminiDiagnostics,
+      caseItem?.uploadSnapshot?.geminiDiagnostics,
+      caseItem?.moderationData?.geminiDiagnostics,
+    ];
+    return candidates.find((item) => item && typeof item === 'object') || null;
+  };
+  const formatBooleanNl = (value) => (value === true ? 'ja' : value === false ? 'nee' : 'onbekend');
+  const formatListNl = (value) => {
+    if (Array.isArray(value)) return value.filter(Boolean).map((item) => String(item)).join(', ') || 'geen';
+    if (typeof value === 'string') return value.trim() || 'geen';
+    return 'geen';
+  };
+  const formatSafetyRatings = (value) => {
+    if (!Array.isArray(value) || value.length === 0) return 'geen';
+    return value.slice(0, 6).map((item) => {
+      if (!item || typeof item !== 'object') return String(item || 'onbekend');
+      const category = item.category || item.name || 'onbekend';
+      const probability = item.probability || item.severity || item.rating || 'onbekend';
+      return `${category}: ${probability}`;
+    }).join(' · ');
+  };
+  const geminiDiagnostics = resolveGeminiDiagnostics(selectedCase, selectedUpload);
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
@@ -5296,6 +5322,26 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                             })
                           : <span className="text-[11px] text-slate-400">Geen</span>}
                       </div>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Gemini diagnostiek</p>
+                    <div className="space-y-1 rounded-xl bg-slate-50 dark:bg-slate-800 p-3 text-[11px] text-slate-600 dark:text-slate-200">
+                      {!geminiDiagnostics ? (
+                        <p>Geen Gemini diagnostiek opgeslagen voor deze case.</p>
+                      ) : (
+                        <>
+                          <p><span className="font-semibold">Gemini geprobeerd:</span> {formatBooleanNl(geminiDiagnostics?.attempted)}</p>
+                          <p><span className="font-semibold">Gemini gelukt:</span> {formatBooleanNl(geminiDiagnostics?.success)}</p>
+                          <p><span className="font-semibold">Fallback gebruikt:</span> {formatBooleanNl(geminiDiagnostics?.fallbackUsed)}</p>
+                          <p><span className="font-semibold">Reden fallback:</span> {geminiDiagnostics?.fallbackReason || 'onbekend'}</p>
+                          <p><span className="font-semibold">Ontbrekende velden:</span> {formatListNl(geminiDiagnostics?.missingFields)}</p>
+                          <p><span className="font-semibold">Finish reason:</span> {geminiDiagnostics?.finishReason || 'onbekend'}</p>
+                          <p><span className="font-semibold">Safety ratings samengevat:</span> {formatSafetyRatings(geminiDiagnostics?.safetyRatings)}</p>
+                          <p><span className="font-semibold">Model:</span> {geminiDiagnostics?.model || 'onbekend'}</p>
+                          <p><span className="font-semibold">Promptversie:</span> {geminiDiagnostics?.promptVersion || 'onbekend'}</p>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div>

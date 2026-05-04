@@ -767,6 +767,9 @@ const buildAiSummary = (source = {}) => ({
   aiSafetySignals: Array.isArray(source?.aiSafetySignals) ? source.aiSafetySignals : [],
   aiVisionLabels: Array.isArray(source?.aiVisionLabels) ? source.aiVisionLabels : [],
   policyAppliedTriggers: Array.isArray(source?.policyAppliedTriggers) ? source.policyAppliedTriggers : [],
+  geminiDiagnostics: source?.geminiDiagnostics && typeof source.geminiDiagnostics === 'object'
+    ? source.geminiDiagnostics
+    : null,
 });
 
 const getUploaderSnapshotFromPublicProfile = async (uid, fallback = {}) => {
@@ -1200,9 +1203,34 @@ const buildGeminiRawPreview = (text, maxLength = 400) => {
     : normalized;
 };
 
+const buildGeminiDiagnostics = (overrides = {}) => ({
+  attempted: false,
+  success: false,
+  fallbackUsed: false,
+  fallbackReason: null,
+  apiErrorCode: null,
+  finishReason: null,
+  safetyRatings: null,
+  rawTextPresent: false,
+  parsedJsonPresent: false,
+  missingFields: [],
+  model: null,
+  promptVersion: 'gemini_moderation_v1',
+  ...overrides,
+});
+
 const runGeminiClassifier = async ({ buffer, mimeType }) => {
+  const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash-002';
+  const promptVersion = 'gemini_moderation_v1';
   if (process.env.ENABLE_GEMINI_CLASSIFIER !== 'true') {
-    return null;
+    return {
+      parsed: null,
+      parseSucceeded: false,
+      hasRawText: false,
+      rawPreview: null,
+      rawLength: 0,
+      diagnostics: buildGeminiDiagnostics({ fallbackReason: 'classifier_disabled', model: modelName, promptVersion }),
+    };
   }
   const project = process.env.GOOGLE_CLOUD_PROJECT;
   const location = process.env.GOOGLE_CLOUD_LOCATION || 'europe-west4';
@@ -1211,7 +1239,6 @@ const runGeminiClassifier = async ({ buffer, mimeType }) => {
     return null;
   }
   const vertex = new VertexAI({ project, location });
-  const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash-002';
   const model = vertex.getGenerativeModel({ model: modelName });
   const prompt = [
     'You are a moderation classifier. Return ONLY valid JSON.',
@@ -1238,14 +1265,47 @@ const runGeminiClassifier = async ({ buffer, mimeType }) => {
     },
   });
 
-  const text = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const candidate = result?.response?.candidates?.[0] || null;
+  const text = candidate?.content?.parts?.[0]?.text;
+  const finishReason = candidate?.finishReason || null;
+  const safetyRatings = Array.isArray(candidate?.safetyRatings)
+    ? candidate.safetyRatings.map((item) => ({
+        category: item?.category || null,
+        probability: item?.probability || null,
+        blocked: Boolean(item?.blocked),
+      }))
+    : null;
   const parsed = parseGeminiJson(text);
+  const missingFields = [];
+  if (parsed && typeof parsed === 'object') {
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'adultDecision')) missingFields.push('adultDecision');
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'sexualExplicitConfidence')) missingFields.push('sexualExplicitConfidence');
+  }
+  const rawTextPresent = typeof text === 'string' && text.trim().length > 0;
+  const parsedJsonPresent = Boolean(parsed);
+  let fallbackReason = null;
+  if (!rawTextPresent) fallbackReason = 'empty_response';
+  else if (!parsedJsonPresent) fallbackReason = 'malformed_json';
+  else if (missingFields.length > 0) fallbackReason = 'missing_required_fields';
   return {
     parsed,
-    parseSucceeded: Boolean(parsed),
-    hasRawText: typeof text === 'string' && text.trim().length > 0,
+    parseSucceeded: parsedJsonPresent,
+    hasRawText: rawTextPresent,
     rawPreview: buildGeminiRawPreview(text),
     rawLength: typeof text === 'string' ? text.length : 0,
+    diagnostics: buildGeminiDiagnostics({
+      attempted: true,
+      success: parsedJsonPresent && missingFields.length === 0,
+      fallbackUsed: Boolean(fallbackReason),
+      fallbackReason,
+      finishReason,
+      safetyRatings,
+      rawTextPresent,
+      parsedJsonPresent,
+      missingFields,
+      model: modelName,
+      promptVersion,
+    }),
   };
 };
 
@@ -1468,6 +1528,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let geminiFailed = false;
   let geminiAdultDecision = null;
   let geminiSexualExplicitConfidence = 0;
+  let geminiDiagnostics = buildGeminiDiagnostics();
   let explicitDecisionBranchHit = false;
   let explicitDecisionAddedForbiddenReason = false;
   let geminiDebug = {
@@ -1490,6 +1551,11 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       geminiAttempted = true;
       const geminiClassifierResult = await runGeminiClassifier(parsed);
       geminiResult = geminiClassifierResult?.parsed || null;
+      geminiDiagnostics = buildGeminiDiagnostics({
+        ...geminiDiagnostics,
+        ...(geminiClassifierResult?.diagnostics || {}),
+        attempted: true,
+      });
       geminiDebug = {
         ...geminiDebug,
         parseSucceeded: Boolean(geminiClassifierResult?.parseSucceeded),
@@ -1545,6 +1611,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       }
     } catch (error) {
       geminiFailed = true;
+      geminiDiagnostics = buildGeminiDiagnostics({
+        ...geminiDiagnostics,
+        attempted: true,
+        success: false,
+        fallbackUsed: true,
+        fallbackReason: 'api_error',
+        apiErrorCode: error?.code ? String(error.code) : null,
+      });
       logger.error('Gemini classifier fout.', error);
     }
 
@@ -1568,22 +1642,20 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     const adultSafeSearchScore = safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0;
     const racySafeSearchScore = safeSearch ? scoreFromLikelihood(safeSearch.racy) : 0;
     const hasStrongAdultSafeSearchSignal = adultSafeSearchScore >= forbiddenThreshold;
-    const hasStrongRacySafeSearchSignal = racySafeSearchScore >= forbiddenThreshold;
     if (geminiAttempted && geminiUnavailableOrUnusable && hasStrongAdultSafeSearchSignal) {
-      const hasManualArtNudeContext = normalizedMakerTags.includes(ADULT_ART_NUDE_TRIGGER);
-      const hasThemeArtNudeContext = normalizedThemes.includes(ART_NUDE_THEME);
-      const hasFallbackForbiddenEscalationSignal = hasStrongRacySafeSearchSignal;
-      if (hasManualArtNudeContext || hasThemeArtNudeContext || !hasFallbackForbiddenEscalationSignal) {
-        suggestedTriggers.push(
-          buildTriggerRecord('gemini_uncertain_fallback', adultSafeSearchScore, 'geminiFallback')
-        );
-      } else {
-        forbiddenReasons.push({
-          trigger: 'gemini_uncertain_fallback',
-          reason: 'SafeSearch adult hoog, Gemini niet beschikbaar of output onbruikbaar.',
-          score: adultSafeSearchScore,
+      if (!geminiDiagnostics.fallbackReason) {
+        geminiDiagnostics = buildGeminiDiagnostics({
+          ...geminiDiagnostics,
+          attempted: geminiAttempted,
+          fallbackUsed: true,
+          fallbackReason: geminiFailed ? 'api_error_or_timeout' : 'unusable_output',
+          rawTextPresent: Boolean(geminiDebug.hasRawText),
+          parsedJsonPresent: Boolean(geminiDebug.parseSucceeded),
         });
       }
+      suggestedTriggers.push(
+        buildTriggerRecord('gemini_uncertain_fallback', adultSafeSearchScore, 'geminiFallback')
+      );
     }
 
   }
@@ -1616,19 +1688,13 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const finalForbiddenReasonsRaw = cachedResult ? cachedForbiddenReasons : normalizeArray(forbiddenReasons);
   const finalPolicyAppliedTriggers = sanitizeRawVisionDerivedRecords(finalAppliedTriggers);
   const finalForbiddenReasons = sanitizeRawVisionDerivedRecords(finalForbiddenReasonsRaw);
-  const outcome = finalForbiddenReasons.length
-    ? 'forbidden'
-    : finalSuggestedTriggers.length
-      ? 'suggested'
-      : 'allowed';
-
   let reviewCaseId = cachedResult?.reviewCaseId || null;
-  let canRequestReview = outcome === 'forbidden';
+  let canRequestReview = false;
   let openReviewCase = null;
   let inCooldown = false;
   let reviewCreated = false;
 
-  if (userId && outcome === 'forbidden') {
+  if (userId && finalForbiddenReasons.length > 0) {
     try {
       userModeration = await getUserModeration(userId);
       const cooldownUntil = resolveTimestamp(userModeration?.data?.cooldownUntil);
@@ -1727,7 +1793,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
   }
 
-  canRequestReview = outcome === 'forbidden' && !inCooldown && !openReviewCase && !reviewCreated;
+  canRequestReview = finalForbiddenReasons.length > 0 && !inCooldown && !openReviewCase && !reviewCreated;
 
   if (reviewCaseId && userId && !openReviewCase) {
     try {
@@ -1799,6 +1865,16 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   }
 
   const shouldReview = classification === 'uncertain_possible_explicit';
+  const hasTaxonomyMismatch = requiredThemes.length > 0;
+  const hasStrongForbiddenReason = hasSexualExplicitReason || hasReportedContentReason;
+  const shouldNeedsCorrection = !hasStrongForbiddenReason && !shouldReview && hasTaxonomyMismatch;
+  const outcome = hasStrongForbiddenReason
+    ? 'forbidden'
+    : shouldReview
+      ? 'review'
+      : shouldNeedsCorrection
+        ? 'needsCorrection'
+        : 'allowed';
   const previousModeratorExample = matchedModerationExample?.data
     ? {
         exampleId: matchedModerationExample.id,
@@ -1827,7 +1903,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     appliedTriggers: finalAppliedTriggers,
     suggestedTriggers: finalSuggestedTriggers,
     forbiddenReasons: finalForbiddenReasons,
-    showSuggestionUI: finalSuggestedTriggers.length > 0,
+    showSuggestionUI: finalSuggestedTriggers.length > 0 || outcome === 'needsCorrection',
     canRequestReview,
     reviewCaseId,
     classification,
@@ -1841,6 +1917,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       explicitDecisionBranchHit,
       explicitDecisionAddedForbiddenReason,
     },
+    geminiDiagnostics,
     userSelectedTaxonomy: {
       themes: normalizedThemes,
       triggers: normalizedMakerTags,
@@ -1910,6 +1987,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       aiSafetySignals: response.aiSafetySignals,
       aiVisionLabels: response.aiVisionLabels,
       policyAppliedTriggers: response.policyAppliedTriggers,
+      geminiDiagnostics: response.geminiDiagnostics || null,
       reviewCaseId: reviewCaseId || null,
       previousModeratorExample,
       fingerprints,
@@ -1955,6 +2033,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
             aiSafetySignals: response.aiSafetySignals,
             aiVisionLabels: response.aiVisionLabels,
             policyAppliedTriggers: response.policyAppliedTriggers,
+            geminiDiagnostics: response.geminiDiagnostics || null,
           }),
           previousModeratorExample,
           updatedAt: FieldValue.serverTimestamp(),
@@ -1990,6 +2069,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         geminiAttempted,
         geminiFailed,
       },
+      geminiDiagnostics,
     };
   }
 
@@ -2807,6 +2887,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       aiSafetySignals: Array.isArray(uploadData?.aiSafetySignals) ? uploadData.aiSafetySignals : [],
       aiVisionLabels: Array.isArray(uploadData?.aiVisionLabels) ? uploadData.aiVisionLabels : [],
       policyAppliedTriggers: Array.isArray(uploadData?.policyAppliedTriggers) ? uploadData.policyAppliedTriggers : [],
+      geminiDiagnostics: uploadData?.geminiDiagnostics || null,
     });
 
     let reviewCaseId = existingCase?.id || null;
@@ -3138,6 +3219,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
           requiredThemes: Array.isArray(aiResult?.requiredThemes) ? aiResult.requiredThemes : [],
           adultDecision: moderationSignals?.adultDecision ?? null,
           sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
+          geminiDiagnostics: aiResult?.geminiDiagnostics || null,
         },
         moderatorDecision: {
           action: normalizedAction,
@@ -3434,6 +3516,7 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
           requiredThemes: Array.isArray(aiResult?.requiredThemes) ? aiResult.requiredThemes : [],
           adultDecision: moderationSignals?.adultDecision ?? null,
           sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
+          geminiDiagnostics: aiResult?.geminiDiagnostics || null,
         },
         moderatorDecision: {
           action: 'queueFreshEvaluation',

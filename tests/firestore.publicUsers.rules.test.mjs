@@ -71,6 +71,21 @@ async function run() {
         isCurrent: false,
         version: 1,
       });
+      await setDoc(doc(db, 'posts', 'legacy_without_moderation'), {
+        authorId: ownerUid,
+        title: 'Legacy title',
+        description: 'Legacy description',
+        imageUrl: 'https://example.com/legacy.jpg',
+        storagePath: 'uploads/legacy.jpg',
+        uploadId: 'upload_legacy',
+        makerTags: [],
+        contributors: [],
+        credits: [{ uid: 'credit_1', role: 'model' }],
+        contributorIds: ['credit_1'],
+        likes: 10,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
     });
 
     const ownerDb = authedContext(testEnv, ownerUid, { email_verified: true }).firestore();
@@ -437,6 +452,86 @@ async function run() {
 
     await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
       correction: null,
+    }));
+
+    await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      title: 'Legacy title updated',
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      imageUrl: 'https://example.com/hijack.jpg',
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      authorId: otherUid,
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      outcome: 'allowed',
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      shouldReview: false,
+    }));
+
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      visibility: 'private',
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      randomField: 'not-allowed',
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      likes: deleteField(),
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      credits: deleteField(),
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      contributorIds: deleteField(),
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      imageUrl: deleteField(),
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      credits: [{ uid: 'credit_2', role: 'mua' }],
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      contributorIds: ['credit_2'],
+    }));
+
+    await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      description: 'Legacy description updated',
+      updatedAt: serverTimestamp(),
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {
+      correction: {
+        type: 'safeCorrection',
+        requiresModeratorReview: false,
+        publishBlocked: false,
+        userAcceptedAt: new Date(),
+      },
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      outcome: 'review',
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      shouldReview: true,
+    }));
+
+    await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      title: 'Taxonomy post retitled',
+      description: 'Updated description with valid moderation fields preserved.',
     }));
 
     console.log('PASS firestore.publicUsers.rules.test');

@@ -106,6 +106,39 @@ service cloud.firestore {
         && data.shouldReview == false
         && isCorrectionPublishAllowed(data);
     }
+
+    function isLegacyPostWithoutModerationProof(data) {
+      return !('outcome' in data)
+        && !('shouldReview' in data);
+    }
+    function isLegacyPostMetadataOnlyUpdate() {
+      let diff = request.resource.data.diff(resource.data);
+      return diff.affectedKeys().hasOnly([
+        'title',
+        'description',
+        'updatedAt'
+      ])
+        && !diff.affectedKeys().hasAny([
+          'authorId',
+          'imageUrl',
+          'storagePath',
+          'uploadId',
+          'contributors',
+          'credits',
+          'contributorIds',
+          'makerTags',
+          'tags',
+          'outcome',
+          'shouldReview',
+          'correction',
+          'appliedTriggers',
+          'policyAppliedTriggers',
+          'forbiddenReasons',
+          'requiredThemes',
+          'reviewStatus',
+          'createdAt'
+        ]);
+    }
     function keepsPostModerationFieldsOnUpdate() {
       return (('correction' in resource.data)
         ? (('correction' in request.resource.data) && request.resource.data.correction is map)
@@ -374,10 +407,19 @@ service cloud.firestore {
         && request.resource.data.authorId == request.auth.uid
         && isPostModerationPublishAllowed(request.resource.data);
       allow update: if isVerifiedOrDev()
-        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.authorId == resource.data.authorId
         && resource.data.authorId == request.auth.uid
-        && isPostModerationPublishAllowed(request.resource.data)
-        && keepsPostModerationFieldsOnUpdate();
+        && (
+          (
+            !isLegacyPostWithoutModerationProof(resource.data)
+            && isPostModerationPublishAllowed(request.resource.data)
+            && keepsPostModerationFieldsOnUpdate()
+          )
+          || (
+            isLegacyPostWithoutModerationProof(resource.data)
+            && isLegacyPostMetadataOnlyUpdate()
+          )
+        );
       allow delete: if isVerifiedOrDev() && resource.data.authorId == request.auth.uid;
 
       match /comments/{commentId} {

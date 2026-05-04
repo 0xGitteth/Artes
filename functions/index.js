@@ -3115,7 +3115,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
     const recipientUids = [...new Set([userId, ...contributorUids].filter(Boolean))];
     if (recipientUids.length > 0) {
       const decisionMessage = createDecisionMessage({
-        decision,
+        decision: normalizedDecision,
         decisionMessagePublic: finalDecisionMessage,
         decisionReasons,
         caseType,

@@ -308,6 +308,8 @@ const THEME_STYLES = {
 const getThemeStyle = (theme) => {
   return THEME_STYLES[theme] || 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800';
 };
+const DIAGNOSTIC_VISION_ONLY_TRIGGER_KEYS = new Set(['spidersInsects', 'needlesInjections']);
+const isDiagnosticVisionOnlyTrigger = (value) => DIAGNOSTIC_VISION_ONLY_TRIGGER_KEYS.has(resolveTriggerKey(value));
 
 const THEMES = Object.keys(THEME_STYLES);
 const palette = ['#8B5CF6', '#EC4899', '#10B981', '#06B6D4', '#F59E0B', '#3B82F6', '#F97316'];
@@ -5003,7 +5005,19 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     || selectedUpload?.postDraft?.imageUrl
     || reportedPost?.imageUrl
     || null;
-  const tags = (Array.isArray(selectedUpload?.appliedTriggers) ? selectedUpload.appliedTriggers : (Array.isArray(selectedUpload?.makerTags) ? selectedUpload.makerTags : []))
+  const userSelectedTaxonomy = selectedCase?.aiSummary?.userSelectedTaxonomy
+    || selectedUpload?.userSelectedTaxonomy
+    || { themes: Array.isArray(selectedUpload?.themes) ? selectedUpload.themes : [], triggers: Array.isArray(selectedUpload?.makerTags) ? selectedUpload.makerTags : [] };
+  const aiSuggestedTaxonomy = selectedCase?.aiSummary?.aiSuggestedTaxonomy
+    || selectedUpload?.aiSuggestedTaxonomy
+    || { triggers: Array.isArray(selectedUpload?.suggestedTriggers) ? selectedUpload.suggestedTriggers : [] };
+  const aiSignals = Array.isArray(selectedCase?.aiSummary?.aiSafetySignals)
+    ? selectedCase.aiSummary.aiSafetySignals
+    : (Array.isArray(selectedUpload?.aiSafetySignals) ? selectedUpload.aiSafetySignals : []);
+  const aiVisionLabels = Array.isArray(selectedCase?.aiSummary?.aiVisionLabels)
+    ? selectedCase.aiSummary.aiVisionLabels
+    : (Array.isArray(selectedUpload?.aiVisionLabels) ? selectedUpload.aiVisionLabels : []);
+  const tags = (Array.isArray(userSelectedTaxonomy?.triggers) ? userSelectedTaxonomy.triggers : [])
     .map((tag) => {
       if (typeof tag === 'string') return resolveTriggerKey(tag);
       if (tag && typeof tag === 'object') return resolveTriggerKey(tag.trigger || tag.reason);
@@ -5019,6 +5033,13 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     suggestedTriggers: Array.isArray(selectedUpload?.suggestedTriggers) ? selectedUpload.suggestedTriggers : [],
     moderationSignals: selectedUpload?.moderationSignals || null,
   };
+  const policyAppliedTriggers = Array.isArray(selectedCase?.aiSummary?.policyAppliedTriggers)
+    ? selectedCase.aiSummary.policyAppliedTriggers
+    : (Array.isArray(selectedAiSummary?.appliedTriggers) ? selectedAiSummary.appliedTriggers : []);
+  const sanitizedPolicyAppliedTriggers = policyAppliedTriggers.filter((trigger) => {
+    const key = resolveTriggerKey(typeof trigger === 'string' ? trigger : trigger?.trigger || trigger?.reason);
+    return !isDiagnosticVisionOnlyTrigger(key);
+  });
   const selectedReviewReason = selectedCase?.reviewReason
     || (selectedCase?.caseType === 'report' ? 'reportedPost' : 'inReview');
   const statusLabelMap = {
@@ -5175,7 +5196,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                     </div>
                   )}
                   <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Uploader tags</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Uploader gekozen</p>
                     <div className="flex flex-wrap gap-2 mt-2">
                       {tags.length > 0 ? tags.map((tag, index) => (
                         <span key={`${tag}-${index}`} className="text-[11px] px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-200">
@@ -5195,31 +5216,61 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">AI signalen / triggers</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">AI voorstel</p>
                     <div className="space-y-2 rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
                       <div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Forbidden reasons</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Voorgestelde triggers</p>
                         <div className="flex flex-wrap gap-2 mt-1">
-                          {(Array.isArray(selectedAiSummary?.forbiddenReasons) ? selectedAiSummary.forbiddenReasons : []).length > 0
-                            ? selectedAiSummary.forbiddenReasons.map((reason, idx) => {
-                                const key = resolveTriggerKey(typeof reason === 'string' ? reason : reason?.trigger || reason?.reason);
+                          {(Array.isArray(aiSuggestedTaxonomy?.triggers) ? aiSuggestedTaxonomy.triggers : []).length > 0
+                            ? aiSuggestedTaxonomy.triggers.map((trigger, idx) => {
+                                const key = resolveTriggerKey(typeof trigger === 'string' ? trigger : trigger?.trigger || trigger?.reason);
                                 const label = TRIGGERS.find((item) => item.id === key)?.label || key;
-                                return <span key={`forbidden-${idx}`} className="text-[11px] px-2 py-1 rounded-full bg-rose-100 text-rose-700">{label}</span>;
+                                return <span key={`suggested-${idx}`} className="text-[11px] px-2 py-1 rounded-full bg-violet-100 text-violet-700">{label}</span>;
+                              })
+                            : <span className="text-[11px] text-slate-400">Geen</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">AI signalen</p>
+                    <div className="space-y-2 rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
+                      <div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Safety signalen</p>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {aiSignals.length > 0
+                            ? aiSignals.map((signal, idx) => {
+                                const key = resolveTriggerKey(signal?.signal || signal?.trigger || signal);
+                                const label = TRIGGERS.find((item) => item.id === key)?.label || key;
+                                return <span key={`signal-${idx}`} className="text-[11px] px-2 py-1 rounded-full bg-amber-100 text-amber-700">{label}</span>;
                               })
                             : <span className="text-[11px] text-slate-400">Geen</span>}
                         </div>
                       </div>
                       <div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Applied triggers</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Vision labels (diagnostisch)</p>
                         <div className="flex flex-wrap gap-2 mt-1">
-                          {(Array.isArray(selectedAiSummary?.appliedTriggers) ? selectedAiSummary.appliedTriggers : []).length > 0
-                            ? selectedAiSummary.appliedTriggers.map((trigger, idx) => {
-                                const key = resolveTriggerKey(typeof trigger === 'string' ? trigger : trigger?.trigger || trigger?.reason);
-                                const label = TRIGGERS.find((item) => item.id === key)?.label || key;
-                                return <span key={`applied-${idx}`} className="text-[11px] px-2 py-1 rounded-full bg-blue-100 text-blue-700">{label}</span>;
-                              })
+                          {aiVisionLabels.length > 0
+                            ? aiVisionLabels.map((label, idx) => (
+                                <span key={`vision-${idx}`} className="text-[11px] px-2 py-1 rounded-full bg-slate-200 text-slate-700">{label}</span>
+                              ))
                             : <span className="text-[11px] text-slate-400">Geen</span>}
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Beleidsbeslissing</p>
+                    <div className="space-y-2 rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Applied triggers</p>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {sanitizedPolicyAppliedTriggers.length > 0
+                          ? sanitizedPolicyAppliedTriggers.map((trigger, idx) => {
+                              const key = resolveTriggerKey(typeof trigger === 'string' ? trigger : trigger?.trigger || trigger?.reason);
+                              const label = TRIGGERS.find((item) => item.id === key)?.label || key;
+                              return <span key={`policy-${idx}`} className="text-[11px] px-2 py-1 rounded-full bg-blue-100 text-blue-700">{label}</span>;
+                            })
+                          : <span className="text-[11px] text-slate-400">Geen</span>}
                       </div>
                     </div>
                   </div>

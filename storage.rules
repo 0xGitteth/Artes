@@ -11,15 +11,29 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/config/moderation)
         && request.auth.token.email in firestore.get(/databases/(default)/documents/config/moderation).data.moderatorEmails;
     }
+    function isAllowedProfileImageName(fileName) {
+      return fileName == 'avatar.jpg' || fileName == 'header.jpg';
+    }
+    function isValidProfileImageUpload(fileName) {
+      return isAllowedProfileImageName(fileName)
+        && request.resource != null
+        && request.resource.contentType == 'image/jpeg'
+        && request.resource.size <= 350 * 1024;
+    }
 
     match /uploads/{userId}/{allPaths=**} {
       allow read: if isModerator() || (request.auth != null && request.auth.uid == userId);
       allow write: if isVerifiedUser() && request.auth.uid == userId;
     }
 
-    match /claimProofs/{requestId}/{userId}.png {
-      allow read: if isModerator() || (request.auth != null && request.auth.uid == userId);
-      allow write: if isVerifiedUser() && request.auth.uid == userId;
+    match /claimProofs/{requestId}/{fileName} {
+      allow read: if isModerator() || (request.auth != null && fileName == request.auth.uid + '.png');
+      allow write: if isVerifiedUser() && fileName == request.auth.uid + '.png';
+    }
+
+    match /profileImages/{userId}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if isVerifiedUser() && request.auth.uid == userId && isValidProfileImageUpload(fileName);
     }
 
     match /{allPaths=**} {

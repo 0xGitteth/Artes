@@ -3877,7 +3877,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                   onClick={() =>
                     setProfileData((prev) => ({
                       ...prev,
-                      preferences: {
+       preferences: {
                         ...prev.preferences,
                         theme: opt.id,
                       },
@@ -3912,7 +3912,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                         onClick={() =>
                           setProfileData((prev) => ({
                             ...prev,
-                            preferences: {
+       preferences: {
                               ...prev.preferences,
                               triggerVisibility: {
                                 ...prev.preferences?.triggerVisibility,
@@ -7821,6 +7821,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
   const [saveError, setSaveError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [cropSource, setCropSource] = useState('');
+  const [pendingCroppedImages, setPendingCroppedImages] = useState(null);
   const headerMeasureRef = useRef(null);
   const [headerAspectRatio, setHeaderAspectRatio] = useState(3);
   const selectedRoles = formData.roles || [];
@@ -7838,6 +7839,10 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
   );
   const handleSave = async () => {
      setSaveError(null);
+     if (cropSource) {
+       setSaveError('Je hebt een nieuwe foto gekozen. Klik eerst op "Gebruik uitsnede" voordat je opslaat.');
+       return;
+     }
      setIsSaving(true);
      const quickProfilePostIds = Array.from(new Set(manualPostIds));
      const payload = {
@@ -7850,6 +7855,8 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
        linkedCompanyId: formData.linkedCompanyId || null,
        quickProfilePreviewMode: formData.quickProfilePreviewMode || 'latest',
        quickProfilePostIds,
+       avatarBlob: pendingCroppedImages?.avatar === formData.avatar ? (pendingCroppedImages?.avatarBlob || null) : null,
+       headerImageBlob: pendingCroppedImages?.headerImage === formData.headerImage ? (pendingCroppedImages?.headerImageBlob || null) : null,
        preferences: {
          ...formData.preferences,
          triggerVisibility: normalizeTriggerPreferences(formData.preferences?.triggerVisibility),
@@ -7866,6 +7873,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
        await updateUserProfile(user.uid, payload);
        const normalized = normalizeProfileData({ ...profile, ...payload, uid: user.uid }, user.uid);
        onProfileUpdated?.(normalized);
+       setPendingCroppedImages(null);
        if (import.meta.env.DEV) {
          console.log('[EditProfileModal] Profile save completed, snapshot listener will update UI');
        }
@@ -7909,6 +7917,23 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
       };
     });
   };
+
+
+  useEffect(() => {
+    setPendingCroppedImages((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      if (prev.avatar && prev.avatar !== formData.avatar) {
+        next.avatar = null;
+        next.avatarBlob = null;
+      }
+      if (prev.headerImage && prev.headerImage !== formData.headerImage) {
+        next.headerImage = null;
+        next.headerImageBlob = null;
+      }
+      return next;
+    });
+  }, [formData.avatar, formData.headerImage]);
 
   const handleImageUpload = (event, key) => {
     const file = event.target.files?.[0];
@@ -8010,7 +8035,13 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                             className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
                             placeholder="https://"
                             value={formData.avatar || ''}
-                            onChange={(event) => setFormData({ ...formData, avatar: event.target.value })}
+                            onChange={(event) => {
+                              const nextAvatar = event.target.value;
+                              setFormData((prev) => ({ ...prev, avatar: nextAvatar }));
+                              setPendingCroppedImages((prev) => (prev?.avatar && prev.avatar !== nextAvatar
+                                ? { ...prev, avatarBlob: null, avatar: null }
+                                : prev));
+                            }}
                           />
                         )}
                         {formData.avatar && (
@@ -8019,7 +8050,10 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                             <button
                               type="button"
                               className="text-xs text-slate-500 hover:text-slate-700"
-                              onClick={() => setFormData({ ...formData, avatar: '' })}
+                              onClick={() => {
+                                setFormData((prev) => ({ ...prev, avatar: '' }));
+                                setPendingCroppedImages((prev) => (prev ? { ...prev, avatarBlob: null, avatar: null } : prev));
+                              }}
                             >
                               Verwijderen
                             </button>
@@ -8035,8 +8069,14 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                           source={cropSource}
                           measuredHeaderAspectRatio={headerAspectRatio}
                           onCancel={() => setCropSource('')}
-                          onApply={({ avatar, headerImage }) => {
+                          onApply={({ avatar, headerImage, avatarBlob, headerImageBlob, error }) => {
+                            if (error) {
+                              setSaveError(error);
+                              return;
+                            }
                             setFormData((prev) => ({ ...prev, avatar, headerImage }));
+                            setPendingCroppedImages({ avatarBlob, headerImageBlob, avatar, headerImage });
+                            setSaveError(null);
                             setCropSource('');
                           }}
                         />
@@ -8213,7 +8253,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                              onClick={() =>
                                setFormData((prev) => ({
                                  ...prev,
-                                 preferences: {
+       preferences: {
                                    ...prev.preferences,
                                    triggerVisibility: {
                                      ...prev.preferences?.triggerVisibility,

@@ -36,7 +36,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getStorage } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { SUPPORT_INTRO_TEXT } from './utils/supportChat';
 import { isCodexDevUser } from './utils/codexDevIdentity';
 import {
@@ -555,6 +555,19 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   );
 };
 
+
+const MAX_PROFILE_IMAGE_UPLOAD_BYTES = 350 * 1024;
+
+const uploadProfileImageBlob = async (uid, blob, targetName) => {
+  if (!(blob instanceof Blob)) return null;
+  if (blob.size > MAX_PROFILE_IMAGE_UPLOAD_BYTES) {
+    throw new Error('Profielfoto is te groot na verwerken. Kies een kleinere uitsnede en probeer opnieuw.');
+  }
+  const storageRef = ref(getFirebaseStorage(), `profileImages/${uid}/${targetName}`);
+  await uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg', cacheControl: 'public,max-age=3600' });
+  return getDownloadURL(storageRef);
+};
+
 const ONBOARDING_WRITE_KEYS = ['onboardingStep', 'onboardingComplete'];
 
 const hasOnboardingWriteKeys = (patch = {}) => ONBOARDING_WRITE_KEYS.some((key) => key in patch);
@@ -703,6 +716,28 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const safeData = stripClientGateFields(data);
+  const avatarBlob = safeData.avatarBlob instanceof Blob ? safeData.avatarBlob : null;
+  const headerImageBlob = safeData.headerImageBlob instanceof Blob ? safeData.headerImageBlob : null;
+  delete safeData.avatarBlob;
+  delete safeData.headerImageBlob;
+
+  if (safeData.avatar && String(safeData.avatar).startsWith('data:')) delete safeData.avatar;
+  if (safeData.headerImage && String(safeData.headerImage).startsWith('data:')) delete safeData.headerImage;
+
+  if (avatarBlob || headerImageBlob) {
+    const [avatarUrl, headerImageUrl] = await Promise.all([
+      avatarBlob ? uploadProfileImageBlob(resolvedUid, avatarBlob, 'avatar.jpg') : null,
+      headerImageBlob ? uploadProfileImageBlob(resolvedUid, headerImageBlob, 'header.jpg') : null,
+    ]);
+    if (avatarUrl) {
+      safeData.avatar = avatarUrl;
+      safeData.photoURL = avatarUrl;
+    }
+    if (headerImageUrl) {
+      safeData.headerImage = headerImageUrl;
+    }
+  }
+
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
   const userDocPath = `users/${resolvedUid}`;
   const publicDocPath = `publicUsers/${resolvedUid}`;

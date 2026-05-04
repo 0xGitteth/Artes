@@ -6892,7 +6892,6 @@ function UploadModal({
     };
 
     if (!image) validationErrors.image = 'Voeg een afbeelding toe.';
-    if (!title.trim()) validationErrors.title = 'Titel ontbreekt. Voeg een titel toe.';
     if (selectedStyles.length === 0) validationErrors.styles = 'Thema ontbreekt. Kies minstens één thema.';
     const missingRequiredThemes = getMissingRequiredThemes(requiredThemes);
     if (missingRequiredThemes.length > 0) validationErrors.moderation = `Voeg eerst thema toe: ${missingRequiredThemes.join(', ')}.`;

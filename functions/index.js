@@ -16,6 +16,9 @@ import {
   normalizeDomain,
 } from './websiteClaimProof.js';
 import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.js';
+import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
+import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
+import { canPublishUpload, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -3046,6 +3049,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
     const {
       reviewCaseId,
       decision,
+      action,
       reasonCode,
       decisionMessagePublic,
       decisionReasons = [],
@@ -3079,6 +3083,18 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       res.status(400).json({ error: `Invalid reasonCode for action ${normalizedAction}` });
       return;
     }
+    const normalizedModeratorAction = normalizeModeratorDecisionAction(action, normalizedDecision);
+    if (!normalizedModeratorAction) {
+      res.status(400).json({ error: 'Invalid action' });
+      return;
+    }
+    const taxonomyValidation = validateCorrectedTaxonomyForAction(normalizedModeratorAction, body?.correctedTaxonomy || {});
+    if (!taxonomyValidation.isValid) {
+      res.status(400).json({ error: 'correctedTaxonomy is required for correction actions' });
+      return;
+    }
+    const correctedThemes = taxonomyValidation.themes;
+    const correctedTriggers = taxonomyValidation.triggers;
     const trimmedMessage = String(decisionMessagePublic || '').trim();
     if (!trimmedMessage) {
       res.status(400).json({ error: 'decisionMessagePublic is required' });
@@ -3113,6 +3129,13 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       }
       const data = snapshot.data();
       reviewSnapshotData = data;
+      const caseForbidden = data?.aiResult?.outcome === 'forbidden' || data?.outcome === 'forbidden';
+      const isAllowedOverride = normalizedReasonCode === 'wrong_theme_or_label' && Boolean(moderatorNoteInternal);
+      if (caseForbidden && normalizedDecision === 'approved' && !isAllowedOverride) {
+        const error = new Error('Forbidden content requires explicit override path with reasonCode and audit note');
+        error.status = 400;
+        throw error;
+      }
       caseType = data?.caseType || 'upload';
       const reportedPost = data?.reportedPost || null;
       reportPostId = reportedPost?.id || data?.reportedPostId || null;
@@ -3160,14 +3183,18 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         const uploadSnapshot = await transaction.get(uploadRef);
         uploadSnapshotData = uploadSnapshot.exists ? (uploadSnapshot.data() || null) : null;
         const isApproved = normalizedDecision === 'approved';
+        const requiresUploaderAcceptance = normalizedModeratorAction === 'requestUserCorrection';
+        const uploadReviewStatus = requiresUploaderAcceptance ? 'needs_user_correction' : normalizedDecision;
         transaction.update(uploadRef, {
-          reviewStatus: normalizedDecision,
+          reviewStatus: uploadReviewStatus,
           reviewDecisionMessagePublic: finalDecisionMessage,
           reviewDecisionReasons: decisionReasons,
           reviewDecisionAt: FieldValue.serverTimestamp(),
-          publicationStatus: isApproved ? 'pending' : 'blocked',
+          publicationStatus: isApproved ? (requiresUploaderAcceptance ? 'needs_user_correction' : 'pending') : 'blocked',
           approvedAt: isApproved ? FieldValue.serverTimestamp() : FieldValue.delete(),
           reviewCaseId,
+          correctedTaxonomy: (correctedThemes.length || correctedTriggers.length) ? { themes: correctedThemes, triggers: correctedTriggers } : FieldValue.delete(),
+          requiresUploaderAcceptance: normalizedModeratorAction === 'requestUserCorrection',
         });
       }
 
@@ -3179,6 +3206,15 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         decidedAt: FieldValue.serverTimestamp(),
         decidedByUid: decoded.uid,
         decidedByEmail: email,
+        moderatorDecision: {
+          action: normalizedModeratorAction,
+          reasonCode: normalizedReasonCode,
+          correctedTaxonomy: { themes: correctedThemes, triggers: correctedTriggers },
+          requiresUploaderAcceptance: normalizedModeratorAction === 'requestUserCorrection',
+          finalPolicyOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
+          decidedAt: FieldValue.serverTimestamp(),
+          decidedBy: decoded.uid,
+        },
         lock: FieldValue.delete(),
       };
       if (uploadId) {
@@ -3218,6 +3254,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
           suggestedTriggers: Array.isArray(aiResult?.suggestedTriggers) ? aiResult.suggestedTriggers : [],
           forbiddenReasons: Array.isArray(aiResult?.forbiddenReasons) ? aiResult.forbiddenReasons : [],
           requiredThemes: Array.isArray(aiResult?.requiredThemes) ? aiResult.requiredThemes : [],
+          suggestedThemes: Array.isArray(aiResult?.suggestedThemes) ? aiResult.suggestedThemes : [],
           adultDecision: moderationSignals?.adultDecision ?? null,
           sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
           geminiDiagnostics: aiResult?.geminiDiagnostics || null,
@@ -3237,9 +3274,11 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
           } : null,
         },
         moderatorDecision: {
-          action: normalizedAction,
+          action: normalizedModeratorAction,
           finalOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
           reasonCode: normalizedReasonCode,
+          correctedTaxonomy: { themes: correctedThemes, triggers: correctedTriggers },
+          requiresUploaderAcceptance: normalizedModeratorAction === 'requestUserCorrection',
           notes: moderatorNoteInternal || null,
           decidedBy: decoded.uid,
           decidedAt: FieldValue.serverTimestamp(),
@@ -3600,11 +3639,11 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const { messageId, uploadId, action, postDraft: postDraftFromBody } = body || {};
-    if (!uploadId || !action || (action !== 'repairPublished' && !messageId)) {
-      res.status(400).json({ error: 'uploadId and action are required (messageId required unless repairPublished)' });
+    if (!uploadId || !action || (requiresMessageIdForAction(action) && !messageId)) {
+      res.status(400).json({ error: 'uploadId and action are required (messageId required for this action)' });
       return;
     }
-    if (!['publishNow', 'saveDraft', 'dismiss', 'repairPublished'].includes(action)) {
+    if (!['publishNow', 'saveDraft', 'dismiss', 'repairPublished', 'acceptCorrection', 'rejectCorrection'].includes(action)) {
       res.status(400).json({ error: 'Invalid action' });
       return;
     }
@@ -3639,7 +3678,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       return;
     }
 
-    const isApprovedOrLegacyPublished = upload?.reviewStatus === 'approved' || upload?.publicationStatus === 'published';
+    const isApprovedOrLegacyPublished = canPublishUpload(upload);
     if ((action === 'publishNow' || action === 'repairPublished') && !isApprovedOrLegacyPublished) {
       res.status(409).json({ error: 'Upload is not approved' });
       return;
@@ -3647,6 +3686,78 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     if (action === 'saveDraft' && upload?.reviewStatus !== 'approved') {
       res.status(409).json({ error: 'Upload is not approved' });
       return;
+    }
+
+
+
+    if (action === 'acceptCorrection' || action === 'rejectCorrection') {
+      const validation = validateUploaderCorrectionAction({ action, upload, userId });
+      if (!validation.ok) {
+        res.status(validation.status || 400).json({ error: validation.error });
+        return;
+      }
+      const { correctedTaxonomy } = validation;
+      const reviewCaseId = upload?.reviewCaseId || null;
+      const moderationExampleId = `${reviewCaseId || uploadId}_uploaderCorrection`;
+      const nextCorrection = {
+        ...(upload?.correction && typeof upload.correction === 'object' ? upload.correction : {}),
+        suggestedThemes: correctedTaxonomy.themes,
+        suggestedTriggers: correctedTaxonomy.triggers,
+      };
+      if (action === 'acceptCorrection') {
+        nextCorrection.userAcceptedAt = FieldValue.serverTimestamp();
+        nextCorrection.userRejectedAt = null;
+        nextCorrection.requiresModeratorReview = false;
+        nextCorrection.publishBlocked = false;
+        nextCorrection.finalAcceptedThemes = correctedTaxonomy.themes;
+        nextCorrection.finalAcceptedTriggers = correctedTaxonomy.triggers;
+      } else {
+        nextCorrection.userRejectedAt = FieldValue.serverTimestamp();
+        nextCorrection.requiresModeratorReview = true;
+        nextCorrection.publishBlocked = true;
+        nextCorrection.reviewRequestedAt = FieldValue.serverTimestamp();
+      }
+
+      await uploadRef.set({
+        correctedTaxonomy,
+        uploaderCorrectionResponse: action === 'acceptCorrection'
+          ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
+          : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
+        correction: nextCorrection,
+        publicationStatus: action === 'acceptCorrection' ? 'correction_accepted' : 'user_disagreed',
+        reviewStatus: action === 'acceptCorrection' ? 'approved' : 'needs_user_correction',
+        requiresUploaderAcceptance: action === 'acceptCorrection' ? false : true,
+        ...(action === 'acceptCorrection' ? {
+          postDraft: {
+            ...(upload?.postDraft || {}),
+            styles: correctedTaxonomy.themes,
+            makerTags: correctedTaxonomy.triggers,
+            appliedTriggers: correctedTaxonomy.triggers,
+          },
+        } : {}),
+      }, { merge: true });
+
+      await db.collection('moderationExamples').doc(moderationExampleId).set({
+        uploadId,
+        reviewCaseId,
+        source: 'userModerationAction',
+        uploaderCorrectionResponse: action === 'acceptCorrection'
+          ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
+          : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
+        moderatorDecision: {
+          action: upload?.moderatorDecision?.action || null,
+          reasonCode: upload?.moderatorDecision?.reasonCode || null,
+          correctedTaxonomy,
+        },
+        correction: {
+          originalSelectedThemes: Array.isArray(upload?.postDraft?.styles) ? upload.postDraft.styles : [],
+          originalSelectedTriggers: Array.isArray(upload?.postDraft?.makerTags) ? upload.postDraft.makerTags : [],
+          finalAcceptedThemes: action === 'acceptCorrection' ? correctedTaxonomy.themes : [],
+          finalAcceptedTriggers: action === 'acceptCorrection' ? correctedTaxonomy.triggers : [],
+        },
+        decidedAt: FieldValue.serverTimestamp(),
+        decidedBy: userId,
+      }, { merge: true });
     }
 
     if (action === 'publishNow' || action === 'repairPublished') {
@@ -3701,7 +3812,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
           error.status = 403;
           throw error;
         }
-        const latestApprovedOrLegacyPublished = latestUpload?.reviewStatus === 'approved' || latestUpload?.publicationStatus === 'published';
+        const latestApprovedOrLegacyPublished = canPublishUpload(latestUpload);
         if (!latestApprovedOrLegacyPublished) {
           const error = new Error('Upload is not approved');
           error.status = 409;
@@ -5195,3 +5306,4 @@ export const config = {
 export { ensureSupportThread, ensureModerationThread } from "./supportChat.js";
 export { createDiditSession, refreshDiditSession, diditWebhook };
 export { deleteOnboardingAccount } from "./accountLifecycle.js";
+    

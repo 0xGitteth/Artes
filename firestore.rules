@@ -76,7 +76,8 @@ service cloud.firestore {
       return !('correction' in data)
         || (
           data.correction is map
-          && (!('type' in data.correction) || isAllowedCorrectionType(data.correction.type))
+          && ('type' in data.correction)
+          && isAllowedCorrectionType(data.correction.type)
           && (!('requiresModeratorReview' in data.correction) || data.correction.requiresModeratorReview is bool)
           && (!('publishBlocked' in data.correction) || data.correction.publishBlocked is bool)
           && (!('userAcceptedAt' in data.correction) || data.correction.userAcceptedAt is timestamp || data.correction.userAcceptedAt == null)
@@ -85,15 +86,11 @@ service cloud.firestore {
               ? (
                 (!('requiresModeratorReview' in data.correction) || data.correction.requiresModeratorReview == false)
                 && (!('publishBlocked' in data.correction) || data.correction.publishBlocked == false)
-                && ('userAcceptedAt' in data.correction && data.correction.userAcceptedAt != null)
+                && ('userAcceptedAt' in data.correction)
+                && data.correction.userAcceptedAt is timestamp
+                && data.correction.userAcceptedAt != null
               )
-              : (
-                data.correction.type == 'sensitiveCorrection'
-                || data.correction.type == 'reviewRequiredCorrection'
-                || data.correction.type == 'noCorrectionForbidden'
-              )
-                ? false
-                : true
+              : false
           )
         );
     }
@@ -140,18 +137,22 @@ service cloud.firestore {
         ]);
     }
     function keepsPostModerationFieldsOnUpdate() {
-      return (('correction' in resource.data)
-        ? (('correction' in request.resource.data) && request.resource.data.correction is map)
-        : true)
-        && request.resource.data.diff(resource.data).affectedKeys().hasAny(['outcome', 'shouldReview', 'correction'])
-        ? (
-          ('outcome' in request.resource.data)
-          && ('shouldReview' in request.resource.data)
-          && request.resource.data.outcome == 'allowed'
-          && request.resource.data.shouldReview == false
-          && isCorrectionPublishAllowed(request.resource.data)
-        )
-        : true;
+      let diff = request.resource.data.diff(resource.data);
+      let touchesModeration = diff.affectedKeys().hasAny(['outcome', 'shouldReview', 'correction']);
+      let keepsExistingCorrection = !('correction' in resource.data)
+        || (('correction' in request.resource.data) && request.resource.data.correction is map);
+
+      return keepsExistingCorrection
+        && (
+          !touchesModeration
+          || (
+            ('outcome' in request.resource.data)
+            && ('shouldReview' in request.resource.data)
+            && request.resource.data.outcome == 'allowed'
+            && request.resource.data.shouldReview == false
+            && isCorrectionPublishAllowed(request.resource.data)
+          )
+        );
     }
 
     match /config/moderation {

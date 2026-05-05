@@ -8,6 +8,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  Timestamp,
   updateDoc,
   deleteDoc,
   deleteField,
@@ -327,6 +328,7 @@ async function run() {
 
     await assertSucceeds(deleteDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId)));
 
+    const acceptedAtTs = Timestamp.fromDate(new Date());
     const basePost = {
       authorId: ownerUid,
       title: 'Taxonomy post',
@@ -340,7 +342,7 @@ async function run() {
         type: 'safeCorrection',
         requiresModeratorReview: false,
         publishBlocked: false,
-        userAcceptedAt: new Date(),
+        userAcceptedAt: acceptedAtTs,
       },
     };
 
@@ -372,6 +374,17 @@ async function run() {
         publishBlocked: false,
         userAcceptedAt: null,
       },
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'safe_correction_iso_accept_denied'), {
+      ...basePost,
+      correction: {
+        ...basePost.correction,
+        userAcceptedAt: new Date().toISOString(),
+      },
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'empty_correction_denied'), {
+      ...basePost,
+      correction: {},
     }));
 
     await assertFails(setDoc(doc(ownerDb, 'posts', 'sensitive_correction_blocked'), {
@@ -452,6 +465,18 @@ async function run() {
 
     await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
       correction: null,
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      correction: deleteField(),
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      correction: {},
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      correction: {
+        ...basePost.correction,
+        userAcceptedAt: new Date().toISOString(),
+      },
     }));
 
     await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {

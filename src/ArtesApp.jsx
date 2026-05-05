@@ -73,6 +73,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  Timestamp,
   serverTimestamp,
   startAt,
   writeBatch,
@@ -6513,7 +6514,7 @@ function UploadModal({
     const nextTriggers = Array.from(new Set((taxonomyCorrection.suggestedTriggers || []).map(resolveTriggerKey).filter(Boolean)));
     setSelectedStyles(nextThemes);
     setMakerTags(nextTriggers);
-    setCorrectionAcceptedAt(new Date().toISOString());
+    setCorrectionAcceptedAt(Timestamp.now());
     setOutcome('allowed');
     setShouldReview(false);
     setTaxonomyCorrection((prev) => (prev ? {
@@ -6993,7 +6994,7 @@ function UploadModal({
       }
 
       setReviewRequested(true);
-      setCorrectionReviewRequestedAt(new Date().toISOString());
+      setCorrectionReviewRequestedAt(Timestamp.now());
     } catch (error) {
       setReviewRequested(false);
       setAiError(error?.message || 'Reviewverzoek versturen mislukt. Probeer opnieuw.');

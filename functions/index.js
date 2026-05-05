@@ -18,6 +18,7 @@ import {
 import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.js';
 import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
+import { canPublishUpload, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -3183,8 +3184,9 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         uploadSnapshotData = uploadSnapshot.exists ? (uploadSnapshot.data() || null) : null;
         const isApproved = normalizedDecision === 'approved';
         const requiresUploaderAcceptance = normalizedModeratorAction === 'requestUserCorrection';
+        const uploadReviewStatus = requiresUploaderAcceptance ? 'needs_user_correction' : normalizedDecision;
         transaction.update(uploadRef, {
-          reviewStatus: normalizedDecision,
+          reviewStatus: uploadReviewStatus,
           reviewDecisionMessagePublic: finalDecisionMessage,
           reviewDecisionReasons: decisionReasons,
           reviewDecisionAt: FieldValue.serverTimestamp(),
@@ -3637,8 +3639,8 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const { messageId, uploadId, action, postDraft: postDraftFromBody } = body || {};
-    if (!uploadId || !action || (action !== 'repairPublished' && !messageId)) {
-      res.status(400).json({ error: 'uploadId and action are required (messageId required unless repairPublished)' });
+    if (!uploadId || !action || (requiresMessageIdForAction(action) && !messageId)) {
+      res.status(400).json({ error: 'uploadId and action are required (messageId required for this action)' });
       return;
     }
     if (!['publishNow', 'saveDraft', 'dismiss', 'repairPublished', 'acceptCorrection', 'rejectCorrection'].includes(action)) {
@@ -3676,7 +3678,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       return;
     }
 
-    const isApprovedOrLegacyPublished = upload?.reviewStatus === 'approved' || upload?.publicationStatus === 'published';
+    const isApprovedOrLegacyPublished = canPublishUpload(upload);
     if ((action === 'publishNow' || action === 'repairPublished') && !isApprovedOrLegacyPublished) {
       res.status(409).json({ error: 'Upload is not approved' });
       return;
@@ -3723,6 +3725,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
           : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
         correction: nextCorrection,
         publicationStatus: action === 'acceptCorrection' ? 'correction_accepted' : 'user_disagreed',
+        reviewStatus: action === 'acceptCorrection' ? 'approved' : 'needs_user_correction',
         requiresUploaderAcceptance: action === 'acceptCorrection' ? false : true,
         ...(action === 'acceptCorrection' ? {
           postDraft: {
@@ -3809,7 +3812,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
           error.status = 403;
           throw error;
         }
-        const latestApprovedOrLegacyPublished = latestUpload?.reviewStatus === 'approved' || latestUpload?.publicationStatus === 'published';
+        const latestApprovedOrLegacyPublished = canPublishUpload(latestUpload);
         if (!latestApprovedOrLegacyPublished) {
           const error = new Error('Upload is not approved');
           error.status = 409;

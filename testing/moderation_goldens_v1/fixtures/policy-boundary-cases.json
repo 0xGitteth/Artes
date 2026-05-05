@@ -1,0 +1,50 @@
+[
+  {
+    "id": "BOUDOIR_ALLOWED_01",
+    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": ["adultEroticSuggestive"] },
+    "vision": { "safeSearch": { "adult": "UNLIKELY", "racy": "POSSIBLE" }, "labels": ["Lingerie", "Portrait"] },
+    "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.18, "explicitSexualAct": false, "visibleGenitalia": false }
+  },
+  {
+    "id": "BOUDOIR_WEAK_SIGNAL_01",
+    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": ["adultEroticSuggestive"] },
+    "vision": { "safeSearch": { "adult": "POSSIBLE", "racy": "LIKELY" }, "labels": ["Lingerie"] },
+    "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.2, "explicitSexualAct": false, "visibleGenitalia": false }
+  },
+  {
+    "id": "BOUDOIR_WRONG_VISION_LABEL_01",
+    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "UNLIKELY", "racy": "POSSIBLE" }, "labels": ["Spider", "Insect"] },
+    "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.12, "explicitSexualAct": false, "visibleGenitalia": false }
+  },
+  {
+    "id": "ART_NUDE_BORDERLINE_01",
+    "uploaderTaxonomy": { "themes": ["FigureStudy"], "triggers": ["adultArtNude"] },
+    "vision": { "safeSearch": { "adult": "LIKELY", "racy": "LIKELY" }, "labels": ["Art", "Nude"] },
+    "ai": { "adultDecision": "borderline", "sexualExplicitConfidence": 0.44, "explicitSexualAct": false, "visibleGenitalia": true }
+  },
+  {
+    "id": "EXPLICIT_FORBIDDEN_01",
+    "uploaderTaxonomy": { "themes": ["Portrait"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "VERY_LIKELY", "racy": "VERY_LIKELY" }, "labels": ["Adult", "Sex"] },
+    "ai": { "adultDecision": "explicit", "sexualExplicitConfidence": 0.94, "explicitSexualAct": true, "visibleGenitalia": true }
+  },
+  {
+    "id": "WRONG_HARMLESS_TAXONOMY_01",
+    "uploaderTaxonomy": { "themes": ["Landscape"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY" }, "labels": ["Portrait"] },
+    "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.05, "explicitSexualAct": false, "visibleGenitalia": false, "suggestedThemes": ["Portrait"] }
+  },
+  {
+    "id": "WRONG_SENSITIVE_TAXONOMY_01",
+    "uploaderTaxonomy": { "themes": ["Landscape"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "LIKELY", "racy": "VERY_LIKELY" }, "labels": ["Lingerie"] },
+    "ai": { "adultDecision": "borderline", "sexualExplicitConfidence": 0.55, "explicitSexualAct": false, "visibleGenitalia": false, "suggestedTriggers": ["adultEroticSuggestive"] }
+  },
+  {
+    "id": "AI_LABEL_RENDERING_01",
+    "uploaderTaxonomy": { "themes": ["Portrait"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "UNLIKELY", "racy": "UNLIKELY" }, "labels": ["Person", "Studio"] },
+    "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.1, "explicitSexualAct": false, "visibleGenitalia": false, "suggestedThemes": ["Boudoir"], "suggestedTriggers": ["adultEroticSuggestive"] }
+  }
+]

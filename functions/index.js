@@ -20,6 +20,7 @@ import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } 
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
+import { composeModerationPolicyResult } from './moderationPolicy.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -1665,35 +1666,35 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
   }
 
-  const cachedAppliedTriggers = normalizeArray(cachedResult?.appliedTriggers);
-  const cachedSuggestedTriggers = normalizeArray(cachedResult?.suggestedTriggers);
-  const cachedForbiddenReasons = normalizeArray(cachedResult?.forbiddenReasons);
-  if (cachedResult) {
-    aiSafetySignals.push(...normalizeArray(cachedResult?.aiSafetySignals));
-  }
-  const aiVisionLabels = cachedResult
-    ? normalizeArray(cachedResult?.aiVisionLabels)
-    : labels.map((label) => label?.description).filter(Boolean);
-  if (cachedResult && !aiSafetySignals.length) {
-    [...cachedAppliedTriggers, ...cachedSuggestedTriggers, ...cachedForbiddenReasons].forEach((item) => {
-      const trigger = extractTriggerKey(item);
-      if (isRawVisionDerivedRecord(item) || isVisionDiagnosticOnlyTrigger(trigger)) {
-        aiSafetySignals.push({ signal: trigger, score: Number(item?.score) || 0, source: 'cachedLegacy' });
-      }
-    });
-  }
-  const finalAppliedTriggersRaw = cachedResult
-    ? [...cachedAppliedTriggers, ...appliedTriggers.filter((item) =>
-        !cachedAppliedTriggers.some((cached) => cached?.trigger === item?.trigger && cached?.source === item?.source)
-      )]
-    : normalizeArray(appliedTriggers);
-  const finalAppliedTriggers = sanitizeRawVisionDerivedRecords(finalAppliedTriggersRaw);
-  const finalSuggestedTriggersRaw = cachedResult ? cachedSuggestedTriggers : normalizeArray(suggestedTriggers);
-  const finalSuggestedTriggers = sanitizeRawVisionDerivedRecords(finalSuggestedTriggersRaw);
-  const finalForbiddenReasonsRaw = cachedResult ? cachedForbiddenReasons : normalizeArray(forbiddenReasons);
-  const finalPolicyAppliedTriggers = sanitizeRawVisionDerivedRecords(finalAppliedTriggers);
-  const finalForbiddenReasons = sanitizeRawVisionDerivedRecords(finalForbiddenReasonsRaw);
-  let reviewCaseId = cachedResult?.reviewCaseId || null;
+  const policyResult = composeModerationPolicyResult({
+    cachedResult,
+    appliedTriggers,
+    suggestedTriggers,
+    forbiddenReasons,
+    aiSafetySignals,
+    rawVisionLabels: labels.map((label) => label?.description).filter(Boolean),
+    normalizedThemes,
+    normalizedMakerTags,
+    geminiAdultDecision,
+    geminiSexualExplicitConfidence,
+    explicitDecisionBranchHit,
+    explicitDecisionAddedForbiddenReason,
+    shouldRouteByPreviousExample,
+    matchedModerationExample,
+    safeSearchAdultScore: safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0,
+    safeSearchNudityScore: safeSearch ? scoreFromLikelihood(safeSearch.racy) : 0,
+    forbiddenThreshold,
+    mediumLogThreshold,
+    geminiDiagnostics,
+  });
+
+  const finalAppliedTriggers = policyResult.appliedTriggers;
+  const finalSuggestedTriggers = policyResult.suggestedTriggers;
+  const finalForbiddenReasons = policyResult.forbiddenReasons;
+  const finalPolicyAppliedTriggers = policyResult.policyAppliedTriggers;
+  const aiVisionLabels = policyResult.aiVisionLabels;
+  aiSafetySignals = policyResult.aiSafetySignals;
+  let reviewCaseId = policyResult.reviewCaseId;
   let canRequestReview = false;
   let openReviewCase = null;
   let inCooldown = false;
@@ -1738,27 +1739,16 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
                 triggers: finalSuggestedTriggers,
               },
               aiSafetySignals,
-              aiVisionLabels: labels.map((label) => label?.description).filter(Boolean),
+              aiVisionLabels,
               policyAppliedTriggers: finalPolicyAppliedTriggers,
-              moderationSignals: {
-                adultDecision: geminiAdultDecision,
-                sexualExplicitConfidence: geminiSexualExplicitConfidence,
-                explicitDecisionBranchHit,
-                explicitDecisionAddedForbiddenReason,
-              },
+              moderationSignals: policyResult.moderationSignals,
             }),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
           });
           reviewCaseId = reviewRef.id;
           reviewCreated = true;
-          await userModeration.ref.set(
-            {
-              openReviewCount: 1,
-              updatedAt: FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
+          await userModeration.ref.set({ openReviewCount: 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
         }
       }
     } catch (error) {
@@ -1766,133 +1756,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
   }
 
-  if (userId && shouldRouteByPreviousExample && !reviewCaseId) {
-    try {
-      openReviewCase = openReviewCase || await findOpenReviewCase(userId);
-      if (openReviewCase) {
-        reviewCaseId = openReviewCase.id;
-        reviewCreated = true;
-      } else {
-        const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-        const reviewRef = await db.collection('reviewCases').add({
-          caseType: 'upload',
-          userId,
-          status: 'inReview',
-          decision: null,
-          fingerprints: [fingerprints],
-          linkedUploadIds: [],
-          reviewReason: 'previousModeratorExampleExactMatch',
-          previousModeratorExample: {
-            exampleId: matchedModerationExample.id,
-            matchedFingerprintType: 'sha256',
-          },
-          ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-        reviewCaseId = reviewRef.id;
-        reviewCreated = true;
-      }
-    } catch (error) {
-      logger.error('Review case voor previous moderator example mislukt.', error);
-    }
-  }
-
   canRequestReview = finalForbiddenReasons.length > 0 && !inCooldown && !openReviewCase && !reviewCreated;
 
-  if (reviewCaseId && userId && !openReviewCase) {
-    try {
-      const reviewSnapshot = await db.collection('reviewCases').doc(reviewCaseId).get();
-      if (reviewSnapshot.exists) {
-        const reviewData = reviewSnapshot.data();
-        const rejectedReview = reviewData?.status === 'rejected'
-          || (reviewData?.status === 'resolved' && reviewData?.decision === 'rejected');
-        if (rejectedReview && userModeration) {
-          const newFalseAppealCount = Number(userModeration.data?.falseAppealCount ?? 0) + 1;
-          const shouldCooldown = newFalseAppealCount >= falseAppealThreshold;
-          await userModeration.ref.set(
-            {
-              falseAppealCount: newFalseAppealCount,
-              cooldownUntil: shouldCooldown
-                ? new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000)
-                : userModeration.data?.cooldownUntil || null,
-              updatedAt: FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
-        }
-      }
-    } catch (error) {
-      logger.error('Review case cooldown update mislukt.', error);
-    }
-  }
-
-  const hasSexualExplicitReason = finalForbiddenReasons.some((reason) => reason?.trigger === INTERNAL_SEXUAL_EXPLICIT_TRIGGER);
-  const hasReportedContentReason = finalForbiddenReasons.some((reason) => reason?.trigger === 'reportedContent');
-  const hasArtNudeTrigger = finalPolicyAppliedTriggers.some((item) => item.trigger === ADULT_ART_NUDE_TRIGGER);
-  const hasEroticSuggestiveTrigger = finalPolicyAppliedTriggers.some((item) => item.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER);
-  const hasManualEroticSuggestiveTag = normalizedMakerTags.includes(ADULT_EROTIC_SUGGESTIVE_TRIGGER);
-  const hasGeminiEroticSuggestiveSignal = finalSuggestedTriggers.some((item) => item?.trigger === ADULT_EROTIC_SUGGESTIVE_TRIGGER && item?.source === 'gemini');
-  const hasGeminiExplicitDecision = geminiAdultDecision === 'explicit';
-  const hasGeminiAdultSupportSignal = geminiAdultDecision === 'adult';
-  const hasStrongEroticSuggestiveCorroboration = hasEroticSuggestiveTrigger
-    || hasManualEroticSuggestiveTag
-    || hasGeminiEroticSuggestiveSignal
-    || hasGeminiAdultSupportSignal;
-  const safeSearchNudityScore = safeSearch ? scoreFromLikelihood(safeSearch.racy) : 0;
-  const safeSearchAdultScore = safeSearch ? scoreFromLikelihood(safeSearch.adult) : 0;
-  const hasGeminiForbiddenSignal = finalForbiddenReasons.some((reason) => reason?.trigger === 'gemini' || reason?.trigger === 'gemini_uncertain_fallback');
-  const hasGeminiUncertainFallbackSuggestion = finalSuggestedTriggers.some((item) => item?.trigger === 'gemini_uncertain_fallback');
-  const hasMixedAdultSignals = safeSearchAdultScore >= forbiddenThreshold && safeSearchNudityScore >= mediumLogThreshold;
-  const shouldEscalateToUncertain = !hasSexualExplicitReason && (hasGeminiForbiddenSignal || hasGeminiUncertainFallbackSuggestion || hasMixedAdultSignals);
-
-  let classification = 'allowed_general';
-  if (hasSexualExplicitReason || hasReportedContentReason) {
-    classification = 'disallowed_sexual_explicit';
-  } else if (shouldEscalateToUncertain || hasGeminiExplicitDecision) {
-    classification = 'uncertain_possible_explicit';
-  } else if (hasArtNudeTrigger || normalizedThemes.includes(ART_NUDE_THEME)) {
-    classification = 'allowed_adult_art_nude';
-  } else if (hasStrongEroticSuggestiveCorroboration) {
-    classification = 'allowed_adult_erotic_suggestive';
-  }
-
-  const requiredThemes = [];
-  if (classification === 'allowed_adult_art_nude' && !normalizedThemes.includes(ART_NUDE_THEME)) {
-    requiredThemes.push(ART_NUDE_THEME);
-  }
-
-  const autoAppliedTriggers = [];
-  if (classification === 'allowed_adult_art_nude') {
-    autoAppliedTriggers.push(ADULT_ART_NUDE_TRIGGER);
-  } else if (classification === 'allowed_adult_erotic_suggestive' || classification === 'uncertain_possible_explicit') {
-    autoAppliedTriggers.push(ADULT_EROTIC_SUGGESTIVE_TRIGGER);
-  }
-
-  const shouldReview = classification === 'uncertain_possible_explicit';
-  const hasTaxonomyMismatch = requiredThemes.length > 0;
-  const hasStrongForbiddenReason = hasSexualExplicitReason || hasReportedContentReason;
-  const shouldNeedsCorrection = !hasStrongForbiddenReason && !shouldReview && hasTaxonomyMismatch;
-  const outcome = hasStrongForbiddenReason
-    ? 'forbidden'
-    : shouldReview
-      ? 'review'
-      : shouldNeedsCorrection
-        ? 'needsCorrection'
-        : 'allowed';
-  const previousModeratorExample = matchedModerationExample?.data
-    ? {
-        exampleId: matchedModerationExample.id,
-        matchedFingerprintType: 'sha256',
-        action: matchedModerationExample.data?.moderatorDecision?.action || null,
-        finalOutcome: matchedModerationExample.data?.moderatorDecision?.finalOutcome || null,
-        reasonCode: matchedModerationExample.data?.moderatorDecision?.reasonCode || null,
-        decidedAt: matchedModerationExample.data?.moderatorDecision?.decidedAt || null,
-        policyVersion: matchedModerationExample.data?.provenance?.policyVersion || null,
-      }
-    : null;
-  const shouldReviewWithPreviousExample = shouldReview || shouldRouteByPreviousExample;
-  const effectiveShouldReview = shouldReviewWithPreviousExample;
+  const previousModeratorExample = policyResult.previousModeratorExample;
+  const effectiveShouldReview = policyResult.shouldReview;
+  const outcome = policyResult.outcome;
+  const requiredThemes = policyResult.requiredThemes;
+  const autoAppliedTriggers = policyResult.autoAppliedTriggers;
+  const classification = policyResult.classification;
   const userMessage = classification === 'disallowed_sexual_explicit'
     ? 'Deze publicatie is geblokkeerd: Pornografisch / Seksueel expliciet.'
     : requiredThemes.length > 0
@@ -1916,32 +1787,15 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     autoAppliedTriggers,
     shouldReview: effectiveShouldReview,
     userMessage,
-    moderationSignals: {
-      adultDecision: geminiAdultDecision,
-      sexualExplicitConfidence: geminiSexualExplicitConfidence,
-      explicitDecisionBranchHit,
-      explicitDecisionAddedForbiddenReason,
-    },
+    moderationSignals: policyResult.moderationSignals,
     geminiDiagnostics,
-    userSelectedTaxonomy: {
-      themes: normalizedThemes,
-      triggers: normalizedMakerTags,
-    },
-    aiSuggestedTaxonomy: {
-      triggers: finalSuggestedTriggers,
-    },
+    userSelectedTaxonomy: policyResult.userSelectedTaxonomy,
+    aiSuggestedTaxonomy: policyResult.aiSuggestedTaxonomy,
     aiSafetySignals,
-    aiVisionLabels: labels.map((label) => label?.description).filter(Boolean),
+    aiVisionLabels,
     policyAppliedTriggers: finalPolicyAppliedTriggers,
-    previousModeratorExample,
-    fingerprints,
-    legacy: {
-      labels: labels.map((label) => label.description).filter(Boolean),
-      isSensitive: outcome !== 'allowed',
-    },
   };
 
-  let uploadId = null;
   let persistedPreview = null;
   let previewField = null;
   try {

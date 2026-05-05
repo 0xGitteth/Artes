@@ -465,6 +465,12 @@ const MODERATOR_REASON_CODES_BY_ACTION = {
   rejected: ['forbidden_explicit_sexual', 'forbidden_non_consensual_context', 'wrong_theme_or_label'],
   queueFreshEvaluation: ['review_borderline_adult', 'unclear_ai_result', 'wrong_theme_or_label'],
 };
+const MODERATOR_DECISION_ACTIONS = {
+  approveAsIs: 'approveAsIs',
+  approveWithTaxonomyCorrection: 'approveWithTaxonomyCorrection',
+  requestUserCorrection: 'requestUserCorrection',
+  rejectForbidden: 'rejectForbidden',
+};
 
 const buildDecisionTemplate = (decision, reasons) => {
   if (decision === 'approved') {
@@ -4539,6 +4545,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [selectedCase, setSelectedCase] = useState(null);
   const [selectedUpload, setSelectedUpload] = useState(null);
   const [claimState, setClaimState] = useState({ claimed: false, claimedBy: null, loading: false });
+  const [decisionAction, setDecisionAction] = useState(MODERATOR_DECISION_ACTIONS.approveAsIs);
   const [decision, setDecision] = useState('approved');
   const [selectedReasons, setSelectedReasons] = useState([]);
   const [decisionReasonCode, setDecisionReasonCode] = useState('');
@@ -4553,6 +4560,9 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [freshEvaluationMessage, setFreshEvaluationMessage] = useState('');
   const [freshEvaluationError, setFreshEvaluationError] = useState('');
   const [showRawDebug, setShowRawDebug] = useState(false);
+  const [correctedThemes, setCorrectedThemes] = useState([]);
+  const [correctedTriggers, setCorrectedTriggers] = useState([]);
+  const [decisionResultStatus, setDecisionResultStatus] = useState('');
   const reviewCasesListenerLogRef = useRef(null);
   const validDecisionReasonCodes = useMemo(
     () => new Set(MODERATOR_REASON_CODES_BY_ACTION[decision] || []),
@@ -4841,6 +4851,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
 
   useEffect(() => {
     if (!selectedCase) return;
+    setDecisionAction(MODERATOR_DECISION_ACTIONS.approveAsIs);
     setDecision('approved');
     setDecisionReasonCode('');
     setQueueFreshEvaluationReasonCode('');
@@ -4849,6 +4860,9 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     setMessageTouched(false);
     setModeratorNote('');
     setDecisionError(null);
+    setDecisionResultStatus('');
+    setCorrectedThemes([]);
+    setCorrectedTriggers([]);
   }, [selectedCase?.id]);
 
   useEffect(() => {
@@ -4925,6 +4939,14 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       setDecisionError('Het bericht mag maximaal 280 tekens zijn.');
       return;
     }
+    const isCorrectionAction = (
+      decisionAction === MODERATOR_DECISION_ACTIONS.approveWithTaxonomyCorrection
+      || decisionAction === MODERATOR_DECISION_ACTIONS.requestUserCorrection
+    );
+    if (isCorrectionAction && correctedThemes.length === 0 && correctedTriggers.length === 0) {
+      setDecisionError('Kies minimaal één gecorrigeerd thema of trigger.');
+      return;
+    }
     if (decision === 'rejected' && selectedReasons.length === 1 && selectedReasons[0] === 'missingOrIncorrectTags') {
       setDecisionError('Triggers ontbreken of kloppen niet kan niet alleen tot afkeuring leiden.');
       return;
@@ -4946,9 +4968,14 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         body: JSON.stringify({
           reviewCaseId: selectedCase.id,
           decision,
+          action: decisionAction,
           reasonCode: decisionReasonCode,
           decisionMessagePublic: decisionMessage.trim(),
           decisionReasons: selectedReasons,
+          correctedTaxonomy: {
+            themes: correctedThemes,
+            triggers: correctedTriggers,
+          },
           moderatorNoteInternal: moderatorNote || null,
         }),
       });
@@ -4956,6 +4983,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         const payload = await response.json();
         throw new Error(payload?.error || 'Beslissing opslaan mislukt.');
       }
+      setDecisionResultStatus(`Opgeslagen: ${decisionAction}`);
       setDecisionReasonCode('');
       setSelectedCaseId(null);
     } catch (error) {
@@ -5303,6 +5331,13 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                       </div>
                     </div>
                   </div>
+                  <div className="space-y-2 rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Taxonomie vergelijking</p>
+                    <p className="text-[11px] text-slate-500">Uploader thema&apos;s: {(Array.isArray(selectedUpload?.themes) ? selectedUpload.themes : []).join(', ') || 'Geen'}</p>
+                    <p className="text-[11px] text-slate-500">Uploader triggers: {(Array.isArray(tags) ? tags : []).join(', ') || 'Geen'}</p>
+                    <p className="text-[11px] text-slate-500">AI thema&apos;s: {(Array.isArray(aiSuggestedTaxonomy?.themes) ? aiSuggestedTaxonomy.themes : []).join(', ') || 'Geen'}</p>
+                    <p className="text-[11px] text-slate-500">AI triggers: {(Array.isArray(aiSuggestedTaxonomy?.triggers) ? aiSuggestedTaxonomy.triggers : []).map((t) => (typeof t === 'string' ? t : t?.trigger)).filter(Boolean).join(', ') || 'Geen'}</p>
+                  </div>
                   <div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">AI signalen</p>
                     <div className="space-y-2 rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
@@ -5411,13 +5446,33 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                     )}
                   </div>
                   <div className="space-y-3">
-                    <div className="flex gap-3">
-                      <Button variant={decision === 'approved' ? 'primary' : 'secondary'} onClick={() => { setDecision('approved'); setMessageTouched(false); }}>
-                        Goedkeuren (A)
+                    <div className="flex gap-3 flex-wrap">
+                      <Button variant={decisionAction === MODERATOR_DECISION_ACTIONS.approveAsIs ? 'primary' : 'secondary'} onClick={() => { setDecisionAction(MODERATOR_DECISION_ACTIONS.approveAsIs); setDecision('approved'); setMessageTouched(false); }}>
+                        Approve as is
                       </Button>
-                      <Button variant={decision === 'rejected' ? 'danger' : 'secondary'} onClick={() => { setDecision('rejected'); setMessageTouched(false); }}>
-                        Afkeuren (R)
+                      <Button variant={decisionAction === MODERATOR_DECISION_ACTIONS.approveWithTaxonomyCorrection ? 'primary' : 'secondary'} onClick={() => { setDecisionAction(MODERATOR_DECISION_ACTIONS.approveWithTaxonomyCorrection); setDecision('approved'); setMessageTouched(false); }}>
+                        Approve + correction
                       </Button>
+                      <Button variant={decisionAction === MODERATOR_DECISION_ACTIONS.requestUserCorrection ? 'secondary' : 'secondary'} onClick={() => { setDecisionAction(MODERATOR_DECISION_ACTIONS.requestUserCorrection); setDecision('approved'); setMessageTouched(false); }}>
+                        Request user correction
+                      </Button>
+                      <Button variant={decisionAction === MODERATOR_DECISION_ACTIONS.rejectForbidden ? 'danger' : 'secondary'} onClick={() => { setDecisionAction(MODERATOR_DECISION_ACTIONS.rejectForbidden); setDecision('rejected'); setMessageTouched(false); }}>
+                        Reject forbidden
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Gecorrigeerde thema&apos;s</label>
+                        <select multiple className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white" value={correctedThemes} onChange={(e) => setCorrectedThemes(Array.from(e.target.selectedOptions).map((o) => o.value))}>
+                          {THEMES.map((theme) => <option key={theme} value={theme}>{theme}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Gecorrigeerde triggers</label>
+                        <select multiple className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white" value={correctedTriggers} onChange={(e) => setCorrectedTriggers(Array.from(e.target.selectedOptions).map((o) => o.value))}>
+                          {TRIGGERS.map((trigger) => <option key={trigger.id} value={trigger.id}>{trigger.label}</option>)}
+                        </select>
+                      </div>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Reason code *</label>
@@ -5518,6 +5573,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                       )}
                     </div>
                     {decisionError && <p className="text-xs text-red-500">{decisionError}</p>}
+                    {decisionResultStatus && <p className="text-xs text-emerald-600 dark:text-emerald-400">{decisionResultStatus}</p>}
                     <Button
                       onClick={handleDecisionSubmit}
                       disabled={decisionPending || isLockedByOther}
@@ -6436,6 +6492,22 @@ function UploadModal({
         setRequiredThemes([]);
         setShouldReview(false);
         setShowSuggestionUI(false);
+        const moderatorTaxonomy = uploadData.correctedTaxonomy || uploadData?.moderatorDecision?.correctedTaxonomy || null;
+        const needsAcceptance = uploadData.requiresUploaderAcceptance === true && uploadData.publicationStatus === 'needs_user_correction';
+        if (needsAcceptance && moderatorTaxonomy) {
+          setTaxonomyCorrection({
+            type: TAXONOMY_CORRECTION_TYPES.SAFE,
+            suggestedThemes: Array.isArray(moderatorTaxonomy.themes) ? moderatorTaxonomy.themes : [],
+            suggestedTriggers: Array.isArray(moderatorTaxonomy.triggers) ? moderatorTaxonomy.triggers : [],
+            originalThemes: Array.isArray(draft.styles) ? draft.styles : [],
+            originalTriggers: Array.isArray(draft.makerTags) ? draft.makerTags : [],
+            reason: String(uploadData?.moderatorDecision?.reasonCode || uploadData?.moderatorDecision?.note || 'Moderator vroeg om categorie-correctie.'),
+            requiresUserAcceptance: true,
+            requiresModeratorReview: true,
+            publishBlocked: true,
+            fromModeratorReview: true,
+          });
+        }
         setUploaderRole(String(draft.authorRole || uploadData.authorRole || defaultRole));
         setStep(2);
       } catch (error) {
@@ -6508,13 +6580,32 @@ function UploadModal({
     return null;
   }, [forbiddenReasons, makerTags, outcome, requiredThemes, selectedStyles, shouldReview, suggestedTriggers, userMessage]);
 
-  const handleAcceptTaxonomyCorrection = () => {
+  const handleAcceptTaxonomyCorrection = async () => {
     if (!taxonomyCorrection || taxonomyCorrection.type !== TAXONOMY_CORRECTION_TYPES.SAFE) return;
     const nextThemes = Array.from(new Set((taxonomyCorrection.suggestedThemes || []).filter(Boolean)));
     const nextTriggers = Array.from(new Set((taxonomyCorrection.suggestedTriggers || []).map(resolveTriggerKey).filter(Boolean)));
     setSelectedStyles(nextThemes);
     setMakerTags(nextTriggers);
-    setCorrectionAcceptedAt(Timestamp.now());
+
+    if (taxonomyCorrection?.fromModeratorReview && moderationApiBase && user?.uid && resumeUpload?.id) {
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch(`${moderationApiBase}/userModerationAction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ uploadId: resumeUpload.id, action: 'acceptCorrection' }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error || 'Opslaan van correctie mislukt.');
+        setCorrectionAcceptedAt(Timestamp.now());
+      } catch (error) {
+        setErrors((prev) => ({ ...prev, moderation: error?.message || 'Correctie opslaan mislukt.' }));
+        return;
+      }
+    } else {
+      setCorrectionAcceptedAt(Timestamp.now());
+    }
+
     setOutcome('allowed');
     setShouldReview(false);
     setTaxonomyCorrection((prev) => (prev ? {
@@ -6527,6 +6618,27 @@ function UploadModal({
     } : prev));
     setErrors((prev) => ({ ...prev, moderation: undefined, styles: undefined }));
   };
+
+  const handleRejectTaxonomyCorrection = async () => {
+    if (taxonomyCorrection?.fromModeratorReview && moderationApiBase && user?.uid && resumeUpload?.id) {
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch(`${moderationApiBase}/userModerationAction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ uploadId: resumeUpload.id, action: 'rejectCorrection' }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error || 'Reviewverzoek versturen mislukt.');
+      } catch (error) {
+        setErrors((prev) => ({ ...prev, moderation: error?.message || 'Reviewverzoek versturen mislukt.' }));
+        return;
+      }
+    }
+    setCorrectionRejectedAt(Timestamp.now());
+    setCorrectionReviewRequestedAt(Timestamp.now());
+  };
+
 
   // Contributor search logic
   const [contributorSearch, setContributorSearch] = useState('');
@@ -7599,9 +7711,9 @@ function UploadModal({
                              )}
                              <div className="mt-2 flex flex-wrap gap-2">
                                {taxonomyCorrection.type === TAXONOMY_CORRECTION_TYPES.SAFE && taxonomyCorrection.requiresUserAcceptance && (
-                                 <button type="button" className="text-xs bg-amber-600 text-white px-3 py-1 rounded" onClick={handleAcceptTaxonomyCorrection}>Pas categorie aan</button>
+                                 <button type="button" className="text-xs bg-amber-600 text-white px-3 py-1 rounded" onClick={handleAcceptTaxonomyCorrection}>Pas voorgestelde categorie toe</button>
                                )}
-                               <button type="button" className="text-xs border border-amber-400 px-3 py-1 rounded" onClick={() => setCorrectionRejectedAt(new Date().toISOString())}>Ik ben het oneens</button>
+                               <button type="button" className="text-xs border border-amber-400 px-3 py-1 rounded" onClick={handleRejectTaxonomyCorrection}>Ik ben het oneens</button>
                                <button type="button" className="text-xs underline" onClick={handleRequestReview}>Vraag review aan</button>
                              </div>
                            </div>

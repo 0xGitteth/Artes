@@ -19,6 +19,7 @@ import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.j
 import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, requiresMessageIdForAction } from './userModerationActionPolicy.js';
+import { buildCommonModerationExample } from './moderationExampleBuilder.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -91,6 +92,7 @@ const MODERATION_EXAMPLE_REASON_CODES_BY_ACTION = {
   reject: new Set(['forbidden_explicit_sexual', 'forbidden_non_consensual_context', 'wrong_theme_or_label']),
   queueFreshEvaluation: new Set(['review_borderline_adult', 'unclear_ai_result', 'wrong_theme_or_label']),
 };
+
 const visionClient = new ImageAnnotatorClient();
 
 const generateClaimCode = () => `ARTES-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
@@ -1979,7 +1981,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
 
     const uploadPayload = {
-      userId: userId || null,
+      uploaderUid: userId || null,
       ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
       outcome,
       appliedTriggers: finalAppliedTriggers,
@@ -3231,64 +3233,34 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       const moderationSignals = uploadSnapshotData?.moderationSignals || reviewSnapshotData?.moderationSignals || {};
       const aiResult = uploadSnapshotData?.aiResult || reviewSnapshotData?.aiResult || {};
       const correctionSnapshot = uploadSnapshotData?.correction || uploadSnapshotData?.postDraft?.correction || reviewSnapshotData?.uploadSnapshot?.correction || null;
-      moderationExamplePayload = {
+      moderationExamplePayload = buildCommonModerationExample({
         uploadId: uploadId || null,
         reviewCaseId: reviewCaseId || null,
-        userId: userId || null,
+        uploaderUid: userId || null,
         fingerprints: {
           sha256: uploadFingerprints?.sha256 || null,
           dhash: uploadFingerprints?.dhash || null,
           dhashPrefix: uploadFingerprints?.dhashPrefix || null,
         },
-        uploaderInput: {
-          themes: uploadInputThemes,
-          makerTags: uploadInputMakerTags,
-          title: uploadSnapshotData?.title || null,
-          description: uploadSnapshotData?.description || null,
-        },
-        aiSnapshot: {
-          outcome: aiResult?.outcome || null,
-          classification: aiResult?.classification || null,
-          shouldReview: typeof aiResult?.shouldReview === 'boolean' ? aiResult.shouldReview : null,
-          appliedTriggers: Array.isArray(aiResult?.appliedTriggers) ? aiResult.appliedTriggers : [],
-          suggestedTriggers: Array.isArray(aiResult?.suggestedTriggers) ? aiResult.suggestedTriggers : [],
-          forbiddenReasons: Array.isArray(aiResult?.forbiddenReasons) ? aiResult.forbiddenReasons : [],
-          requiredThemes: Array.isArray(aiResult?.requiredThemes) ? aiResult.requiredThemes : [],
-          suggestedThemes: Array.isArray(aiResult?.suggestedThemes) ? aiResult.suggestedThemes : [],
-          adultDecision: moderationSignals?.adultDecision ?? null,
-          sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
-          geminiDiagnostics: aiResult?.geminiDiagnostics || null,
-          correction: correctionSnapshot ? {
-            type: correctionSnapshot?.type || null,
-            originalSelectedThemes: Array.isArray(correctionSnapshot?.originalSelectedThemes) ? correctionSnapshot.originalSelectedThemes : [],
-            originalSelectedTriggers: Array.isArray(correctionSnapshot?.originalSelectedTriggers) ? correctionSnapshot.originalSelectedTriggers : [],
-            suggestedThemes: Array.isArray(correctionSnapshot?.suggestedThemes) ? correctionSnapshot.suggestedThemes : [],
-            suggestedTriggers: Array.isArray(correctionSnapshot?.suggestedTriggers) ? correctionSnapshot.suggestedTriggers : [],
-            finalAcceptedThemes: Array.isArray(correctionSnapshot?.finalAcceptedThemes) ? correctionSnapshot.finalAcceptedThemes : [],
-            finalAcceptedTriggers: Array.isArray(correctionSnapshot?.finalAcceptedTriggers) ? correctionSnapshot.finalAcceptedTriggers : [],
-            userAcceptedAt: correctionSnapshot?.userAcceptedAt || null,
-            userRejectedAt: correctionSnapshot?.userRejectedAt || null,
-            reviewRequestedAt: correctionSnapshot?.reviewRequestedAt || null,
-            requiresModeratorReview: correctionSnapshot?.requiresModeratorReview === true,
-            publishBlocked: correctionSnapshot?.publishBlocked === true,
-          } : null,
-        },
+        uploadData: uploadSnapshotData || {},
+        reviewData: reviewSnapshotData || {},
+        aiResult,
+        moderationSignals,
+        correctionSnapshot,
+        decision: normalizedDecision,
+        policyDecisionOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
         moderatorDecision: {
           action: normalizedModeratorAction,
           finalOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
           reasonCode: normalizedReasonCode,
           correctedTaxonomy: { themes: correctedThemes, triggers: correctedTriggers },
-          requiresUploaderAcceptance: normalizedModeratorAction === 'requestUserCorrection',
           notes: moderatorNoteInternal || null,
           decidedBy: decoded.uid,
           decidedAt: FieldValue.serverTimestamp(),
         },
-        provenance: {
-          source: 'moderatorDecide',
-          policyVersion: uploadSnapshotData?.policyVersion || reviewSnapshotData?.policyVersion || null,
-          createdAt: FieldValue.serverTimestamp(),
-        },
-      };
+        source: 'moderatorDecide',
+        nowFactory: () => FieldValue.serverTimestamp(),
+      });
       const moderationExampleId = `${reviewCaseId}_${normalizedAction}`;
       transaction.set(db.collection('moderationExamples').doc(moderationExampleId), moderationExamplePayload, { merge: true });
     });
@@ -3550,57 +3522,30 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       const moderationSignals = uploadData?.moderationSignals || reviewCaseData?.uploadSnapshot?.moderationSignals || {};
       const correctionSnapshot = uploadData?.correction || uploadData?.postDraft?.correction || reviewCaseData?.uploadSnapshot?.correction || null;
       try {
-        await db.collection('moderationExamples').doc(moderationExampleId).set({
-        uploadId: effectiveUploadId,
-        reviewCaseId,
-        userId: userId || null,
-        fingerprints: fingerprints ? { ...fingerprints } : null,
-        uploaderInput: {
-          themes: Array.isArray(uploadData?.themes) ? uploadData.themes : [],
-          makerTags: Array.isArray(uploadData?.makerTags) ? uploadData.makerTags : [],
-          title: uploadData?.title || null,
-          description: uploadData?.description || null,
-        },
-        aiSnapshot: {
-          outcome: aiResult?.outcome || null,
-          classification: aiResult?.classification || null,
-          shouldReview: typeof aiResult?.shouldReview === 'boolean' ? aiResult.shouldReview : null,
-          appliedTriggers: Array.isArray(aiResult?.appliedTriggers) ? aiResult.appliedTriggers : [],
-          suggestedTriggers: Array.isArray(aiResult?.suggestedTriggers) ? aiResult.suggestedTriggers : [],
-          forbiddenReasons: Array.isArray(aiResult?.forbiddenReasons) ? aiResult.forbiddenReasons : [],
-          requiredThemes: Array.isArray(aiResult?.requiredThemes) ? aiResult.requiredThemes : [],
-          adultDecision: moderationSignals?.adultDecision ?? null,
-          sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
-          geminiDiagnostics: aiResult?.geminiDiagnostics || null,
-          correction: correctionSnapshot ? {
-            type: correctionSnapshot?.type || null,
-            originalSelectedThemes: Array.isArray(correctionSnapshot?.originalSelectedThemes) ? correctionSnapshot.originalSelectedThemes : [],
-            originalSelectedTriggers: Array.isArray(correctionSnapshot?.originalSelectedTriggers) ? correctionSnapshot.originalSelectedTriggers : [],
-            suggestedThemes: Array.isArray(correctionSnapshot?.suggestedThemes) ? correctionSnapshot.suggestedThemes : [],
-            suggestedTriggers: Array.isArray(correctionSnapshot?.suggestedTriggers) ? correctionSnapshot.suggestedTriggers : [],
-            finalAcceptedThemes: Array.isArray(correctionSnapshot?.finalAcceptedThemes) ? correctionSnapshot.finalAcceptedThemes : [],
-            finalAcceptedTriggers: Array.isArray(correctionSnapshot?.finalAcceptedTriggers) ? correctionSnapshot.finalAcceptedTriggers : [],
-            userAcceptedAt: correctionSnapshot?.userAcceptedAt || null,
-            userRejectedAt: correctionSnapshot?.userRejectedAt || null,
-            reviewRequestedAt: correctionSnapshot?.reviewRequestedAt || null,
-            requiresModeratorReview: correctionSnapshot?.requiresModeratorReview === true,
-            publishBlocked: correctionSnapshot?.publishBlocked === true,
-          } : null,
-        },
-        moderatorDecision: {
-          action: 'queueFreshEvaluation',
-          finalOutcome: 'review',
-          reasonCode,
-          notes: null,
-          decidedBy: decoded.uid,
-          decidedAt: FieldValue.serverTimestamp(),
-        },
-        provenance: {
+        const queueExamplePayload = buildCommonModerationExample({
+          uploadId: effectiveUploadId,
+          reviewCaseId,
+          uploaderUid: userId || null,
+          fingerprints: fingerprints ? { ...fingerprints } : null,
+          uploadData,
+          reviewData: reviewCaseData,
+          aiResult,
+          moderationSignals,
+          correctionSnapshot,
+          decision: null,
+          policyDecisionOutcome: 'review',
+          moderatorDecision: {
+            action: 'queueFreshEvaluation',
+            finalOutcome: 'review',
+            reasonCode,
+            notes: null,
+            decidedBy: decoded.uid,
+            decidedAt: FieldValue.serverTimestamp(),
+          },
           source: 'moderatorQueueFreshEvaluation',
-          policyVersion: uploadData?.policyVersion || null,
-          createdAt: FieldValue.serverTimestamp(),
-        },
-      }, { merge: true });
+          nowFactory: () => FieldValue.serverTimestamp(),
+        });
+        await db.collection('moderationExamples').doc(moderationExampleId).set(queueExamplePayload, { merge: true });
       } catch (exampleError) {
         logger.warn('moderatorQueueFreshEvaluation: moderationExample write skipped', {
           reviewCaseId,
@@ -3737,27 +3682,44 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
         } : {}),
       }, { merge: true });
 
-      await db.collection('moderationExamples').doc(moderationExampleId).set({
+      const correctionActionName = action === 'acceptCorrection' ? 'acceptCorrection' : 'rejectCorrection';
+      const correctionExamplePayload = buildCommonModerationExample({
+        source: 'userModerationAction',
         uploadId,
         reviewCaseId,
-        source: 'userModerationAction',
-        uploaderCorrectionResponse: action === 'acceptCorrection'
-          ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
-          : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
-        moderatorDecision: {
-          action: upload?.moderatorDecision?.action || null,
-          reasonCode: upload?.moderatorDecision?.reasonCode || null,
-          correctedTaxonomy,
-        },
-        correction: {
+        postId: uploadId,
+        uploaderUid: userId,
+        fingerprints: upload?.fingerprints || null,
+        uploadData: upload || {},
+        reviewData: {},
+        aiResult: upload?.aiResult || {},
+        moderationSignals: upload?.moderationSignals || {},
+        correctionSnapshot: {
           originalSelectedThemes: Array.isArray(upload?.postDraft?.styles) ? upload.postDraft.styles : [],
           originalSelectedTriggers: Array.isArray(upload?.postDraft?.makerTags) ? upload.postDraft.makerTags : [],
           finalAcceptedThemes: action === 'acceptCorrection' ? correctedTaxonomy.themes : [],
           finalAcceptedTriggers: action === 'acceptCorrection' ? correctedTaxonomy.triggers : [],
         },
-        decidedAt: FieldValue.serverTimestamp(),
-        decidedBy: userId,
-      }, { merge: true });
+        decision: null,
+        policyDecisionOutcome: upload?.aiResult?.outcome || null,
+        moderatorDecision: {
+          action: upload?.moderatorDecision?.action || correctionActionName,
+          reasonCode: upload?.moderatorDecision?.reasonCode || null,
+          correctedTaxonomy,
+        },
+        uploaderCorrectionResponse: action === 'acceptCorrection'
+          ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
+          : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
+        userCorrectionAction: {
+          acceptedCorrection: action === 'acceptCorrection',
+          rejectedCorrection: action === 'rejectCorrection',
+          requestedReview: action === 'rejectCorrection',
+          timestamp: FieldValue.serverTimestamp(),
+        },
+        nowFactory: () => FieldValue.serverTimestamp(),
+      });
+
+      await db.collection('moderationExamples').doc(moderationExampleId).set(correctionExamplePayload, { merge: true });
     }
 
     if (action === 'publishNow' || action === 'repairPublished') {

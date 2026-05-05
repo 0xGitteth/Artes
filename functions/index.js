@@ -1981,6 +1981,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
 
     const uploadPayload = {
+      userId: userId || null,
       uploaderUid: userId || null,
       ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
       outcome,
@@ -3703,7 +3704,8 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
         decision: null,
         policyDecisionOutcome: upload?.aiResult?.outcome || null,
         moderatorDecision: {
-          action: upload?.moderatorDecision?.action || correctionActionName,
+          action: correctionActionName,
+          priorAction: upload?.moderatorDecision?.action || null,
           reasonCode: upload?.moderatorDecision?.reasonCode || null,
           correctedTaxonomy,
         },

@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { buildCommonModerationExample, mapFinalOutcomeByAction } from '../moderationExampleBuilder.js';
 
 const nowFactory = () => 'NOW';
-
 const base = () => ({ source: 'moderatorDecide', nowFactory, uploadId: 'u1', reviewCaseId: 'r1', uploaderUid: 'owner1' });
+
+test('upload payload in index preserves userId with uploaderUid additive', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(source, /userId:\s*userId\s*\|\|\s*null/);
+  assert.match(source, /uploaderUid:\s*userId\s*\|\|\s*null/);
+});
 
 test('all paths include schemaVersion/source/finalOutcome/learningStatus', () => {
   const allowed = buildCommonModerationExample({ ...base(), decision: 'approved', moderatorDecision: { action: 'approveAsIs' } });
@@ -26,6 +32,23 @@ test('specific finalOutcome mappings are correct', () => {
   assert.equal(mapFinalOutcomeByAction({ action: 'rejectCorrection' }), 'user_disagreed');
 });
 
+test('accept/reject correction outcomes are driven by correction action, not prior requestUserCorrection', () => {
+  const accepted = buildCommonModerationExample({
+    ...base(),
+    moderatorDecision: { action: 'acceptCorrection', priorAction: 'requestUserCorrection' },
+    userCorrectionAction: { acceptedCorrection: true, rejectedCorrection: false, requestedReview: false },
+  });
+  const rejected = buildCommonModerationExample({
+    ...base(),
+    moderatorDecision: { action: 'rejectCorrection', priorAction: 'requestUserCorrection' },
+    userCorrectionAction: { acceptedCorrection: false, rejectedCorrection: true, requestedReview: true },
+  });
+  assert.equal(accepted.finalOutcome, 'correction_accepted');
+  assert.equal(accepted.learningStatus, 'resolved');
+  assert.equal(rejected.finalOutcome, 'user_disagreed');
+  assert.equal(rejected.learningStatus, 'active');
+});
+
 test('correction paths use normalized shape and no sensitive blobs', () => {
   const accepted = buildCommonModerationExample({
     ...base(),
@@ -33,9 +56,6 @@ test('correction paths use normalized shape and no sensitive blobs', () => {
     aiResult: { outcome: 'allowed', prompt: 'secret', rawOutput: 'secret', visionLabelsRaw: ['nudity'] },
     userCorrectionAction: { acceptedCorrection: true, rejectedCorrection: false, requestedReview: false },
   });
-  const rejected = buildCommonModerationExample({ ...base(), moderatorDecision: { action: 'rejectCorrection' }, userCorrectionAction: { acceptedCorrection: false, rejectedCorrection: true, requestedReview: true } });
-  assert.equal(accepted.finalOutcome, 'correction_accepted');
-  assert.equal(rejected.finalOutcome, 'user_disagreed');
   assert.equal(accepted.aiSnapshot.prompt, undefined);
   assert.equal(accepted.aiSnapshot.rawOutput, undefined);
   assert.equal(accepted.uploaderInput.prompt, undefined);

@@ -89,11 +89,14 @@ import CommentIcon from './components/icons/CommentIcon';
 import SupportLanding from './components/SupportLanding';
 import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import PhotoDetailModal from './components/PhotoDetailModal';
-import PostImageDisplay, { isPanoramaImage } from './components/PostImageDisplay';
+import PostImageDisplay from './components/PostImageDisplay';
+import { isPanoramaImage } from './utils/imageMeta';
+import PostCreditDisplay from './components/PostCreditDisplay';
 import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
 import ProfileImageCropper from './components/ProfileImageCropper';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
+import { ROLE_OPTIONS } from './utils/roles';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
@@ -119,22 +122,7 @@ import {
 
 // --- Constants & Styling ---
 
-const ROLES = [
-  { id: 'photographer', label: 'Fotograaf', desc: 'Deel shoots, lichtopstellingen en vind modellen.' },
-  { id: 'model', label: 'Model', desc: 'Bouw je portfolio en vind veilige samenwerkingen.' },
-  { id: 'artist', label: 'Artist', desc: 'Deel kunstzinnige projecten.' },
-  { id: 'stylist', label: 'Stylist', desc: 'Laat je styling werk zien.' },
-  { id: 'mua', label: 'MUA', desc: 'Visagie en special effects.' },
-  { id: 'hair', label: 'Hairstylist', desc: 'Haarstyling en verzorging.' },
-  { id: 'art_director', label: 'Art Director', desc: 'Conceptontwikkeling en visuele regie.' },
-  { id: 'retoucher', label: 'Retoucher', desc: 'Nabewerking en high-end retouching.' },
-  { id: 'videographer', label: 'Videograaf', desc: 'Video producties en reels.' },
-  { id: 'producer', label: 'Producer', desc: 'Productie en planning van shoots.' },
-  { id: 'assistent', label: 'Assistent', desc: 'Ondersteuning op de set.' },
-  { id: 'agency', label: 'Agency', desc: 'Vertegenwoordig talent.' },
-  { id: 'company', label: 'Company', desc: 'Merk, studio of bedrijf.' },
-  { id: 'fan', label: 'Fan', desc: 'Word fan van je favoriete makers en bewaar inspiratie.' },
-];
+const ROLES = ROLE_OPTIONS;
 
 const MAKER_FUNCTION_LABELS = {
   maker: 'Maker / content maker',
@@ -2678,6 +2666,7 @@ export default function ArtesApp() {
             moderationApiBase={moderationApiBase}
             onChallengeClick={() => setView('challenge_timeline')}
             onUserClick={setQuickProfileId}
+            onShadowClick={setShadowProfile}
             contentPreference={getPostContentPreference(selectedPost, galleryTriggerVisibility)}
             shouldCover={shouldCoverPost(selectedPost, galleryTriggerVisibility, revealedSensitivePostsById)}
             onRevealSensitivePost={handleRevealSensitivePost}
@@ -4000,10 +3989,6 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
     () => normalizeTriggerPreferences(profile?.preferences?.triggerVisibility),
     [profile?.preferences?.triggerVisibility],
   );
-  const getVisibleCredits = (post) => {
-    if (!Array.isArray(post?.credits)) return [];
-    return post.credits.filter((credit) => credit?.uid !== post.authorId && !credit?.isSelf);
-  };
   const visiblePosts = useMemo(
     () => posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
     [posts, triggerVisibility],
@@ -4081,7 +4066,6 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
       ) : null}
       {visiblePosts.map((post) => {
         const shouldCover = shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById);
-        const visibleCredits = getVisibleCredits(post);
         const authorDisplayName = resolvePostAuthorDisplayName({ post, users });
         const engagement = postEngagement[post.id] || {};
         const likesCount = Number.isFinite(engagement.likesCount) ? engagement.likesCount : Number(post.likes || 0);
@@ -4160,28 +4144,11 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
                    {post.styles?.map(s => <Badge key={s} colorClass={getThemeStyle(s)}>{s}</Badge>)}
                  </div>
               </div>
-              <div className="text-right flex flex-col gap-2">
-                 <div className="cursor-pointer group" onClick={() => onUserClick(post.authorId)}>
-                    <div className="text-xs uppercase font-bold text-slate-400">{ROLES.find(r => r.id === post.authorRole)?.label}</div>
-                    <div className="text-xs font-medium text-slate-900 group-hover:text-blue-600 dark:text-white transition-colors">{authorDisplayName}</div>
-                 </div>
-                 {visibleCredits.map((c, i) => (
-                    <div
-                      key={i}
-                      className="cursor-pointer group"
-                      onClick={() =>
-                        c.uid
-                          ? onUserClick(c.uid)
-                          : onShadowClick({ name: c.name, contributorId: c.contributorId || null })
-                      }
-                    >
-                       <div className="text-xs uppercase font-bold text-slate-400">{ROLES.find(r => r.id === c.role)?.label || c.role}</div>
-                       <div className="text-xs font-medium text-slate-900 group-hover:text-blue-600 dark:text-white transition-colors flex items-center justify-end gap-1">
-                          {c.name} {!c.uid && <ExternalLink className="w-3 h-3 text-slate-400"/>}
-                       </div>
-                    </div>
-                 ))}
-              </div>
+              <PostCreditDisplay
+                post={{ ...post, authorName: authorDisplayName }}
+                onUserClick={onUserClick}
+                onShadowClick={onShadowClick}
+              />
            </div>
         </div>
       );})}

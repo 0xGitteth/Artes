@@ -7,6 +7,7 @@ import LikeIcon from './icons/LikeIcon';
 import CommentIcon from './icons/CommentIcon';
 import SensitiveOverlay from './SensitiveOverlay';
 import { resolvePublicDisplayName } from '../utils/publicIdentity';
+import PostCreditDisplay from './PostCreditDisplay';
 import PostImageDisplay from './PostImageDisplay';
 
 const TRIGGER_LABELS = {
@@ -41,7 +42,7 @@ const toActionErrorMessage = (error, fallbackMessage) => {
   return error.message || fallbackMessage;
 };
 
-export default function PhotoDetailModal({ post, onClose, currentUser, authUser, currentPublicProfile, moderationApiBase, onChallengeClick, onUserClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost }) {
+export default function PhotoDetailModal({ post, onClose, currentUser, authUser, currentPublicProfile, moderationApiBase, onChallengeClick, onUserClick, onShadowClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost }) {
   const user = currentUser || authUser || null;
   const [comments, setComments] = useState([]);
   const [likesCount, setLikesCount] = useState(post.likes || 0);
@@ -213,14 +214,9 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
   const resolvedTriggers = Array.from(new Set([...(post.appliedTriggers || []), ...(post.makerTags || []), ...(post.triggers || [])].map(resolveTriggerKey)))
     .map((trigger) => TRIGGER_LABELS[trigger] || trigger);
   const sensitiveFlag = post.sensitive || (post.appliedTriggers || []).length > 0 || (post.makerTags || []).length > 0;
-  const contributorCredits = Array.isArray(post?.credits)
-    ? post.credits.filter((credit) => credit && !credit.isSelf && credit.uid !== post.authorId)
-    : [];
-  const canOpenAuthorQuickProfile = Boolean(post?.authorId && onUserClick);
-
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-5xl w-full overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-5xl w-full max-h-[92vh] overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
           <div>
             <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Post details</p>
@@ -235,8 +231,9 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             src={post.imageUrl}
             alt={post.title}
             imageMeta={post.imageMeta}
-            className="w-full h-full max-h-[520px] bg-slate-100 dark:bg-slate-800"
-            panoramaFrameClassName="h-[420px] md:h-[520px]"
+            className="flex items-center justify-center w-full bg-slate-100 dark:bg-slate-800 min-h-[260px] md:min-h-[420px] max-h-[70vh]"
+            imageClassName="relative z-0 block max-h-[70vh] w-auto max-w-full object-contain"
+            panoramaFrameClassName="h-[260px] md:h-[420px] max-h-[70vh]"
             shouldCover={shouldCover}
             overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
           />
@@ -257,35 +254,16 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                 </Badge>
               )}
             </div>
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-4 space-y-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Maker</p>
-                <button
-                  type="button"
-                  onClick={() => canOpenAuthorQuickProfile && onUserClick(post.authorId)}
-                  disabled={!canOpenAuthorQuickProfile}
-                  className={`text-sm font-semibold ${canOpenAuthorQuickProfile ? 'text-slate-800 dark:text-slate-100 hover:underline underline-offset-2 cursor-pointer' : 'text-slate-800 dark:text-slate-100 cursor-default'}`}
-                >
-                  {post.authorName || 'Onbekend'}
-                </button>
-              </div>
-              {contributorCredits.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Bijdragers</p>
-                  <div className="flex flex-wrap gap-2">
-                    {contributorCredits.map((credit, index) => (
-                      <Badge
-                        key={`${credit.uid || credit.contributorId || credit.name || 'credit'}-${index}`}
-                        colorClass="bg-white text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700"
-                        className={credit.uid && onUserClick ? 'cursor-pointer hover:opacity-90' : ''}
-                        onClick={credit.uid && onUserClick ? () => onUserClick(credit.uid) : undefined}
-                      >
-                        {credit.role ? `${credit.role}: ` : ''}{credit.name || 'Onbekend'}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-4">
+              <PostCreditDisplay
+                post={post}
+                onUserClick={onUserClick}
+                onShadowClick={onShadowClick}
+                align="left"
+                itemClassName="group text-left"
+                roleClassName="text-xs uppercase font-bold tracking-[0.08em] text-slate-400"
+                nameClassName="text-sm font-semibold text-slate-800 group-hover:text-blue-600 dark:text-slate-100 transition-colors"
+              />
             </div>
             <p className="text-slate-700 dark:text-slate-200 leading-relaxed">{post.description}</p>
             <div className="flex flex-wrap gap-2">

@@ -356,6 +356,7 @@ async function run() {
     const baseConsent = {
       version: 1,
       makerRoles: ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'],
+      makerCreditIndex: 0,
       consentStatuses: ['pending', 'accepted', 'rejected', 'notRequired', 'anonymous', 'pressOrStreetException'],
       hasMaker: true,
       hasVisibleSubject: false,
@@ -400,20 +401,82 @@ async function run() {
       credits: [{ uid: 'photographer_1', role: 'photographer', name: 'Photo One', consentStatus: 'accepted' }],
     }));
 
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_late_maker_index'), {
+      ...basePost,
+      credits: Array.from({ length: 10 }, (_, index) => ({
+        uid: `non_maker_${index}`,
+        role: index % 2 === 0 ? 'model' : 'mua',
+        name: `Non-maker ${index}`,
+        consentStatus: 'accepted',
+      })).concat({ uid: 'late_maker', role: 'photographer', name: 'Late Maker', consentStatus: 'accepted' }),
+      uploadConsent: { ...baseConsent, makerCreditIndex: 10 },
+    }));
+
+    const { makerCreditIndex: _unusedMakerCreditIndex, ...baseConsentWithoutMakerCreditIndex } = baseConsent;
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_missing_maker_credit_index'), {
+      ...basePost,
+      uploadConsent: baseConsentWithoutMakerCreditIndex,
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_maker_credit_index_non_maker'), {
+      ...basePost,
+      credits: [
+        { uid: 'model_index_0', role: 'model', name: 'Model Index 0', consentStatus: 'accepted' },
+        { uid: 'photographer_index_1', role: 'photographer', name: 'Photographer Index 1', consentStatus: 'accepted' },
+      ],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_maker_credit_index_out_of_range'), {
+      ...basePost,
+      uploadConsent: { ...baseConsent, makerCreditIndex: 1 },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_maker_credit_index_negative'), {
+      ...basePost,
+      uploadConsent: { ...baseConsent, makerCreditIndex: -1 },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_maker_credit_index_wrong_type'), {
+      ...basePost,
+      uploadConsent: { ...baseConsent, makerCreditIndex: '0' },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_maker_credit_index_malformed_credit'), {
+      ...basePost,
+      credits: ['photographer'],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
+    }));
+
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_anonymous_photographer'), {
       ...basePost,
-      credits: [{ role: 'photographer', name: 'Anonymous maker', isAnonymous: true, consentStatus: 'anonymous' }],
+      credits: [
+        { uid: 'model_before_anonymous', role: 'model', name: 'Model Before Anonymous', consentStatus: 'accepted' },
+        { role: 'photographer', name: 'Anonymous maker', isAnonymous: true, consentStatus: 'anonymous' },
+      ],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 1 },
     }));
 
     await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_maker_roles_only'), {
       ...basePost,
       credits: [{ uid: 'model_2', role: 'model', name: 'Model Two', consentStatus: 'accepted' }],
-      uploadConsent: { ...baseConsent, makerRoles: ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'] },
+      uploadConsent: { ...baseConsent, makerRoles: ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'], makerCreditIndex: 0 },
     }));
 
     await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
-      credits: [{ uid: 'model_3', role: 'model', name: 'Model Three', consentStatus: 'accepted' }],
-      uploadConsent: { ...baseConsent, hasMaker: true },
+      credits: [
+        { uid: 'model_3', role: 'model', name: 'Model Three', consentStatus: 'accepted' },
+        { uid: 'photographer_moved', role: 'photographer', name: 'Moved Photographer', consentStatus: 'accepted' },
+      ],
+      uploadConsent: { ...baseConsent, hasMaker: true, makerCreditIndex: 0 },
+    }));
+
+    await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      credits: [
+        { uid: 'model_3', role: 'model', name: 'Model Three', consentStatus: 'accepted' },
+        { uid: 'photographer_moved', role: 'photographer', name: 'Moved Photographer', consentStatus: 'accepted' },
+      ],
+      uploadConsent: { ...baseConsent, hasMaker: true, makerCreditIndex: 1 },
     }));
 
     const { outcome: _unusedOutcome, ...postWithoutOutcome } = basePost;

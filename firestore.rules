@@ -110,32 +110,24 @@ service cloud.firestore {
       return role in ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'];
     }
     function creditAtHasMakerRole(credits, index) {
-      return credits.size() > index
+      return index is int
+        && index >= 0
+        && credits.size() > index
         && credits[index] is map
         && ('role' in credits[index])
         && isAllowedMakerRole(credits[index].role);
     }
-    // Firestore rules cannot iterate over arbitrary arrays. The publish gate
-    // validates the canonical current post schema (`credits[].role`) over the
-    // first 10 credits, which is above the UI-supported contributor count.
-    // Client-maintained uploadConsent.hasMaker/makerRoles are metadata only and
-    // are never accepted without an actual maker role in credits.
+    // The client-maintained uploadConsent.hasMaker/makerRoles fields are
+    // metadata only. The security proof is uploadConsent.makerCreditIndex,
+    // which must point at an actual canonical credits[] entry with a maker role.
     function hasActualMakerCredit(data) {
       return ('credits' in data)
         && data.credits is list
         && data.credits.size() > 0
-        && (
-          creditAtHasMakerRole(data.credits, 0)
-          || creditAtHasMakerRole(data.credits, 1)
-          || creditAtHasMakerRole(data.credits, 2)
-          || creditAtHasMakerRole(data.credits, 3)
-          || creditAtHasMakerRole(data.credits, 4)
-          || creditAtHasMakerRole(data.credits, 5)
-          || creditAtHasMakerRole(data.credits, 6)
-          || creditAtHasMakerRole(data.credits, 7)
-          || creditAtHasMakerRole(data.credits, 8)
-          || creditAtHasMakerRole(data.credits, 9)
-        );
+        && ('uploadConsent' in data)
+        && data.uploadConsent is map
+        && ('makerCreditIndex' in data.uploadConsent)
+        && creditAtHasMakerRole(data.credits, data.uploadConsent.makerCreditIndex);
     }
     function isPostConsentPublishAllowed(data) {
       return hasActualMakerCredit(data)

@@ -6,6 +6,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import { canAccessFirestore, devLog } from '../utils/firestoreGate';
+import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException } from '../utils/uploadConsent';
 import {
   getFirestore,
   collection,
@@ -187,14 +188,28 @@ export const updateProfile = async (uid, payload) => {
 export const publishPost = async (post) => {
   if (!auth.currentUser) throw new Error('Not signed in');
 
-  const contributorIds = Array.isArray(post.credits)
-    ? Array.from(new Set(post.credits.map((credit) => credit?.contributorId).filter(Boolean)))
+  const normalizedException = normalizeConsentException(post.consentException || post.uploadConsent?.exception || {});
+  const normalizedCredits = Array.isArray(post.credits)
+    ? post.credits.map((credit) => normalizeConsentCredit(credit, { exception: normalizedException }))
     : [];
+  if (!hasMakerCredit(normalizedCredits)) {
+    throw new Error('Upload requires at least one maker credit.');
+  }
+  const uploadConsent = post.uploadConsent || buildUploadConsent({
+    credits: normalizedCredits,
+    exception: normalizedException,
+    aiPeoplePresent: false,
+    subjectWarningAcknowledged: false,
+  });
+  const contributorIds = Array.from(new Set(normalizedCredits.map((credit) => credit?.contributorId).filter(Boolean)));
 
   logFirestoreOp('WRITE', 'posts/{auto}', 'publishPost');
   const isCodexActor = auth.currentUser.uid === 'codex-dev-user';
   return addDoc(collection(db, 'posts'), {
     ...post,
+    credits: normalizedCredits,
+    uploadConsent,
+    consentException: normalizedException,
     contributorIds,
     authorUid: auth.currentUser.uid,
     ...(isCodexActor ? { testActor: 'codex' } : {}),

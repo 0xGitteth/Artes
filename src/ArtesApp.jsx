@@ -45,6 +45,7 @@ import {
   migrateRemoveGeneralTheme,
   getContributorByAlias,
   createContributorWithAliases,
+  createContributorContentRequest,
   CLAIMS_COLLECTIONS,
   getClaimRequestRef,
   getFirebaseStorageInstance,
@@ -98,6 +99,18 @@ import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } 
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
 import { resolvePublicDisplayName } from './utils/publicIdentity';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
+import {
+  CONSENT_EXCEPTION_REASONS,
+  CONTRIBUTOR_CONSENT_STATUSES,
+  buildUploadConsent,
+  getSelfMakerRoles,
+  hasMakerCredit,
+  hasVisibleSubjectCredit,
+  isMakerRole,
+  normalizeConsentException,
+  normalizeConsentCredit,
+  validateUploadConsent,
+} from './utils/uploadConsent';
 
 // --- Constants & Styling ---
 
@@ -6295,8 +6308,9 @@ function UploadModal({
   moderationApiBase = '',
   resumeUploadId = null,
 }) {
-  const defaultRole = profile.roles?.[0] || 'photographer';
-  const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true };
+  const makerSelfRoles = getSelfMakerRoles(profile.roles);
+  const defaultRole = makerSelfRoles[0] || profile.roles?.[0] || 'photographer';
+  const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true, consentStatus: CONTRIBUTOR_CONSENT_STATUSES.ACCEPTED };
   const triggerLabelMap = useMemo(() => new Map(TRIGGERS.map((trigger) => [trigger.id, trigger.label])), []);
   const getTriggerLabel = (id) => triggerLabelMap.get(id) || id;
   const MAX_UPLOAD_BYTES = 900 * 1024;
@@ -6346,6 +6360,9 @@ function UploadModal({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [uploaderRole, setUploaderRole] = useState(defaultRole);
+  const [aiPeoplePresent, setAiPeoplePresent] = useState(false);
+  const [subjectWarningAcknowledged, setSubjectWarningAcknowledged] = useState(false);
+  const [consentException, setConsentException] = useState({ enabled: false, type: CONSENT_EXCEPTION_REASONS.STREET, reason: '' });
   const [errors, setErrors] = useState({});
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState('');
@@ -6778,6 +6795,9 @@ function UploadModal({
       setCorrectionAcceptedAt(null);
       setCorrectionRejectedAt(null);
       setCorrectionReviewRequestedAt(null);
+      setAiPeoplePresent(false);
+      setSubjectWarningAcknowledged(false);
+      setConsentException({ enabled: false, type: CONSENT_EXCEPTION_REASONS.STREET, reason: '' });
       logModerationDebug('file-processed', { previewSource: 'local-file', previewField: null });
     } catch (error) {
       console.error('Image processing failed', error);
@@ -6880,6 +6900,10 @@ function UploadModal({
         : null;
       const nextRequiredThemes = Array.isArray(data?.requiredThemes) ? data.requiredThemes : [];
       const nextAutoAppliedTriggers = (Array.isArray(data?.autoAppliedTriggers) ? data.autoAppliedTriggers : []).map(resolveTriggerKey).filter(Boolean);
+      const peopleSignal = data?.peoplePresent ?? data?.personPresent ?? data?.visiblePeople ?? data?.hasPeople ?? null;
+      const nextAiPeoplePresent = peopleSignal === true
+        || (typeof peopleSignal === 'number' && peopleSignal > 0)
+        || (Array.isArray(peopleSignal) && peopleSignal.length > 0);
       const normalizedAppliedTriggers = Array.from(new Set([...nextAppliedTriggers.map(resolveTriggerKey), ...nextAutoAppliedTriggers]));
       const shouldShowSuggestions = nextOutcome === 'allowed' && nextSuggestedTriggers.length > 0;
 
@@ -6953,6 +6977,8 @@ function UploadModal({
       setUserMessage(data?.userMessage || '');
       setShouldReview(Boolean(data?.shouldReview));
       setClassification(nextClassification);
+      setAiPeoplePresent(nextAiPeoplePresent);
+      if (!nextAiPeoplePresent || hasVisibleSubjectCredit(credits)) setSubjectWarningAcknowledged(false);
       setShowSuggestionUI(shouldShowSuggestions);
       setReviewRequested(false);
       setTaxonomyCorrection(deriveTaxonomyCorrection({
@@ -6975,6 +7001,7 @@ function UploadModal({
         userMessage: data?.userMessage || '',
         shouldReview: Boolean(data?.shouldReview),
         classification: nextClassification,
+        peoplePresent: nextAiPeoplePresent,
       };
     } catch (error) {
       console.error('AI check failed', error);
@@ -7001,6 +7028,8 @@ function UploadModal({
       setCorrectionAcceptedAt(null);
       setCorrectionRejectedAt(null);
       setCorrectionReviewRequestedAt(null);
+      setAiPeoplePresent(false);
+      setSubjectWarningAcknowledged(false);
       return null;
     } finally {
       setAiLoading(false);
@@ -7117,7 +7146,7 @@ function UploadModal({
 
   const addCredit = async (foundUser) => {
      if(foundUser) {
-        setCredits((prev) => ([...prev, { role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid, contributorId: foundUser.contributorId || null }]));
+        setCredits((prev) => ([...prev, normalizeConsentCredit({ role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid, contributorId: foundUser.contributorId || null }, { exception: consentException })]));
         setContributorSearch('');
         setAllowExternalOverride(false);
         setNewCredit({ role: newCredit.role, name: '', instagramHandle: '', website: '', email: '' });
@@ -7190,7 +7219,7 @@ function UploadModal({
 
      setCredits((prev) => ([
        ...prev,
-       {
+       normalizeConsentCredit({
          role: newCredit.role,
          name: displayName,
          contributorId,
@@ -7198,7 +7227,7 @@ function UploadModal({
          website: normalizedWebsite || null,
          email: normalizedEmail || null,
          isExternal: true,
-       },
+       }, { exception: consentException }),
      ]));
      setContributorSearch('');
      setAllowExternalOverride(false);
@@ -7206,15 +7235,30 @@ function UploadModal({
      setShowInvite(false);
   };
 
+  const addAnonymousContributor = () => {
+    setCredits((prev) => ([
+      ...prev,
+      normalizeConsentCredit({
+        role: newCredit.role,
+        name: 'Anonieme bijdrager',
+        isAnonymous: true,
+        isExternal: true,
+      }, { exception: consentException }),
+    ]));
+    setContributorSearch('');
+    setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '' });
+    setShowInvite(false);
+  };
+
   useEffect(() => {
     setCredits((prev) => {
       const existingSelf = prev.find((c) => c.isSelf);
       if (existingSelf && existingSelf.role === uploaderRole && existingSelf.name === profile.displayName && existingSelf.uid === profile.uid) {
         const others = prev.filter((c) => !c.isSelf);
-        return [existingSelf, ...others];
+        return [{ ...existingSelf, consentStatus: CONTRIBUTOR_CONSENT_STATUSES.ACCEPTED, consentRequired: false }, ...others];
       }
       const others = prev.filter((c) => !c.isSelf);
-      return [{ role: uploaderRole, name: profile.displayName, uid: profile.uid, isSelf: true }, ...others];
+      return [{ role: uploaderRole, name: profile.displayName, uid: profile.uid, isSelf: true, consentStatus: CONTRIBUTOR_CONSENT_STATUSES.ACCEPTED, consentRequired: false }, ...others];
     });
   }, [uploaderRole, profile.displayName, profile.uid]);
 
@@ -7256,6 +7300,17 @@ function UploadModal({
     if (missingRequiredThemes.length > 0) validationErrors.moderation = `Voeg eerst thema toe: ${missingRequiredThemes.join(', ')}.`;
     if (shouldReview) validationErrors.moderation = 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.';
     if (outcome === 'forbidden') validationErrors.moderation = 'Deze publicatie is geblokkeerd door de safety check.';
+    const consentValidation = validateUploadConsent({
+      credits,
+      uploaderRole,
+      profileRoles: profile.roles || [],
+      exception: consentException,
+    });
+    Object.assign(validationErrors, consentValidation);
+    const subjectWarningActive = aiPeoplePresent && !hasVisibleSubjectCredit(credits);
+    if (subjectWarningActive && !subjectWarningAcknowledged) {
+      validationErrors.subjects = 'AI ziet mogelijk personen. Tag een model/subject, kies anoniem of bevestig waarom taggen niet passend is.';
+    }
 
     if (Object.keys(validationErrors).length > 0) {
       const nextFinalResult = validationErrors.moderation?.includes('review') ? 'review' : (validationErrors.moderation?.includes('geblokkeerd') ? 'blocked' : 'validation_error');
@@ -7327,6 +7382,19 @@ function UploadModal({
       ? Array.from(new Set([...baseTriggers, ...suggestedTriggers]))
       : baseTriggers;
     const triggerFlag = finalAppliedTriggers.length > 0;
+    const normalizedException = normalizeConsentException(consentException);
+    const consentCredits = credits.map((credit) => normalizeConsentCredit(credit, { exception: normalizedException }));
+    const uploadConsent = buildUploadConsent({
+      credits: consentCredits,
+      exception: normalizedException,
+      aiPeoplePresent,
+      subjectWarningAcknowledged: subjectWarningAcknowledged || !aiPeoplePresent || hasVisibleSubjectCredit(consentCredits),
+    });
+    const consentAudit = uploadConsent.audit.map((entry) => ({
+      ...entry,
+      at: Timestamp.now(),
+      actorUid: user.uid,
+    }));
     const correctionMetadata = taxonomyCorrection ? {
       correction: {
         type: taxonomyCorrection.type,
@@ -7390,7 +7458,10 @@ function UploadModal({
               styles: selectedStyles,
               makerTags,
               appliedTriggers,
-              credits,
+              credits: consentCredits,
+              uploadConsent,
+              consentAudit,
+              consentException: normalizedException,
               isChallenge,
               ...correctionMetadata,
             },
@@ -7429,7 +7500,10 @@ function UploadModal({
         forbiddenReasons: effectiveForbiddenReasons,
         reviewCaseId: effectiveReviewCaseId,
         ...correctionMetadata,
-        credits,
+        credits: consentCredits,
+        uploadConsent,
+        consentAudit,
+        consentException: normalizedException,
         likes: 0,
         isChallenge,
         ...(imageMeta ? {
@@ -7455,9 +7529,12 @@ function UploadModal({
       setTitle('');
       setDesc('');
       setSelectedStyles([]);
-                      setCredits([{ role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true }]);
+      setCredits([{ role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true, consentStatus: CONTRIBUTOR_CONSENT_STATUSES.ACCEPTED, consentRequired: false }]);
       setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '' });
       setShowInvite(false);
+      setAiPeoplePresent(false);
+      setSubjectWarningAcknowledged(false);
+      setConsentException({ enabled: false, type: CONSENT_EXCEPTION_REASONS.STREET, reason: '' });
       setMakerTags([]);
       setAppliedTriggers([]);
       setSuggestedTriggers([]);
@@ -7787,16 +7864,48 @@ function UploadModal({
                       
                       <div className="bg-slate-50 dark:bg-slate-800/70 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
                          <div className="flex items-center justify-between mb-2">
-                            <label className="text-sm font-bold block dark:text-white">Bijdragers</label>
-                            {profile.roles.length === 1 && <span className="text-[11px] uppercase text-slate-500">{ROLES.find(x => x.id === uploaderRole)?.label}</span>}
+                            <label className="text-sm font-bold block dark:text-white">Bijdragers & consent</label>
+                            {(profile.roles || []).length === 1 && <span className="text-[11px] uppercase text-slate-500">{ROLES.find(x => x.id === uploaderRole)?.label}</span>}
+                         </div>
+                         <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/80 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-100 space-y-1">
+                           <p className="font-semibold">Elke upload heeft minstens één maker nodig.</p>
+                           <p>Makerrollen: {ROLES.filter((role) => isMakerRole(role.id)).map((role) => role.label).join(', ')}. Model + MUA alleen is niet genoeg.</p>
                          </div>
 
-                         {profile.roles.length > 1 && (
+                         {(profile.roles || []).length > 1 && (
                             <div className="mb-4">
                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Jouw rol in deze publicatie</p>
-                               <div className="flex gap-2 flex-wrap">{profile.roles.map(r => <button key={r} onClick={() => setUploaderRole(r)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${uploaderRole === r ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white'}`}>{ROLES.find(x => x.id === r)?.label}</button>)}</div>
-                               <p className="text-[11px] text-slate-500 dark:text-slate-300 mt-1">Wordt toegevoegd als jouw eigen credit.</p>
+                               <div className="flex gap-2 flex-wrap">{(profile.roles || []).map(r => <button key={r} type="button" onClick={() => setUploaderRole(r)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${uploaderRole === r ? (isMakerRole(r) ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white') : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white'}`}>{ROLES.find(x => x.id === r)?.label}{isMakerRole(r) ? ' · maker' : ''}</button>)}</div>
+                               <p className="text-[11px] text-slate-500 dark:text-slate-300 mt-1">Je kunt jezelf alleen taggen met rollen die op je profiel staan. Kies een makerrol als jij de foto/het werk maakte.</p>
                             </div>
+                         )}
+                         {makerSelfRoles.length > 0 && !hasMakerCredit(credits) && (
+                           <button
+                             type="button"
+                             onClick={() => setUploaderRole(makerSelfRoles[0])}
+                             className="mb-3 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-100"
+                           >
+                             Voeg mij toe als maker ({ROLES.find((role) => role.id === makerSelfRoles[0])?.label})
+                           </button>
+                         )}
+                         {errors.maker && <p className="mb-2 text-xs text-red-500">{errors.maker}</p>}
+                         {errors.selfRole && <p className="mb-2 text-xs text-red-500">{errors.selfRole}</p>}
+
+                         {aiPeoplePresent && !hasVisibleSubjectCredit(credits) && (
+                           <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-900/25 dark:text-amber-100">
+                             <p className="font-semibold">AI denkt dat er mogelijk personen zichtbaar zijn.</p>
+                             <p className="mt-1">Dit is geen identiteitsclaim. Tag een model/subject, kies anoniem, of bevestig dat taggen niet nodig/passend is.</p>
+                             <label className="mt-2 flex items-start gap-2">
+                               <input
+                                 type="checkbox"
+                                 checked={subjectWarningAcknowledged}
+                                 onChange={(e) => setSubjectWarningAcknowledged(e.target.checked)}
+                                 className="mt-0.5"
+                               />
+                               <span>Ik begrijp de waarschuwing en heb consent/uitzondering beoordeeld.</span>
+                             </label>
+                             {errors.subjects && <p className="mt-2 text-red-500">{errors.subjects}</p>}
+                           </div>
                          )}
 
                          <div className="space-y-2 mb-3">
@@ -7804,14 +7913,48 @@ function UploadModal({
                                <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-700 p-2 rounded border dark:border-slate-600">
                                   <div className="flex items-center gap-2 dark:text-white">
                                      {c.isSelf && <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200 rounded">Jij</span>}
+                                     {isMakerRole(c.role) && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200 rounded">Maker</span>}
                                      <span><span className="font-bold capitalize">{ROLES.find(r => r.id === c.role)?.label}:</span> {c.name}</span>
                                   </div>
                                   <div className="flex gap-2 items-center">
+                                     {c.consentStatus && <span className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-100 px-1.5 py-0.5 rounded text-[10px]">{c.consentStatus}</span>}
                                      {c.isExternal && <span className="bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-100 px-1.5 py-0.5 rounded text-[10px]">Extern</span>}
                                      {!c.isSelf && <button onClick={() => setCredits(credits.filter((_, idx) => idx !== i))}><Trash2 className="w-3 h-3 text-red-500"/></button>}
                                   </div>
                                </div>
                             ))}
+                         </div>
+
+                         <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100">
+                           <label className="flex items-start gap-2 font-semibold">
+                             <input
+                               type="checkbox"
+                               checked={consentException.enabled}
+                               onChange={(e) => setConsentException((prev) => ({ ...prev, enabled: e.target.checked }))}
+                               className="mt-0.5"
+                             />
+                             <span>Straat- of persfotografie uitzondering vastleggen</span>
+                           </label>
+                           {consentException.enabled && (
+                             <div className="mt-3 space-y-2">
+                               <select
+                                 value={consentException.type}
+                                 onChange={(e) => setConsentException((prev) => ({ ...prev, type: e.target.value }))}
+                                 className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                               >
+                                 <option value={CONSENT_EXCEPTION_REASONS.STREET}>Straatfotografie</option>
+                                 <option value={CONSENT_EXCEPTION_REASONS.PRESS}>Persfotografie</option>
+                               </select>
+                               <textarea
+                                 value={consentException.reason}
+                                 onChange={(e) => setConsentException((prev) => ({ ...prev, reason: e.target.value }))}
+                                 placeholder="Waarom is individuele toestemming niet vereist of praktisch haalbaar?"
+                                 className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                               />
+                               <p className="text-[11px] text-slate-500 dark:text-slate-300">Deze flow blokkeert publicatie niet, maar bewaart de reden auditable bij de upload.</p>
+                               {errors.exception && <p className="text-red-500">{errors.exception}</p>}
+                             </div>
+                           )}
                          </div>
 
                          <div className="flex gap-2 mb-2">
@@ -7863,6 +8006,13 @@ function UploadModal({
                                 )}
                             </div>
                          </div>
+                         <button
+                           type="button"
+                           onClick={addAnonymousContributor}
+                           className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-100"
+                         >
+                           Voeg anonieme bijdrager toe waar passend
+                         </button>
                          
                          {showInvite && (
                             <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-100 mb-2 border border-yellow-200 dark:border-yellow-800">
@@ -9358,6 +9508,10 @@ function ShadowProfileModal({
     const [inviteLoading, setInviteLoading] = useState(false);
     const [inviteError, setInviteError] = useState('');
     const [inviteCopied, setInviteCopied] = useState(false);
+    const [contentRequest, setContentRequest] = useState({ postId: '', requestType: 'hide', reason: '' });
+    const [contentRequestBusy, setContentRequestBusy] = useState(false);
+    const [contentRequestError, setContentRequestError] = useState('');
+    const [contentRequestSuccess, setContentRequestSuccess] = useState('');
     const [websiteAlias, setWebsiteAlias] = useState(null);
 
     const normalizeExternalLink = (link) => {
@@ -9497,6 +9651,7 @@ function ShadowProfileModal({
     const isLoggedIn = Boolean(authUser?.uid);
     const requiresIdCheck = isLoggedIn && (!userProfile?.ageVerified || (userProfile?.onboardingStep ?? 0) < 2);
     const claimedByUid = contributorInfo?.claimedByUid || contributorInfo?.claimedBy || null;
+    const claimedByCurrentUser = Boolean(claimedByUid && claimedByUid === authUser?.uid);
     const claimedByOther = Boolean(claimedByUid && claimedByUid !== authUser?.uid);
 
     const hasInstagramAlias = Boolean(contributorInfo?.instagramHandle)
@@ -9750,6 +9905,33 @@ function ShadowProfileModal({
         console.error('[ShadowProfileModal] Failed to route to ID check', error);
       }
       if (setView) setView('onboarding');
+    };
+
+
+    const handleContributorContentRequest = async () => {
+      if (!claimedByCurrentUser || !contributorId) return;
+      const postId = contentRequest.postId || shadowPosts[0]?.id || '';
+      if (!postId) {
+        setContentRequestError('Kies eerst een post.');
+        return;
+      }
+      setContentRequestBusy(true);
+      setContentRequestError('');
+      setContentRequestSuccess('');
+      try {
+        const result = await createContributorContentRequest({
+          contributorId,
+          postId,
+          requestType: contentRequest.requestType,
+          reason: contentRequest.reason,
+        });
+        setContentRequestSuccess(`Verzoek ontvangen (${result.id}).`);
+        setContentRequest((prev) => ({ ...prev, reason: '' }));
+      } catch (error) {
+        setContentRequestError(error?.message || 'Verzoek versturen mislukt.');
+      } finally {
+        setContentRequestBusy(false);
+      }
     };
 
     const handleShareInvite = async () => {
@@ -10106,6 +10288,47 @@ function ShadowProfileModal({
                 </div>
               )}
             </div>
+            {claimedByCurrentUser && (
+              <div className="absolute left-6 right-6 bottom-4 rounded-2xl bg-white/10 p-3 text-left text-xs text-white shadow-lg backdrop-blur">
+                <p className="font-semibold">Geclaimd profiel: correctie, verbergen of verwijderen aanvragen</p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr]">
+                  <select
+                    value={contentRequest.postId || shadowPosts[0]?.id || ''}
+                    onChange={(e) => setContentRequest((prev) => ({ ...prev, postId: e.target.value }))}
+                    className="rounded-lg border border-white/20 bg-slate-900/80 p-2 text-white"
+                  >
+                    {shadowPosts.map((post) => (
+                      <option key={post.id} value={post.id}>{post.title || post.id}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={contentRequest.requestType}
+                    onChange={(e) => setContentRequest((prev) => ({ ...prev, requestType: e.target.value }))}
+                    className="rounded-lg border border-white/20 bg-slate-900/80 p-2 text-white"
+                  >
+                    <option value="hide">Verbergen</option>
+                    <option value="remove">Verwijderen</option>
+                    <option value="correction">Correctie</option>
+                  </select>
+                </div>
+                <textarea
+                  value={contentRequest.reason}
+                  onChange={(e) => setContentRequest((prev) => ({ ...prev, reason: e.target.value }))}
+                  placeholder="Licht je verzoek toe voor audit en moderator opvolging."
+                  className="mt-2 w-full rounded-lg border border-white/20 bg-slate-900/80 p-2 text-white placeholder:text-white/50"
+                />
+                <button
+                  type="button"
+                  onClick={handleContributorContentRequest}
+                  disabled={contentRequestBusy || shadowPosts.length === 0}
+                  className="mt-2 rounded-full bg-white px-4 py-2 font-semibold text-indigo-900 disabled:opacity-60"
+                >
+                  {contentRequestBusy ? 'Versturen...' : 'Verzoek versturen'}
+                </button>
+                {contentRequestError && <p className="mt-1 text-rose-200">{contentRequestError}</p>}
+                {contentRequestSuccess && <p className="mt-1 text-emerald-200">{contentRequestSuccess}</p>}
+              </div>
+            )}
             <button onClick={onClose} className="absolute top-4 right-4">
               <X />
             </button>

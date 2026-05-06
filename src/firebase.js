@@ -121,6 +121,7 @@ export const CLAIMS_COLLECTIONS = {
   claimRequests: 'claimRequests',
   claimVouches: 'claimVouches',
   claimInvites: 'claimInvites',
+  contributorContentRequests: 'contributorContentRequests',
 };
 
 export const getContributorRef = (contributorId) =>
@@ -179,6 +180,24 @@ export const refreshDiditSession = async (sessionId = null) => {
   const payload = sessionId ? { sessionId } : {};
   const result = await callable(payload);
   return result?.data || null;
+};
+
+
+export const createContributorContentRequest = async ({ contributorId, postId, requestType, reason = '' }) => {
+  const user = await waitForAuthReady();
+  if (!user?.uid) throw new Error('Not signed in');
+  const allowedTypes = new Set(['remove', 'hide', 'correction']);
+  const normalizedType = allowedTypes.has(requestType) ? requestType : 'correction';
+  return addDoc(collection(getFirebaseDb(), CLAIMS_COLLECTIONS.contributorContentRequests), {
+    contributorId,
+    postId,
+    requestType: normalizedType,
+    reason: String(reason || '').trim().slice(0, 1000),
+    status: 'pending',
+    requesterUid: user.uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
 };
 
 /**

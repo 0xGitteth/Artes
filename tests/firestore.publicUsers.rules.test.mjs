@@ -94,6 +94,23 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'posts', 'pre_consent_moderated'), {
+        authorId: ownerUid,
+        title: 'Pre-consent moderated title',
+        description: 'Pre-consent moderated description',
+        imageUrl: 'https://example.com/pre-consent.jpg',
+        storagePath: 'uploads/pre-consent.jpg',
+        uploadId: 'upload_pre_consent',
+        makerTags: [],
+        contributors: [],
+        credits: [{ uid: ownerUid, role: 'photographer', name: 'Owner One', isSelf: true }],
+        contributorIds: [ownerUid],
+        outcome: 'allowed',
+        shouldReview: false,
+        reviewStatus: 'approved',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
     });
 
     const ownerDb = authedContext(testEnv, ownerUid, { email_verified: true }).firestore();
@@ -368,6 +385,37 @@ async function run() {
 
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), basePost));
 
+    // P1: uploadConsent.hasMaker/makerRoles are not enough without an actual maker credit.
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_fake_maker_model_only'), {
+      ...basePost,
+      credits: [
+        { uid: 'model_1', role: 'model', name: 'Model One', consentStatus: 'accepted' },
+        { uid: 'mua_1', role: 'mua', name: 'MUA One', consentStatus: 'accepted' },
+      ],
+      uploadConsent: { ...baseConsent, hasMaker: true },
+    }));
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_actual_photographer'), {
+      ...basePost,
+      credits: [{ uid: 'photographer_1', role: 'photographer', name: 'Photo One', consentStatus: 'accepted' }],
+    }));
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_anonymous_photographer'), {
+      ...basePost,
+      credits: [{ role: 'photographer', name: 'Anonymous maker', isAnonymous: true, consentStatus: 'anonymous' }],
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_maker_roles_only'), {
+      ...basePost,
+      credits: [{ uid: 'model_2', role: 'model', name: 'Model Two', consentStatus: 'accepted' }],
+      uploadConsent: { ...baseConsent, makerRoles: ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'] },
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      credits: [{ uid: 'model_3', role: 'model', name: 'Model Three', consentStatus: 'accepted' }],
+      uploadConsent: { ...baseConsent, hasMaker: true },
+    }));
+
     const { outcome: _unusedOutcome, ...postWithoutOutcome } = basePost;
     await assertFails(setDoc(doc(ownerDb, 'posts', 'missing_outcome'), postWithoutOutcome));
 
@@ -507,6 +555,35 @@ async function run() {
         ...basePost.correction,
         userAcceptedAt: new Date().toISOString(),
       },
+    }));
+
+    // P2: pre-consent moderated posts keep a narrow metadata-only owner edit path.
+    await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'pre_consent_moderated'), {
+      title: 'Pre-consent moderated title updated',
+      description: 'Pre-consent moderated description updated',
+      updatedAt: serverTimestamp(),
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'pre_consent_moderated'), {
+      imageUrl: 'https://example.com/pre-consent-hijack.jpg',
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'pre_consent_moderated'), {
+      outcome: 'review',
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'pre_consent_moderated'), {
+      credits: [{ uid: 'model_4', role: 'model', name: 'Model Four' }],
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'pre_consent_moderated'), {
+      uploadConsent: baseConsent,
+      consentAudit: [{ action: 'clientBackfillAttempt', actorUid: ownerUid, at: acceptedAtTs }],
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+      title: 'Consented post cannot carry invalid consent mutation',
+      uploadConsent: { ...baseConsent, hasMaker: false },
     }));
 
     await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'legacy_without_moderation'), {

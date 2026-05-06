@@ -106,10 +106,39 @@ service cloud.firestore {
           'pressOrStreetException'
         ]);
     }
-    function isPostConsentPublishAllowed(data) {
+    function isAllowedMakerRole(role) {
+      return role in ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'];
+    }
+    function creditAtHasMakerRole(credits, index) {
+      return credits.size() > index
+        && credits[index] is map
+        && ('role' in credits[index])
+        && isAllowedMakerRole(credits[index].role);
+    }
+    // Firestore rules cannot iterate over arbitrary arrays. The publish gate
+    // validates the canonical current post schema (`credits[].role`) over the
+    // first 10 credits, which is above the UI-supported contributor count.
+    // Client-maintained uploadConsent.hasMaker/makerRoles are metadata only and
+    // are never accepted without an actual maker role in credits.
+    function hasActualMakerCredit(data) {
       return ('credits' in data)
         && data.credits is list
         && data.credits.size() > 0
+        && (
+          creditAtHasMakerRole(data.credits, 0)
+          || creditAtHasMakerRole(data.credits, 1)
+          || creditAtHasMakerRole(data.credits, 2)
+          || creditAtHasMakerRole(data.credits, 3)
+          || creditAtHasMakerRole(data.credits, 4)
+          || creditAtHasMakerRole(data.credits, 5)
+          || creditAtHasMakerRole(data.credits, 6)
+          || creditAtHasMakerRole(data.credits, 7)
+          || creditAtHasMakerRole(data.credits, 8)
+          || creditAtHasMakerRole(data.credits, 9)
+        );
+    }
+    function isPostConsentPublishAllowed(data) {
+      return hasActualMakerCredit(data)
         && ('uploadConsent' in data)
         && data.uploadConsent is map
         && ('version' in data.uploadConsent)
@@ -138,6 +167,11 @@ service cloud.firestore {
     function isLegacyPostWithoutModerationProof(data) {
       return !('outcome' in data)
         && !('shouldReview' in data);
+    }
+    function isPreConsentModeratedPost(data) {
+      return ('outcome' in data)
+        && ('shouldReview' in data)
+        && (!('uploadConsent' in data) || !('consentAudit' in data));
     }
     function isLegacyPostMetadataOnlyUpdate() {
       let diff = request.resource.data.diff(resource.data);
@@ -446,13 +480,18 @@ service cloud.firestore {
         && resource.data.authorId == request.auth.uid
         && (
           (
-            !isLegacyPostWithoutModerationProof(resource.data)
-            && isPostModerationPublishAllowed(request.resource.data)
-            && keepsPostModerationFieldsOnUpdate()
-          )
-          || (
             isLegacyPostWithoutModerationProof(resource.data)
             && isLegacyPostMetadataOnlyUpdate()
+          )
+          || (
+            isPreConsentModeratedPost(resource.data)
+            && isLegacyPostMetadataOnlyUpdate()
+          )
+          || (
+            !isLegacyPostWithoutModerationProof(resource.data)
+            && !isPreConsentModeratedPost(resource.data)
+            && keepsPostModerationFieldsOnUpdate()
+            && isPostModerationPublishAllowed(request.resource.data)
           )
         );
       allow delete: if isVerifiedOrDev() && resource.data.authorId == request.auth.uid;

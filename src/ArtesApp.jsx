@@ -102,8 +102,12 @@ import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
 import {
   CONSENT_EXCEPTION_REASONS,
   CONTRIBUTOR_CONSENT_STATUSES,
+  MAKER_FUNCTION_IDS,
+  MAKER_ROLE_IDS,
   buildUploadConsent,
+  getMissingMakerPromptState,
   getSelfMakerRoles,
+  getVisiblePersonPromptState,
   hasMakerCredit,
   hasVisibleSubjectCredit,
   isMakerRole,
@@ -130,6 +134,16 @@ const ROLES = [
   { id: 'company', label: 'Company', desc: 'Merk, studio of bedrijf.' },
   { id: 'fan', label: 'Fan', desc: 'Word fan van je favoriete makers en bewaar inspiratie.' },
 ];
+
+const MAKER_FUNCTION_LABELS = {
+  maker: 'Maker / content maker',
+  rightsHolder: 'Rechthebbende',
+  productionOwner: 'Productie-eigenaar',
+};
+
+const getMakerFunctionLabel = (makerFunction) => ROLES.find((role) => role.id === makerFunction)?.label
+  || MAKER_FUNCTION_LABELS[makerFunction]
+  || makerFunction;
 
 const DIDIT_SUPPORT_EMAIL = 'admin@artes.app';
 const DIDIT_APPROVED_STATUSES = ['approved'];
@@ -6329,6 +6343,8 @@ function UploadModal({
     instagramHandle: '',
     website: '',
     email: '',
+    isMaker: false,
+    makerFunction: '',
   });
   const [showInvite, setShowInvite] = useState(false);
   const [inviteCandidates, setInviteCandidates] = useState([]);
@@ -6362,6 +6378,10 @@ function UploadModal({
   const [uploaderRole, setUploaderRole] = useState(defaultRole);
   const [aiPeoplePresent, setAiPeoplePresent] = useState(false);
   const [subjectWarningAcknowledged, setSubjectWarningAcknowledged] = useState(false);
+  const [missingMakerPromptShown, setMissingMakerPromptShown] = useState(false);
+  const [selectedSelfMakerRole, setSelectedSelfMakerRole] = useState('photographer');
+  const [pendingSelfMakerRole, setPendingSelfMakerRole] = useState(null);
+  const [selfMakerRoleConfirmation, setSelfMakerRoleConfirmation] = useState({ confirmed: false, role: '', confirmedAt: null });
   const [consentException, setConsentException] = useState({ enabled: false, type: CONSENT_EXCEPTION_REASONS.STREET, reason: '' });
   const [errors, setErrors] = useState({});
   const [publishing, setPublishing] = useState(false);
@@ -6380,6 +6400,45 @@ function UploadModal({
   }, []);
 
   const isResumeFlow = Boolean(resumeUploadId);
+  const missingMakerPromptState = useMemo(() => getMissingMakerPromptState({
+    credits,
+    uploaderRole,
+    profileRoles: profile.roles || [],
+    missingMakerPromptShown,
+    selfMakerRoleConfirmed: selfMakerRoleConfirmation.confirmed,
+    selfMakerRole: selfMakerRoleConfirmation.role,
+  }), [credits, uploaderRole, profile.roles, missingMakerPromptShown, selfMakerRoleConfirmation]);
+  const visiblePersonPromptState = useMemo(() => getVisiblePersonPromptState({
+    credits,
+    uploaderRole,
+    aiPeoplePresent,
+    exception: consentException,
+    userAcknowledgedVisiblePersonPrompt: subjectWarningAcknowledged,
+  }), [credits, uploaderRole, aiPeoplePresent, consentException, subjectWarningAcknowledged]);
+
+  const confirmSelfMakerRoleForUpload = useCallback((role) => {
+    if (!isMakerRole(role)) return;
+    setSelfMakerRoleConfirmation({ confirmed: true, role, confirmedAt: new Date().toISOString() });
+    setUploaderRole(role);
+    setPendingSelfMakerRole(null);
+  }, []);
+
+  const selectSelfMakerRoleForUpload = useCallback((role) => {
+    if (!isMakerRole(role)) return;
+    setSelectedSelfMakerRole(role);
+    if ((profile.roles || []).includes(role)) {
+      setSelfMakerRoleConfirmation({ confirmed: false, role: '', confirmedAt: null });
+      setUploaderRole(role);
+      return;
+    }
+    setPendingSelfMakerRole(role);
+  }, [profile.roles]);
+
+  useEffect(() => {
+    if (missingMakerPromptState.shouldShowMissingMakerPrompt) {
+      setMissingMakerPromptShown(true);
+    }
+  }, [missingMakerPromptState.shouldShowMissingMakerPrompt]);
 
   const deriveCaseId = useCallback((value) => {
     const normalized = String(value || '').trim();
@@ -6797,6 +6856,9 @@ function UploadModal({
       setCorrectionReviewRequestedAt(null);
       setAiPeoplePresent(false);
       setSubjectWarningAcknowledged(false);
+      setMissingMakerPromptShown(false);
+      setPendingSelfMakerRole(null);
+      setSelfMakerRoleConfirmation({ confirmed: false, role: '', confirmedAt: null });
       setConsentException({ enabled: false, type: CONSENT_EXCEPTION_REASONS.STREET, reason: '' });
       logModerationDebug('file-processed', { previewSource: 'local-file', previewField: null });
     } catch (error) {
@@ -7030,6 +7092,9 @@ function UploadModal({
       setCorrectionReviewRequestedAt(null);
       setAiPeoplePresent(false);
       setSubjectWarningAcknowledged(false);
+      setMissingMakerPromptShown(false);
+      setPendingSelfMakerRole(null);
+      setSelfMakerRoleConfirmation({ confirmed: false, role: '', confirmedAt: null });
       return null;
     } finally {
       setAiLoading(false);
@@ -7144,12 +7209,19 @@ function UploadModal({
     }
   };
 
+  const getNewCreditMakerFields = useCallback((credit = newCredit) => {
+    const makerFunction = String(credit.makerFunction || '').trim();
+    if (isMakerRole(credit.role)) return { isMaker: true, makerFunction: credit.role };
+    if (credit.isMaker && makerFunction) return { isMaker: true, makerFunction };
+    return { isMaker: false, makerFunction: null };
+  }, [newCredit]);
+
   const addCredit = async (foundUser) => {
      if(foundUser) {
-        setCredits((prev) => ([...prev, normalizeConsentCredit({ role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid, contributorId: foundUser.contributorId || null }, { exception: consentException })]));
+        setCredits((prev) => ([...prev, normalizeConsentCredit({ role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid, contributorId: foundUser.contributorId || null, ...getNewCreditMakerFields() }, { exception: consentException })]));
         setContributorSearch('');
         setAllowExternalOverride(false);
-        setNewCredit({ role: newCredit.role, name: '', instagramHandle: '', website: '', email: '' });
+        setNewCredit({ role: newCredit.role, name: '', instagramHandle: '', website: '', email: '', isMaker: isMakerRole(newCredit.role), makerFunction: isMakerRole(newCredit.role) ? newCredit.role : '' });
         setShowInvite(false);
         return;
      }
@@ -7227,26 +7299,27 @@ function UploadModal({
          website: normalizedWebsite || null,
          email: normalizedEmail || null,
          isExternal: true,
+         ...getNewCreditMakerFields(),
        }, { exception: consentException }),
      ]));
      setContributorSearch('');
      setAllowExternalOverride(false);
-     setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '' });
+     setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '', isMaker: false, makerFunction: '' });
      setShowInvite(false);
   };
 
-  const addAnonymousContributor = () => {
+  const addAnonymousContributor = (roleOverride = newCredit.role) => {
     setCredits((prev) => ([
       ...prev,
       normalizeConsentCredit({
-        role: newCredit.role,
+        role: roleOverride,
         name: 'Anonieme bijdrager',
         isAnonymous: true,
         isExternal: true,
       }, { exception: consentException }),
     ]));
     setContributorSearch('');
-    setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '' });
+    setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '', isMaker: false, makerFunction: '' });
     setShowInvite(false);
   };
 
@@ -7305,12 +7378,12 @@ function UploadModal({
       uploaderRole,
       profileRoles: profile.roles || [],
       exception: consentException,
+      aiPeoplePresent,
+      subjectWarningAcknowledged,
+      selfMakerRoleConfirmed: selfMakerRoleConfirmation.confirmed,
+      selfMakerRole: selfMakerRoleConfirmation.role,
     });
     Object.assign(validationErrors, consentValidation);
-    const subjectWarningActive = aiPeoplePresent && !hasVisibleSubjectCredit(credits);
-    if (subjectWarningActive && !subjectWarningAcknowledged) {
-      validationErrors.subjects = 'AI ziet mogelijk personen. Tag een model/subject, kies anoniem of bevestig waarom taggen niet passend is.';
-    }
 
     if (Object.keys(validationErrors).length > 0) {
       const nextFinalResult = validationErrors.moderation?.includes('review') ? 'review' : (validationErrors.moderation?.includes('geblokkeerd') ? 'blocked' : 'validation_error');
@@ -7384,15 +7457,39 @@ function UploadModal({
     const triggerFlag = finalAppliedTriggers.length > 0;
     const normalizedException = normalizeConsentException(consentException);
     const consentCredits = credits.map((credit) => normalizeConsentCredit(credit, { exception: normalizedException }));
+    const missingMakerPromptForPublish = getMissingMakerPromptState({
+      credits: consentCredits,
+      uploaderRole,
+      profileRoles: profile.roles || [],
+      missingMakerPromptShown,
+      selfMakerRoleConfirmed: selfMakerRoleConfirmation.confirmed,
+      selfMakerRole: selfMakerRoleConfirmation.role,
+    });
+    const visiblePersonPromptForPublish = getVisiblePersonPromptState({
+      credits: consentCredits,
+      uploaderRole,
+      aiPeoplePresent,
+      exception: normalizedException,
+      userAcknowledgedVisiblePersonPrompt: subjectWarningAcknowledged,
+    });
+    const consentTimestamp = Timestamp.now();
     const uploadConsent = buildUploadConsent({
       credits: consentCredits,
       exception: normalizedException,
       aiPeoplePresent,
-      subjectWarningAcknowledged: subjectWarningAcknowledged || !aiPeoplePresent || hasVisibleSubjectCredit(consentCredits),
+      subjectWarningAcknowledged,
+      uploaderRole,
+      profileRoles: profile.roles || [],
+      visiblePersonPromptResolvedAt: visiblePersonPromptForPublish.resolvedBy ? consentTimestamp : null,
+      missingMakerPromptShown: missingMakerPromptForPublish.missingMakerPromptShown,
+      missingMakerPromptResolvedAt: missingMakerPromptForPublish.missingMakerPromptResolved ? consentTimestamp : null,
+      selfMakerRoleConfirmed: selfMakerRoleConfirmation.confirmed,
+      selfMakerRole: selfMakerRoleConfirmation.role,
+      selfMakerRoleConfirmedAt: selfMakerRoleConfirmation.confirmed ? consentTimestamp : null,
     });
     const consentAudit = uploadConsent.audit.map((entry) => ({
       ...entry,
-      at: Timestamp.now(),
+      at: consentTimestamp,
       actorUid: user.uid,
     }));
     const correctionMetadata = taxonomyCorrection ? {
@@ -7530,10 +7627,13 @@ function UploadModal({
       setDesc('');
       setSelectedStyles([]);
       setCredits([{ role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true, consentStatus: CONTRIBUTOR_CONSENT_STATUSES.ACCEPTED, consentRequired: false }]);
-      setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '' });
+      setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '', isMaker: false, makerFunction: '' });
       setShowInvite(false);
       setAiPeoplePresent(false);
       setSubjectWarningAcknowledged(false);
+      setMissingMakerPromptShown(false);
+      setPendingSelfMakerRole(null);
+      setSelfMakerRoleConfirmation({ confirmed: false, role: '', confirmedAt: null });
       setConsentException({ enabled: false, type: CONSENT_EXCEPTION_REASONS.STREET, reason: '' });
       setMakerTags([]);
       setAppliedTriggers([]);
@@ -7876,7 +7976,7 @@ function UploadModal({
                             <div className="mb-4">
                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Jouw rol in deze publicatie</p>
                                <div className="flex gap-2 flex-wrap">{(profile.roles || []).map(r => <button key={r} type="button" onClick={() => setUploaderRole(r)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${uploaderRole === r ? (isMakerRole(r) ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white') : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white'}`}>{ROLES.find(x => x.id === r)?.label}{isMakerRole(r) ? ' · maker' : ''}</button>)}</div>
-                               <p className="text-[11px] text-slate-500 dark:text-slate-300 mt-1">Je kunt jezelf alleen taggen met rollen die op je profiel staan. Kies een makerrol als jij de foto/het werk maakte.</p>
+                               <p className="text-[11px] text-slate-500 dark:text-slate-300 mt-1">Je profielrollen zijn je standaardrollen. Voor deze upload kun je ook een andere makerrol bevestigen als jij het werk maakte.</p>
                             </div>
                          )}
                          {makerSelfRoles.length > 0 && !hasMakerCredit(credits) && (
@@ -7888,23 +7988,133 @@ function UploadModal({
                              Voeg mij toe als maker ({ROLES.find((role) => role.id === makerSelfRoles[0])?.label})
                            </button>
                          )}
-                         {errors.maker && <p className="mb-2 text-xs text-red-500">{errors.maker}</p>}
+                         {errors.maker && !missingMakerPromptState.shouldShowMissingMakerPrompt && <p className="mb-2 text-xs text-red-500">{errors.maker}</p>}
                          {errors.selfRole && <p className="mb-2 text-xs text-red-500">{errors.selfRole}</p>}
 
-                         {aiPeoplePresent && !hasVisibleSubjectCredit(credits) && (
-                           <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-900/25 dark:text-amber-100">
-                             <p className="font-semibold">AI denkt dat er mogelijk personen zichtbaar zijn.</p>
-                             <p className="mt-1">Dit is geen identiteitsclaim. Tag een model/subject, kies anoniem, of bevestig dat taggen niet nodig/passend is.</p>
-                             <label className="mt-2 flex items-start gap-2">
-                               <input
-                                 type="checkbox"
-                                 checked={subjectWarningAcknowledged}
-                                 onChange={(e) => setSubjectWarningAcknowledged(e.target.checked)}
-                                 className="mt-0.5"
-                               />
-                               <span>Ik begrijp de waarschuwing en heb consent/uitzondering beoordeeld.</span>
-                             </label>
-                             {errors.subjects && <p className="mt-2 text-red-500">{errors.subjects}</p>}
+                         {missingMakerPromptState.shouldShowMissingMakerPrompt && (
+                           <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-950 shadow-sm dark:border-rose-800/50 dark:bg-rose-900/25 dark:text-rose-50">
+                             <p className="text-sm font-bold">Er mist nog een maker</p>
+                             <p className="mt-2">Bij elke upload op Artes moet minstens één maker worden vermeld. Dat kan bijvoorbeeld de fotograaf, videograaf, retoucher, art director of kunstenaar zijn.</p>
+                             <p className="mt-2">De maker hoeft geen Artes account te hebben. Je kunt iemand toevoegen met naam en eventueel een Instagram-handle of e-mailadres, of kiezen voor een anonieme maker.</p>
+                             <p className="mt-2 font-semibold">Zo blijft duidelijk wie aan het beeld heeft bijgedragen en krijgt iedereen de erkenning die die verdient.</p>
+                             <div className="mt-3 grid grid-cols-2 gap-2">
+                               <button
+                                 type="button"
+                                 onClick={() => {
+                                   setNewCredit((prev) => ({ ...prev, role: 'photographer' }));
+                                   setContributorSearch('');
+                                   setShowInvite(false);
+                                 }}
+                                 className="rounded-lg bg-rose-600 px-3 py-2 font-semibold text-white hover:bg-rose-700"
+                               >
+                                 Maker toevoegen
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => addAnonymousContributor('photographer')}
+                                 className="rounded-lg border border-rose-300 bg-white/80 px-3 py-2 font-semibold text-rose-900 hover:bg-white dark:border-rose-700 dark:bg-slate-900/70 dark:text-rose-50"
+                               >
+                                 Anonieme maker toevoegen
+                               </button>
+                             </div>
+                             <div className="mt-3 rounded-xl border border-rose-200 bg-white/70 p-3 dark:border-rose-800 dark:bg-slate-900/50">
+                               <p className="font-semibold">Ben jij zelf de maker van deze upload?</p>
+                               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                                 <select
+                                   value={selectedSelfMakerRole}
+                                   onChange={(event) => setSelectedSelfMakerRole(event.target.value)}
+                                   className="flex-1 rounded-lg border border-rose-200 bg-white p-2 text-xs text-slate-800 dark:border-rose-800 dark:bg-slate-900 dark:text-slate-100"
+                                 >
+                                   {MAKER_ROLE_IDS.map((roleId) => (
+                                     <option key={roleId} value={roleId}>{ROLES.find((role) => role.id === roleId)?.label || roleId}</option>
+                                   ))}
+                                 </select>
+                                 <button
+                                   type="button"
+                                   onClick={() => selectSelfMakerRoleForUpload(selectedSelfMakerRole)}
+                                   className="rounded-lg border border-rose-300 bg-white px-3 py-2 font-semibold text-rose-900 hover:bg-rose-50 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-50"
+                                 >
+                                   Gebruik voor deze upload
+                                 </button>
+                               </div>
+                               {selfMakerRoleConfirmation.confirmed && selfMakerRoleConfirmation.role === uploaderRole && (
+                                 <p className="mt-2 text-emerald-700 dark:text-emerald-200">Makerrol bevestigd voor deze upload.</p>
+                               )}
+                             </div>
+                             {pendingSelfMakerRole && (
+                               <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-950 dark:border-blue-800 dark:bg-blue-900/25 dark:text-blue-50">
+                                 <p className="text-sm font-bold">Heb jij dit beeld gemaakt?</p>
+                                 <p className="mt-2">Deze rol staat niet in je profiel, maar je kunt die wel gebruiken voor deze upload. Bijvoorbeeld als je een zelfportret plaatst, eigen werk fotografeert of deze content zelf hebt gemaakt.</p>
+                                 <p className="mt-2">Dit past alleen de credits van deze upload aan. Je profielrollen worden niet automatisch gewijzigd.</p>
+                                 <div className="mt-3 grid grid-cols-2 gap-2">
+                                   <button
+                                     type="button"
+                                     onClick={() => confirmSelfMakerRoleForUpload(pendingSelfMakerRole)}
+                                     className="rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white hover:bg-blue-700"
+                                   >
+                                     Bevestigen
+                                   </button>
+                                   <button
+                                     type="button"
+                                     onClick={() => setPendingSelfMakerRole(null)}
+                                     className="rounded-lg border border-blue-300 bg-white/80 px-3 py-2 font-semibold text-blue-900 hover:bg-white dark:border-blue-700 dark:bg-slate-900/70 dark:text-blue-50"
+                                   >
+                                     Annuleren
+                                   </button>
+                                 </div>
+                               </div>
+                             )}
+                             {errors.maker && <p className="mt-2 text-red-600 dark:text-red-300">{errors.maker}</p>}
+                           </div>
+                         )}
+
+                         {visiblePersonPromptState.shouldShowVisiblePersonPrompt && (
+                           <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 shadow-sm dark:border-amber-800/50 dark:bg-amber-900/25 dark:text-amber-50">
+                             <p className="text-sm font-bold">Er lijkt een persoon op deze foto te staan</p>
+                             <p className="mt-2">Omdat je deze upload als maker plaatst, vragen we je om het model of de geportretteerde persoon te taggen als dat van toepassing is.</p>
+                             <p className="mt-2">Deze persoon hoeft geen Artes account te hebben. Wanneer je de naam + bijbehorende instagram handle of emailadres achterlaat, wordt er een tijdelijk account aangemaakt voor deze persoon, die later geclaimd kan worden.</p>
+                             <p className="mt-2 font-semibold">Artes vindt het belangrijk dat iedereen die aan een beeld heeft bijgedragen de erkenning krijgt die die verdient.</p>
+                             <div className="mt-3 grid grid-cols-2 gap-2">
+                               <button
+                                 type="button"
+                                 onClick={() => {
+                                   setNewCredit((prev) => ({ ...prev, role: 'model' }));
+                                   setContributorSearch('');
+                                   setShowInvite(false);
+                                 }}
+                                 className="rounded-lg bg-amber-600 px-3 py-2 font-semibold text-white hover:bg-amber-700"
+                               >
+                                 Model toevoegen
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => {
+                                   addAnonymousContributor('model');
+                                 }}
+                                 className="rounded-lg border border-amber-300 bg-white/80 px-3 py-2 font-semibold text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50"
+                               >
+                                 Anoniem toevoegen
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => setSubjectWarningAcknowledged(true)}
+                                 className={`rounded-lg border px-3 py-2 font-semibold ${subjectWarningAcknowledged ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100' : 'border-amber-300 bg-white/80 text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50'}`}
+                               >
+                                 Niet van toepassing
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => setConsentException((prev) => ({
+                                   ...prev,
+                                   enabled: true,
+                                   type: prev.type || CONSENT_EXCEPTION_REASONS.STREET,
+                                 }))}
+                                 className={`rounded-lg border px-3 py-2 font-semibold ${consentException.enabled ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100' : 'border-amber-300 bg-white/80 text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50'}`}
+                               >
+                                 Straat/pers uitzondering
+                               </button>
+                             </div>
+                             {errors.visiblePersonPrompt && <p className="mt-2 text-red-600 dark:text-red-300">{errors.visiblePersonPrompt}</p>}
                            </div>
                          )}
 
@@ -7913,8 +8123,8 @@ function UploadModal({
                                <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-700 p-2 rounded border dark:border-slate-600">
                                   <div className="flex items-center gap-2 dark:text-white">
                                      {c.isSelf && <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200 rounded">Jij</span>}
-                                     {isMakerRole(c.role) && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200 rounded">Maker</span>}
-                                     <span><span className="font-bold capitalize">{ROLES.find(r => r.id === c.role)?.label}:</span> {c.name}</span>
+                                     {(c.isMaker || isMakerRole(c.role)) && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200 rounded">Maker</span>}
+                                     <span><span className="font-bold capitalize">{ROLES.find(r => r.id === c.role)?.label}:</span> {c.name}{c.makerFunction && !isMakerRole(c.role) ? ` · ${getMakerFunctionLabel(c.makerFunction)}` : ''}</span>
                                   </div>
                                   <div className="flex gap-2 items-center">
                                      {c.consentStatus && <span className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-100 px-1.5 py-0.5 rounded text-[10px]">{c.consentStatus}</span>}
@@ -7933,7 +8143,7 @@ function UploadModal({
                                onChange={(e) => setConsentException((prev) => ({ ...prev, enabled: e.target.checked }))}
                                className="mt-0.5"
                              />
-                             <span>Straat- of persfotografie uitzondering vastleggen</span>
+                             <span>Straat-, pers- of documentaire uitzondering vastleggen</span>
                            </label>
                            {consentException.enabled && (
                              <div className="mt-3 space-y-2">
@@ -7944,6 +8154,7 @@ function UploadModal({
                                >
                                  <option value={CONSENT_EXCEPTION_REASONS.STREET}>Straatfotografie</option>
                                  <option value={CONSENT_EXCEPTION_REASONS.PRESS}>Persfotografie</option>
+                                 <option value={CONSENT_EXCEPTION_REASONS.DOCUMENTARY}>Documentaire uitzondering</option>
                                </select>
                                <textarea
                                  value={consentException.reason}
@@ -7958,7 +8169,15 @@ function UploadModal({
                          </div>
 
                          <div className="flex gap-2 mb-2">
-                            <select className="p-2 border border-slate-300 rounded text-sm w-1/3 bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100" value={newCredit.role} onChange={e => setNewCredit((prev) => ({...prev, role: e.target.value}))}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
+                            <select className="p-2 border border-slate-300 rounded text-sm w-1/3 bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100" value={newCredit.role} onChange={e => {
+                              const nextRole = e.target.value;
+                              setNewCredit((prev) => ({
+                                ...prev,
+                                role: nextRole,
+                                isMaker: isMakerRole(nextRole) ? true : prev.isMaker,
+                                makerFunction: isMakerRole(nextRole) ? nextRole : prev.makerFunction,
+                              }));
+                            }}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
                             <div className="relative flex-1">
                                 <input 
                                    className="w-full p-2 border border-slate-300 rounded text-sm bg-white text-slate-800 placeholder:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500" 
@@ -8005,6 +8224,34 @@ function UploadModal({
                                     </div>
                                 )}
                             </div>
+                         </div>
+                         <div className="mb-3 rounded-xl border border-slate-200 bg-white/80 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100">
+                           <label className="flex items-start gap-2 font-semibold">
+                             <input
+                               type="checkbox"
+                               checked={Boolean(newCredit.isMaker || isMakerRole(newCredit.role))}
+                               disabled={isMakerRole(newCredit.role)}
+                               onChange={(event) => setNewCredit((prev) => ({
+                                 ...prev,
+                                 isMaker: event.target.checked,
+                                 makerFunction: event.target.checked ? (prev.makerFunction || 'maker') : '',
+                               }))}
+                               className="mt-0.5"
+                             />
+                             <span>Deze bijdrager is maker, rechthebbende of productie-eigenaar voor deze upload</span>
+                           </label>
+                           {(newCredit.isMaker || isMakerRole(newCredit.role)) && (
+                             <select
+                               value={isMakerRole(newCredit.role) ? newCredit.role : (newCredit.makerFunction || 'maker')}
+                               disabled={isMakerRole(newCredit.role)}
+                               onChange={(event) => setNewCredit((prev) => ({ ...prev, makerFunction: event.target.value }))}
+                               className="mt-2 w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                             >
+                               {MAKER_FUNCTION_IDS.map((makerFunction) => (
+                                 <option key={makerFunction} value={makerFunction}>{getMakerFunctionLabel(makerFunction)}</option>
+                               ))}
+                             </select>
+                           )}
                          </div>
                          <button
                            type="button"

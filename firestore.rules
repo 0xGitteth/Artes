@@ -106,10 +106,31 @@ service cloud.firestore {
           'pressOrStreetException'
         ]);
     }
-    function isPostConsentPublishAllowed(data) {
+    function isAllowedMakerRole(role) {
+      return role in ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'];
+    }
+    function creditAtHasMakerRole(credits, index) {
+      return index is int
+        && index >= 0
+        && credits.size() > index
+        && credits[index] is map
+        && ('role' in credits[index])
+        && isAllowedMakerRole(credits[index].role);
+    }
+    // The client-maintained uploadConsent.hasMaker/makerRoles fields are
+    // metadata only. The security proof is uploadConsent.makerCreditIndex,
+    // which must point at an actual canonical credits[] entry with a maker role.
+    function hasActualMakerCredit(data) {
       return ('credits' in data)
         && data.credits is list
         && data.credits.size() > 0
+        && ('uploadConsent' in data)
+        && data.uploadConsent is map
+        && ('makerCreditIndex' in data.uploadConsent)
+        && creditAtHasMakerRole(data.credits, data.uploadConsent.makerCreditIndex);
+    }
+    function isPostConsentPublishAllowed(data) {
+      return hasActualMakerCredit(data)
         && ('uploadConsent' in data)
         && data.uploadConsent is map
         && ('version' in data.uploadConsent)
@@ -138,6 +159,11 @@ service cloud.firestore {
     function isLegacyPostWithoutModerationProof(data) {
       return !('outcome' in data)
         && !('shouldReview' in data);
+    }
+    function isPreConsentModeratedPost(data) {
+      return ('outcome' in data)
+        && ('shouldReview' in data)
+        && (!('uploadConsent' in data) || !('consentAudit' in data));
     }
     function isLegacyPostMetadataOnlyUpdate() {
       let diff = request.resource.data.diff(resource.data);
@@ -446,13 +472,18 @@ service cloud.firestore {
         && resource.data.authorId == request.auth.uid
         && (
           (
-            !isLegacyPostWithoutModerationProof(resource.data)
-            && isPostModerationPublishAllowed(request.resource.data)
-            && keepsPostModerationFieldsOnUpdate()
-          )
-          || (
             isLegacyPostWithoutModerationProof(resource.data)
             && isLegacyPostMetadataOnlyUpdate()
+          )
+          || (
+            isPreConsentModeratedPost(resource.data)
+            && isLegacyPostMetadataOnlyUpdate()
+          )
+          || (
+            !isLegacyPostWithoutModerationProof(resource.data)
+            && !isPreConsentModeratedPost(resource.data)
+            && keepsPostModerationFieldsOnUpdate()
+            && isPostModerationPublishAllowed(request.resource.data)
           )
         );
       allow delete: if isVerifiedOrDev() && resource.data.authorId == request.auth.uid;

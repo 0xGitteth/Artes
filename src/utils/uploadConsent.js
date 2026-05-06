@@ -37,8 +37,10 @@ export const isContributorConsentStatus = (status) => CONSENT_STATUS_SET.has(Str
 export const getSelfMakerRoles = (profileRoles = []) => (Array.isArray(profileRoles) ? profileRoles : [])
   .filter(isMakerRole);
 
-export const hasMakerCredit = (credits = []) => (Array.isArray(credits) ? credits : [])
-  .some((credit) => isMakerRole(credit?.role));
+export const getMakerCreditIndex = (credits = []) => (Array.isArray(credits) ? credits : [])
+  .findIndex((credit) => isMakerRole(credit?.role));
+
+export const hasMakerCredit = (credits = []) => getMakerCreditIndex(credits) >= 0;
 
 export const hasVisibleSubjectCredit = (credits = []) => (Array.isArray(credits) ? credits : [])
   .some((credit) => isSubjectRole(credit?.role));
@@ -85,11 +87,14 @@ export const buildUploadConsent = ({ credits = [], exception = {}, aiPeoplePrese
   const normalizedCredits = (Array.isArray(credits) ? credits : [])
     .map((credit) => normalizeConsentCredit(credit, { exception: normalizedException }));
 
+  const makerCreditIndex = getMakerCreditIndex(normalizedCredits);
+
   return {
     version: 1,
     makerRoles: [...MAKER_ROLE_IDS],
+    makerCreditIndex,
     consentStatuses: Object.values(CONTRIBUTOR_CONSENT_STATUSES),
-    hasMaker: hasMakerCredit(normalizedCredits),
+    hasMaker: makerCreditIndex >= 0,
     hasVisibleSubject: hasVisibleSubjectCredit(normalizedCredits),
     aiPeoplePresent: Boolean(aiPeoplePresent),
     subjectWarningAcknowledged: Boolean(subjectWarningAcknowledged),

@@ -401,6 +401,42 @@ async function run() {
       credits: [{ uid: 'photographer_1', role: 'photographer', name: 'Photo One', consentStatus: 'accepted' }],
     }));
 
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_model_self_portrait_explicit_maker'), {
+      ...basePost,
+      credits: [{ uid: ownerUid, role: 'model', name: 'Model Self Portrait', isSelf: true, isMaker: true, makerFunction: 'photographer', consentStatus: 'accepted' }],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
+    }));
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_agency_rights_holder_maker'), {
+      ...basePost,
+      credits: [{ uid: 'agency_1', role: 'agency', name: 'Agency One', isMaker: true, makerFunction: 'rightsHolder', consentStatus: 'accepted' }],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
+    }));
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_company_production_owner_maker'), {
+      ...basePost,
+      credits: [{ uid: 'company_1', role: 'company', name: 'Company One', isMaker: true, makerFunction: 'productionOwner', consentStatus: 'accepted' }],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_agency_unmarked_not_maker'), {
+      ...basePost,
+      credits: [{ uid: 'agency_unmarked', role: 'agency', name: 'Agency Unmarked', consentStatus: 'accepted' }],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_is_maker_without_function_denied'), {
+      ...basePost,
+      credits: [{ uid: 'model_flag_only', role: 'model', name: 'Model Flag Only', isMaker: true, consentStatus: 'accepted' }],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_function_without_is_maker_denied'), {
+      ...basePost,
+      credits: [{ uid: 'model_function_only', role: 'model', name: 'Model Function Only', makerFunction: 'photographer', consentStatus: 'accepted' }],
+      uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
+    }));
+
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_late_maker_index'), {
       ...basePost,
       credits: Array.from({ length: 10 }, (_, index) => ({

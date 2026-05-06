@@ -15,6 +15,13 @@ export const MAKER_ROLE_IDS = Object.freeze([
   'art_director',
 ]);
 
+export const MAKER_FUNCTION_IDS = Object.freeze([
+  ...MAKER_ROLE_IDS,
+  'maker',
+  'rightsHolder',
+  'productionOwner',
+]);
+
 export const SUBJECT_ROLE_IDS = Object.freeze([
   'model',
   'assistent',
@@ -24,31 +31,100 @@ export const SUBJECT_ROLE_IDS = Object.freeze([
 export const CONSENT_EXCEPTION_REASONS = Object.freeze({
   STREET: 'streetPhotography',
   PRESS: 'pressPhotography',
+  DOCUMENTARY: 'documentary',
+});
+
+export const VISIBLE_PERSON_PROMPT_REASONS = Object.freeze({
+  MAKER_AI_VISIBLE_PERSON_NO_SUBJECT: 'makerAiVisiblePersonNoSubjectContributor',
+});
+
+export const VISIBLE_PERSON_PROMPT_RESOLVED_BY = Object.freeze({
+  TAGGED_CONTRIBUTOR: 'taggedContributor',
+  ANONYMOUS_CONTRIBUTOR: 'anonymousContributor',
+  EXCEPTION: 'exception',
+  NOT_APPLICABLE: 'notApplicable',
+});
+
+export const MISSING_MAKER_PROMPT_RESOLVED_BY = Object.freeze({
+  TAGGED_CONTRIBUTOR: 'taggedContributor',
+  ANONYMOUS_CONTRIBUTOR: 'anonymousContributor',
+  SELF_TAGGED_MAKER: 'selfTaggedMaker',
 });
 
 const MAKER_ROLE_SET = new Set(MAKER_ROLE_IDS);
+const MAKER_FUNCTION_SET = new Set(MAKER_FUNCTION_IDS);
 const SUBJECT_ROLE_SET = new Set(SUBJECT_ROLE_IDS);
 const CONSENT_STATUS_SET = new Set(Object.values(CONTRIBUTOR_CONSENT_STATUSES));
 
 export const isMakerRole = (role) => MAKER_ROLE_SET.has(String(role || ''));
+export const isMakerFunction = (makerFunction) => MAKER_FUNCTION_SET.has(String(makerFunction || ''));
 export const isSubjectRole = (role) => SUBJECT_ROLE_SET.has(String(role || ''));
 export const isContributorConsentStatus = (status) => CONSENT_STATUS_SET.has(String(status || ''));
 
 export const getSelfMakerRoles = (profileRoles = []) => (Array.isArray(profileRoles) ? profileRoles : [])
   .filter(isMakerRole);
 
+export const getCreditMakerFunction = (credit = {}) => {
+  const explicitMakerFunction = String(credit?.makerFunction || '').trim();
+  if (Boolean(credit?.isMaker) && isMakerFunction(explicitMakerFunction)) return explicitMakerFunction;
+  const role = String(credit?.role || '').trim();
+  return isMakerRole(role) ? role : '';
+};
+
+export const isExplicitMakerCredit = (credit = {}) => Boolean(getCreditMakerFunction(credit));
+
 export const getMakerCreditIndex = (credits = []) => (Array.isArray(credits) ? credits : [])
-  .findIndex((credit) => isMakerRole(credit?.role));
+  .findIndex((credit) => isExplicitMakerCredit(credit));
 
 export const hasMakerCredit = (credits = []) => getMakerCreditIndex(credits) >= 0;
+
+export const hasAnonymousMakerCredit = (credits = []) => (Array.isArray(credits) ? credits : [])
+  .some((credit) => isExplicitMakerCredit(credit) && Boolean(credit?.isAnonymous));
+
+export const hasValidSelfMakerCredit = ({
+  credits = [],
+  uploaderRole = '',
+  profileRoles = [],
+  selfMakerRoleConfirmed = false,
+  selfMakerRole = '',
+} = {}) => (Array.isArray(credits) ? credits : [])
+  .some((credit) => {
+    if (!credit?.isSelf || credit.role !== uploaderRole) return false;
+    const makerFunction = getCreditMakerFunction(credit);
+    if (!makerFunction) return false;
+    if (Array.isArray(profileRoles) && profileRoles.includes(credit.role)) return true;
+    return Boolean(selfMakerRoleConfirmed && selfMakerRole === makerFunction);
+  });
+
+export const normalizeCreditAfterRoleChange = (previousCredit = {}, nextRole = '') => {
+  const role = String(nextRole || '').trim();
+  if (isMakerRole(role)) {
+    return {
+      ...previousCredit,
+      role,
+      isMaker: true,
+      makerFunction: role,
+    };
+  }
+
+  return {
+    ...previousCredit,
+    role,
+    isMaker: false,
+    makerFunction: '',
+  };
+};
 
 export const hasVisibleSubjectCredit = (credits = []) => (Array.isArray(credits) ? credits : [])
   .some((credit) => isSubjectRole(credit?.role));
 
+export const hasAnonymousVisibleSubjectCredit = (credits = []) => (Array.isArray(credits) ? credits : [])
+  .some((credit) => isSubjectRole(credit?.role) && Boolean(credit?.isAnonymous));
+
 export const normalizeConsentException = (exception = {}) => {
   const type = Object.values(CONSENT_EXCEPTION_REASONS).includes(exception?.type) ? exception.type : '';
   const reason = String(exception?.reason || '').trim().slice(0, 500);
-  const enabled = Boolean(exception?.enabled && type && reason);
+  const enabled = Boolean(exception?.enabled && type);
   return {
     enabled,
     type: enabled ? type : null,
@@ -61,6 +137,10 @@ export const normalizeConsentCredit = (credit = {}, context = {}) => {
   const isAnonymous = Boolean(credit.isAnonymous);
   const exception = normalizeConsentException(context.exception);
   const role = String(credit.role || '').trim();
+  const explicitMakerFunction = String(credit.makerFunction || '').trim();
+  const legacyMakerFunction = isMakerRole(role) ? role : '';
+  const makerFunction = isMakerFunction(explicitMakerFunction) ? explicitMakerFunction : legacyMakerFunction;
+  const isMaker = Boolean(legacyMakerFunction || (credit.isMaker && makerFunction));
   let consentStatus = credit.consentStatus;
 
   if (isAnonymous) {
@@ -76,18 +156,144 @@ export const normalizeConsentCredit = (credit = {}, context = {}) => {
   return {
     ...credit,
     role,
+    makerFunction: isMaker ? makerFunction : null,
+    isMaker,
     consentStatus,
     consentRequired: consentStatus === CONTRIBUTOR_CONSENT_STATUSES.PENDING,
     consentUpdatedAt: credit.consentUpdatedAt || null,
   };
 };
 
-export const buildUploadConsent = ({ credits = [], exception = {}, aiPeoplePresent = false, subjectWarningAcknowledged = false } = {}) => {
+
+export const getMissingMakerPromptState = ({
+  credits = [],
+  uploaderRole = '',
+  profileRoles = [],
+  missingMakerPromptShown = false,
+  selfMakerRoleConfirmed = false,
+  selfMakerRole = '',
+} = {}) => {
+  const creditList = Array.isArray(credits) ? credits : [];
+  const validSelfMakerUsed = hasValidSelfMakerCredit({
+    credits: creditList,
+    uploaderRole,
+    profileRoles,
+    selfMakerRoleConfirmed,
+    selfMakerRole,
+  });
+  const validMakerCredits = creditList.filter((credit) => {
+    if (!isExplicitMakerCredit(credit)) return false;
+    if (!credit?.isSelf) return true;
+    const makerFunction = getCreditMakerFunction(credit);
+    return credit.role === uploaderRole
+      && (
+        (Array.isArray(profileRoles) && profileRoles.includes(credit.role))
+        || Boolean(selfMakerRoleConfirmed && selfMakerRole === makerFunction)
+      );
+  });
+  const hasResolvableMaker = validMakerCredits.length > 0;
+  const anonymousMakerUsed = validMakerCredits.some((credit) => Boolean(credit?.isAnonymous));
+  const shouldShowMissingMakerPrompt = !hasResolvableMaker;
+
+  let resolvedBy = null;
+  if (hasResolvableMaker) {
+    if (anonymousMakerUsed) {
+      resolvedBy = MISSING_MAKER_PROMPT_RESOLVED_BY.ANONYMOUS_CONTRIBUTOR;
+    } else if (validSelfMakerUsed) {
+      resolvedBy = MISSING_MAKER_PROMPT_RESOLVED_BY.SELF_TAGGED_MAKER;
+    } else {
+      resolvedBy = MISSING_MAKER_PROMPT_RESOLVED_BY.TAGGED_CONTRIBUTOR;
+    }
+  }
+
+  return {
+    missingMakerPromptShown: Boolean(missingMakerPromptShown || shouldShowMissingMakerPrompt),
+    shouldShowMissingMakerPrompt,
+    missingMakerPromptResolved: hasResolvableMaker,
+    missingMakerResolvedBy: resolvedBy,
+  };
+};
+
+export const getVisiblePersonPromptState = ({
+  credits = [],
+  uploaderRole = '',
+  aiPeoplePresent = false,
+  exception = {},
+  userAcknowledgedVisiblePersonPrompt = false,
+} = {}) => {
+  const normalizedException = normalizeConsentException(exception);
+  const makerUpload = isMakerRole(uploaderRole);
+  const aiSuggestsVisiblePerson = Boolean(aiPeoplePresent);
+  const promptApplies = makerUpload && aiSuggestsVisiblePerson;
+  const anonymousContributorUsed = hasAnonymousVisibleSubjectCredit(credits);
+  const hasSubjectContributor = hasVisibleSubjectCredit(credits);
+  const visiblePersonPromptReason = promptApplies
+    ? VISIBLE_PERSON_PROMPT_REASONS.MAKER_AI_VISIBLE_PERSON_NO_SUBJECT
+    : null;
+
+  let resolvedBy = null;
+  if (promptApplies) {
+    if (anonymousContributorUsed) {
+      resolvedBy = VISIBLE_PERSON_PROMPT_RESOLVED_BY.ANONYMOUS_CONTRIBUTOR;
+    } else if (hasSubjectContributor) {
+      resolvedBy = VISIBLE_PERSON_PROMPT_RESOLVED_BY.TAGGED_CONTRIBUTOR;
+    } else if (normalizedException.enabled) {
+      resolvedBy = VISIBLE_PERSON_PROMPT_RESOLVED_BY.EXCEPTION;
+    } else if (userAcknowledgedVisiblePersonPrompt) {
+      resolvedBy = VISIBLE_PERSON_PROMPT_RESOLVED_BY.NOT_APPLICABLE;
+    }
+  }
+
+  const visiblePersonPromptShown = promptApplies;
+  const shouldShowVisiblePersonPrompt = promptApplies && !hasSubjectContributor;
+  const unresolved = promptApplies && !resolvedBy;
+
+  return {
+    visiblePersonPromptShown,
+    shouldShowVisiblePersonPrompt,
+    visiblePersonPromptReason,
+    userAcknowledgedVisiblePersonPrompt: Boolean(userAcknowledgedVisiblePersonPrompt),
+    selectedExceptionReason: normalizedException.enabled ? normalizedException.type : null,
+    anonymousContributorUsed,
+    resolvedBy,
+    unresolved,
+  };
+};
+
+export const buildUploadConsent = ({
+  credits = [],
+  exception = {},
+  aiPeoplePresent = false,
+  subjectWarningAcknowledged = false,
+  uploaderRole = '',
+  profileRoles = [],
+  visiblePersonPromptResolvedAt = null,
+  missingMakerPromptShown = false,
+  missingMakerPromptResolvedAt = null,
+  selfMakerRoleConfirmed = false,
+  selfMakerRole = '',
+  selfMakerRoleConfirmedAt = null,
+} = {}) => {
   const normalizedException = normalizeConsentException(exception);
   const normalizedCredits = (Array.isArray(credits) ? credits : [])
     .map((credit) => normalizeConsentCredit(credit, { exception: normalizedException }));
 
   const makerCreditIndex = getMakerCreditIndex(normalizedCredits);
+  const missingMakerPrompt = getMissingMakerPromptState({
+    credits: normalizedCredits,
+    uploaderRole,
+    profileRoles,
+    missingMakerPromptShown,
+    selfMakerRoleConfirmed,
+    selfMakerRole,
+  });
+  const visiblePersonPrompt = getVisiblePersonPromptState({
+    credits: normalizedCredits,
+    uploaderRole,
+    aiPeoplePresent,
+    exception: normalizedException,
+    userAcknowledgedVisiblePersonPrompt: subjectWarningAcknowledged,
+  });
 
   return {
     version: 1,
@@ -98,37 +304,90 @@ export const buildUploadConsent = ({ credits = [], exception = {}, aiPeoplePrese
     hasVisibleSubject: hasVisibleSubjectCredit(normalizedCredits),
     aiPeoplePresent: Boolean(aiPeoplePresent),
     subjectWarningAcknowledged: Boolean(subjectWarningAcknowledged),
+    visiblePersonPromptShown: visiblePersonPrompt.visiblePersonPromptShown,
+    visiblePersonPromptReason: visiblePersonPrompt.visiblePersonPromptReason,
+    userAcknowledgedVisiblePersonPrompt: visiblePersonPrompt.userAcknowledgedVisiblePersonPrompt,
+    selectedExceptionReason: visiblePersonPrompt.selectedExceptionReason,
+    anonymousContributorUsed: visiblePersonPrompt.anonymousContributorUsed,
+    resolvedBy: visiblePersonPrompt.resolvedBy,
+    resolvedAt: visiblePersonPrompt.resolvedBy ? visiblePersonPromptResolvedAt : null,
+    missingMakerPromptShown: missingMakerPrompt.missingMakerPromptShown,
+    missingMakerPromptResolved: missingMakerPrompt.missingMakerPromptResolved,
+    missingMakerResolvedBy: missingMakerPrompt.missingMakerResolvedBy,
+    missingMakerResolvedAt: missingMakerPrompt.missingMakerPromptResolved ? missingMakerPromptResolvedAt : null,
+    selfMakerRoleConfirmed: Boolean(selfMakerRoleConfirmed),
+    selfMakerRole: selfMakerRoleConfirmed ? selfMakerRole : null,
+    selfMakerRoleOutsideProfile: Boolean(selfMakerRoleConfirmed && selfMakerRole && (!Array.isArray(profileRoles) || !profileRoles.includes(selfMakerRole))),
+    selfMakerRoleConfirmedAt: selfMakerRoleConfirmed ? selfMakerRoleConfirmedAt : null,
     exception: normalizedException,
     audit: [
       {
         action: 'uploadConsentCaptured',
         at: null,
         actor: 'uploader',
-        makerCount: normalizedCredits.filter((credit) => isMakerRole(credit.role)).length,
+        makerCount: normalizedCredits.filter(isExplicitMakerCredit).length,
         pendingConsentCount: normalizedCredits.filter((credit) => credit.consentStatus === CONTRIBUTOR_CONSENT_STATUSES.PENDING).length,
         exceptionType: normalizedException.type,
+        visiblePersonPromptShown: visiblePersonPrompt.visiblePersonPromptShown,
+        visiblePersonPromptReason: visiblePersonPrompt.visiblePersonPromptReason,
+        userAcknowledgedVisiblePersonPrompt: visiblePersonPrompt.userAcknowledgedVisiblePersonPrompt,
+        selectedExceptionReason: visiblePersonPrompt.selectedExceptionReason,
+        anonymousContributorUsed: visiblePersonPrompt.anonymousContributorUsed,
+        resolvedBy: visiblePersonPrompt.resolvedBy,
+        resolvedAt: visiblePersonPrompt.resolvedBy ? visiblePersonPromptResolvedAt : null,
+        missingMakerPromptShown: missingMakerPrompt.missingMakerPromptShown,
+        missingMakerPromptResolved: missingMakerPrompt.missingMakerPromptResolved,
+        missingMakerResolvedBy: missingMakerPrompt.missingMakerResolvedBy,
+        missingMakerResolvedAt: missingMakerPrompt.missingMakerPromptResolved ? missingMakerPromptResolvedAt : null,
+        selfMakerRoleConfirmed: Boolean(selfMakerRoleConfirmed),
+        selfMakerRole: selfMakerRoleConfirmed ? selfMakerRole : null,
+        selfMakerRoleOutsideProfile: Boolean(selfMakerRoleConfirmed && selfMakerRole && (!Array.isArray(profileRoles) || !profileRoles.includes(selfMakerRole))),
+        selfMakerRoleConfirmedAt: selfMakerRoleConfirmed ? selfMakerRoleConfirmedAt : null,
       },
     ],
   };
 };
 
-export const validateUploadConsent = ({ credits = [], uploaderRole = '', profileRoles = [], exception = {} } = {}) => {
+export const validateUploadConsent = ({
+  credits = [],
+  uploaderRole = '',
+  profileRoles = [],
+  exception = {},
+  aiPeoplePresent = false,
+  subjectWarningAcknowledged = false,
+  selfMakerRoleConfirmed = false,
+  selfMakerRole = '',
+} = {}) => {
   const errors = {};
   const normalizedException = normalizeConsentException(exception);
   const selfCredit = (Array.isArray(credits) ? credits : []).find((credit) => credit?.isSelf);
 
   if (!hasMakerCredit(credits)) {
-    errors.maker = 'Voeg minstens één maker toe: fotograaf, artist, videograaf, retoucher of art director.';
+    errors.maker = 'Er mist nog een maker. Voeg een fotograaf, videograaf, retoucher, art director of kunstenaar toe.';
   }
 
   if (selfCredit) {
-    if (!Array.isArray(profileRoles) || !profileRoles.includes(selfCredit.role) || selfCredit.role !== uploaderRole) {
-      errors.selfRole = 'Kies je eigen rol uit je profielrollen.';
+    const selfRoleInProfile = Array.isArray(profileRoles) && profileRoles.includes(selfCredit.role);
+    const confirmedSelfMakerForUpload = Boolean(
+      selfMakerRoleConfirmed
+      && selfMakerRole === getCreditMakerFunction(selfCredit)
+      && selfCredit.role === uploaderRole
+      && isExplicitMakerCredit(selfCredit)
+    );
+    if ((!selfRoleInProfile && !confirmedSelfMakerForUpload) || selfCredit.role !== uploaderRole) {
+      errors.selfRole = 'Kies je eigen rol uit je profielrollen of bevestig een makerrol voor deze upload.';
     }
   }
 
-  if (normalizedException.enabled && !normalizedException.reason) {
-    errors.exception = 'Leg kort vast waarom dit straat- of persfotografie is.';
+  const visiblePersonPrompt = getVisiblePersonPromptState({
+    credits,
+    uploaderRole,
+    aiPeoplePresent,
+    exception: normalizedException,
+    userAcknowledgedVisiblePersonPrompt: subjectWarningAcknowledged,
+  });
+  if (visiblePersonPrompt.unresolved) {
+    errors.visiblePersonPrompt = 'Er lijkt mogelijk een persoon zichtbaar te zijn. Kies Model toevoegen, Anoniem toevoegen, Niet van toepassing of Straat/pers uitzondering.';
   }
 
   return errors;

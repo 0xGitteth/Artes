@@ -109,17 +109,30 @@ service cloud.firestore {
     function isAllowedMakerRole(role) {
       return role in ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'];
     }
+    function isAllowedMakerFunction(makerFunction) {
+      return makerFunction in ['photographer', 'artist', 'videographer', 'retoucher', 'art_director', 'maker', 'rightsHolder', 'productionOwner'];
+    }
+    function creditHasExplicitMakerFunction(credit) {
+      return credit is map
+        && ('isMaker' in credit)
+        && credit.isMaker == true
+        && ('makerFunction' in credit)
+        && credit.makerFunction is string
+        && isAllowedMakerFunction(credit.makerFunction);
+    }
     function creditAtHasMakerRole(credits, index) {
       return index is int
         && index >= 0
         && credits.size() > index
         && credits[index] is map
-        && ('role' in credits[index])
-        && isAllowedMakerRole(credits[index].role);
+        && (
+          (('role' in credits[index]) && isAllowedMakerRole(credits[index].role))
+          || creditHasExplicitMakerFunction(credits[index])
+        );
     }
     // The client-maintained uploadConsent.hasMaker/makerRoles fields are
     // metadata only. The security proof is uploadConsent.makerCreditIndex,
-    // which must point at an actual canonical credits[] entry with a maker role.
+    // which must point at an actual canonical credits[] entry with a maker role or explicit upload maker function.
     function hasActualMakerCredit(data) {
       return ('credits' in data)
         && data.credits is list

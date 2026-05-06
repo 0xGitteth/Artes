@@ -1,13 +1,5 @@
 import React from 'react';
-
-const PANORAMA_RATIO_THRESHOLD = 2.8;
-
-export const isPanoramaImage = (imageMeta) => {
-  if (!imageMeta || typeof imageMeta !== 'object') return false;
-  if (imageMeta.orientation === 'panorama') return true;
-  const ratio = Number(imageMeta.aspectRatio);
-  return Number.isFinite(ratio) && ratio >= PANORAMA_RATIO_THRESHOLD;
-};
+import { isPanoramaImage } from '../utils/imageMeta';
 
 export default function PostImageDisplay({
   src,
@@ -21,6 +13,7 @@ export default function PostImageDisplay({
   overlay = null,
   badgeClassName = '',
   panoramaFrameClassName = '',
+  imageClassName = 'relative z-0 block h-auto w-full object-cover',
   panoramaHint = 'Veeg horizontaal om de hele foto te bekijken.',
 }) {
   const isPanorama = isPanoramaImage(imageMeta);
@@ -56,7 +49,7 @@ export default function PostImageDisplay({
           onClick={onClick}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
-          className="relative z-0 block h-auto w-full object-cover"
+          className={imageClassName}
           loading="lazy"
         />
       )}

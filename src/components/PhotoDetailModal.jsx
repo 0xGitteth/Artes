@@ -8,6 +8,7 @@ import CommentIcon from './icons/CommentIcon';
 import SensitiveOverlay from './SensitiveOverlay';
 import { resolvePublicDisplayName } from '../utils/publicIdentity';
 import PostCreditDisplay from './PostCreditDisplay';
+import PostImageDisplay from './PostImageDisplay';
 
 const TRIGGER_LABELS = {
   adultArtNude: '18+ Artistiek naakt',
@@ -226,17 +227,16 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
           </button>
         </div>
         <div className="grid md:grid-cols-2 gap-0">
-          <div className="relative flex items-center justify-center bg-slate-100 dark:bg-slate-800 min-h-[260px] md:min-h-[420px] max-h-[70vh] overflow-hidden">
-            {shouldCover && (
-              <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />
-            )}
-            <img
-              src={post.imageUrl}
-              alt={post.title}
-              className="block max-h-[70vh] w-auto max-w-full object-contain"
-              loading="lazy"
-            />
-          </div>
+          <PostImageDisplay
+            src={post.imageUrl}
+            alt={post.title}
+            imageMeta={post.imageMeta}
+            className="flex items-center justify-center w-full bg-slate-100 dark:bg-slate-800 min-h-[260px] md:min-h-[420px] max-h-[70vh]"
+            imageClassName="relative z-0 block max-h-[70vh] w-auto max-w-full object-contain"
+            panoramaFrameClassName="h-[260px] md:h-[420px] max-h-[70vh]"
+            shouldCover={shouldCover}
+            overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+          />
           <div className="p-6 space-y-4 overflow-y-auto no-scrollbar max-h-[80vh]">
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Calendar size={16} />

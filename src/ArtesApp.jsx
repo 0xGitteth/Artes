@@ -111,6 +111,7 @@ import {
   hasMakerCredit,
   hasVisibleSubjectCredit,
   isMakerRole,
+  normalizeCreditAfterRoleChange,
   normalizeConsentException,
   normalizeConsentCredit,
   validateUploadConsent,
@@ -8171,12 +8172,7 @@ function UploadModal({
                          <div className="flex gap-2 mb-2">
                             <select className="p-2 border border-slate-300 rounded text-sm w-1/3 bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100" value={newCredit.role} onChange={e => {
                               const nextRole = e.target.value;
-                              setNewCredit((prev) => ({
-                                ...prev,
-                                role: nextRole,
-                                isMaker: isMakerRole(nextRole) ? true : prev.isMaker,
-                                makerFunction: isMakerRole(nextRole) ? nextRole : prev.makerFunction,
-                              }));
+                              setNewCredit((prev) => normalizeCreditAfterRoleChange(prev, nextRole));
                             }}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
                             <div className="relative flex-1">
                                 <input 

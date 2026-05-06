@@ -96,6 +96,25 @@ export const hasValidSelfMakerCredit = ({
     return Boolean(selfMakerRoleConfirmed && selfMakerRole === makerFunction);
   });
 
+export const normalizeCreditAfterRoleChange = (previousCredit = {}, nextRole = '') => {
+  const role = String(nextRole || '').trim();
+  if (isMakerRole(role)) {
+    return {
+      ...previousCredit,
+      role,
+      isMaker: true,
+      makerFunction: role,
+    };
+  }
+
+  return {
+    ...previousCredit,
+    role,
+    isMaker: false,
+    makerFunction: '',
+  };
+};
+
 export const hasVisibleSubjectCredit = (credits = []) => (Array.isArray(credits) ? credits : [])
   .some((credit) => isSubjectRole(credit?.role));
 

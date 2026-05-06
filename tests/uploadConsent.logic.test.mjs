@@ -12,6 +12,7 @@ import {
   getVisiblePersonPromptState,
   hasMakerCredit,
   hasVisibleSubjectCredit,
+  normalizeCreditAfterRoleChange,
   validateUploadConsent,
 } from '../src/utils/uploadConsent.js';
 
@@ -21,6 +22,31 @@ assert.equal(hasMakerCredit([{ role: 'artist' }]), true, 'artist is an allowed m
 assert.equal(getMakerCreditIndex([{ role: 'model' }, { role: 'retoucher' }]), 1, 'maker index points at first maker credit');
 assert.equal(getMakerCreditIndex([{ role: 'model' }, { role: 'mua' }]), -1, 'missing maker credit has no maker index');
 assert.equal(hasVisibleSubjectCredit([{ role: 'model' }]), true, 'model is a visible subject role');
+
+assert.deepEqual(
+  normalizeCreditAfterRoleChange({ role: 'photographer', isMaker: true, makerFunction: 'photographer' }, 'model'),
+  { role: 'model', isMaker: false, makerFunction: '' },
+  'changing role photographer -> model clears isMaker and makerFunction',
+);
+assert.deepEqual(
+  normalizeCreditAfterRoleChange({ role: 'photographer', isMaker: true, makerFunction: 'photographer' }, 'mua'),
+  { role: 'mua', isMaker: false, makerFunction: '' },
+  'changing role photographer -> MUA clears isMaker and makerFunction',
+);
+assert.deepEqual(
+  normalizeCreditAfterRoleChange({ role: 'photographer', isMaker: true, makerFunction: 'photographer' }, 'agency'),
+  { role: 'agency', isMaker: false, makerFunction: '' },
+  'changing role photographer -> agency clears isMaker and makerFunction',
+);
+assert.deepEqual(
+  normalizeCreditAfterRoleChange({ role: 'model', isMaker: false, makerFunction: '' }, 'photographer'),
+  { role: 'photographer', isMaker: true, makerFunction: 'photographer' },
+  'changing role model -> photographer sets isMaker true and makerFunction photographer',
+);
+const modelRoleAfterReset = normalizeCreditAfterRoleChange({ role: 'photographer', isMaker: true, makerFunction: 'photographer' }, 'model');
+const explicitModelMakerAfterReset = { ...modelRoleAfterReset, isMaker: true, makerFunction: 'photographer' };
+assert.equal(hasMakerCredit([explicitModelMakerAfterReset]), true, 'explicitly marking a non-maker role as maker still works after role change');
+assert.equal(getMakerCreditIndex([{ role: 'model' }, explicitModelMakerAfterReset]), 1, 'makerCreditIndex points only to the actual explicit maker credit');
 
 const missingMaker = validateUploadConsent({
   credits: [{ role: 'model', isSelf: true }],

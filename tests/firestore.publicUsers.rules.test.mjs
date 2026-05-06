@@ -72,6 +72,13 @@ async function run() {
         isCurrent: false,
         version: 1,
       });
+      await setDoc(doc(db, 'contributors', 'claimed_contributor'), {
+        displayName: 'Claimed Contributor',
+        status: 'claimed',
+        claimedByUid: ownerUid,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'posts', 'legacy_without_moderation'), {
         authorId: ownerUid,
         title: 'Legacy title',
@@ -329,6 +336,16 @@ async function run() {
     await assertSucceeds(deleteDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId)));
 
     const acceptedAtTs = Timestamp.fromDate(new Date());
+    const baseConsent = {
+      version: 1,
+      makerRoles: ['photographer', 'artist', 'videographer', 'retoucher', 'art_director'],
+      consentStatuses: ['pending', 'accepted', 'rejected', 'notRequired', 'anonymous', 'pressOrStreetException'],
+      hasMaker: true,
+      hasVisibleSubject: false,
+      aiPeoplePresent: false,
+      subjectWarningAcknowledged: false,
+      exception: { enabled: false, type: null, reason: '' },
+    };
     const basePost = {
       authorId: ownerUid,
       title: 'Taxonomy post',
@@ -338,6 +355,9 @@ async function run() {
       appliedTriggers: [],
       outcome: 'allowed',
       shouldReview: false,
+      credits: [{ uid: ownerUid, role: 'photographer', name: 'Owner One', isSelf: true, consentStatus: 'accepted' }],
+      uploadConsent: baseConsent,
+      consentAudit: [{ action: 'uploadConsentCaptured', actorUid: ownerUid, at: acceptedAtTs }],
       correction: {
         type: 'safeCorrection',
         requiresModeratorReview: false,
@@ -365,6 +385,16 @@ async function run() {
 
     const { correction: _unusedCorrection, ...postWithoutCorrection } = basePost;
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'allowed_without_correction'), postWithoutCorrection));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'missing_maker_consent'), {
+      ...postWithoutCorrection,
+      uploadConsent: { ...baseConsent, hasMaker: false },
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'missing_consent_audit'), {
+      ...postWithoutCorrection,
+      consentAudit: [],
+    }));
 
     await assertFails(setDoc(doc(ownerDb, 'posts', 'safe_correction_missing_accept'), {
       ...basePost,
@@ -557,6 +587,28 @@ async function run() {
     await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
       title: 'Taxonomy post retitled',
       description: 'Updated description with valid moderation fields preserved.',
+    }));
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'contributorContentRequests', 'hide_request'), {
+      contributorId: 'claimed_contributor',
+      postId: 'safe_correction_ok',
+      requestType: 'hide',
+      reason: 'I claimed this contributor profile and want this hidden.',
+      status: 'pending',
+      requesterUid: ownerUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+
+    await assertFails(setDoc(doc(otherDb, 'contributorContentRequests', 'spoofed_request'), {
+      contributorId: 'claimed_contributor',
+      postId: 'safe_correction_ok',
+      requestType: 'remove',
+      reason: 'Not my claimed contributor.',
+      status: 'pending',
+      requesterUid: otherUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     }));
 
     console.log('PASS firestore.publicUsers.rules.test');

@@ -7778,27 +7778,21 @@ function UploadModal({
                 <div className="grid gap-3 md:grid-cols-2 md:gap-8">
                    <div className="space-y-2.5 md:space-y-4">
                       <div className="bg-slate-50 dark:bg-slate-800 p-2.5 rounded-lg border dark:border-slate-700 space-y-2 md:p-4 md:rounded-xl md:space-y-3">
-                         <p className="text-sm font-semibold dark:text-white">Preview voor timeline & overzichten</p>
-                         <div className="bg-slate-100 rounded-xl overflow-hidden relative max-h-[30dvh] md:max-h-[520px]">
-                           <img src={image} className="w-full h-auto object-contain"/>
+                         <p className="text-sm font-semibold dark:text-white">Geselecteerde afbeelding</p>
+                         <div className="bg-slate-100 rounded-xl relative flex items-center justify-center p-1 dark:bg-slate-900/40">
+                           <img src={image} className="max-h-[34dvh] w-auto max-w-full rounded-lg object-contain md:max-h-[520px]"/>
                            {outcome === 'forbidden' && (
                              <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center text-orange-400 font-bold">
                                <AlertOctagon className="w-6 h-6 mr-2"/> Publicatie geblokkeerd
                              </div>
                            )}
                          </div>
-                         <div>
-                           <p className="text-xs text-slate-500 dark:text-slate-300 mb-2">Grid/card preview (sommige overzichten tonen een uitsnede):</p>
-                           <div className="w-full aspect-[4/3] max-h-32 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 dark:border-slate-700 md:aspect-square md:max-h-none">
-                             <img src={image} className="w-full h-full object-cover" />
-                           </div>
-                         </div>
                          <p className="text-xs text-slate-500 dark:text-slate-300">Je foto wordt automatisch verkleind zodat hij sneller laadt.</p>
                          {imageMeta?.orientation === 'panorama' && (
-                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg breed. In sommige overzichten wordt hij als panorama weergegeven.</p>
+                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg breed. Bestaande kaartweergaven kunnen hem als panorama tonen.</p>
                          )}
                          {imageMeta?.aspectRatio && imageMeta.aspectRatio <= 0.5 && (
-                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg hoog. In sommige overzichten kan een uitsnede worden getoond.</p>
+                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg hoog. Bestaande kaartweergaven kunnen nog een uitsnede tonen.</p>
                          )}
                        </div>
                       {errors.image && <p className="text-xs text-red-500">{errors.image}</p>}

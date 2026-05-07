@@ -4204,6 +4204,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
 
   return (
     <div className="max-w-5xl mx-auto px-4 pt-0 pb-6 md:py-6">
+       {/* Mobile top-0 sticks to the padded scrollport edge, which is already below the fixed app header. */}
        <div className="sticky top-0 md:top-16 bg-[#F0F4F8] dark:bg-slate-900 z-20 pb-4">
           <div className="relative mb-4"><Search className="absolute left-4 top-3.5 text-slate-400"/><input className="w-full pl-12 pr-4 py-3 rounded-2xl border-none shadow-sm dark:bg-slate-800 dark:text-white" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)}/></div>
           <div className="flex gap-2 mb-4">

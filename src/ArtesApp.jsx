@@ -696,7 +696,7 @@ const SEED_POSTS = [
 // --- Components ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, asChild = false }) => {
-  const baseStyle = "px-6 py-3 rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 active:scale-95 cursor-pointer";
+  const baseStyle = "min-h-9 px-3 py-2 text-sm rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer md:min-h-0 md:px-6 md:py-3 md:text-base md:rounded-xl md:gap-2";
   const variants = {
     primary: "bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed",
     secondary: "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700",
@@ -712,7 +712,7 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
 const Badge = ({ children, colorClass, onClick, className = '' }) => (
   <span 
     onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
-    className={`px-3 py-1 rounded-full text-xs font-semibold border ${onClick ? 'cursor-pointer hover:opacity-80' : ''} ${colorClass} ${className}`}
+    className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border md:px-3 md:py-1 md:text-xs ${onClick ? 'cursor-pointer hover:opacity-80' : ''} ${colorClass} ${className}`}
   >
     {children}
   </span>
@@ -723,7 +723,7 @@ const Input = ({ label, type = "text", placeholder, value, onChange, error }) =>
     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{label}</label>
     <input
       type={type}
-      className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all ${error ? 'border-red-500 focus:ring-red-400' : 'border-slate-200 dark:border-slate-700'}`}
+      className={`w-full px-3 py-2 text-sm rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all md:px-4 md:py-3 md:text-base md:rounded-xl ${error ? 'border-red-500 focus:ring-red-400' : 'border-slate-200 dark:border-slate-700'}`}
       placeholder={placeholder}
       value={value}
       onChange={onChange}
@@ -2524,8 +2524,8 @@ export default function ArtesApp() {
         {/* FAB */}
         {profile && view !== 'onboarding' && view !== 'login' && canUpload && (
            <div className="fixed bottom-6 right-6 z-40">
-             <button onClick={() => handleOpenUploadModal()} className="w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-xl shadow-blue-600/30 flex items-center justify-center transition-transform hover:scale-105 active:scale-95">
-               <Plus className="w-7 h-7" />
+             <button onClick={() => handleOpenUploadModal()} className="w-12 h-12 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-xl shadow-blue-600/30 flex items-center justify-center transition-colors md:w-14 md:h-14">
+               <Plus className="w-6 h-6 md:w-7 md:h-7" />
              </button>
            </div>
         )}
@@ -4053,9 +4053,9 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
   const showTimelineEmptyState = Boolean(currentUser?.uid && followingLoaded && visiblePosts.length === 0);
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-12">
+    <div className="max-w-2xl mx-auto px-3 py-4 space-y-8 md:px-4 md:py-6 md:space-y-12">
       {showTimelineEmptyState ? (
-        <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-center">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-center md:rounded-3xl md:p-6">
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
             Je volgt nog niemand of er zijn nog geen posts van makers die je volgt.
           </p>
@@ -4107,8 +4107,8 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
                overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
              />
            </div>
-           <div className="bg-white dark:bg-slate-800 rounded-b-xl shadow-xl p-5 mt-2 border border-slate-100 dark:border-slate-700 flex gap-6">
-              <div className="flex-1 space-y-3">
+           <div className="bg-white dark:bg-slate-800 rounded-b-lg shadow-xl p-3 mt-2 border border-slate-100 dark:border-slate-700 flex gap-3 md:rounded-b-xl md:p-5 md:gap-6">
+              <div className="flex-1 space-y-2 md:space-y-3">
                  <div className="flex gap-3">
                    <button
                      type="button"
@@ -4203,12 +4203,12 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   ));
 
   return (
-    <div className="max-w-5xl mx-auto px-4 pt-0 pb-6 md:py-6">
+    <div className="max-w-5xl mx-auto px-3 pt-0 pb-4 md:px-4 md:py-6">
        {/* Mobile top-0 sticks to the padded scrollport edge, which is already below the fixed app header. */}
-       <div className="sticky top-0 md:top-16 bg-[#F0F4F8] dark:bg-slate-900 z-20 pb-4">
-          <div className="relative mb-4"><Search className="absolute left-4 top-3.5 text-slate-400"/><input className="w-full pl-12 pr-4 py-3 rounded-2xl border-none shadow-sm dark:bg-slate-800 dark:text-white" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)}/></div>
-          <div className="flex gap-2 mb-4">
-             {['all', 'ideas', 'people'].map(t => <button key={t} onClick={() => setTab(t)} className={`px-6 py-2 rounded-lg font-bold text-sm transition-all ${tab === t ? 'bg-white shadow text-blue-600 dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>{t === 'all' ? 'Alles' : t === 'ideas' ? 'Ideeën' : 'Mensen'}</button>)}
+       <div className="sticky top-0 md:top-16 bg-[#F0F4F8] dark:bg-slate-900 z-20 pb-3 md:pb-4">
+          <div className="relative mb-3 md:mb-4"><Search className="absolute left-3 top-2.5 h-5 w-5 text-slate-400 md:left-4 md:top-3.5 md:h-6 md:w-6"/><input className="w-full pl-10 pr-3 py-2 text-sm rounded-lg border-none shadow-sm dark:bg-slate-800 dark:text-white md:pl-12 md:pr-4 md:py-3 md:text-base md:rounded-2xl" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)}/></div>
+          <div className="flex gap-1.5 mb-3 md:gap-2 md:mb-4">
+             {['all', 'ideas', 'people'].map(t => <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md font-bold text-xs transition-all md:px-6 md:py-2 md:rounded-lg md:text-sm ${tab === t ? 'bg-white shadow text-blue-600 dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>{t === 'all' ? 'Alles' : t === 'ideas' ? 'Ideeën' : 'Mensen'}</button>)}
           </div>
        </div>
 
@@ -4226,7 +4226,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
        })}</div>}
 
        {tab === 'ideas' && <div>
-          <div className="flex flex-wrap gap-2 mb-6">{displayedThemes.map(t => <button key={t} onClick={() => toggleTheme(t)} className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${activeThemes.includes(t) ? 'ring-2 ring-blue-500 ' + getThemeStyle(t) : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{t}</button>)}<button onClick={() => setShowAllThemes(!showAllThemes)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button></div>
+          <div className="flex flex-wrap gap-1.5 mb-4 md:gap-2 md:mb-6">{displayedThemes.map(t => <button key={t} onClick={() => toggleTheme(t)} className={`px-2 py-1 rounded-full text-[11px] font-bold border transition-all md:px-4 md:py-2 md:text-xs ${activeThemes.includes(t) ? 'ring-2 ring-blue-500 ' + getThemeStyle(t) : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{t}</button>)}<button onClick={() => setShowAllThemes(!showAllThemes)} className="text-[11px] font-bold text-blue-600 px-2 py-1 md:px-4 md:text-xs">Toon meer...</button></div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">{filteredPosts.map((p) => {
             const shouldCover = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
             return <div key={p.id} onClick={() => onPostClick(p)} className="relative aspect-[4/5] bg-slate-200 rounded-lg overflow-hidden cursor-pointer">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => setView('challenge_timeline')}>Challenge</Badge></div>}{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
@@ -4234,11 +4234,11 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
        </div>}
 
        {tab === 'people' && <div>
-          <div className="space-y-3 mb-6">
+          <div className="space-y-2 mb-4 md:space-y-3 md:mb-6">
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => setActiveThemes([])}
-                className={`px-4 py-2 rounded-full text-xs font-bold border ${activeThemes.length === 0 ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
+                className={`px-2 py-1 rounded-full text-[11px] font-bold border md:px-4 md:py-2 md:text-xs ${activeThemes.length === 0 ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
               >
                 Alle thema&apos;s
               </button>
@@ -4246,22 +4246,22 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
                 <button
                   key={theme}
                   onClick={() => toggleTheme(theme)}
-                  className={`px-4 py-2 rounded-full text-xs font-bold border transition-all ${activeThemes.includes(theme) ? 'ring-2 ring-blue-500 ' + getThemeStyle(theme) : 'bg-white dark:bg-slate-800 text-slate-500'}`}
+                  className={`px-2 py-1 rounded-full text-[11px] font-bold border transition-all md:px-4 md:py-2 md:text-xs ${activeThemes.includes(theme) ? 'ring-2 ring-blue-500 ' + getThemeStyle(theme) : 'bg-white dark:bg-slate-800 text-slate-500'}`}
                 >
                   {theme}
                 </button>
               ))}
-              <button onClick={() => setShowAllThemes(!showAllThemes)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button>
+              <button onClick={() => setShowAllThemes(!showAllThemes)} className="text-[11px] font-bold text-blue-600 px-2 py-1 md:px-4 md:text-xs">Toon meer...</button>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => setActiveRole(null)}
-                className={`px-4 py-2 rounded-full text-xs font-bold border ${!activeRole ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
+                className={`px-2 py-1 rounded-full text-[11px] font-bold border md:px-4 md:py-2 md:text-xs ${!activeRole ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
               >
                 Iedereen
               </button>
-              {displayedRoles.map(r => <button key={r.id} onClick={() => setActiveRole(r.id)} className={`px-4 py-2 rounded-full text-xs font-bold border ${activeRole === r.id ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{r.label}</button>)}
-              <button onClick={() => setShowAllRoles(!showAllRoles)} className="text-xs font-bold text-blue-600 px-4">Toon meer...</button>
+              {displayedRoles.map(r => <button key={r.id} onClick={() => setActiveRole(r.id)} className={`px-2 py-1 rounded-full text-[11px] font-bold border md:px-4 md:py-2 md:text-xs ${activeRole === r.id ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{r.label}</button>)}
+              <button onClick={() => setShowAllRoles(!showAllRoles)} className="text-[11px] font-bold text-blue-600 px-2 py-1 md:px-4 md:text-xs">Toon meer...</button>
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{filteredUsers.map((u) => {
@@ -4386,7 +4386,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
         <div className="relative h-[520px] w-full overflow-hidden">
            <img
              src={headerImage}
-             className="w-full h-full object-cover scale-105"
+             className="w-full h-full object-cover"
            />
            <div className="absolute inset-0 bg-white/40 dark:bg-black/55" />
            <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
@@ -7679,10 +7679,10 @@ function UploadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3 md:p-4">
        {inviteShareOpen && (
          <div className="absolute inset-0 z-10 bg-black/70 flex items-center justify-center p-6">
-           <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-lg space-y-4">
+           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-3 w-full max-w-lg space-y-3 md:rounded-3xl md:p-6 md:space-y-4">
              <div>
                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Kopieer invite link</h3>
                <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -7740,8 +7740,8 @@ function UploadModal({
            </div>
          </div>
        )}
-       <div className="bg-white dark:bg-slate-900 w-full max-w-4xl h-[85vh] rounded-3xl overflow-hidden flex flex-col">
-          <div className="p-4 border-b flex items-center justify-between gap-4">
+       <div className="bg-white dark:bg-slate-900 w-full max-w-4xl h-[85vh] rounded-2xl overflow-hidden flex flex-col md:rounded-3xl">
+          <div className="p-3 border-b flex items-center justify-between gap-3 md:p-4 md:gap-4">
             <div className="flex items-center gap-3">
               <h3 className="font-bold dark:text-white">Beeld publiceren</h3>
               {isChallenge && (
@@ -7757,7 +7757,7 @@ function UploadModal({
             </div>
             <button onClick={onClose}><X className="dark:text-white"/></button>
           </div>
-          <div className="flex-1 overflow-y-auto p-6 no-scrollbar">
+          <div className="flex-1 overflow-y-auto p-3 no-scrollbar md:p-6">
              {resumeLoading && (
                <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploadgegevens laden...
@@ -7770,9 +7770,9 @@ function UploadModal({
              )}
              {!resumeLoading && !resumeError && (
              step === 1 ? <div className="h-full border-2 border-dashed rounded-3xl flex items-center justify-center relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-10 h-10 text-slate-400"/></div> : (
-                <div className="grid md:grid-cols-2 gap-8">
-                   <div className="space-y-4">
-                      <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border dark:border-slate-700 space-y-3">
+                <div className="grid md:grid-cols-2 gap-4 md:gap-8">
+                   <div className="space-y-3 md:space-y-4">
+                      <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-lg border dark:border-slate-700 space-y-2 md:p-4 md:rounded-xl md:space-y-3">
                          <p className="text-sm font-semibold dark:text-white">Preview voor timeline & overzichten</p>
                          <div className="bg-slate-100 rounded-xl overflow-hidden relative max-h-[520px]">
                            <img src={image} className="w-full h-auto object-contain"/>
@@ -11339,42 +11339,42 @@ function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabe
 function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
-            <div className="bg-white dark:bg-slate-900 w-80 h-full p-6 flex flex-col gap-6 text-slate-900 dark:text-slate-100">
+            <div className="bg-white dark:bg-slate-900 w-80 h-full p-4 flex flex-col gap-4 text-slate-900 dark:text-slate-100 md:p-6 md:gap-6">
                 <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-xl">Instellingen</h3>
+                  <h3 className="font-bold text-lg md:text-xl">Instellingen</h3>
                   <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"><X/></button>
                 </div>
-                <div className="space-y-4">
+                <div className="space-y-3 md:space-y-4">
                     <h4 className="text-xs uppercase font-bold text-slate-400">Account</h4>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Meldingen</span><Bell className="w-4 h-4"/></div>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Privacy</span><Lock className="w-4 h-4"/></div>
+                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Meldingen</span><Bell className="w-4 h-4"/></div>
+                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Privacy</span><Lock className="w-4 h-4"/></div>
                     <button
                       type="button"
                       onClick={onLogout}
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left text-rose-600 dark:text-rose-300"
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3 text-rose-600 dark:text-rose-300"
                     >
                       <span>Log uit</span>
                       <LogOut className="w-4 h-4" />
                     </button>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Weergave</h4>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between gap-3">
+                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between gap-2 md:p-3 md:gap-3">
                       <button
                         type="button"
                         onClick={onToggleDark}
-                        className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                        className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold md:rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                       >
                         {darkMode ? 'Light mode' : 'Dark mode'}
                       </button>
                       {darkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-slate-500" />}
                     </div>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between"><span>Taal</span><Globe className="w-4 h-4"/></div>
+                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Taal</span><Globe className="w-4 h-4"/></div>
                     {moderatorAccess === true && (
                       <>
                         <h4 className="text-xs uppercase font-bold text-slate-400">Moderatie</h4>
                         <button
                           type="button"
                           onClick={onOpenModeration}
-                          className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
                         >
                           <span className="flex items-center gap-2">
                             Artes Moderatie
@@ -11392,7 +11392,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                       <Link
                         to="/debug"
                         onClick={onClose}
-                        className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
                       >
                         <span>Debug</span>
                         <Info className="w-4 h-4" />
@@ -11401,7 +11401,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     <button
                       type="button"
                       onClick={onOpenVouchRequests}
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
                     >
                       <span>Vouch verzoeken</span>
                       <MessageCircle className="w-4 h-4" />
@@ -11409,7 +11409,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     <button
                       type="button"
                       onClick={onOpenSupport}
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
                     >
                       <span>Support</span>
                       <HelpCircle className="w-4 h-4" />
@@ -11417,7 +11417,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     <button
                       type="button"
                       onClick={onOpenAppShortcutInfo}
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left"
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
                     >
                       <span>Artes als app gebruiken</span>
                       <Smartphone className="w-4 h-4" />

@@ -90,6 +90,8 @@ import SupportLanding from './components/SupportLanding';
 import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import PhotoDetailModal from './components/PhotoDetailModal';
 import PostImageDisplay from './components/PostImageDisplay';
+import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
+import { getAdaptivePhotoTileSpan } from './utils/adaptivePhotoGrid';
 import { isPanoramaImage } from './utils/imageMeta';
 import PostCreditDisplay from './components/PostCreditDisplay';
 import SensitiveOverlay from './components/SensitiveOverlay';
@@ -4217,25 +4219,52 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
           </div>
        </div>
 
-       {tab === 'all' && <div className="columns-2 gap-2 space-y-2 md:columns-4 md:gap-4 md:space-y-4">{mixedContent.map((item, i) => {
-         const shouldCover = item.type === 'post' ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
+       {tab === 'all' && <div className="grid grid-flow-dense grid-cols-2 items-start gap-2 sm:grid-cols-3 md:gap-3 lg:grid-cols-4 lg:gap-4">{mixedContent.map((item, i) => {
+         const isPost = item.type === 'post';
+         const shouldCover = isPost ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
+         const postSpan = isPost ? getAdaptivePhotoTileSpan(item.data) : null;
          return (
-          <div key={i} onClick={() => item.type === 'post' ? onPostClick(item.data) : onUserClick(item.data.uid)} className="break-inside-avoid bg-white dark:bg-slate-800 rounded-lg overflow-hidden shadow-sm cursor-pointer mb-2 md:mb-4 md:rounded-xl">
+          <article
+            key={`${item.type}-${item.data.id || item.data.uid || i}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => isPost ? onPostClick(item.data) : onUserClick(item.data.uid)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                isPost ? onPostClick(item.data) : onUserClick(item.data.uid);
+              }
+            }}
+            className={`group relative ${isPost ? postSpan.className : 'col-span-1'} overflow-hidden rounded-lg bg-white text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl cursor-pointer`}
+            data-tile-type={isPost ? postSpan.tileType : 'user'}
+          >
              <div className="relative overflow-hidden">
                {shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(item.data.id)} /> : null}
-               <img src={item.type === 'post' ? item.data.imageUrl : item.data.avatar} className="relative z-0 w-full h-auto" />
+               <img
+                 src={isPost ? item.data.imageUrl : item.data.avatar}
+                 alt={isPost ? item.data.title || '' : item.data.displayName || ''}
+                 loading="lazy"
+                 className={`relative z-0 block w-full ${isPost ? 'h-auto object-contain' : 'aspect-square h-auto object-cover'}`}
+               />
              </div>
-             <div className="px-2 py-1.5 font-bold text-[11px] truncate dark:text-white md:p-2 md:text-xs">{item.type === 'post' ? item.data.title : item.data.displayName}</div>
-          </div>
+             <div className="px-2 py-1.5 font-bold text-[11px] truncate dark:text-white md:p-2 md:text-xs">{isPost ? item.data.title : item.data.displayName}</div>
+          </article>
          );
        })}</div>}
 
        {tab === 'ideas' && <div>
           <div className="flex flex-wrap gap-1.5 mb-3 md:gap-2 md:mb-6">{displayedThemes.map(t => <button key={t} onClick={() => toggleTheme(t)} className={`px-2 py-1 rounded-full text-[11px] font-bold border transition-all md:px-4 md:py-2 md:text-xs ${activeThemes.includes(t) ? 'ring-2 ring-blue-500 ' + getThemeStyle(t) : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{t}</button>)}<button onClick={() => setShowAllThemes(!showAllThemes)} className="text-[11px] font-bold text-blue-600 px-2 py-1 md:px-4 md:text-xs">Toon meer...</button></div>
-          <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 md:gap-2">{filteredPosts.map((p) => {
-            const shouldCover = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
-            return <div key={p.id} onClick={() => onPostClick(p)} className="relative aspect-[4/5] bg-slate-200 rounded-md overflow-hidden cursor-pointer md:rounded-lg">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => setView('challenge_timeline')}>Challenge</Badge></div>}{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
-          })}</div>
+          <AdaptivePhotoGrid
+            posts={filteredPosts}
+            onPostClick={onPostClick}
+            getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+            renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+            renderBadge={(post) => (post.isChallenge ? (
+              <div className="absolute left-2 top-2 z-10">
+                <Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => setView('challenge_timeline')}>Challenge</Badge>
+              </div>
+            ) : null)}
+          />
        </div>}
 
        {tab === 'people' && <div>
@@ -4478,12 +4507,13 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
         </div>
         
         <div className="max-w-6xl mx-auto px-6 py-8 relative z-20">
-           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {visiblePosts.map((p) => {
-                const shouldCover = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
-                return <div key={p.id} onClick={() => onPostClick(p)} className={`relative aspect-[4/5] bg-slate-200 rounded-sm overflow-hidden cursor-pointer ${p.isChallenge ? 'ring-2 ring-amber-400' : ''}`}>{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
-              })}
-           </div>
+           <AdaptivePhotoGrid
+             posts={visiblePosts}
+             onPostClick={onPostClick}
+             getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+             renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+             itemClassName="rounded-sm"
+           />
            {visiblePosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
         </div>
      </div>
@@ -9649,22 +9679,17 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
               <span className="text-xs text-slate-500 dark:text-slate-400">{userPosts.length} totaal</span>
             </div>
             {previewPosts.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {previewPosts.map((post) => {
-                  const covered = shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById);
-                  return (
-                  <div key={post.id} className="bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden">
-                    <div className="relative aspect-[4/5] overflow-hidden">
-                      {covered ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
-                      <img src={post.imageUrl} className="relative z-0 w-full h-full object-cover" />
-                    </div>
-                    <div className="p-3">
-                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{post.title}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{post.description}</p>
-                    </div>
-                  </div>
-                );})}
-              </div>
+              <AdaptivePhotoGrid
+                posts={previewPosts}
+                getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+                renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+                renderFooter={(post) => (
+                  <span className="block p-3">
+                    <span className="block text-sm font-semibold text-slate-800 dark:text-slate-200">{post.title}</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">{post.description}</span>
+                  </span>
+                )}
+              />
             ) : (
               <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-300">
                 Nog geen posts om te tonen.

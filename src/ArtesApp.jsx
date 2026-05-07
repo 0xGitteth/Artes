@@ -100,6 +100,12 @@ import AppLogo from './components/branding/AppLogo';
 import ProfileImageCropper from './components/ProfileImageCropper';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { ROLE_OPTIONS } from './utils/roles';
+import {
+  ALL_PROFILE_PORTFOLIO_TAB,
+  filterProfilePostsByRole,
+  getEligibleProfilePosts,
+  getProfilePortfolioTabs,
+} from './utils/profilePortfolioRoles';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
@@ -4407,6 +4413,26 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
     () => posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
     [posts, triggerVisibility],
   );
+  const [activePortfolioTab, setActivePortfolioTab] = useState(ALL_PROFILE_PORTFOLIO_TAB);
+  const eligiblePortfolioPosts = useMemo(
+    () => getEligibleProfilePosts(visiblePosts, normalizedProfile),
+    [normalizedProfile, visiblePosts],
+  );
+  const portfolioTabs = useMemo(
+    () => getProfilePortfolioTabs(eligiblePortfolioPosts, normalizedProfile),
+    [eligiblePortfolioPosts, normalizedProfile],
+  );
+  const showPortfolioTabs = portfolioTabs.length > 0;
+  const portfolioTabKeys = useMemo(() => new Set(portfolioTabs.map((tab) => tab.key)), [portfolioTabs]);
+  useEffect(() => {
+    if (!showPortfolioTabs || !portfolioTabKeys.has(activePortfolioTab)) {
+      setActivePortfolioTab(ALL_PROFILE_PORTFOLIO_TAB);
+    }
+  }, [activePortfolioTab, portfolioTabKeys, showPortfolioTabs, profileUserId]);
+  const portfolioPosts = useMemo(
+    () => filterProfilePostsByRole(eligiblePortfolioPosts, normalizedProfile, activePortfolioTab),
+    [activePortfolioTab, eligiblePortfolioPosts, normalizedProfile],
+  );
   if (!normalizedProfile) return null;
   const roles = normalizedProfile.roles;
   const themes = normalizedProfile.themes;
@@ -4512,14 +4538,43 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
         </div>
         
         <div className="max-w-6xl mx-auto px-6 py-8 relative z-20">
+           {showPortfolioTabs && (
+             <>
+               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                 <div>
+                   <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Portfolio</p>
+                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Foto’s per rol</h2>
+                 </div>
+                 <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{portfolioPosts.length} van {eligiblePortfolioPosts.length}</span>
+               </div>
+               <div className="mb-6 flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Portfolio rollen">
+                 {portfolioTabs.map((tab) => {
+                   const isActive = activePortfolioTab === tab.key;
+                   return (
+                     <button
+                       key={tab.key}
+                       type="button"
+                       role="tab"
+                       aria-selected={isActive}
+                       onClick={() => setActivePortfolioTab(tab.key)}
+                       className={`shrink-0 rounded-full border px-4 py-2 text-sm font-bold transition ${isActive ? 'border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500'}`}
+                     >
+                       {tab.label}
+                     </button>
+                   );
+                 })}
+               </div>
+             </>
+           )}
            <AdaptivePhotoGrid
-             posts={visiblePosts}
+             posts={portfolioPosts}
              onPostClick={onPostClick}
              getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
              renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
              itemClassName="rounded-sm"
            />
-           {visiblePosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
+           {eligiblePortfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
+           {showPortfolioTabs && portfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Geen posts binnen deze rol.</p>}
         </div>
      </div>
   );

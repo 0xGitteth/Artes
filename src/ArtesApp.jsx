@@ -7774,35 +7774,47 @@ function UploadModal({
                </div>
              )}
              {!resumeLoading && !resumeError && (
-             step === 1 ? <div className="min-h-[220px] h-[32dvh] max-h-[280px] border-2 border-dashed rounded-2xl md:rounded-3xl flex items-center justify-center relative md:h-full md:max-h-none"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-10 h-10 text-slate-400"/></div> : (
-                <div className="grid md:grid-cols-2 gap-3 md:gap-8">
-                   <div className="space-y-2.5 md:space-y-4">
+             step === 1 ? <div className="min-h-[180px] h-[28dvh] max-h-[240px] border-2 border-dashed rounded-2xl md:min-h-[220px] md:h-full md:max-h-none md:rounded-3xl flex flex-col items-center justify-center gap-2 relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-9 h-9 text-slate-400 md:w-10 md:h-10"/><p className="text-xs font-semibold text-slate-500 dark:text-slate-300 md:text-sm">Tik om een beeld te kiezen</p></div> : (
+                <div className="grid min-w-0 gap-3 md:grid-cols-2 md:gap-8">
+                   <div className="min-w-0 space-y-2.5 md:space-y-4">
                       <div className="bg-slate-50 dark:bg-slate-800 p-2.5 rounded-lg border dark:border-slate-700 space-y-2 md:p-4 md:rounded-xl md:space-y-3">
-                         <p className="text-sm font-semibold dark:text-white">Preview voor timeline & overzichten</p>
-                         <div className="bg-slate-100 rounded-xl overflow-hidden relative max-h-[520px]">
-                           <img src={image} className="w-full h-auto object-contain"/>
+                         <p className="text-sm font-semibold dark:text-white">Geselecteerde afbeelding</p>
+                         <div className="min-w-0 bg-slate-100 rounded-xl relative flex items-center justify-center p-1 dark:bg-slate-900/40">
+                           {isPanoramaImage(imageMeta) ? (
+                             <img src={image} className="block h-auto w-full rounded-lg object-contain"/>
+                           ) : (
+                             <img src={image} className="block max-h-[34dvh] max-w-full rounded-lg object-contain md:max-h-[520px]"/>
+                           )}
                            {outcome === 'forbidden' && (
                              <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center text-orange-400 font-bold">
                                <AlertOctagon className="w-6 h-6 mr-2"/> Publicatie geblokkeerd
                              </div>
                            )}
                          </div>
-                         <div>
-                           <p className="text-xs text-slate-500 dark:text-slate-300 mb-2">Grid/card preview (sommige overzichten tonen een uitsnede):</p>
-                           <div className="w-full aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-200 dark:border-slate-700">
-                             <img src={image} className="w-full h-full object-cover" />
-                           </div>
-                         </div>
                          <p className="text-xs text-slate-500 dark:text-slate-300">Je foto wordt automatisch verkleind zodat hij sneller laadt.</p>
                          {imageMeta?.orientation === 'panorama' && (
-                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg breed. In sommige overzichten wordt hij als panorama weergegeven.</p>
+                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg breed. Bestaande kaartweergaven kunnen hem als panorama tonen.</p>
                          )}
                          {imageMeta?.aspectRatio && imageMeta.aspectRatio <= 0.5 && (
-                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg hoog. In sommige overzichten kan een uitsnede worden getoond.</p>
+                           <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg hoog. Bestaande kaartweergaven kunnen nog een uitsnede tonen.</p>
+                         )}
+                         {isPanoramaImage(imageMeta) && (
+                           <div className="min-w-0 rounded-lg border border-slate-200 bg-white/80 p-2 dark:border-slate-700 dark:bg-slate-900/40 md:rounded-xl md:p-3">
+                             <p className="mb-2 text-sm font-semibold dark:text-white">Preview in tijdlijn</p>
+                             <PostImageDisplay
+                               src={image}
+                               alt={title || 'Panorama preview'}
+                               imageMeta={imageMeta}
+                               className="w-full min-w-0 rounded-xl bg-slate-200 dark:bg-slate-900"
+                               panoramaFrameClassName="h-32 sm:h-36 md:h-56"
+                               badgeClassName="left-2 top-2"
+                               panoramaHint="Veeg horizontaal om de hele foto te bekijken."
+                             />
+                           </div>
                          )}
                        </div>
                       {errors.image && <p className="text-xs text-red-500">{errors.image}</p>}
-                      <div className="bg-slate-50 p-4 rounded-xl border dark:bg-slate-800 dark:border-slate-700">
+                      <div className="bg-slate-50 p-2.5 rounded-lg border dark:bg-slate-800 dark:border-slate-700 md:p-4 md:rounded-xl">
                          <div className="flex justify-between items-center mb-3">
                             <span className="text-sm font-bold flex items-center gap-2 dark:text-white"><Shield className="w-4 h-4"/> Safety Check</span>
                             <button
@@ -7945,24 +7957,24 @@ function UploadModal({
                          )}
                       </div>
                    </div>
-                   <div className="space-y-6">
+                   <div className="space-y-3 md:space-y-6">
                       <Input label="Titel" value={title} onChange={e => { setTitle(e.target.value); setErrors(prev => ({ ...prev, title: undefined })); }} error={errors.title} />
-                      <div><label className="text-sm font-normal block mb-2 text-slate-700 dark:text-slate-200">Bijschrift</label><textarea className="w-full p-3 rounded-xl border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500" value={desc} onChange={e => setDesc(e.target.value)} /></div>
+                      <div><label className="text-sm font-normal block mb-1.5 text-slate-700 dark:text-slate-200 md:mb-2">Bijschrift</label><textarea className="w-full min-h-20 p-2.5 text-sm rounded-lg border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 md:p-3 md:rounded-xl" value={desc} onChange={e => setDesc(e.target.value)} /></div>
                       
-                      <div className="bg-slate-50 dark:bg-slate-800/70 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                      <div className="bg-slate-50 dark:bg-slate-800/70 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 md:p-4 md:rounded-xl">
                          <div className="flex items-center justify-between mb-2">
                             <label className="text-sm font-bold block dark:text-white">Bijdragers & consent</label>
                             {(profile.roles || []).length === 1 && <span className="text-[11px] uppercase text-slate-500">{ROLES.find(x => x.id === uploaderRole)?.label}</span>}
                          </div>
-                         <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/80 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-100 space-y-1">
+                         <div className="mb-2.5 rounded-xl border border-blue-100 bg-blue-50/80 p-2.5 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-100 space-y-1 md:mb-4 md:rounded-2xl md:p-3">
                            <p className="font-semibold">Elke upload heeft minstens één maker nodig.</p>
                            <p>Makerrollen: {ROLES.filter((role) => isMakerRole(role.id)).map((role) => role.label).join(', ')}. Model + MUA alleen is niet genoeg.</p>
                          </div>
 
                          {(profile.roles || []).length > 1 && (
-                            <div className="mb-4">
+                            <div className="mb-2.5 md:mb-4">
                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Jouw rol in deze publicatie</p>
-                               <div className="flex gap-2 flex-wrap">{(profile.roles || []).map(r => <button key={r} type="button" onClick={() => setUploaderRole(r)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${uploaderRole === r ? (isMakerRole(r) ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white') : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white'}`}>{ROLES.find(x => x.id === r)?.label}{isMakerRole(r) ? ' · maker' : ''}</button>)}</div>
+                               <div className="flex gap-2 flex-wrap">{(profile.roles || []).map(r => <button key={r} type="button" onClick={() => setUploaderRole(r)} className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all md:px-4 md:py-1.5 md:text-xs ${uploaderRole === r ? (isMakerRole(r) ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white') : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white'}`}>{ROLES.find(x => x.id === r)?.label}{isMakerRole(r) ? ' · maker' : ''}</button>)}</div>
                                <p className="text-[11px] text-slate-500 dark:text-slate-300 mt-1">Je profielrollen zijn je standaardrollen. Voor deze upload kun je ook een andere makerrol bevestigen als jij het werk maakte.</p>
                             </div>
                          )}
@@ -7970,7 +7982,7 @@ function UploadModal({
                            <button
                              type="button"
                              onClick={() => setUploaderRole(makerSelfRoles[0])}
-                             className="mb-3 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-100"
+                             className="mb-2.5 w-full rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-100 md:mb-3 md:rounded-xl md:py-2"
                            >
                              Voeg mij toe als maker ({ROLES.find((role) => role.id === makerSelfRoles[0])?.label})
                            </button>
@@ -7979,12 +7991,12 @@ function UploadModal({
                          {errors.selfRole && <p className="mb-2 text-xs text-red-500">{errors.selfRole}</p>}
 
                          {missingMakerPromptState.shouldShowMissingMakerPrompt && (
-                           <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-950 shadow-sm dark:border-rose-800/50 dark:bg-rose-900/25 dark:text-rose-50">
+                           <div className="mb-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-950 shadow-sm dark:border-rose-800/50 dark:bg-rose-900/25 dark:text-rose-50 md:mb-3 md:rounded-2xl md:p-4">
                              <p className="text-sm font-bold">Er mist nog een maker</p>
-                             <p className="mt-2">Bij elke upload op Artes moet minstens één maker worden vermeld. Dat kan bijvoorbeeld de fotograaf, videograaf, retoucher, art director of kunstenaar zijn.</p>
-                             <p className="mt-2">De maker hoeft geen Artes account te hebben. Je kunt iemand toevoegen met naam en eventueel een Instagram-handle of e-mailadres, of kiezen voor een anonieme maker.</p>
-                             <p className="mt-2 font-semibold">Zo blijft duidelijk wie aan het beeld heeft bijgedragen en krijgt iedereen de erkenning die die verdient.</p>
-                             <div className="mt-3 grid grid-cols-2 gap-2">
+                             <p className="mt-1.5 md:mt-2">Bij elke upload op Artes moet minstens één maker worden vermeld. Dat kan bijvoorbeeld de fotograaf, videograaf, retoucher, art director of kunstenaar zijn.</p>
+                             <p className="mt-1.5 md:mt-2">De maker hoeft geen Artes account te hebben. Je kunt iemand toevoegen met naam en eventueel een Instagram-handle of e-mailadres, of kiezen voor een anonieme maker.</p>
+                             <p className="mt-1.5 font-semibold md:mt-2">Zo blijft duidelijk wie aan het beeld heeft bijgedragen en krijgt iedereen de erkenning die die verdient.</p>
+                             <div className="mt-2.5 grid grid-cols-2 gap-2 md:mt-3">
                                <button
                                  type="button"
                                  onClick={() => {
@@ -7992,19 +8004,19 @@ function UploadModal({
                                    setContributorSearch('');
                                    setShowInvite(false);
                                  }}
-                                 className="rounded-lg bg-rose-600 px-3 py-2 font-semibold text-white hover:bg-rose-700"
+                                 className="rounded-lg bg-rose-600 px-2.5 py-1.5 font-semibold text-white hover:bg-rose-700 md:px-3 md:py-2"
                                >
                                  Maker toevoegen
                                </button>
                                <button
                                  type="button"
                                  onClick={() => addAnonymousContributor('photographer')}
-                                 className="rounded-lg border border-rose-300 bg-white/80 px-3 py-2 font-semibold text-rose-900 hover:bg-white dark:border-rose-700 dark:bg-slate-900/70 dark:text-rose-50"
+                                 className="rounded-lg border border-rose-300 bg-white/80 px-2.5 py-1.5 font-semibold text-rose-900 hover:bg-white dark:border-rose-700 dark:bg-slate-900/70 dark:text-rose-50 md:px-3 md:py-2"
                                >
                                  Anonieme maker toevoegen
                                </button>
                              </div>
-                             <div className="mt-3 rounded-xl border border-rose-200 bg-white/70 p-3 dark:border-rose-800 dark:bg-slate-900/50">
+                             <div className="mt-2.5 rounded-xl border border-rose-200 bg-white/70 p-2.5 dark:border-rose-800 dark:bg-slate-900/50 md:mt-3 md:p-3">
                                <p className="font-semibold">Ben jij zelf de maker van deze upload?</p>
                                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                                  <select
@@ -8019,7 +8031,7 @@ function UploadModal({
                                  <button
                                    type="button"
                                    onClick={() => selectSelfMakerRoleForUpload(selectedSelfMakerRole)}
-                                   className="rounded-lg border border-rose-300 bg-white px-3 py-2 font-semibold text-rose-900 hover:bg-rose-50 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-50"
+                                   className="rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 font-semibold text-rose-900 hover:bg-rose-50 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-50 md:px-3 md:py-2"
                                  >
                                    Gebruik voor deze upload
                                  </button>
@@ -8029,22 +8041,22 @@ function UploadModal({
                                )}
                              </div>
                              {pendingSelfMakerRole && (
-                               <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-950 dark:border-blue-800 dark:bg-blue-900/25 dark:text-blue-50">
+                               <div className="mt-2.5 rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-blue-950 dark:border-blue-800 dark:bg-blue-900/25 dark:text-blue-50 md:mt-3 md:p-3">
                                  <p className="text-sm font-bold">Heb jij dit beeld gemaakt?</p>
-                                 <p className="mt-2">Deze rol staat niet in je profiel, maar je kunt die wel gebruiken voor deze upload. Bijvoorbeeld als je een zelfportret plaatst, eigen werk fotografeert of deze content zelf hebt gemaakt.</p>
-                                 <p className="mt-2">Dit past alleen de credits van deze upload aan. Je profielrollen worden niet automatisch gewijzigd.</p>
-                                 <div className="mt-3 grid grid-cols-2 gap-2">
+                                 <p className="mt-1.5 md:mt-2">Deze rol staat niet in je profiel, maar je kunt die wel gebruiken voor deze upload. Bijvoorbeeld als je een zelfportret plaatst, eigen werk fotografeert of deze content zelf hebt gemaakt.</p>
+                                 <p className="mt-1.5 md:mt-2">Dit past alleen de credits van deze upload aan. Je profielrollen worden niet automatisch gewijzigd.</p>
+                                 <div className="mt-2.5 grid grid-cols-2 gap-2 md:mt-3">
                                    <button
                                      type="button"
                                      onClick={() => confirmSelfMakerRoleForUpload(pendingSelfMakerRole)}
-                                     className="rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white hover:bg-blue-700"
+                                     className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-semibold text-white hover:bg-blue-700 md:px-3 md:py-2"
                                    >
                                      Bevestigen
                                    </button>
                                    <button
                                      type="button"
                                      onClick={() => setPendingSelfMakerRole(null)}
-                                     className="rounded-lg border border-blue-300 bg-white/80 px-3 py-2 font-semibold text-blue-900 hover:bg-white dark:border-blue-700 dark:bg-slate-900/70 dark:text-blue-50"
+                                     className="rounded-lg border border-blue-300 bg-white/80 px-2.5 py-1.5 font-semibold text-blue-900 hover:bg-white dark:border-blue-700 dark:bg-slate-900/70 dark:text-blue-50 md:px-3 md:py-2"
                                    >
                                      Annuleren
                                    </button>
@@ -8056,12 +8068,12 @@ function UploadModal({
                          )}
 
                          {visiblePersonPromptState.shouldShowVisiblePersonPrompt && (
-                           <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 shadow-sm dark:border-amber-800/50 dark:bg-amber-900/25 dark:text-amber-50">
+                           <div className="mb-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950 shadow-sm dark:border-amber-800/50 dark:bg-amber-900/25 dark:text-amber-50 md:mb-3 md:rounded-2xl md:p-4">
                              <p className="text-sm font-bold">Er lijkt een persoon op deze foto te staan</p>
-                             <p className="mt-2">Omdat je deze upload als maker plaatst, vragen we je om het model of de geportretteerde persoon te taggen als dat van toepassing is.</p>
-                             <p className="mt-2">Deze persoon hoeft geen Artes account te hebben. Wanneer je de naam + bijbehorende instagram handle of emailadres achterlaat, wordt er een tijdelijk account aangemaakt voor deze persoon, die later geclaimd kan worden.</p>
-                             <p className="mt-2 font-semibold">Artes vindt het belangrijk dat iedereen die aan een beeld heeft bijgedragen de erkenning krijgt die die verdient.</p>
-                             <div className="mt-3 grid grid-cols-2 gap-2">
+                             <p className="mt-1.5 md:mt-2">Omdat je deze upload als maker plaatst, vragen we je om het model of de geportretteerde persoon te taggen als dat van toepassing is.</p>
+                             <p className="mt-1.5 md:mt-2">Deze persoon hoeft geen Artes account te hebben. Wanneer je de naam + bijbehorende instagram handle of emailadres achterlaat, wordt er een tijdelijk account aangemaakt voor deze persoon, die later geclaimd kan worden.</p>
+                             <p className="mt-1.5 font-semibold md:mt-2">Artes vindt het belangrijk dat iedereen die aan een beeld heeft bijgedragen de erkenning krijgt die die verdient.</p>
+                             <div className="mt-2.5 grid grid-cols-2 gap-2 md:mt-3">
                                <button
                                  type="button"
                                  onClick={() => {
@@ -8069,7 +8081,7 @@ function UploadModal({
                                    setContributorSearch('');
                                    setShowInvite(false);
                                  }}
-                                 className="rounded-lg bg-amber-600 px-3 py-2 font-semibold text-white hover:bg-amber-700"
+                                 className="rounded-lg bg-amber-600 px-2.5 py-1.5 font-semibold text-white hover:bg-amber-700 md:px-3 md:py-2"
                                >
                                  Model toevoegen
                                </button>
@@ -8078,14 +8090,14 @@ function UploadModal({
                                  onClick={() => {
                                    addAnonymousContributor('model');
                                  }}
-                                 className="rounded-lg border border-amber-300 bg-white/80 px-3 py-2 font-semibold text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50"
+                                 className="rounded-lg border border-amber-300 bg-white/80 px-2.5 py-1.5 font-semibold text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50 md:px-3 md:py-2"
                                >
                                  Anoniem toevoegen
                                </button>
                                <button
                                  type="button"
                                  onClick={() => setSubjectWarningAcknowledged(true)}
-                                 className={`rounded-lg border px-3 py-2 font-semibold ${subjectWarningAcknowledged ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100' : 'border-amber-300 bg-white/80 text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50'}`}
+                                 className={`rounded-lg border px-2.5 py-1.5 font-semibold md:px-3 md:py-2 ${subjectWarningAcknowledged ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100' : 'border-amber-300 bg-white/80 text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50'}`}
                                >
                                  Niet van toepassing
                                </button>
@@ -8096,7 +8108,7 @@ function UploadModal({
                                    enabled: true,
                                    type: prev.type || CONSENT_EXCEPTION_REASONS.STREET,
                                  }))}
-                                 className={`rounded-lg border px-3 py-2 font-semibold ${consentException.enabled ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100' : 'border-amber-300 bg-white/80 text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50'}`}
+                                 className={`rounded-lg border px-2.5 py-1.5 font-semibold md:px-3 md:py-2 ${consentException.enabled ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100' : 'border-amber-300 bg-white/80 text-amber-900 hover:bg-white dark:border-amber-700 dark:bg-slate-900/70 dark:text-amber-50'}`}
                                >
                                  Straat/pers uitzondering
                                </button>
@@ -8105,15 +8117,15 @@ function UploadModal({
                            </div>
                          )}
 
-                         <div className="space-y-2 mb-3">
+                         <div className="space-y-1.5 mb-2.5 md:space-y-2 md:mb-3">
                             {credits.map((c, i) => (
-                               <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-700 p-2 rounded border dark:border-slate-600">
-                                  <div className="flex items-center gap-2 dark:text-white">
+                               <div key={i} className="flex items-start justify-between gap-2 text-xs bg-white dark:bg-slate-700 p-2 rounded border dark:border-slate-600">
+                                  <div className="flex min-w-0 flex-wrap items-center gap-1.5 dark:text-white md:gap-2">
                                      {c.isSelf && <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200 rounded">Jij</span>}
                                      {(c.isMaker || isMakerRole(c.role)) && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200 rounded">Maker</span>}
-                                     <span><span className="font-bold capitalize">{ROLES.find(r => r.id === c.role)?.label}:</span> {c.name}{c.makerFunction && !isMakerRole(c.role) ? ` · ${getMakerFunctionLabel(c.makerFunction)}` : ''}</span>
+                                     <span className="min-w-0 break-words"><span className="font-bold capitalize">{ROLES.find(r => r.id === c.role)?.label}:</span> {c.name}{c.makerFunction && !isMakerRole(c.role) ? ` · ${getMakerFunctionLabel(c.makerFunction)}` : ''}</span>
                                   </div>
-                                  <div className="flex gap-2 items-center">
+                                  <div className="flex flex-shrink-0 flex-wrap justify-end gap-1.5 items-center md:gap-2">
                                      {c.consentStatus && <span className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-100 px-1.5 py-0.5 rounded text-[10px]">{c.consentStatus}</span>}
                                      {c.isExternal && <span className="bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-100 px-1.5 py-0.5 rounded text-[10px]">Extern</span>}
                                      {!c.isSelf && <button onClick={() => setCredits(credits.filter((_, idx) => idx !== i))}><Trash2 className="w-3 h-3 text-red-500"/></button>}
@@ -8122,7 +8134,7 @@ function UploadModal({
                             ))}
                          </div>
 
-                         <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100">
+                         <div className="mb-2.5 rounded-lg border border-slate-200 bg-white p-2.5 text-xs dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100 md:mb-3 md:rounded-xl md:p-3">
                            <label className="flex items-start gap-2 font-semibold">
                              <input
                                type="checkbox"
@@ -8156,13 +8168,13 @@ function UploadModal({
                          </div>
 
                          <div className="flex gap-2 mb-2">
-                            <select className="p-2 border border-slate-300 rounded text-sm w-1/3 bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100" value={newCredit.role} onChange={e => {
+                            <select className="w-[38%] min-w-0 p-2 border border-slate-300 rounded text-xs bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 md:w-1/3 md:text-sm" value={newCredit.role} onChange={e => {
                               const nextRole = e.target.value;
                               setNewCredit((prev) => normalizeCreditAfterRoleChange(prev, nextRole));
                             }}>{ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
                             <div className="relative flex-1">
                                 <input 
-                                   className="w-full p-2 border border-slate-300 rounded text-sm bg-white text-slate-800 placeholder:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500" 
+                                   className="w-full p-2 border border-slate-300 rounded text-xs bg-white text-slate-800 placeholder:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 md:text-sm"
                                    placeholder="Zoek naam..." 
                                    value={contributorSearch || newCredit.name} 
                                    onChange={e => {
@@ -8207,7 +8219,7 @@ function UploadModal({
                                 )}
                             </div>
                          </div>
-                         <div className="mb-3 rounded-xl border border-slate-200 bg-white/80 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100">
+                         <div className="mb-2.5 rounded-lg border border-slate-200 bg-white/80 p-2.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100 md:mb-3 md:rounded-xl md:p-3">
                            <label className="flex items-start gap-2 font-semibold">
                              <input
                                type="checkbox"
@@ -8238,28 +8250,28 @@ function UploadModal({
                          <button
                            type="button"
                            onClick={addAnonymousContributor}
-                           className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-100"
+                           className="mb-2.5 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-100 md:mb-3 md:py-2"
                          >
                            Voeg anonieme bijdrager toe waar passend
                          </button>
                          
                          {showInvite && (
-                            <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-100 mb-2 border border-yellow-200 dark:border-yellow-800">
+                            <div className="bg-yellow-50 p-2.5 rounded text-xs text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-100 mb-2 border border-yellow-200 dark:border-yellow-800 md:p-3">
                                <p className="mb-2 font-semibold">Ongeclaimd profiel aanmaken voor {newCredit.name}</p>
                                <input
-                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-2"
+                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-1.5 md:mb-2"
                                  placeholder="Instagram handle (optioneel)"
                                  value={newCredit.instagramHandle}
                                  onChange={e => setNewCredit((prev) => ({...prev, instagramHandle: e.target.value}))}
                                />
                                <input
-                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-2"
+                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-1.5 md:mb-2"
                                  placeholder="Website domein (optioneel)"
                                  value={newCredit.website}
                                  onChange={e => setNewCredit((prev) => ({...prev, website: e.target.value}))}
                                />
                                <input
-                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-2"
+                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-1.5 md:mb-2"
                                  placeholder="Email (optioneel)"
                                  value={newCredit.email}
                                  onChange={e => setNewCredit((prev) => ({...prev, email: e.target.value}))}
@@ -8272,8 +8284,8 @@ function UploadModal({
                          </div>
                       </div>
                       <div>
-                     <label className="text-sm font-bold block mb-2 dark:text-white">Thema&apos;s</label>
-                         <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto no-scrollbar">{THEMES.map(t => {
+                     <label className="text-sm font-bold block mb-1.5 dark:text-white md:mb-2">Thema&apos;s</label>
+                         <div className="flex flex-wrap gap-1.5 md:gap-2">{THEMES.map(t => {
                            const isSelected = selectedStyles.includes(t);
                            return (
                              <button
@@ -8291,7 +8303,7 @@ function UploadModal({
                       </div>
                       {publishError && <p className="text-sm text-red-500 text-center">{publishError}</p>}
                       {showSuggestionUI && <p className="text-xs text-amber-700 dark:text-amber-300 text-center">Kies hoe je met de AI-suggesties wilt omgaan om te publiceren.</p>}
-                      <Button onClick={handlePublish} className="w-full" disabled={publishing || showSuggestionUI || outcome === 'forbidden'}>
+                      <Button onClick={handlePublish} className="w-full py-2 text-sm md:py-3 md:text-base" disabled={publishing || showSuggestionUI || outcome === 'forbidden'}>
                         {publishing ? <><Loader2 className="w-4 h-4 animate-spin" /> Publiceren...</> : 'Publiceren'}
                       </Button>
                    </div>

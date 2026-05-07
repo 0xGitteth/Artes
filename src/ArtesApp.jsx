@@ -4053,7 +4053,7 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
   const showTimelineEmptyState = Boolean(currentUser?.uid && followingLoaded && visiblePosts.length === 0);
 
   return (
-    <div className="max-w-2xl mx-auto px-3 py-4 space-y-8 md:px-4 md:py-6 md:space-y-12">
+    <div className="max-w-2xl mx-auto px-2.5 py-3 space-y-5 md:px-4 md:py-6 md:space-y-12">
       {showTimelineEmptyState ? (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-center md:rounded-3xl md:p-6">
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
@@ -4079,7 +4079,7 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
         <div key={post.id} className="relative group">
            <div
              data-dragged="false"
-             className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`}
+             className={`relative overflow-hidden rounded-sm bg-slate-200 dark:bg-slate-800 min-h-[190px] sm:min-h-[240px] md:min-h-[300px] shadow-sm cursor-pointer ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`}
              onClick={(event) => {
                if (event.currentTarget.dataset.dragged === 'true') {
                  event.currentTarget.dataset.dragged = 'false';
@@ -4103,18 +4103,20 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
                alt={post.title}
                imageMeta={post.imageMeta}
                className="w-full"
+               imageClassName="relative z-0 block h-auto max-h-[520px] w-full object-cover md:max-h-none"
+               panoramaFrameClassName="h-44 sm:h-56 md:h-56"
                shouldCover={shouldCover}
                overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
              />
            </div>
-           <div className="bg-white dark:bg-slate-800 rounded-b-lg shadow-xl p-3 mt-2 border border-slate-100 dark:border-slate-700 flex gap-3 md:rounded-b-xl md:p-5 md:gap-6">
+           <div className="bg-white dark:bg-slate-800 rounded-b-lg shadow-xl p-2.5 mt-1.5 border border-slate-100 dark:border-slate-700 flex gap-2.5 md:rounded-b-xl md:p-5 md:mt-2 md:gap-6">
               <div className="flex-1 space-y-2 md:space-y-3">
-                 <div className="flex gap-3">
+                 <div className="flex gap-2 md:gap-3">
                    <button
                      type="button"
                      onClick={(event) => handleLikeClick(event, post)}
                      disabled={likeBusy}
-                     className="inline-flex items-center gap-2 px-1 py-1.5 text-sm text-slate-600 dark:text-slate-300 transition disabled:opacity-60"
+                     className="inline-flex items-center gap-1.5 px-1 py-1 text-sm text-slate-600 dark:text-slate-300 transition disabled:opacity-60 md:gap-2 md:py-1.5"
                    >
                      <LikeIcon size={16} active={liked} disabled={likeBusy} />
                      <span>{likesCount}</span>
@@ -4125,14 +4127,14 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
                        event.stopPropagation();
                        onPostClick(post);
                      }}
-                     className="inline-flex items-center gap-2 px-1 py-1.5 text-sm text-slate-600 dark:text-slate-300"
+                     className="inline-flex items-center gap-1.5 px-1 py-1 text-sm text-slate-600 dark:text-slate-300 md:gap-2 md:py-1.5"
                    >
                      <CommentIcon size={16} active={false} />
                      <span>{commentsCount}</span>
                    </button>
                  </div>
-                 <div><h3 className="text-lg font-serif font-bold dark:text-white">{post.title}</h3><p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">{post.description}</p></div>
-                 <div className="flex flex-wrap gap-2">
+                 <div><h3 className="text-base font-serif font-bold dark:text-white md:text-lg">{post.title}</h3><p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 md:text-sm">{post.description}</p></div>
+                 <div className="flex flex-wrap gap-1.5 md:gap-2">
                    {post.isChallenge && (
                      <Badge
                        colorClass="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-300/40"
@@ -4148,6 +4150,9 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
                 post={{ ...post, authorName: authorDisplayName }}
                 onUserClick={onUserClick}
                 onShadowClick={onShadowClick}
+                className="gap-1 md:gap-2"
+                roleClassName="text-[10px] uppercase font-bold text-slate-400 md:text-xs"
+                nameClassName="text-[11px] font-medium text-slate-900 group-hover:text-blue-600 dark:text-white transition-colors md:text-xs"
               />
            </div>
         </div>
@@ -4203,39 +4208,39 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   ));
 
   return (
-    <div className="max-w-5xl mx-auto px-3 pt-0 pb-4 md:px-4 md:py-6">
+    <div className="max-w-5xl mx-auto px-2.5 pt-0 pb-3 md:px-4 md:py-6">
        {/* Mobile top-0 sticks to the padded scrollport edge, which is already below the fixed app header. */}
-       <div className="sticky top-0 md:top-16 bg-[#F0F4F8] dark:bg-slate-900 z-20 pb-3 md:pb-4">
-          <div className="relative mb-3 md:mb-4"><Search className="absolute left-3 top-2.5 h-5 w-5 text-slate-400 md:left-4 md:top-3.5 md:h-6 md:w-6"/><input className="w-full pl-10 pr-3 py-2 text-sm rounded-lg border-none shadow-sm dark:bg-slate-800 dark:text-white md:pl-12 md:pr-4 md:py-3 md:text-base md:rounded-2xl" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)}/></div>
-          <div className="flex gap-1.5 mb-3 md:gap-2 md:mb-4">
-             {['all', 'ideas', 'people'].map(t => <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md font-bold text-xs transition-all md:px-6 md:py-2 md:rounded-lg md:text-sm ${tab === t ? 'bg-white shadow text-blue-600 dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>{t === 'all' ? 'Alles' : t === 'ideas' ? 'Ideeën' : 'Mensen'}</button>)}
+       <div className="sticky top-0 md:top-16 bg-[#F0F4F8] dark:bg-slate-900 z-20 pb-2 md:pb-4">
+          <div className="relative mb-2 md:mb-4"><Search className="absolute left-3 top-2 h-4 w-4 text-slate-400 md:left-4 md:top-3.5 md:h-6 md:w-6"/><input className="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border-none shadow-sm dark:bg-slate-800 dark:text-white md:pl-12 md:pr-4 md:py-3 md:text-base md:rounded-2xl" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)}/></div>
+          <div className="flex gap-1.5 mb-2 md:gap-2 md:mb-4">
+             {['all', 'ideas', 'people'].map(t => <button key={t} onClick={() => setTab(t)} className={`px-2.5 py-1 rounded-md font-bold text-xs transition-all md:px-6 md:py-2 md:rounded-lg md:text-sm ${tab === t ? 'bg-white shadow text-blue-600 dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>{t === 'all' ? 'Alles' : t === 'ideas' ? 'Ideeën' : 'Mensen'}</button>)}
           </div>
        </div>
 
-       {tab === 'all' && <div className="columns-2 md:columns-4 gap-4 space-y-4">{mixedContent.map((item, i) => {
+       {tab === 'all' && <div className="columns-2 gap-2 space-y-2 md:columns-4 md:gap-4 md:space-y-4">{mixedContent.map((item, i) => {
          const shouldCover = item.type === 'post' ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
          return (
-          <div key={i} onClick={() => item.type === 'post' ? onPostClick(item.data) : onUserClick(item.data.uid)} className="break-inside-avoid bg-white dark:bg-slate-800 rounded-xl overflow-hidden shadow-sm cursor-pointer mb-4">
+          <div key={i} onClick={() => item.type === 'post' ? onPostClick(item.data) : onUserClick(item.data.uid)} className="break-inside-avoid bg-white dark:bg-slate-800 rounded-lg overflow-hidden shadow-sm cursor-pointer mb-2 md:mb-4 md:rounded-xl">
              <div className="relative overflow-hidden">
                {shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(item.data.id)} /> : null}
                <img src={item.type === 'post' ? item.data.imageUrl : item.data.avatar} className="relative z-0 w-full h-auto" />
              </div>
-             <div className="p-2 font-bold text-xs truncate dark:text-white">{item.type === 'post' ? item.data.title : item.data.displayName}</div>
+             <div className="px-2 py-1.5 font-bold text-[11px] truncate dark:text-white md:p-2 md:text-xs">{item.type === 'post' ? item.data.title : item.data.displayName}</div>
           </div>
          );
        })}</div>}
 
        {tab === 'ideas' && <div>
-          <div className="flex flex-wrap gap-1.5 mb-4 md:gap-2 md:mb-6">{displayedThemes.map(t => <button key={t} onClick={() => toggleTheme(t)} className={`px-2 py-1 rounded-full text-[11px] font-bold border transition-all md:px-4 md:py-2 md:text-xs ${activeThemes.includes(t) ? 'ring-2 ring-blue-500 ' + getThemeStyle(t) : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{t}</button>)}<button onClick={() => setShowAllThemes(!showAllThemes)} className="text-[11px] font-bold text-blue-600 px-2 py-1 md:px-4 md:text-xs">Toon meer...</button></div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">{filteredPosts.map((p) => {
+          <div className="flex flex-wrap gap-1.5 mb-3 md:gap-2 md:mb-6">{displayedThemes.map(t => <button key={t} onClick={() => toggleTheme(t)} className={`px-2 py-1 rounded-full text-[11px] font-bold border transition-all md:px-4 md:py-2 md:text-xs ${activeThemes.includes(t) ? 'ring-2 ring-blue-500 ' + getThemeStyle(t) : 'bg-white dark:bg-slate-800 text-slate-500'}`}>{t}</button>)}<button onClick={() => setShowAllThemes(!showAllThemes)} className="text-[11px] font-bold text-blue-600 px-2 py-1 md:px-4 md:text-xs">Toon meer...</button></div>
+          <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 md:gap-2">{filteredPosts.map((p) => {
             const shouldCover = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
-            return <div key={p.id} onClick={() => onPostClick(p)} className="relative aspect-[4/5] bg-slate-200 rounded-lg overflow-hidden cursor-pointer">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => setView('challenge_timeline')}>Challenge</Badge></div>}{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
+            return <div key={p.id} onClick={() => onPostClick(p)} className="relative aspect-[4/5] bg-slate-200 rounded-md overflow-hidden cursor-pointer md:rounded-lg">{p.isChallenge && <div className="absolute top-2 left-2 z-10"><Badge colorClass="bg-amber-100 text-amber-800 border-amber-300" onClick={() => setView('challenge_timeline')}>Challenge</Badge></div>}{shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}<img src={p.imageUrl} className="relative z-0 w-full h-full object-cover"/></div>;
           })}</div>
        </div>}
 
        {tab === 'people' && <div>
           <div className="space-y-2 mb-4 md:space-y-3 md:mb-6">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5 md:gap-2">
               <button
                 onClick={() => setActiveThemes([])}
                 className={`px-2 py-1 rounded-full text-[11px] font-bold border md:px-4 md:py-2 md:text-xs ${activeThemes.length === 0 ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
@@ -4253,7 +4258,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
               ))}
               <button onClick={() => setShowAllThemes(!showAllThemes)} className="text-[11px] font-bold text-blue-600 px-2 py-1 md:px-4 md:text-xs">Toon meer...</button>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5 md:gap-2">
               <button
                 onClick={() => setActiveRole(null)}
                 className={`px-2 py-1 rounded-full text-[11px] font-bold border md:px-4 md:py-2 md:text-xs ${!activeRole ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'}`}
@@ -4264,11 +4269,11 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
               <button onClick={() => setShowAllRoles(!showAllRoles)} className="text-[11px] font-bold text-blue-600 px-2 py-1 md:px-4 md:text-xs">Toon meer...</button>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{filteredUsers.map((u) => {
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-4">{filteredUsers.map((u) => {
             const primaryRole = Array.isArray(u.roles) && u.roles.length ? u.roles[0] : null;
             const primaryRoleLabel = primaryRole ? ROLES.find((r) => r.id === primaryRole)?.label : null;
             return (
-              <div key={u.uid} onClick={() => onUserClick(u.uid)} className="bg-white dark:bg-slate-800 rounded-2xl overflow-hidden shadow-sm cursor-pointer"><div className="aspect-square relative"><img src={u.avatar} className="w-full h-full object-cover"/><div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-3"><span className="text-white font-bold">{u.displayName}</span><span className="text-white/70 text-xs">{primaryRoleLabel || 'Lid'}</span></div></div></div>
+              <div key={u.uid} onClick={() => onUserClick(u.uid)} className="bg-white dark:bg-slate-800 rounded-xl overflow-hidden shadow-sm cursor-pointer md:rounded-2xl"><div className="aspect-square relative"><img src={u.avatar} className="w-full h-full object-cover"/><div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 md:p-3"><span className="text-white font-bold">{u.displayName}</span><span className="text-white/70 text-xs">{primaryRoleLabel || 'Lid'}</span></div></div></div>
             );
           })}</div>
        </div>}

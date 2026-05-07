@@ -171,18 +171,18 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-xl overflow-hidden">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-700">
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2 md:p-4">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-lg max-h-[calc(100dvh-1rem)] md:max-h-[92vh] rounded-2xl md:rounded-3xl shadow-xl overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between p-3 md:p-6 border-b border-slate-200 dark:border-slate-700">
           <div>
-            <h2 className="text-lg font-semibold dark:text-white">Nieuwe chat</h2>
+            <h2 className="text-base md:text-lg font-semibold dark:text-white">Nieuwe chat</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">Zoek op naam of gebruikersnaam.</p>
           </div>
           <button onClick={onClose}>
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-6 space-y-4">
+        <div className="p-3 md:p-6 space-y-3 md:space-y-4 overflow-y-auto no-scrollbar">
           <div className="relative">
             <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
             <input
@@ -223,7 +223,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
           )}
 
           {selectedUser && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+            <div className="rounded-xl md:rounded-2xl border border-slate-200 dark:border-slate-700 p-3 md:p-4 space-y-3">
               <div className="flex items-center gap-3">
                 <Avatar photoURL={selectedUser.photoURL} name={getUserVisibleName(selectedUser)} />
                 <div>
@@ -477,11 +477,11 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
   };
 
   return (
-    <div className="h-full flex flex-col md:flex-row">
+    <div className="h-full min-h-0 flex flex-col md:flex-row">
       <aside className="md:w-80 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center justify-between p-3 md:p-4 border-b border-slate-200 dark:border-slate-800">
           <div>
-            <h2 className="text-lg font-semibold dark:text-white">Chat</h2>
+            <h2 className="text-base md:text-lg font-semibold dark:text-white">Chat</h2>
             <p className="text-xs text-slate-500">Berichten & moderatie</p>
           </div>
           <button
@@ -508,7 +508,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
                   <button
                     type="button"
                     onClick={() => setActiveThreadId(threadKey)}
-                    className="flex-1 text-left p-4 transition"
+                    className="flex-1 text-left p-3 md:p-4 transition"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -548,9 +548,9 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
       <section className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-900">
         {activeThread ? (
           <>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            <div className="flex items-center justify-between px-3 py-2 md:px-6 md:py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
               <div>
-                <h3 className="text-lg font-semibold dark:text-white">
+                <h3 className="text-base md:text-lg font-semibold dark:text-white">
                   {activeThreadIndex?.displayTitle || activeThread.title || 'Chat'}
                 </h3>
                 {activeThread.type === 'system' && (
@@ -562,7 +562,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto no-scrollbar px-6 py-6 space-y-4">
+            <div className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 md:px-6 md:py-6 space-y-3 md:space-y-4">
               {renderMessages.length === 0 ? (
                 <div className="text-sm text-slate-500">Nog geen berichten.</div>
               ) : (
@@ -599,14 +599,14 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
                       key={message.id}
                       className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div className="max-w-[75%] flex flex-col">
+                      <div className="max-w-[86%] md:max-w-[75%] flex flex-col">
                         {shouldShowLabel && (
                           <div className={`text-[11px] uppercase font-semibold mb-1 opacity-70 ${isOwn ? 'text-right' : 'text-left'}`}>
                             {senderLabel}
                           </div>
                         )}
                         <div
-                          className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                          className={`rounded-2xl px-3 py-2 md:px-4 md:py-3 text-sm shadow-sm ${
                             isSystem
                               ? 'bg-blue-50 text-blue-900 border border-blue-100'
                               : isOwn
@@ -657,7 +657,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
               )}
             </div>
 
-            <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4">
+            <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 md:px-6 md:py-4">
               {activeThread.type === 'dm' || activeThread.type === 'support' ? (
                 <div className="flex gap-2">
                   <input
@@ -673,7 +673,7 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
                   <button
                     type="button"
                     onClick={handleSendMessage}
-                    className="bg-blue-600 text-white rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                    className="bg-blue-600 text-white rounded-full px-3 py-2 md:px-4 text-sm font-semibold disabled:opacity-50"
                     disabled={activeThread.type === 'support' && !canSendSupport}
                   >
                     Verstuur

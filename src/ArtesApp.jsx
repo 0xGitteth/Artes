@@ -2301,7 +2301,7 @@ export default function ArtesApp() {
           />
         )}
 
-        <main className="h-full overflow-y-auto no-scrollbar pb-24 pt-16 scroll-smooth">
+        <main className="h-full overflow-y-auto no-scrollbar pb-24 pt-[calc(3.5rem+env(safe-area-inset-top))] md:pt-16 scroll-smooth">
           {(view === 'loading' || profileLoading) && (
             <div className="h-full flex items-center justify-center">
               <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -4203,8 +4203,8 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   ));
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6">
-       <div className="sticky top-0 bg-[#F0F4F8] dark:bg-slate-900 z-30 pb-4">
+    <div className="max-w-5xl mx-auto px-4 pt-0 pb-6 md:py-6">
+       <div className="sticky top-0 md:top-16 bg-[#F0F4F8] dark:bg-slate-900 z-20 pb-4">
           <div className="relative mb-4"><Search className="absolute left-4 top-3.5 text-slate-400"/><input className="w-full pl-12 pr-4 py-3 rounded-2xl border-none shadow-sm dark:bg-slate-800 dark:text-white" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)}/></div>
           <div className="flex gap-2 mb-4">
              {['all', 'ideas', 'people'].map(t => <button key={t} onClick={() => setTab(t)} className={`px-6 py-2 rounded-lg font-bold text-sm transition-all ${tab === t ? 'bg-white shadow text-blue-600 dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>{t === 'all' ? 'Alles' : t === 'ideas' ? 'Ideeën' : 'Mensen'}</button>)}
@@ -4276,33 +4276,46 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
 }
 
 function NavBar({ view, setView, onOpenSettings, showModerationDot = false }) {
+   const mobileNavItems = [
+      { id: 'gallery', label: 'Galerij', icon: ImageIcon },
+      { id: 'discover', label: 'Ontdekken', icon: Search },
+      { id: 'community', label: 'Community', icon: Users },
+      { id: 'profile', label: 'Profiel', icon: User },
+   ];
+
    return (
-      <>
-        <div className="fixed top-0 left-0 right-0 h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-30 flex items-center justify-between px-6">
-           <button
-             type="button"
-             className="cursor-pointer"
-             onClick={() => setView('gallery')}
-             aria-label="Ga naar galerij"
-           >
-             <img src="/brand/logo.png" alt="Artes" className="h-9 w-auto" />
-           </button>
-           <div className="hidden md:flex gap-6">
-              {['gallery', 'discover', 'community'].map(v => <button key={v} onClick={() => setView(v)} className={`capitalize font-medium ${view === v ? 'text-blue-600' : 'text-slate-500'}`}>{v === 'discover' ? 'Ontdekken' : v === 'gallery' ? 'Galerij' : v}</button>)}
-              <button onClick={() => setView('profile')} className={`capitalize font-medium ${view === 'profile' ? 'text-blue-600' : 'text-slate-500'}`}>Mijn Portfolio</button>
-           </div>
-           <button onClick={onOpenSettings} className="relative" aria-label="Instellingen openen">
-             <Settings className="w-5 h-5 text-slate-500"/>
-             {showModerationDot && <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500" />}
-           </button>
-        </div>
-        <div className="md:hidden fixed top-16 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 z-30 flex items-center justify-around">
-           <button onClick={() => setView('gallery')} className={view === 'gallery' ? 'text-blue-600' : 'text-slate-400'}><ImageIcon/></button>
-           <button onClick={() => setView('discover')} className={view === 'discover' ? 'text-blue-600' : 'text-slate-400'}><Search/></button>
-           <button onClick={() => setView('community')} className={view === 'community' ? 'text-blue-600' : 'text-slate-400'}><Users/></button>
-           <button onClick={() => setView('profile')} className={view === 'profile' ? 'text-blue-600' : 'text-slate-400'}><User/></button>
-        </div>
-      </>
+      <div className="fixed top-0 left-0 right-0 h-[calc(3.5rem+env(safe-area-inset-top))] md:h-16 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 z-40 flex items-end md:items-center justify-between px-3 md:px-6 pb-2 md:pb-0 pt-[env(safe-area-inset-top)] md:pt-0">
+         <button
+           type="button"
+           className="cursor-pointer shrink-0"
+           onClick={() => setView('gallery')}
+           aria-label="Ga naar galerij"
+         >
+           <img src="/brand/logo.png" alt="Artes" className="h-7 w-auto md:h-9" />
+         </button>
+         <div className="hidden md:flex gap-6">
+            {['gallery', 'discover', 'community'].map(v => <button key={v} onClick={() => setView(v)} className={`capitalize font-medium ${view === v ? 'text-blue-600' : 'text-slate-500'}`}>{v === 'discover' ? 'Ontdekken' : v === 'gallery' ? 'Galerij' : v}</button>)}
+            <button onClick={() => setView('profile')} className={`capitalize font-medium ${view === 'profile' ? 'text-blue-600' : 'text-slate-500'}`}>Mijn Portfolio</button>
+         </div>
+         <div className="md:hidden flex flex-1 items-center justify-center gap-1 px-2">
+            {mobileNavItems.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setView(id)}
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${view === id ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/15' : 'text-slate-400'}`}
+                aria-label={label}
+                aria-current={view === id ? 'page' : undefined}
+              >
+                <Icon className="h-5 w-5" />
+              </button>
+            ))}
+         </div>
+         <button onClick={onOpenSettings} className="relative shrink-0 p-2 -mr-2 md:mr-0" aria-label="Instellingen openen">
+           <Settings className="w-5 h-5 text-slate-500"/>
+           {showModerationDot && <span className="absolute top-1 right-1 md:-top-1 md:-right-1 h-2.5 w-2.5 rounded-full bg-red-500" />}
+         </button>
+      </div>
    );
 }
 

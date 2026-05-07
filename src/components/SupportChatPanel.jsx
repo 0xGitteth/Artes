@@ -200,10 +200,10 @@ export default function SupportChatPanel({ authReady, authUser, currentPublicPro
   };
 
   return (
-    <div className="h-full flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-3xl overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+    <div className="h-full min-h-0 flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl md:rounded-3xl overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 md:px-6 md:py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
         <div>
-          <h3 className="text-lg font-semibold dark:text-white">Artes Moderatie</h3>
+          <h3 className="text-base md:text-lg font-semibold dark:text-white">Artes Moderatie</h3>
           <p className="text-xs text-slate-500 dark:text-slate-300">Support chat</p>
         </div>
         {thread?.lastMessageAt && (
@@ -211,7 +211,7 @@ export default function SupportChatPanel({ authReady, authUser, currentPublicPro
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar px-6 py-6 space-y-4 bg-slate-50 dark:bg-slate-900">
+      <div className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 md:px-6 md:py-6 space-y-3 md:space-y-4 bg-slate-50 dark:bg-slate-900">
         {normalizedMessages.length === 0 ? (
           <div className="text-sm text-slate-500 dark:text-slate-300">Nog geen berichten.</div>
         ) : (
@@ -234,13 +234,13 @@ export default function SupportChatPanel({ authReady, authUser, currentPublicPro
                 key={message.id}
                 className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
               >
-                <div className="max-w-[75%] flex flex-col">
+                <div className="max-w-[86%] md:max-w-[75%] flex flex-col">
                   {shouldShowLabel && (
                     <div className={`text-[11px] uppercase font-semibold mb-1 opacity-70 ${isOwn ? 'text-right' : 'text-left'}`}>
                       {senderLabel}
                     </div>
                   )}
-                  <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${bubbleStyle}`}>
+                  <div className={`rounded-2xl px-3 py-2 md:px-4 md:py-3 text-sm shadow-sm ${bubbleStyle}`}>
                     <p>{bodyText}</p>
                     <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 text-right">
                       {formatTime(message.createdAt)}
@@ -253,7 +253,7 @@ export default function SupportChatPanel({ authReady, authUser, currentPublicPro
         )}
       </div>
 
-      <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4">
+      <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 md:px-6 md:py-4">
         <div className="flex gap-2">
           <input
             className="flex-1 rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm placeholder:text-slate-400 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
@@ -268,7 +268,7 @@ export default function SupportChatPanel({ authReady, authUser, currentPublicPro
           <button
             type="button"
             onClick={handleSendMessage}
-            className="bg-blue-600 text-white rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            className="bg-blue-600 text-white rounded-full px-3 py-2 md:px-4 text-sm font-semibold disabled:opacity-50"
             disabled={!canSend}
           >
             Verstuur

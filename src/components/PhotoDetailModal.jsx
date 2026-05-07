@@ -215,29 +215,29 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
     .map((trigger) => TRIGGER_LABELS[trigger] || trigger);
   const sensitiveFlag = post.sensitive || (post.appliedTriggers || []).length > 0 || (post.makerTags || []).length > 0;
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-5xl w-full max-h-[92vh] overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-2 md:p-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl md:rounded-3xl shadow-2xl max-w-5xl w-full max-h-[calc(100dvh-1rem)] md:max-h-[92vh] overflow-hidden flex flex-col">
+        <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-2 md:px-6 md:py-4 border-b border-slate-200 dark:border-slate-800">
           <div>
             <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Post details</p>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{post.title}</h3>
+            <h3 className="line-clamp-1 text-base md:text-lg font-semibold text-slate-900 dark:text-white">{post.title}</h3>
           </div>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
             <X />
           </button>
         </div>
-        <div className="grid md:grid-cols-2 gap-0">
+        <div className="grid min-h-0 flex-1 md:grid-cols-2 gap-0 overflow-y-auto md:overflow-hidden no-scrollbar">
           <PostImageDisplay
             src={post.imageUrl}
             alt={post.title}
             imageMeta={post.imageMeta}
-            className="flex items-center justify-center w-full bg-slate-100 dark:bg-slate-800 min-h-[260px] md:min-h-[420px] max-h-[70vh]"
-            imageClassName="relative z-0 block max-h-[70vh] w-auto max-w-full object-contain"
-            panoramaFrameClassName="h-[260px] md:h-[420px] max-h-[70vh]"
+            className="flex items-center justify-center w-full bg-slate-100 dark:bg-slate-800 min-h-[180px] max-h-[38dvh] md:min-h-[420px] md:max-h-[70vh]"
+            imageClassName="relative z-0 block max-h-[38dvh] md:max-h-[70vh] w-auto max-w-full object-contain"
+            panoramaFrameClassName="h-[180px] max-h-[38dvh] md:h-[420px] md:max-h-[70vh]"
             shouldCover={shouldCover}
             overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
           />
-          <div className="p-6 space-y-4 overflow-y-auto no-scrollbar max-h-[80vh]">
+          <div className="p-3 md:p-6 space-y-3 md:space-y-4 overflow-visible md:overflow-y-auto no-scrollbar md:max-h-[80vh]">
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Calendar size={16} />
               <span>{post.createdAt?.toDate ? post.createdAt.toDate().toLocaleDateString() : 'Nieuw'}</span>
@@ -254,7 +254,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                 </Badge>
               )}
             </div>
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-4">
+            <div className="rounded-xl md:rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-3 md:p-4">
               <PostCreditDisplay
                 post={post}
                 onUserClick={onUserClick}
@@ -304,7 +304,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             {reportState.error && <p className="text-xs text-red-500">{reportState.error}</p>}
 
             {isOwner && (
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3 bg-slate-50/50 dark:bg-slate-800/30">
+              <div className="rounded-xl md:rounded-2xl border border-slate-200 dark:border-slate-700 p-3 md:p-4 space-y-3 bg-slate-50/50 dark:bg-slate-800/30">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Beheer je post</p>
                   <div className="flex gap-2">
@@ -362,13 +362,13 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
               </div>
             )}
 
-            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 bg-slate-50/60 dark:bg-slate-800/50">
+            <div className="border border-slate-200 dark:border-slate-800 rounded-xl md:rounded-2xl p-3 md:p-4 space-y-3 bg-slate-50/60 dark:bg-slate-800/50">
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Reacties</p>
-              <div className="max-h-48 overflow-y-auto no-scrollbar space-y-3">
+              <div className="max-h-36 md:max-h-48 overflow-y-auto no-scrollbar space-y-2 md:space-y-3">
                 {comments.map((comment) => {
                   const canDeleteComment = Boolean(user?.uid && comment.authorId === user.uid);
                   return (
-                    <div key={comment.id} className="group p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+                    <div key={comment.id} className="group p-2.5 md:p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-slate-800 dark:text-white">{comment.authorName || 'Anon'}</p>
@@ -392,7 +392,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
                 })}
                 {!comments.length && <p className="text-sm text-slate-500 dark:text-slate-300">Nog geen reacties</p>}
               </div>
-              <form onSubmit={handleComment} className="flex items-center gap-3">
+              <form onSubmit={handleComment} className="flex items-center gap-2 md:gap-3">
                 <Input
                   placeholder="Deel je feedback"
                   value={commentText}

@@ -4502,7 +4502,7 @@ function ModerationDecisionModal({ message, onClose, onOpenComposer, pending, cu
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl overflow-hidden shadow-xl">
         <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-          <h3 className="font-bold text-lg dark:text-white">{title}</h3>
+          <h3 className="font-bold text-base md:text-lg dark:text-white">{title}</h3>
           <button onClick={onClose} disabled={pending}><X /></button>
         </div>
         <div className="p-6 space-y-4">
@@ -7679,9 +7679,9 @@ function UploadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3 md:p-4">
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-2 md:p-4">
        {inviteShareOpen && (
-         <div className="absolute inset-0 z-10 bg-black/70 flex items-center justify-center p-6">
+         <div className="absolute inset-0 z-10 bg-black/70 flex items-center justify-center p-2 md:p-6">
            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-3 w-full max-w-lg space-y-3 md:rounded-3xl md:p-6 md:space-y-4">
              <div>
                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Kopieer invite link</h3>
@@ -7740,8 +7740,8 @@ function UploadModal({
            </div>
          </div>
        )}
-       <div className="bg-white dark:bg-slate-900 w-full max-w-4xl h-[85vh] rounded-2xl overflow-hidden flex flex-col md:rounded-3xl">
-          <div className="p-3 border-b flex items-center justify-between gap-3 md:p-4 md:gap-4">
+       <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[calc(100dvh-1rem)] md:h-[85vh] rounded-2xl overflow-hidden flex flex-col md:rounded-3xl">
+          <div className="p-2.5 border-b flex items-center justify-between gap-2 md:p-4 md:gap-4">
             <div className="flex items-center gap-3">
               <h3 className="font-bold dark:text-white">Beeld publiceren</h3>
               {isChallenge && (
@@ -7757,7 +7757,7 @@ function UploadModal({
             </div>
             <button onClick={onClose}><X className="dark:text-white"/></button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 no-scrollbar md:p-6">
+          <div className="flex-1 overflow-y-auto p-2.5 no-scrollbar md:p-6">
              {resumeLoading && (
                <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-300">
                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploadgegevens laden...
@@ -7769,10 +7769,10 @@ function UploadModal({
                </div>
              )}
              {!resumeLoading && !resumeError && (
-             step === 1 ? <div className="h-full border-2 border-dashed rounded-3xl flex items-center justify-center relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-10 h-10 text-slate-400"/></div> : (
-                <div className="grid md:grid-cols-2 gap-4 md:gap-8">
-                   <div className="space-y-3 md:space-y-4">
-                      <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-lg border dark:border-slate-700 space-y-2 md:p-4 md:rounded-xl md:space-y-3">
+             step === 1 ? <div className="min-h-[220px] h-[32dvh] max-h-[280px] border-2 border-dashed rounded-2xl md:rounded-3xl flex items-center justify-center relative md:h-full md:max-h-none"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-10 h-10 text-slate-400"/></div> : (
+                <div className="grid md:grid-cols-2 gap-3 md:gap-8">
+                   <div className="space-y-2.5 md:space-y-4">
+                      <div className="bg-slate-50 dark:bg-slate-800 p-2.5 rounded-lg border dark:border-slate-700 space-y-2 md:p-4 md:rounded-xl md:space-y-3">
                          <p className="text-sm font-semibold dark:text-white">Preview voor timeline & overzichten</p>
                          <div className="bg-slate-100 rounded-xl overflow-hidden relative max-h-[520px]">
                            <img src={image} className="w-full h-auto object-contain"/>
@@ -8459,15 +8459,15 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
   const quickPreviewMode = formData.quickProfilePreviewMode || 'latest';
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4">
-       <div className="bg-white dark:bg-slate-900 w-full max-w-2xl h-[80vh] rounded-3xl overflow-hidden flex flex-col">
-          <div className="p-6 border-b flex justify-between"><h3 className="font-bold text-lg dark:text-white">Profiel Bewerken</h3><button onClick={onClose}><X/></button></div>
-          <div className="flex-1 overflow-y-auto no-scrollbar p-8 space-y-6">
+    <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-2 md:p-4">
+       <div className="bg-white dark:bg-slate-900 w-full max-w-2xl h-[calc(100dvh-1rem)] md:h-[80vh] rounded-2xl md:rounded-3xl overflow-hidden flex flex-col">
+          <div className="px-3 py-2 border-b flex justify-between md:p-6"><h3 className="font-bold text-base md:text-lg dark:text-white">Profiel Bewerken</h3><button onClick={onClose}><X/></button></div>
+          <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-4 md:p-8 md:space-y-6">
              <div aria-hidden="true" className="pointer-events-none fixed -left-[9999px] top-0 opacity-0 w-[calc(100vw-2rem)] max-w-3xl xl:max-w-4xl">
                <div ref={headerMeasureRef} className="w-full h-56 md:h-72" />
              </div>
              {/* Simple Tabs for this view */}
-             <div className="flex gap-4 border-b mb-4">
+             <div className="flex gap-3 overflow-x-auto no-scrollbar border-b mb-3 md:gap-4 md:mb-4">
                  {[
                    { key: 'general', label: 'Algemeen' },
                    { key: 'preview', label: 'Quick Profile' },
@@ -8478,7 +8478,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                    <button
                      key={key}
                      onClick={() => setTab(key)}
-                     className={`pb-2 ${tab === key ? 'border-b-2 border-blue-600 font-bold' : ''}`}
+                     className={`shrink-0 pb-2 text-sm md:text-base ${tab === key ? 'border-b-2 border-blue-600 font-bold' : ''}`}
                    >
                      {label}
                    </button>
@@ -8490,7 +8490,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                     <Input label="Weergavenaam" value={formData.displayName} onChange={e => setFormData({...formData, displayName: e.target.value})} />
                     <div><label className="block text-sm font-medium mb-1 dark:text-slate-300">Bio</label><textarea className="w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white h-24" value={formData.bio} onChange={e => setFormData({...formData, bio: e.target.value})} /></div>
 
-                    <div className="border-t pt-6 space-y-4">
+                    <div className="border-t pt-4 space-y-3 md:pt-6 md:space-y-4">
                       <h4 className="font-bold dark:text-white">Profielafbeeldingen</h4>
                       <div className="space-y-2">
                         <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Avatar</p>
@@ -9569,8 +9569,8 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   // Early return after all hooks
   if (!userProfile) {
     return (
-      <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-6">
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 w-full max-w-md text-center shadow-2xl">
+      <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-2 md:p-6">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl md:rounded-3xl p-4 md:p-8 w-full max-w-md text-center shadow-2xl">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-slate-600 dark:text-slate-300">Profiel laden...</p>
         </div>
@@ -9579,14 +9579,14 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   }
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4 md:p-6">
-      <div className="bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-3xl xl:max-w-4xl max-h-[calc(100vh-2rem)] shadow-2xl overflow-hidden border border-white/10 flex flex-col">
-        <div className="relative h-56 md:h-72 w-full shrink-0">
+    <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-2 md:p-6">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl md:rounded-[28px] w-full max-w-3xl xl:max-w-4xl max-h-[calc(100dvh-1rem)] md:max-h-[calc(100vh-2rem)] shadow-2xl overflow-hidden border border-white/10 flex flex-col">
+        <div className="relative h-40 md:h-72 w-full shrink-0">
           <img src={headerImage} className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
-          <div className="absolute inset-x-0 bottom-0 p-8 text-white">
-            <h2 className="text-4xl font-bold mb-3">{userProfile.displayName}</h2>
-            <div className="flex flex-wrap gap-2 mb-4">
+          <div className="absolute inset-x-0 bottom-0 p-4 md:p-8 text-white">
+            <h2 className="text-2xl md:text-4xl font-bold mb-2 md:mb-3">{userProfile.displayName}</h2>
+            <div className="flex flex-wrap gap-1.5 md:gap-2 mb-2 md:mb-4">
               {roles.map((role) => (
                 <span
                   key={role}
@@ -9608,14 +9608,14 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
           </div>
           <button
             onClick={onClose}
-            className="absolute top-6 right-6 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center backdrop-blur-md hover:bg-black/70 transition"
+            className="absolute top-3 right-3 md:top-6 md:right-6 w-9 h-9 md:w-10 md:h-10 rounded-full bg-black/50 text-white flex items-center justify-center backdrop-blur-md hover:bg-black/70 transition"
             aria-label="Sluiten"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-5 md:p-8 space-y-6 overflow-y-auto no-scrollbar">
+        <div className="p-3 md:p-8 space-y-4 md:space-y-6 overflow-y-auto no-scrollbar">
           <div className="flex flex-wrap gap-2">
             {themes && themes.length > 0 ? (
               themes.map((theme) => (
@@ -11324,8 +11324,8 @@ function AppShortcutInfoContent() {
 function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabel = null }) {
   return (
     <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-xl rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 md:p-8 shadow-2xl">
-        <h3 className="text-2xl font-bold mb-4 text-slate-900 dark:text-white">Artes als app gebruiken</h3>
+      <div className="w-full max-w-xl max-h-[calc(100dvh-1rem)] overflow-y-auto no-scrollbar rounded-2xl md:rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 md:p-8 shadow-2xl">
+        <h3 className="text-xl md:text-2xl font-bold mb-3 md:mb-4 text-slate-900 dark:text-white">Artes als app gebruiken</h3>
         <AppShortcutInfoContent />
         <div className="mt-6 flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
           {secondaryLabel && <Button variant="secondary" onClick={onClose}>{secondaryLabel}</Button>}
@@ -11339,12 +11339,12 @@ function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabe
 function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false }) { 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
-            <div className="bg-white dark:bg-slate-900 w-80 h-full p-4 flex flex-col gap-4 text-slate-900 dark:text-slate-100 md:p-6 md:gap-6">
+            <div className="bg-white dark:bg-slate-900 w-[min(20rem,calc(100vw-1rem))] h-[calc(100dvh-1rem)] m-2 md:m-0 md:h-full p-3 flex flex-col gap-3 text-slate-900 dark:text-slate-100 md:w-80 md:p-6 md:gap-6 rounded-2xl md:rounded-none overflow-y-auto no-scrollbar">
                 <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-lg md:text-xl">Instellingen</h3>
+                  <h3 className="font-bold text-base md:text-xl">Instellingen</h3>
                   <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"><X/></button>
                 </div>
-                <div className="space-y-3 md:space-y-4">
+                <div className="space-y-2.5 md:space-y-4">
                     <h4 className="text-xs uppercase font-bold text-slate-400">Account</h4>
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Meldingen</span><Bell className="w-4 h-4"/></div>
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Privacy</span><Lock className="w-4 h-4"/></div>

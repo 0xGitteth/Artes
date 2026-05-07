@@ -1,10 +1,5 @@
 import { getAdaptivePhotoTileSpan } from '../utils/adaptivePhotoGrid';
-
-const isInteractiveElement = (target, container) => {
-  if (!(target instanceof Element)) return false;
-  const interactive = target.closest('button, a, input, select, textarea, summary, [role="button"], [role="link"]');
-  return Boolean(interactive && interactive !== container && container.contains(interactive));
-};
+import { shouldIgnoreTileActivation } from '../utils/domInteraction';
 
 export default function AdaptivePhotoGrid({
   posts = [],
@@ -28,11 +23,11 @@ export default function AdaptivePhotoGrid({
             role={clickable ? 'button' : undefined}
             tabIndex={clickable ? 0 : undefined}
             onClick={clickable ? (event) => {
-              if (isInteractiveElement(event.target, event.currentTarget)) return;
+              if (shouldIgnoreTileActivation(event.target, event.currentTarget)) return;
               onPostClick(post);
             } : undefined}
             onKeyDown={clickable ? (event) => {
-              if (isInteractiveElement(event.target, event.currentTarget)) return;
+              if (shouldIgnoreTileActivation(event.target, event.currentTarget)) return;
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 onPostClick(post);

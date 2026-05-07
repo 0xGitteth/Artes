@@ -92,6 +92,7 @@ import PhotoDetailModal from './components/PhotoDetailModal';
 import PostImageDisplay from './components/PostImageDisplay';
 import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
 import { getAdaptivePhotoTileSpan } from './utils/adaptivePhotoGrid';
+import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
 import PostCreditDisplay from './components/PostCreditDisplay';
 import SensitiveOverlay from './components/SensitiveOverlay';
@@ -4228,8 +4229,12 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
             key={`${item.type}-${item.data.id || item.data.uid || i}`}
             role="button"
             tabIndex={0}
-            onClick={() => isPost ? onPostClick(item.data) : onUserClick(item.data.uid)}
+            onClick={(event) => {
+              if (shouldIgnoreTileActivation(event.target, event.currentTarget)) return;
+              isPost ? onPostClick(item.data) : onUserClick(item.data.uid);
+            }}
             onKeyDown={(event) => {
+              if (shouldIgnoreTileActivation(event.target, event.currentTarget)) return;
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 isPost ? onPostClick(item.data) : onUserClick(item.data.uid);

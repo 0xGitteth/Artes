@@ -7775,12 +7775,16 @@ function UploadModal({
              )}
              {!resumeLoading && !resumeError && (
              step === 1 ? <div className="min-h-[180px] h-[28dvh] max-h-[240px] border-2 border-dashed rounded-2xl md:min-h-[220px] md:h-full md:max-h-none md:rounded-3xl flex flex-col items-center justify-center gap-2 relative"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} /><Plus className="w-9 h-9 text-slate-400 md:w-10 md:h-10"/><p className="text-xs font-semibold text-slate-500 dark:text-slate-300 md:text-sm">Tik om een beeld te kiezen</p></div> : (
-                <div className="grid gap-3 md:grid-cols-2 md:gap-8">
-                   <div className="space-y-2.5 md:space-y-4">
+                <div className="grid min-w-0 gap-3 md:grid-cols-2 md:gap-8">
+                   <div className="min-w-0 space-y-2.5 md:space-y-4">
                       <div className="bg-slate-50 dark:bg-slate-800 p-2.5 rounded-lg border dark:border-slate-700 space-y-2 md:p-4 md:rounded-xl md:space-y-3">
                          <p className="text-sm font-semibold dark:text-white">Geselecteerde afbeelding</p>
-                         <div className="bg-slate-100 rounded-xl relative flex items-center justify-center p-1 dark:bg-slate-900/40">
-                           <img src={image} className="max-h-[34dvh] w-auto max-w-full rounded-lg object-contain md:max-h-[520px]"/>
+                         <div className="min-w-0 bg-slate-100 rounded-xl relative flex items-center justify-center p-1 dark:bg-slate-900/40">
+                           {isPanoramaImage(imageMeta) ? (
+                             <img src={image} className="block h-auto w-full rounded-lg object-contain"/>
+                           ) : (
+                             <img src={image} className="block max-h-[34dvh] max-w-full rounded-lg object-contain md:max-h-[520px]"/>
+                           )}
                            {outcome === 'forbidden' && (
                              <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center text-orange-400 font-bold">
                                <AlertOctagon className="w-6 h-6 mr-2"/> Publicatie geblokkeerd
@@ -7793,6 +7797,20 @@ function UploadModal({
                          )}
                          {imageMeta?.aspectRatio && imageMeta.aspectRatio <= 0.5 && (
                            <p className="text-xs text-amber-700 dark:text-amber-300">Deze foto is erg hoog. Bestaande kaartweergaven kunnen nog een uitsnede tonen.</p>
+                         )}
+                         {isPanoramaImage(imageMeta) && (
+                           <div className="min-w-0 rounded-lg border border-slate-200 bg-white/80 p-2 dark:border-slate-700 dark:bg-slate-900/40 md:rounded-xl md:p-3">
+                             <p className="mb-2 text-sm font-semibold dark:text-white">Preview in tijdlijn</p>
+                             <PostImageDisplay
+                               src={image}
+                               alt={title || 'Panorama preview'}
+                               imageMeta={imageMeta}
+                               className="w-full min-w-0 rounded-xl bg-slate-200 dark:bg-slate-900"
+                               panoramaFrameClassName="h-32 sm:h-36 md:h-56"
+                               badgeClassName="left-2 top-2"
+                               panoramaHint="Veeg horizontaal om de hele foto te bekijken."
+                             />
+                           </div>
                          )}
                        </div>
                       {errors.image && <p className="text-xs text-red-500">{errors.image}</p>}

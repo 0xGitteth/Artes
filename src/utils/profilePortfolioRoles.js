@@ -66,12 +66,17 @@ export const getProfilePostRoleKeys = (post = {}, profileUser = {}) => {
   const credits = Array.isArray(post?.credits) ? post.credits.filter(isStructuredCredit) : [];
 
   if (credits.length > 0) {
-    return uniqueRoleKeys(
-      credits
-        .filter((credit) => creditMatchesProfileUser(credit, post, profileUser))
-        .map((credit) => credit.role)
-        .filter((role) => eligibleRoles.has(role)),
-    );
+    const matchingCredits = credits.filter((credit) => creditMatchesProfileUser(credit, post, profileUser));
+
+    if (matchingCredits.length > 0) {
+      return uniqueRoleKeys(
+        matchingCredits
+          .map((credit) => credit.role)
+          .filter((role) => eligibleRoles.has(role)),
+      );
+    }
+
+    return getLegacyProfilePostRoleKeys(post, profileUser);
   }
 
   return getLegacyProfilePostRoleKeys(post, profileUser);

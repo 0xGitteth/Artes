@@ -124,6 +124,70 @@ assert.deepEqual(getProfilePostRoleKeys(legacyFirstProfileRole, profile(['model'
 assert.deepEqual(getProfilePostRoleKeys(legacyInvalidAuthorRole, profile(['model'])), [], 'legacy fallback role must be within profile.roles');
 assert.deepEqual(eligibleIds([legacyAuthorRole, legacyFirstProfileRole, legacyInvalidAuthorRole], profile(['model'])), ['legacy-author-role', 'legacy-first-role'], 'legacy authored posts still appear when fallback role is eligible');
 
+const sophieProfile = (roles = ['model']) => profile(roles, { uid: 'user-sophie', contributorId: 'contrib-sophie' });
+const sophieAuthoredWithOtherContributorCredit = post({
+  id: 'sophie-authored-other-credit',
+  authorId: 'user-sophie',
+  authorRole: 'model',
+  credits: [{ uid: 'user-tom', role: 'photographer' }],
+});
+assert.deepEqual(
+  getProfilePostRoleKeys(sophieAuthoredWithOtherContributorCredit, sophieProfile(['model'])),
+  ['model'],
+  'legacy authored post with credits for another contributor still uses authorRole fallback for the author',
+);
+assert.deepEqual(
+  eligibleIds([sophieAuthoredWithOtherContributorCredit], sophieProfile(['model'])),
+  ['sophie-authored-other-credit'],
+  'legacy authored post with credits for another contributor remains eligible for the author',
+);
+assert.deepEqual(
+  getProfilePostRoleKeys(sophieAuthoredWithOtherContributorCredit, sophieProfile(['photographer'])),
+  [],
+  'legacy authored post with credits for another contributor is excluded when authorRole is outside profile.roles',
+);
+assert.deepEqual(
+  eligibleIds([sophieAuthoredWithOtherContributorCredit], sophieProfile(['photographer'])),
+  [],
+  'legacy authored post with credits for another contributor is not eligible when fallback role is outside profile.roles',
+);
+
+const nonAuthoredOtherContributorCredit = post({
+  id: 'non-authored-other-credit',
+  authorId: 'user-other',
+  authorRole: 'model',
+  credits: [{ uid: 'user-tom', role: 'photographer' }],
+});
+assert.deepEqual(
+  getProfilePostRoleKeys(nonAuthoredOtherContributorCredit, sophieProfile(['model'])),
+  [],
+  'non-authored post with credits for other people does not fall back onto this profile',
+);
+
+const matchingOutOfProfileStructuredCredit = post({
+  id: 'matching-out-of-profile-credit',
+  authorId: 'user-sophie',
+  authorRole: 'model',
+  credits: [{ uid: 'user-sophie', role: 'mua' }],
+});
+assert.deepEqual(
+  getProfilePostRoleKeys(matchingOutOfProfileStructuredCredit, sophieProfile(['model'])),
+  [],
+  'matching structured credit outside profile.roles does not fall back to authorRole',
+);
+
+const matchingEligibleStructuredCredit = post({
+  id: 'matching-eligible-structured-credit',
+  authorId: 'user-sophie',
+  authorRole: 'model',
+  credits: [{ uid: 'user-sophie', role: 'photographer' }],
+});
+assert.deepEqual(
+  getProfilePostRoleKeys(matchingEligibleStructuredCredit, sophieProfile(['model', 'photographer'])),
+  ['photographer'],
+  'matching structured eligible credit wins over authorRole fallback',
+);
+
 const unrelatedCreditPost = post({
   id: 'unrelated-credit',
   credits: [{ uid: 'user-3', contributorId: 'contrib-3', role: 'mua' }],

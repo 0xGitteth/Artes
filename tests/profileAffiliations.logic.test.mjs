@@ -41,6 +41,18 @@ const pendingAgencyTalent = {
   linkedAgencyId: 'agency-1',
   linkedAgencyStatus: 'pending',
 };
+const rejectedAgencyTalent = {
+  uid: 'talent-rejected',
+  roles: ['model'],
+  linkedAgencyId: 'agency-1',
+  linkedAgencyStatus: 'rejected',
+};
+const removedAgencyTalent = {
+  uid: 'talent-removed',
+  roles: ['model'],
+  linkedAgencyId: 'agency-1',
+  linkedAgencyStatus: 'removed',
+};
 const missingStatusAgencyTalent = {
   uid: 'talent-missing-status',
   roles: ['model'],
@@ -62,6 +74,8 @@ const wrongAgencyTalent = {
 assert.equal(isApprovedAffiliation(approvedAgencyTalent, agency), true, 'approved linked agency profile is approved affiliation');
 assert.equal(isApprovedAffiliation(verifiedAgencyTalent, agency), true, 'verified linked agency profile is approved affiliation');
 assert.equal(isApprovedAffiliation(pendingAgencyTalent, agency), false, 'pending linked agency profile is not public');
+assert.equal(isApprovedAffiliation(rejectedAgencyTalent, agency), false, 'rejected linked agency profile is not public');
+assert.equal(isApprovedAffiliation(removedAgencyTalent, agency), false, 'removed linked agency profile is not public');
 assert.equal(isApprovedAffiliation(missingStatusAgencyTalent, agency), false, 'missing agency status is not treated as approved');
 assert.equal(isApprovedAffiliation(freeTextAgencyTalent, agency), false, 'free text agency name without linkedAgencyId is not public');
 assert.equal(isApprovedAffiliation(wrongAgencyTalent, agency), false, 'wrong organization id does not match agency');
@@ -90,6 +104,18 @@ const pendingCompanyTeamMember = {
   linkedCompanyId: 'company-1',
   linkedCompanyStatus: 'pending',
 };
+const rejectedCompanyTeamMember = {
+  uid: 'team-rejected',
+  roles: ['producer'],
+  linkedCompanyId: 'company-1',
+  linkedCompanyStatus: 'rejected',
+};
+const removedCompanyTeamMember = {
+  uid: 'team-removed',
+  roles: ['producer'],
+  linkedCompanyId: 'company-1',
+  linkedCompanyStatus: 'removed',
+};
 const missingStatusCompanyTeamMember = {
   uid: 'team-missing-status',
   roles: ['producer'],
@@ -111,6 +137,8 @@ const wrongCompanyTeamMember = {
 assert.equal(isApprovedAffiliation(approvedCompanyTeamMember, company), true, 'approved linked company profile is approved affiliation');
 assert.equal(isApprovedAffiliation(verifiedCompanyTeamMember, company), true, 'verified linked company profile is approved affiliation');
 assert.equal(isApprovedAffiliation(pendingCompanyTeamMember, company), false, 'pending linked company profile is not public');
+assert.equal(isApprovedAffiliation(rejectedCompanyTeamMember, company), false, 'rejected linked company profile is not public');
+assert.equal(isApprovedAffiliation(removedCompanyTeamMember, company), false, 'removed linked company profile is not public');
 assert.equal(isApprovedAffiliation(missingStatusCompanyTeamMember, company), false, 'missing company status is not treated as approved');
 assert.equal(isApprovedAffiliation(freeTextCompanyTeamMember, company), false, 'free text company name without linkedCompanyId is not public');
 assert.equal(isApprovedAffiliation(wrongCompanyTeamMember, company), false, 'wrong organization id does not match company');

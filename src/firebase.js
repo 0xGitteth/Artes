@@ -765,12 +765,12 @@ export const updateUserAffiliationStatus = async ({ targetUid, type, status }) =
   const db = getFirebaseDb();
   const targetRef = doc(db, 'users', targetUid);
   const publicRef = doc(db, 'publicUsers', targetUid);
-  const targetSnap = await getDoc(targetRef);
-  if (!targetSnap.exists()) {
-    throw new Error('Affiliatie bijwerken mislukt: profiel niet gevonden.');
+  const publicSnap = await getDoc(publicRef);
+  if (!publicSnap.exists()) {
+    throw new Error('Affiliatie bijwerken mislukt: openbaar profiel niet gevonden.');
   }
 
-  const target = targetSnap.data() || {};
+  const target = publicSnap.data() || {};
   const fields = normalizedType === 'company'
     ? {
       id: 'linkedCompanyId',

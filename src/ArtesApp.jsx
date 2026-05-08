@@ -31,6 +31,7 @@ import {
   signInWithApple,
   signInWithGoogle,
   updateUserProfile,
+  updateUserAffiliationStatus,
   getFirebaseDbInstance,
   getFirebaseAuthInstance,
   createClaimInvite,
@@ -108,6 +109,8 @@ import {
 } from './utils/profilePortfolioRoles';
 import {
   getAffiliatedProfilesForOrganization,
+  getOrganizationProfileTab,
+  isApprovedAffiliation,
   getVisibleOrganizationProfileTab,
 } from './utils/profileAffiliations';
 import { debugAllowed } from './utils/debugAccess';
@@ -4369,6 +4372,16 @@ function NavBar({ view, setView, onOpenSettings, showModerationDot = false }) {
    );
 }
 
+const AFFILIATION_REMOVAL_LABELS = {
+  agency: 'Verwijderen uit Talent',
+  company: 'Verwijderen uit Team',
+};
+
+const AFFILIATION_REMOVAL_CONFIRMATIONS = {
+  agency: 'Weet je zeker dat je dit profiel uit Talent wilt verwijderen?',
+  company: 'Weet je zeker dat je dit profiel uit Team wilt verwijderen?',
+};
+
 const seedCountsFromProfile = (profileData, normalizedProfileData = null) => {
   const source = normalizedProfileData || profileData;
   return {
@@ -4442,10 +4455,27 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
     () => getAffiliatedProfilesForOrganization(normalizedProfile, allUsers),
     [allUsers, normalizedProfile],
   );
-  const organizationProfileTab = useMemo(
+  const baseOrganizationProfileTab = useMemo(
+    () => getOrganizationProfileTab(normalizedProfile),
+    [normalizedProfile],
+  );
+  const visibleOrganizationProfileTab = useMemo(
     () => getVisibleOrganizationProfileTab(normalizedProfile, allUsers),
     [allUsers, normalizedProfile],
   );
+  const organizationProfileTab = visibleOrganizationProfileTab || (currentUserId === profileUserId ? baseOrganizationProfileTab : null);
+  const currentUserProfile = useMemo(
+    () => (Array.isArray(allUsers) ? allUsers.find((candidate) => candidate?.uid === currentUserId) : null),
+    [allUsers, currentUserId],
+  );
+  const linkedProfileRemovalType = useMemo(() => {
+    if (!currentUserProfile || !normalizedProfile || currentUserId === profileUserId) return null;
+    if (isApprovedAffiliation(normalizedProfile, currentUserProfile)) {
+      const tab = getOrganizationProfileTab(currentUserProfile);
+      return tab?.organizationRole || null;
+    }
+    return null;
+  }, [currentUserId, currentUserProfile, normalizedProfile, profileUserId]);
   useEffect(() => {
     if (!organizationProfileTab || activeProfileTab === organizationProfileTab.key) {
       return;
@@ -4454,6 +4484,41 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
   }, [activeProfileTab, organizationProfileTab, profileUserId]);
   const showOrganizationProfileTab = Boolean(organizationProfileTab);
   const isOrganizationProfileTabActive = Boolean(organizationProfileTab && activeProfileTab === organizationProfileTab.key);
+  const isOrganizationOwnerView = Boolean(currentUserId && profileUserId && currentUserId === profileUserId);
+  const pendingAffiliationRequests = useMemo(() => {
+    if (!isOrganizationOwnerView || !organizationProfileTab || !profileUserId || !Array.isArray(allUsers)) return [];
+    if (organizationProfileTab.organizationRole === 'agency') {
+      return allUsers.filter((candidate) => candidate?.uid !== profileUserId
+        && candidate?.linkedAgencyId === profileUserId
+        && candidate?.linkedAgencyStatus === 'pending');
+    }
+    if (organizationProfileTab.organizationRole === 'company') {
+      return allUsers.filter((candidate) => candidate?.uid !== profileUserId
+        && candidate?.linkedCompanyId === profileUserId
+        && candidate?.linkedCompanyStatus === 'pending');
+    }
+    return [];
+  }, [allUsers, isOrganizationOwnerView, organizationProfileTab, profileUserId]);
+  const [affiliationActionBusyUid, setAffiliationActionBusyUid] = useState(null);
+  const [affiliationActionError, setAffiliationActionError] = useState('');
+  const handleAffiliationAction = useCallback(async (targetUid, status, typeOverride = null) => {
+    const actionType = typeOverride || organizationProfileTab?.organizationRole;
+    if (!actionType) return;
+    if (status === 'removed' && !window.confirm(AFFILIATION_REMOVAL_CONFIRMATIONS[actionType])) return;
+    setAffiliationActionBusyUid(`${targetUid}:${status}`);
+    setAffiliationActionError('');
+    try {
+      await updateUserAffiliationStatus({
+        targetUid,
+        type: actionType,
+        status,
+      });
+    } catch (error) {
+      setAffiliationActionError(error?.message || 'Affiliatie kon niet worden bijgewerkt.');
+    } finally {
+      setAffiliationActionBusyUid(null);
+    }
+  }, [organizationProfileTab]);
   if (!normalizedProfile) return null;
   const roles = normalizedProfile.roles;
   const themes = normalizedProfile.themes;
@@ -4502,6 +4567,19 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
                   {fanError ? <p className="text-sm text-red-500 dark:text-red-300">{fanError}</p> : null}
                 </div>
               ) : null}
+              {linkedProfileRemovalType && (
+                <div className="flex flex-col items-center gap-2 mb-5">
+                  <Button
+                    onClick={() => handleAffiliationAction(profileUserId, 'removed', linkedProfileRemovalType)}
+                    variant="secondary"
+                    disabled={Boolean(affiliationActionBusyUid)}
+                    className="border-red-200 bg-white/80 text-red-700 hover:bg-red-50 dark:border-red-500/40 dark:bg-slate-900/80 dark:text-red-300 dark:hover:bg-red-500/10"
+                  >
+                    {AFFILIATION_REMOVAL_LABELS[linkedProfileRemovalType]}
+                  </Button>
+                  {affiliationActionError ? <p className="text-sm font-semibold text-red-600 dark:text-red-300">{affiliationActionError}</p> : null}
+                </div>
+              )}
               {(hasAgency || hasCompany) && (
                 <div className="flex flex-col sm:flex-row flex-wrap justify-center gap-2 sm:gap-6 text-xs text-slate-700/80 dark:text-white/80 mb-5">
                   {hasAgency && (
@@ -4618,26 +4696,64 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
                  </div>
                  <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{affiliatedProfiles.length}</span>
                </div>
+               {isOrganizationOwnerView && pendingAffiliationRequests.length > 0 && (
+                 <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+                   <div className="mb-3 flex items-center justify-between gap-3">
+                     <div>
+                       <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">Wachtende aanvragen</p>
+                       <h3 className="font-bold text-slate-900 dark:text-white">{organizationProfileTab.organizationRole === 'agency' ? 'Talent requests' : 'Team requests'}</h3>
+                     </div>
+                     <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-amber-700 shadow-sm dark:bg-slate-900 dark:text-amber-300">{pendingAffiliationRequests.length}</span>
+                   </div>
+                   <div className="space-y-2">
+                     {pendingAffiliationRequests.map((requestProfile) => (
+                       <div key={requestProfile.uid} className="flex items-center justify-between gap-3 rounded-xl bg-white p-2 shadow-sm dark:bg-slate-900/70">
+                         <button type="button" onClick={() => onLinkedProfileClick?.(requestProfile.uid)} className="flex min-w-0 items-center gap-3 text-left">
+                           <img src={requestProfile.avatar} alt="" className="h-10 w-10 rounded-full object-cover" />
+                           <span className="truncate font-semibold text-slate-900 dark:text-white">{requestProfile.displayName}</span>
+                         </button>
+                         <div className="flex shrink-0 gap-2">
+                           <button type="button" disabled={Boolean(affiliationActionBusyUid)} onClick={() => handleAffiliationAction(requestProfile.uid, 'approved')} className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Goedkeuren</button>
+                           <button type="button" disabled={Boolean(affiliationActionBusyUid)} onClick={() => handleAffiliationAction(requestProfile.uid, 'rejected')} className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 disabled:opacity-50 dark:bg-slate-700 dark:text-slate-100">Afwijzen</button>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                   {affiliationActionError && <p className="mt-3 text-sm font-semibold text-red-600 dark:text-red-300">{affiliationActionError}</p>}
+                 </div>
+               )}
                {affiliatedProfiles.length > 0 ? (
                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-4">
                    {affiliatedProfiles.map((affiliatedProfile) => {
                      const primaryRole = Array.isArray(affiliatedProfile.roles) && affiliatedProfile.roles.length ? affiliatedProfile.roles[0] : null;
                      const primaryRoleLabel = primaryRole ? ROLES.find((role) => role.id === primaryRole)?.label : null;
                      return (
-                       <button
-                         key={affiliatedProfile.uid}
-                         type="button"
-                         onClick={() => onLinkedProfileClick?.(affiliatedProfile.uid)}
-                         className="overflow-hidden rounded-xl bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-800 md:rounded-2xl"
-                       >
-                         <div className="aspect-square relative">
-                           <img src={affiliatedProfile.avatar} alt="" className="h-full w-full object-cover" />
-                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 md:p-3">
-                             <span className="text-white font-bold">{affiliatedProfile.displayName}</span>
-                             <span className="text-white/70 text-xs">{primaryRoleLabel || 'Lid'}</span>
+                       <div key={affiliatedProfile.uid} className="group relative overflow-hidden rounded-xl bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-within:-translate-y-0.5 focus-within:shadow-md dark:bg-slate-800 md:rounded-2xl">
+                         <button
+                           type="button"
+                           onClick={() => onLinkedProfileClick?.(affiliatedProfile.uid)}
+                           className="block w-full text-left"
+                         >
+                           <div className="aspect-square relative">
+                             <img src={affiliatedProfile.avatar} alt="" className="h-full w-full object-cover" />
+                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 md:p-3">
+                               <span className="text-white font-bold">{affiliatedProfile.displayName}</span>
+                               <span className="text-white/70 text-xs">{primaryRoleLabel || 'Lid'}</span>
+                             </div>
                            </div>
-                         </div>
-                       </button>
+                         </button>
+                         {isOrganizationOwnerView && (
+                           <button
+                             type="button"
+                             aria-label={AFFILIATION_REMOVAL_LABELS[organizationProfileTab.organizationRole]}
+                             disabled={Boolean(affiliationActionBusyUid)}
+                             onClick={() => handleAffiliationAction(affiliatedProfile.uid, 'removed')}
+                             className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white opacity-100 shadow-sm backdrop-blur transition hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-white disabled:opacity-50 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+                           >
+                             <X className="h-4 w-4" />
+                           </button>
+                         )}
+                       </div>
                      );
                    })}
                  </div>

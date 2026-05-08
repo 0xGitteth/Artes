@@ -1,16 +1,13 @@
+import { isApprovedAffiliationStatus } from './profileAffiliationStatus.js';
+
 const ORGANIZATION_TABS = {
   agency: { key: 'talent', label: 'Talent', organizationRole: 'agency', emptyState: 'Nog geen talent gekoppeld.' },
   company: { key: 'team', label: 'Team', organizationRole: 'company', emptyState: 'Nog geen teamleden gekoppeld.' },
 };
 
-const APPROVED_AFFILIATION_STATUSES = new Set(['approved', 'verified']);
 
 const profileRoles = (profile = {}) => (Array.isArray(profile?.roles) ? profile.roles : []);
 const profileUid = (profile = {}) => profile?.uid || profile?.id || null;
-const normalizeStatus = (status) => String(status || '').trim().toLowerCase();
-
-export const isApprovedAffiliationStatus = (status) => APPROVED_AFFILIATION_STATUSES.has(normalizeStatus(status));
-
 export const getOrganizationProfileTab = (viewedProfile = {}) => {
   const roles = profileRoles(viewedProfile);
   if (roles.includes('agency')) return ORGANIZATION_TABS.agency;

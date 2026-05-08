@@ -62,6 +62,157 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/config/moderation)
         && request.auth.token.email in get(/databases/$(database)/documents/config/moderation).data.moderatorEmails;
     }
+
+    function isApprovedAffiliationStatusValue(value) {
+      return value == 'approved' || value == 'verified';
+    }
+    function isSelfSafeAffiliationStatusWrite() {
+      let changed = resource == null ? request.resource.data.keys() : request.resource.data.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(['linkedAgencyStatus'])
+          || !('linkedAgencyStatus' in request.resource.data)
+          || request.resource.data.linkedAgencyStatus == 'pending')
+        && (!changed.hasAny(['linkedCompanyStatus'])
+          || !('linkedCompanyStatus' in request.resource.data)
+          || request.resource.data.linkedCompanyStatus == 'pending');
+    }
+    function isOrganizationOwner(role) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles is list
+        && role in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles;
+    }
+    function isAgencyApprovalWrite(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isOrganizationOwner('agency')
+        && userId != request.auth.uid
+        && changed.hasOnly([
+          'linkedAgencyId',
+          'linkedAgencyName',
+          'linkedAgencyStatus',
+          'linkedAgencyStatusUpdatedAt',
+          'linkedAgencyApprovedAt',
+          'linkedAgencyApprovedBy',
+          'updatedAt'
+        ])
+        && resource.data.linkedAgencyId == request.auth.uid
+        && (
+          (
+            request.resource.data.linkedAgencyId == request.auth.uid
+            && request.resource.data.linkedAgencyStatus == 'approved'
+            && request.resource.data.linkedAgencyApprovedBy == request.auth.uid
+          )
+          || (
+            request.resource.data.linkedAgencyId == null
+            && request.resource.data.linkedAgencyName == ''
+            && (request.resource.data.linkedAgencyStatus == 'rejected' || request.resource.data.linkedAgencyStatus == 'removed')
+            && !('linkedAgencyApprovedAt' in request.resource.data)
+            && !('linkedAgencyApprovedBy' in request.resource.data)
+          )
+        );
+    }
+    function isCompanyApprovalWrite(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isOrganizationOwner('company')
+        && userId != request.auth.uid
+        && changed.hasOnly([
+          'linkedCompanyId',
+          'linkedCompanyName',
+          'linkedCompanyStatus',
+          'linkedCompanyStatusUpdatedAt',
+          'linkedCompanyApprovedAt',
+          'linkedCompanyApprovedBy',
+          'updatedAt'
+        ])
+        && resource.data.linkedCompanyId == request.auth.uid
+        && (
+          (
+            request.resource.data.linkedCompanyId == request.auth.uid
+            && request.resource.data.linkedCompanyStatus == 'approved'
+            && request.resource.data.linkedCompanyApprovedBy == request.auth.uid
+          )
+          || (
+            request.resource.data.linkedCompanyId == null
+            && request.resource.data.linkedCompanyName == ''
+            && (request.resource.data.linkedCompanyStatus == 'rejected' || request.resource.data.linkedCompanyStatus == 'removed')
+            && !('linkedCompanyApprovedAt' in request.resource.data)
+            && !('linkedCompanyApprovedBy' in request.resource.data)
+          )
+        );
+    }
+
+    function isSelfSafePublicAffiliationStatusWrite() {
+      let changed = resource == null ? request.resource.data.keys() : request.resource.data.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(['linkedAgencyStatus'])
+          || !('linkedAgencyStatus' in request.resource.data)
+          || request.resource.data.linkedAgencyStatus == 'pending')
+        && (!changed.hasAny(['linkedCompanyStatus'])
+          || !('linkedCompanyStatus' in request.resource.data)
+          || request.resource.data.linkedCompanyStatus == 'pending');
+    }
+
+    function safePublicAffiliationStatuses(uid) {
+      return (!('linkedAgencyStatus' in request.resource.data)
+          || request.resource.data.linkedAgencyStatus == 'pending'
+          || (
+            isApprovedAffiliationStatusValue(request.resource.data.linkedAgencyStatus)
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedAgencyId == request.resource.data.linkedAgencyId
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedAgencyStatus == request.resource.data.linkedAgencyStatus
+          ))
+        && (!('linkedCompanyStatus' in request.resource.data)
+          || request.resource.data.linkedCompanyStatus == 'pending'
+          || (
+            isApprovedAffiliationStatusValue(request.resource.data.linkedCompanyStatus)
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedCompanyId == request.resource.data.linkedCompanyId
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedCompanyStatus == request.resource.data.linkedCompanyStatus
+          ));
+    }
+    function isAgencyPublicApprovalWrite(uid) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isOrganizationOwner('agency')
+        && uid != request.auth.uid
+        && changed.hasOnly(['linkedAgencyId', 'linkedAgencyName', 'linkedAgencyStatus', 'updatedAt'])
+        && resource.data.linkedAgencyId == request.auth.uid
+        && (
+          (
+            request.resource.data.linkedAgencyId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedAgencyId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedAgencyStatus == 'approved'
+            && (!('linkedAgencyStatus' in request.resource.data) || request.resource.data.linkedAgencyStatus == 'approved')
+          )
+          || (
+            request.resource.data.linkedAgencyId == null
+            && request.resource.data.linkedAgencyName == ''
+            && !('linkedAgencyStatus' in request.resource.data)
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedAgencyId == null
+            && (getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedAgencyStatus == 'rejected'
+              || getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedAgencyStatus == 'removed')
+          )
+        );
+    }
+    function isCompanyPublicApprovalWrite(uid) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isOrganizationOwner('company')
+        && uid != request.auth.uid
+        && changed.hasOnly(['linkedCompanyId', 'linkedCompanyName', 'linkedCompanyStatus', 'updatedAt'])
+        && resource.data.linkedCompanyId == request.auth.uid
+        && (
+          (
+            request.resource.data.linkedCompanyId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedCompanyId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedCompanyStatus == 'approved'
+            && (!('linkedCompanyStatus' in request.resource.data) || request.resource.data.linkedCompanyStatus == 'approved')
+          )
+          || (
+            request.resource.data.linkedCompanyId == null
+            && request.resource.data.linkedCompanyName == ''
+            && !('linkedCompanyStatus' in request.resource.data)
+            && getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedCompanyId == null
+            && (getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedCompanyStatus == 'rejected'
+              || getAfter(/databases/$(database)/documents/users/$(uid)).data.linkedCompanyStatus == 'removed')
+          )
+        );
+    }
+
     function hasClaimEligibility(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data.ageVerified == true
         || get(/databases/$(database)/documents/users/$(uid)).data.onboardingStep >= 2;
@@ -241,11 +392,15 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId)
-        && noServerManagedUserFieldWrites();
+        && noServerManagedUserFieldWrites()
+        && isSelfSafeAffiliationStatusWrite();
       // Update must keep server-managed/sensitive fields client-immutable as well.
-      allow update: if isOwner(userId)
+      allow update: if (isOwner(userId)
         && noClientGateFieldWrites()
-        && noServerManagedUserFieldWrites();
+        && noServerManagedUserFieldWrites()
+        && isSelfSafeAffiliationStatusWrite())
+        || isAgencyApprovalWrite(userId)
+        || isCompanyApprovalWrite(userId);
       allow delete: if isOwner(userId);
 
       match /idv/{docId} {
@@ -289,7 +444,7 @@ service cloud.firestore {
 
     match /publicUsers/{uid} {
       allow read: if true;
-      allow create, update: if isOwner(uid)
+      allow create, update: if (isOwner(uid)
         && onlyKeys([
           'uid',
           'username',
@@ -306,6 +461,8 @@ service cloud.firestore {
           'linkedCompanyName',
           'linkedAgencyId',
           'linkedCompanyId',
+          'linkedAgencyStatus',
+          'linkedCompanyStatus',
           'linkedAgencyLink',
           'linkedCompanyLink',
           'authProvider',
@@ -346,8 +503,14 @@ service cloud.firestore {
         && (!('linkedCompanyName' in request.resource.data) || request.resource.data.linkedCompanyName is string || request.resource.data.linkedCompanyName == null)
         && (!('linkedAgencyId' in request.resource.data) || request.resource.data.linkedAgencyId is string || request.resource.data.linkedAgencyId == null)
         && (!('linkedCompanyId' in request.resource.data) || request.resource.data.linkedCompanyId is string || request.resource.data.linkedCompanyId == null)
+        && (!('linkedAgencyStatus' in request.resource.data) || request.resource.data.linkedAgencyStatus is string)
+        && (!('linkedCompanyStatus' in request.resource.data) || request.resource.data.linkedCompanyStatus is string)
+        && safePublicAffiliationStatuses(uid)
+        && isSelfSafePublicAffiliationStatusWrite()
         && (!('linkedAgencyLink' in request.resource.data) || request.resource.data.linkedAgencyLink is string || request.resource.data.linkedAgencyLink == null)
-        && (!('linkedCompanyLink' in request.resource.data) || request.resource.data.linkedCompanyLink is string || request.resource.data.linkedCompanyLink == null);
+        && (!('linkedCompanyLink' in request.resource.data) || request.resource.data.linkedCompanyLink is string || request.resource.data.linkedCompanyLink == null))
+        || isAgencyPublicApprovalWrite(uid)
+        || isCompanyPublicApprovalWrite(uid);
       allow delete: if false;
     }
 

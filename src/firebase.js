@@ -47,6 +47,11 @@ import {
   normalizeInstagram,
 } from './utils/contributorClaims';
 import { canAccessFirestore, devLog, isOnboardingComplete } from './utils/firestoreGate';
+import {
+  AFFILIATION_STATUSES,
+  applyAffiliationStatusTransitions,
+  getPublicAffiliationProjectionPatch,
+} from './utils/profileAffiliationStatus';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -416,6 +421,8 @@ const PUBLIC_USER_ALLOWED_FIELDS = [
   'linkedCompanyName',
   'linkedAgencyId',
   'linkedCompanyId',
+  'linkedAgencyStatus',
+  'linkedCompanyStatus',
   'linkedAgencyLink',
   'linkedCompanyLink',
 ];
@@ -425,6 +432,7 @@ const sanitizePublicProfileField = (key, value) => {
   if (key === 'username') return normalizeUsername(value);
   if (key === 'photoURL' || key === 'avatar' || key === 'headerImage') return value || null;
   if (key === 'displayName' || key === 'bio') return value || '';
+  if (key === 'linkedAgencyStatus' || key === 'linkedCompanyStatus') return String(value || '').trim().toLowerCase() || undefined;
   if (key === 'headerPosition') return value || 'center';
   if (key === 'roles' || key === 'themes') {
     if (!Array.isArray(value)) return [];
@@ -449,6 +457,8 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     'linkedCompanyName',
     'linkedAgencyId',
     'linkedCompanyId',
+    'linkedAgencyStatus',
+    'linkedCompanyStatus',
     'linkedAgencyLink',
     'linkedCompanyLink',
   ]
@@ -481,6 +491,8 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     'linkedCompanyName',
     'linkedAgencyId',
     'linkedCompanyId',
+    'linkedAgencyStatus',
+    'linkedCompanyStatus',
     'linkedAgencyLink',
     'linkedCompanyLink',
   ];
@@ -490,6 +502,12 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
       payload[field] = sanitizePublicProfileField(field, data[field]);
     }
   });
+
+  Object.assign(
+    payload,
+    getPublicAffiliationProjectionPatch({ source: data, existingPublic, kind: 'agency', deleteValue: deleteField() }),
+    getPublicAffiliationProjectionPatch({ source: data, existingPublic, kind: 'company', deleteValue: deleteField() }),
+  );
 
   const hasUsername = typeof payload.username === 'string' && payload.username.length > 0;
   if (!hasUsername) {
@@ -696,8 +714,13 @@ export const sanitizeThemes = (themes) => {
 // avatar, headerImage, headerPosition, quickProfilePreviewMode, quickProfilePostIds.
 export const createUserProfile = async (uid, profile) => {
   const safeProfile = stripClientGateFields(profile);
+  const affiliationTransition = applyAffiliationStatusTransitions(safeProfile, {}, {
+    timestamp: serverTimestamp(),
+    deleteValue: deleteField(),
+  });
   const payload = {
     ...safeProfile,
+    ...affiliationTransition,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -724,6 +747,83 @@ export const createUserProfile = async (uid, profile) => {
 
   await safeUserWrite(uid, payload);
 };
+
+export const updateUserAffiliationStatus = async ({ targetUid, type, status }) => {
+  const authUser = await waitForAuthReady();
+  if (!authUser?.uid) {
+    throw new Error('Affiliatie bijwerken mislukt: je bent niet ingelogd.');
+  }
+  if (!targetUid || targetUid === authUser.uid) {
+    throw new Error('Affiliatie bijwerken mislukt: kies een gekoppeld profiel.');
+  }
+  const normalizedType = type === 'company' ? 'company' : 'agency';
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  if (![AFFILIATION_STATUSES.APPROVED, AFFILIATION_STATUSES.REJECTED, AFFILIATION_STATUSES.REMOVED].includes(normalizedStatus)) {
+    throw new Error('Affiliatie bijwerken mislukt: status moet approved, rejected of removed zijn.');
+  }
+
+  const db = getFirebaseDb();
+  const targetRef = doc(db, 'users', targetUid);
+  const publicRef = doc(db, 'publicUsers', targetUid);
+  const targetSnap = await getDoc(targetRef);
+  if (!targetSnap.exists()) {
+    throw new Error('Affiliatie bijwerken mislukt: profiel niet gevonden.');
+  }
+
+  const target = targetSnap.data() || {};
+  const fields = normalizedType === 'company'
+    ? {
+      id: 'linkedCompanyId',
+      name: 'linkedCompanyName',
+      status: 'linkedCompanyStatus',
+      statusUpdatedAt: 'linkedCompanyStatusUpdatedAt',
+      approvedAt: 'linkedCompanyApprovedAt',
+      approvedBy: 'linkedCompanyApprovedBy',
+    }
+    : {
+      id: 'linkedAgencyId',
+      name: 'linkedAgencyName',
+      status: 'linkedAgencyStatus',
+      statusUpdatedAt: 'linkedAgencyStatusUpdatedAt',
+      approvedAt: 'linkedAgencyApprovedAt',
+      approvedBy: 'linkedAgencyApprovedBy',
+    };
+
+  if (target?.[fields.id] !== authUser.uid) {
+    throw new Error('Affiliatie bijwerken mislukt: dit profiel is niet aan jouw organisatie gekoppeld.');
+  }
+
+  const privatePatch = {
+    [fields.status]: normalizedStatus,
+    [fields.statusUpdatedAt]: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  const publicPatch = {
+    [fields.id]: target[fields.id],
+    [fields.name]: target[fields.name] || '',
+    updatedAt: serverTimestamp(),
+  };
+
+  if (normalizedStatus === AFFILIATION_STATUSES.APPROVED) {
+    privatePatch[fields.approvedAt] = serverTimestamp();
+    privatePatch[fields.approvedBy] = authUser.uid;
+    publicPatch[fields.status] = AFFILIATION_STATUSES.APPROVED;
+  } else {
+    privatePatch[fields.id] = null;
+    privatePatch[fields.name] = '';
+    privatePatch[fields.approvedAt] = deleteField();
+    privatePatch[fields.approvedBy] = deleteField();
+    publicPatch[fields.id] = null;
+    publicPatch[fields.name] = '';
+    publicPatch[fields.status] = deleteField();
+  }
+
+  const batch = writeBatch(db);
+  batch.set(targetRef, privatePatch, { merge: true });
+  batch.set(publicRef, publicPatch, { merge: true });
+  await batch.commit();
+};
+
 export const updateUserProfile = async (uid, data) => {
   const authUser = await waitForAuthReady();
   if (!authUser?.uid) {
@@ -756,6 +856,22 @@ export const updateUserProfile = async (uid, data) => {
       safeData.headerImage = headerImageUrl;
     }
   }
+
+  let existingPrivate = {};
+  try {
+    const existingPrivateSnap = await getDoc(doc(getFirebaseDb(), 'users', resolvedUid));
+    existingPrivate = existingPrivateSnap.exists() ? existingPrivateSnap.data() : {};
+  } catch (error) {
+    if (error?.code !== 'permission-denied') {
+      throw error;
+    }
+  }
+
+  const affiliationTransition = applyAffiliationStatusTransitions(safeData, existingPrivate, {
+    timestamp: serverTimestamp(),
+    deleteValue: deleteField(),
+  });
+  Object.assign(safeData, affiliationTransition);
 
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
   const userDocPath = `users/${resolvedUid}`;

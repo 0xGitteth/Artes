@@ -49,6 +49,157 @@ async function run() {
         uid: ownerUid,
         displayName: 'Owner One',
       });
+      await setDoc(doc(db, 'users', 'agency_owner'), {
+        uid: 'agency_owner',
+        username: 'agencyowner',
+        displayName: 'Agency Owner',
+        roles: ['agency'],
+      });
+      await setDoc(doc(db, 'users', 'company_owner'), {
+        uid: 'company_owner',
+        username: 'companyowner',
+        displayName: 'Company Owner',
+        roles: ['company'],
+      });
+      await setDoc(doc(db, 'users', 'agency_other'), {
+        uid: 'agency_other',
+        username: 'agencyother',
+        displayName: 'Agency Other',
+        roles: ['agency'],
+      });
+      await setDoc(doc(db, 'users', 'company_other'), {
+        uid: 'company_other',
+        username: 'companyother',
+        displayName: 'Company Other',
+        roles: ['company'],
+      });
+      await setDoc(doc(db, 'users', 'talent_pending'), {
+        uid: 'talent_pending',
+        username: 'talentpending',
+        displayName: 'Talent Pending',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'users', 'team_pending'), {
+        uid: 'team_pending',
+        username: 'teampending',
+        displayName: 'Team Pending',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'publicUsers', 'talent_pending'), {
+        uid: 'talent_pending',
+        username: 'talentpending',
+        displayName: 'Talent Pending',
+        displayNameLower: 'talent pending',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'publicUsers', 'team_pending'), {
+        uid: 'team_pending',
+        username: 'teampending',
+        displayName: 'Team Pending',
+        displayNameLower: 'team pending',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'users', 'talent_reject'), {
+        uid: 'talent_reject',
+        username: 'talentreject',
+        displayName: 'Talent Reject',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'publicUsers', 'talent_reject'), {
+        uid: 'talent_reject',
+        username: 'talentreject',
+        displayName: 'Talent Reject',
+        displayNameLower: 'talent reject',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'users', 'team_reject'), {
+        uid: 'team_reject',
+        username: 'teamreject',
+        displayName: 'Team Reject',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'publicUsers', 'team_reject'), {
+        uid: 'team_reject',
+        username: 'teamreject',
+        displayName: 'Team Reject',
+        displayNameLower: 'team reject',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'users', 'talent_remove'), {
+        uid: 'talent_remove',
+        username: 'talentremove',
+        displayName: 'Talent Remove',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'approved',
+        linkedAgencyApprovedBy: 'agency_owner',
+        linkedAgencyApprovedAt: new Date(),
+      });
+      await setDoc(doc(db, 'publicUsers', 'talent_remove'), {
+        uid: 'talent_remove',
+        username: 'talentremove',
+        displayName: 'Talent Remove',
+        displayNameLower: 'talent remove',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'approved',
+      });
+      await setDoc(doc(db, 'users', 'team_remove'), {
+        uid: 'team_remove',
+        username: 'teamremove',
+        displayName: 'Team Remove',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'approved',
+        linkedCompanyApprovedBy: 'company_owner',
+        linkedCompanyApprovedAt: new Date(),
+      });
+      await setDoc(doc(db, 'publicUsers', 'team_remove'), {
+        uid: 'team_remove',
+        username: 'teamremove',
+        displayName: 'Team Remove',
+        displayNameLower: 'team remove',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'approved',
+      });
+      await setDoc(doc(db, 'users', 'self_withdraw'), {
+        uid: 'self_withdraw',
+        username: 'selfwithdraw',
+        displayName: 'Self Withdraw',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'approved',
+        linkedAgencyApprovedBy: 'agency_owner',
+        linkedAgencyApprovedAt: new Date(),
+      });
+      await setDoc(doc(db, 'publicUsers', 'self_withdraw'), {
+        uid: 'self_withdraw',
+        username: 'selfwithdraw',
+        displayName: 'Self Withdraw',
+        displayNameLower: 'self withdraw',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'approved',
+      });
+
+
       await setDoc(doc(db, 'users', ownerUid, 'following', 'target_a'), {
         targetUid: 'target_a',
         createdAt: new Date(),
@@ -117,6 +268,13 @@ async function run() {
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
     const moderatorDb = authedContext(testEnv, 'mod_1', { email_verified: true, email: 'mod_1@example.com' }).firestore();
+    const agencyOwnerDb = authedContext(testEnv, 'agency_owner', { email_verified: true }).firestore();
+    const companyOwnerDb = authedContext(testEnv, 'company_owner', { email_verified: true }).firestore();
+    const agencyOtherDb = authedContext(testEnv, 'agency_other', { email_verified: true }).firestore();
+    const companyOtherDb = authedContext(testEnv, 'company_other', { email_verified: true }).firestore();
+    const talentDb = authedContext(testEnv, 'talent_pending', { email_verified: true }).firestore();
+    const teamDb = authedContext(testEnv, 'team_pending', { email_verified: true }).firestore();
+    const selfWithdrawDb = authedContext(testEnv, 'self_withdraw', { email_verified: true }).firestore();
 
     await assertSucceeds(getDoc(doc(ownerDb, 'announcements', 'active_update')));
     await assertFails(getDoc(doc(ownerDb, 'announcements', 'draft_update')));
@@ -209,6 +367,215 @@ async function run() {
     await assertFails(
       setDoc(doc(ownerDb, 'users', ownerUid), {
         claims: { moderator: true },
+      }, { merge: true }),
+    );
+
+    await assertFails(
+      setDoc(doc(talentDb, 'users', 'talent_pending'), {
+        linkedAgencyStatus: 'approved',
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(teamDb, 'users', 'team_pending'), {
+        linkedCompanyStatus: 'approved',
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(talentDb, 'users', 'talent_pending'), {
+        linkedAgencyStatus: 'verified',
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(teamDb, 'users', 'team_pending'), {
+        linkedCompanyStatus: 'verified',
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(talentDb, 'users', 'talent_pending'), {
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(teamDb, 'users', 'team_pending'), {
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(agencyOwnerDb, 'users', 'talent_pending'), {
+        linkedAgencyStatus: 'approved',
+        linkedAgencyStatusUpdatedAt: serverTimestamp(),
+        linkedAgencyApprovedAt: serverTimestamp(),
+        linkedAgencyApprovedBy: 'agency_owner',
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(otherDb, 'users', 'talent_pending'), {
+        linkedAgencyStatus: 'approved',
+        linkedAgencyStatusUpdatedAt: serverTimestamp(),
+        linkedAgencyApprovedAt: serverTimestamp(),
+        linkedAgencyApprovedBy: otherUid,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(companyOwnerDb, 'users', 'team_pending'), {
+        linkedCompanyStatus: 'approved',
+        linkedCompanyStatusUpdatedAt: serverTimestamp(),
+        linkedCompanyApprovedAt: serverTimestamp(),
+        linkedCompanyApprovedBy: 'company_owner',
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(otherDb, 'users', 'team_pending'), {
+        linkedCompanyStatus: 'approved',
+        linkedCompanyStatusUpdatedAt: serverTimestamp(),
+        linkedCompanyApprovedAt: serverTimestamp(),
+        linkedCompanyApprovedBy: otherUid,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(agencyOtherDb, 'users', 'talent_pending'), {
+        linkedAgencyStatus: 'approved',
+        linkedAgencyStatusUpdatedAt: serverTimestamp(),
+        linkedAgencyApprovedAt: serverTimestamp(),
+        linkedAgencyApprovedBy: 'agency_other',
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(companyOtherDb, 'users', 'team_pending'), {
+        linkedCompanyStatus: 'approved',
+        linkedCompanyStatusUpdatedAt: serverTimestamp(),
+        linkedCompanyApprovedAt: serverTimestamp(),
+        linkedCompanyApprovedBy: 'company_other',
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(talentDb, 'publicUsers', 'talent_pending'), {
+        linkedAgencyStatus: 'approved',
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(agencyOwnerDb, 'publicUsers', 'talent_pending'), {
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'approved',
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(agencyOwnerDb, 'users', 'talent_reject'), {
+        linkedAgencyId: null,
+        linkedAgencyName: '',
+        linkedAgencyStatus: 'rejected',
+        linkedAgencyStatusUpdatedAt: serverTimestamp(),
+        linkedAgencyApprovedAt: deleteField(),
+        linkedAgencyApprovedBy: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(agencyOwnerDb, 'publicUsers', 'talent_reject'), {
+        linkedAgencyId: null,
+        linkedAgencyName: '',
+        linkedAgencyStatus: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(companyOwnerDb, 'users', 'team_reject'), {
+        linkedCompanyId: null,
+        linkedCompanyName: '',
+        linkedCompanyStatus: 'rejected',
+        linkedCompanyStatusUpdatedAt: serverTimestamp(),
+        linkedCompanyApprovedAt: deleteField(),
+        linkedCompanyApprovedBy: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(companyOwnerDb, 'publicUsers', 'team_reject'), {
+        linkedCompanyId: null,
+        linkedCompanyName: '',
+        linkedCompanyStatus: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(agencyOwnerDb, 'users', 'talent_remove'), {
+        linkedAgencyId: null,
+        linkedAgencyName: '',
+        linkedAgencyStatus: 'removed',
+        linkedAgencyStatusUpdatedAt: serverTimestamp(),
+        linkedAgencyApprovedAt: deleteField(),
+        linkedAgencyApprovedBy: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(agencyOwnerDb, 'publicUsers', 'talent_remove'), {
+        linkedAgencyId: null,
+        linkedAgencyName: '',
+        linkedAgencyStatus: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(companyOwnerDb, 'users', 'team_remove'), {
+        linkedCompanyId: null,
+        linkedCompanyName: '',
+        linkedCompanyStatus: 'removed',
+        linkedCompanyStatusUpdatedAt: serverTimestamp(),
+        linkedCompanyApprovedAt: deleteField(),
+        linkedCompanyApprovedBy: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(companyOwnerDb, 'publicUsers', 'team_remove'), {
+        linkedCompanyId: null,
+        linkedCompanyName: '',
+        linkedCompanyStatus: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertFails(
+      setDoc(doc(otherDb, 'users', 'talent_remove'), {
+        linkedAgencyId: null,
+        linkedAgencyName: '',
+        linkedAgencyStatus: 'removed',
+        linkedAgencyStatusUpdatedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(selfWithdrawDb, 'users', 'self_withdraw'), {
+        linkedAgencyId: null,
+        linkedAgencyName: '',
+        linkedAgencyStatus: deleteField(),
+        linkedAgencyStatusUpdatedAt: deleteField(),
+        linkedAgencyApprovedAt: deleteField(),
+        linkedAgencyApprovedBy: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true }),
+    );
+    await assertSucceeds(
+      setDoc(doc(selfWithdrawDb, 'publicUsers', 'self_withdraw'), {
+        username: 'selfwithdraw',
+        displayName: 'Self Withdraw',
+        displayNameLower: 'self withdraw',
+        linkedAgencyId: null,
+        linkedAgencyName: '',
+        linkedAgencyStatus: deleteField(),
+        updatedAt: serverTimestamp(),
       }, { merge: true }),
     );
 

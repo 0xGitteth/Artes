@@ -106,6 +106,10 @@ import {
   getEligibleProfilePosts,
   getProfilePortfolioTabs,
 } from './utils/profilePortfolioRoles';
+import {
+  getAffiliatedProfilesForOrganization,
+  getVisibleOrganizationProfileTab,
+} from './utils/profileAffiliations';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
@@ -4414,6 +4418,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
     [posts, triggerVisibility],
   );
   const [activePortfolioTab, setActivePortfolioTab] = useState(ALL_PROFILE_PORTFOLIO_TAB);
+  const [activeProfileTab, setActiveProfileTab] = useState('portfolio');
   const eligiblePortfolioPosts = useMemo(
     () => getEligibleProfilePosts(visiblePosts, normalizedProfile),
     [normalizedProfile, visiblePosts],
@@ -4433,6 +4438,22 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
     () => filterProfilePostsByRole(eligiblePortfolioPosts, normalizedProfile, activePortfolioTab),
     [activePortfolioTab, eligiblePortfolioPosts, normalizedProfile],
   );
+  const affiliatedProfiles = useMemo(
+    () => getAffiliatedProfilesForOrganization(normalizedProfile, allUsers),
+    [allUsers, normalizedProfile],
+  );
+  const organizationProfileTab = useMemo(
+    () => getVisibleOrganizationProfileTab(normalizedProfile, allUsers),
+    [allUsers, normalizedProfile],
+  );
+  useEffect(() => {
+    if (!organizationProfileTab || activeProfileTab === organizationProfileTab.key) {
+      return;
+    }
+    setActiveProfileTab('portfolio');
+  }, [activeProfileTab, organizationProfileTab, profileUserId]);
+  const showOrganizationProfileTab = Boolean(organizationProfileTab);
+  const isOrganizationProfileTabActive = Boolean(organizationProfileTab && activeProfileTab === organizationProfileTab.key);
   if (!normalizedProfile) return null;
   const roles = normalizedProfile.roles;
   const themes = normalizedProfile.themes;
@@ -4538,7 +4559,29 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
         </div>
         
         <div className="max-w-6xl mx-auto px-6 py-8 relative z-20">
-           {showPortfolioTabs && (
+           {showOrganizationProfileTab && (
+             <div className="mb-6 flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Profiel tabs">
+               <button
+                 type="button"
+                 role="tab"
+                 aria-selected={activeProfileTab === 'portfolio'}
+                 onClick={() => setActiveProfileTab('portfolio')}
+                 className={`shrink-0 rounded-full border px-4 py-2 text-sm font-bold transition ${activeProfileTab === 'portfolio' ? 'border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500'}`}
+               >
+                 Portfolio
+               </button>
+               <button
+                 type="button"
+                 role="tab"
+                 aria-selected={isOrganizationProfileTabActive}
+                 onClick={() => setActiveProfileTab(organizationProfileTab.key)}
+                 className={`shrink-0 rounded-full border px-4 py-2 text-sm font-bold transition ${isOrganizationProfileTabActive ? 'border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500'}`}
+               >
+                 {organizationProfileTab.label}
+               </button>
+             </div>
+           )}
+           {!isOrganizationProfileTabActive && showPortfolioTabs && (
              <>
                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                  <div>
@@ -4566,15 +4609,55 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
                </div>
              </>
            )}
-           <AdaptivePhotoGrid
-             posts={portfolioPosts}
-             onPostClick={onPostClick}
-             getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
-             renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
-             itemClassName="rounded-sm"
-           />
-           {eligiblePortfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
-           {showPortfolioTabs && portfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Geen posts binnen deze rol.</p>}
+           {isOrganizationProfileTabActive ? (
+             <div>
+               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                 <div>
+                   <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">{organizationProfileTab.label}</p>
+                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Gekoppelde profielen</h2>
+                 </div>
+                 <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{affiliatedProfiles.length}</span>
+               </div>
+               {affiliatedProfiles.length > 0 ? (
+                 <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-4">
+                   {affiliatedProfiles.map((affiliatedProfile) => {
+                     const primaryRole = Array.isArray(affiliatedProfile.roles) && affiliatedProfile.roles.length ? affiliatedProfile.roles[0] : null;
+                     const primaryRoleLabel = primaryRole ? ROLES.find((role) => role.id === primaryRole)?.label : null;
+                     return (
+                       <button
+                         key={affiliatedProfile.uid}
+                         type="button"
+                         onClick={() => onLinkedProfileClick?.(affiliatedProfile.uid)}
+                         className="overflow-hidden rounded-xl bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-800 md:rounded-2xl"
+                       >
+                         <div className="aspect-square relative">
+                           <img src={affiliatedProfile.avatar} alt="" className="h-full w-full object-cover" />
+                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2 md:p-3">
+                             <span className="text-white font-bold">{affiliatedProfile.displayName}</span>
+                             <span className="text-white/70 text-xs">{primaryRoleLabel || 'Lid'}</span>
+                           </div>
+                         </div>
+                       </button>
+                     );
+                   })}
+                 </div>
+               ) : (
+                 <p className="text-center text-slate-500 py-10">{organizationProfileTab.emptyState}</p>
+               )}
+             </div>
+           ) : (
+             <>
+               <AdaptivePhotoGrid
+                 posts={portfolioPosts}
+                 onPostClick={onPostClick}
+                 getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+                 renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+                 itemClassName="rounded-sm"
+               />
+               {eligiblePortfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
+               {showPortfolioTabs && portfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Geen posts binnen deze rol.</p>}
+             </>
+           )}
         </div>
      </div>
   );
@@ -9510,7 +9593,7 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, current
     });
   }, [userId, allUsers, currentUserId, currentProfile]);
   if (!fetchedUser) return <div>Loading...</div>;
-  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={getProfileVisiblePosts(posts, userId, fetchedUser?.contributorId)} onPostClick={onPostClick} allUsers={allUsers} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
+  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={getProfileVisiblePosts(posts, userId, fetchedUser?.contributorId)} onPostClick={onPostClick} allUsers={allUsers} onLinkedProfileClick={(uid) => setView(`profile_${uid}`)} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
 }
 function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
   const targetSeedProfile = useMemo(

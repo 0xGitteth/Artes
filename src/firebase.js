@@ -52,6 +52,13 @@ import {
   applyAffiliationStatusTransitions,
   getPublicAffiliationProjectionPatch,
 } from './utils/profileAffiliationStatus';
+import {
+  buildAffiliationRequestMessagePayload,
+  getAffiliationRequestMessageId,
+  getAffiliationRequestThreadId,
+  getAffiliationFields,
+  shouldCreateAffiliationRequestCard,
+} from './utils/affiliationRequestCards';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -748,6 +755,94 @@ export const createUserProfile = async (uid, profile) => {
   await safeUserWrite(uid, payload);
 };
 
+
+const createOrUpdateAffiliationRequestCard = async ({ requesterUid, organizationUid, affiliationType, requesterProfile = {}, organizationProfile = {} }) => {
+  if (!requesterUid || !organizationUid || requesterUid === organizationUid) return null;
+  const db = getFirebaseDb();
+  const threadId = getAffiliationRequestThreadId(requesterUid, organizationUid);
+  const messageId = getAffiliationRequestMessageId({ requesterUid, organizationUid, affiliationType });
+  if (!threadId || !messageId) return null;
+
+  const participantUids = [requesterUid, organizationUid];
+  const dmKey = [...participantUids].sort().join('_');
+  const now = serverTimestamp();
+  const requesterName = requesterProfile?.displayName || requesterProfile?.username || 'Dit profiel';
+  const organizationName = organizationProfile?.displayName || organizationProfile?.username || requesterProfile?.[getAffiliationFields(affiliationType).name] || '';
+  const text = buildAffiliationRequestMessagePayload({
+    requesterUid,
+    organizationUid,
+    affiliationType,
+    requesterName,
+    organizationName,
+    createdAt: now,
+    updatedAt: now,
+  }).text;
+  const messagePayload = buildAffiliationRequestMessagePayload({
+    requesterUid,
+    organizationUid,
+    affiliationType,
+    requesterName,
+    organizationName,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const batch = writeBatch(db);
+  const threadRef = doc(db, 'threads', threadId);
+  const messageRef = doc(db, 'threads', threadId, 'messages', messageId);
+  const threadSnap = await getDoc(threadRef);
+  let messageExists = false;
+
+  if (threadSnap.exists()) {
+    const messageSnap = await getDoc(messageRef);
+    messageExists = messageSnap.exists();
+    batch.set(threadRef, {
+      updatedAt: now,
+      lastMessageAt: now,
+      lastMessageText: text,
+      lastSenderUid: requesterUid,
+    }, { merge: true });
+  } else {
+    batch.set(threadRef, {
+      type: 'dm',
+      participantUids,
+      participants: participantUids,
+      dmKey,
+      createdAt: now,
+      updatedAt: now,
+      lastMessageAt: now,
+      lastMessageText: text,
+      lastSenderUid: requesterUid,
+    }, { merge: true });
+  }
+  if (messageExists) {
+    batch.set(messageRef, {
+      statusSnapshot: AFFILIATION_STATUSES.PENDING,
+      text,
+      updatedAt: now,
+    }, { merge: true });
+  } else {
+    batch.set(messageRef, messagePayload, { merge: true });
+  }
+  batch.set(doc(db, 'users', requesterUid, 'threadIndex', threadId), {
+    threadId,
+    pinned: false,
+    hidden: false,
+    displayTitle: organizationName || 'Chat',
+    lastMessageAt: now,
+  }, { merge: true });
+  batch.set(doc(db, 'users', organizationUid, 'threadIndex', threadId), {
+    threadId,
+    pinned: false,
+    hidden: false,
+    displayTitle: requesterName || 'Chat',
+    lastMessageAt: now,
+    hasAffiliationRequest: true,
+  }, { merge: true });
+  await batch.commit();
+  return { threadId, messageId };
+};
+
 export const updateUserAffiliationStatus = async ({ targetUid, type, status }) => {
   const authUser = await waitForAuthReady();
   if (!authUser?.uid) {
@@ -822,6 +917,25 @@ export const updateUserAffiliationStatus = async ({ targetUid, type, status }) =
   batch.set(targetRef, privatePatch, { merge: true });
   batch.set(publicRef, publicPatch, { merge: true });
   await batch.commit();
+
+  const threadId = getAffiliationRequestThreadId(targetUid, authUser.uid);
+  const messageId = getAffiliationRequestMessageId({
+    requesterUid: targetUid,
+    organizationUid: authUser.uid,
+    affiliationType: normalizedType,
+  });
+  if (threadId && messageId) {
+    try {
+      await updateDoc(doc(db, 'threads', threadId, 'messages', messageId), {
+        statusSnapshot: normalizedStatus,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      if (error?.code !== 'not-found') {
+        throw error;
+      }
+    }
+  }
 };
 
 export const updateUserProfile = async (uid, data) => {
@@ -981,6 +1095,35 @@ export const updateUserProfile = async (uid, data) => {
       );
       throw new Error('Profiel opslaan mislukt: public profiel kon niet worden bijgewerkt.');
     }
+  }
+
+  const requestCardsToCreate = ['agency', 'company'].filter((affiliationType) => (
+    shouldCreateAffiliationRequestCard({
+      existing: existingPrivate,
+      next: updatePayload,
+      affiliationType,
+    })
+  ));
+
+  if (requestCardsToCreate.length > 0) {
+    await Promise.all(requestCardsToCreate.map(async (affiliationType) => {
+      const fields = getAffiliationFields(affiliationType);
+      const organizationUid = updatePayload[fields.id];
+      let organizationProfile = {};
+      try {
+        const organizationSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', organizationUid));
+        organizationProfile = organizationSnap.exists() ? organizationSnap.data() : {};
+      } catch (error) {
+        if (error?.code !== 'permission-denied') throw error;
+      }
+      await createOrUpdateAffiliationRequestCard({
+        requesterUid: resolvedUid,
+        organizationUid,
+        affiliationType,
+        requesterProfile: updatePayload,
+        organizationProfile,
+      });
+    }));
   }
 };
 

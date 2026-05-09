@@ -120,7 +120,7 @@ import {
   isApprovedAffiliation,
   getVisibleOrganizationProfileTab,
 } from './utils/profileAffiliations';
-import { canShowMoodboardsTab, getMoodboardCoverImages, normalizeMoodboardTitle } from './utils/moodboards';
+import { canShowMoodboardsTab, getMoodboardCoverImages, normalizeMoodboardTitle, resolveMoodboardItemPosts } from './utils/moodboards';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
@@ -2515,6 +2515,8 @@ export default function ArtesApp() {
               profile={profile} 
               isOwn={true} 
               posts={getProfileVisiblePosts(posts, user?.uid, profile?.contributorId)}
+              allPostsForMoodboards={posts}
+              currentUserId={authUser?.uid}
               onOpenSettings={() => setShowEditProfile(true)}
               onPostClick={handleOpenPost}
               allUsers={users}
@@ -4507,15 +4509,12 @@ function MoodboardsSection({ uid, posts, onPostClick, triggerVisibility, reveale
   const [renameTitle, setRenameTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const postById = useMemo(() => new Map((Array.isArray(posts) ? posts : []).map((post) => [post.id, post])), [posts]);
   const activeMoodboard = moodboards.find((moodboard) => moodboard.id === activeMoodboardId) || null;
   const activeItems = activeMoodboardId ? (itemsByBoard[activeMoodboardId] || []) : [];
-  const activePosts = activeItems.map((item) => {
-    const livePost = postById.get(item.postId);
-    if (livePost) return livePost;
-    if (!item.postSnapshot?.imageUrl) return null;
-    return { id: item.postId, imageUrl: item.postSnapshot.imageUrl, title: item.postSnapshot.title || 'Verwijderde post', authorId: item.postSnapshot.authorId || '', moodboardUnavailable: true };
-  }).filter(Boolean);
+  const activePosts = useMemo(
+    () => resolveMoodboardItemPosts(activeItems, posts),
+    [activeItems, posts],
+  );
 
   useEffect(() => {
     if (!uid) return () => {};
@@ -4686,7 +4685,7 @@ function MoodboardsSection({ uid, posts, onPostClick, triggerVisibility, reveale
   );
 }
 
-function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, triggerVisibility, currentUserId = null, isFan = false, fanBusy = false, fanError = '', onToggleFan = null, revealedSensitivePostsById, onRevealSensitivePost }) {
+function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, triggerVisibility, currentUserId = null, isFan = false, fanBusy = false, fanError = '', onToggleFan = null, revealedSensitivePostsById, onRevealSensitivePost }) {
   const normalizedProfile = useMemo(() => (profile ? normalizeProfileData(profile) : null), [profile]);
   const profileUserId = normalizedProfile?.uid || profile?.uid || null;
   const seededFanCounts = useMemo(() => seedCountsFromProfile(profile, normalizedProfile), [profile, normalizedProfile]);
@@ -5004,7 +5003,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
            {isMoodboardsProfileTabActive ? (
              <MoodboardsSection
                uid={profileUserId}
-               posts={visiblePosts}
+               posts={allPostsForMoodboards}
                onPostClick={onPostClick}
                triggerVisibility={triggerVisibility}
                revealedSensitivePostsById={revealedSensitivePostsById}
@@ -10032,7 +10031,7 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, current
     });
   }, [userId, allUsers, currentUserId, currentProfile]);
   if (!fetchedUser) return <div>Loading...</div>;
-  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={getProfileVisiblePosts(posts, userId, fetchedUser?.contributorId)} onPostClick={onPostClick} allUsers={allUsers} onLinkedProfileClick={(uid) => setView(`profile_${uid}`)} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
+  return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={getProfileVisiblePosts(posts, userId, fetchedUser?.contributorId)} allPostsForMoodboards={posts} onPostClick={onPostClick} allUsers={allUsers} onLinkedProfileClick={(uid) => setView(`profile_${uid}`)} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
 }
 function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
   const targetSeedProfile = useMemo(

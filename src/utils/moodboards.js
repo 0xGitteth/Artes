@@ -35,6 +35,24 @@ export const getMoodboardCoverImages = (items = [], posts = []) => {
     .slice(0, 4);
 };
 
+
+export const resolveMoodboardItemPost = (item = {}, posts = []) => {
+  const livePost = (Array.isArray(posts) ? posts : []).find((post) => post?.id === item?.postId);
+  if (livePost) return livePost;
+  if (!item?.postSnapshot?.imageUrl) return null;
+  return {
+    id: item.postId,
+    imageUrl: item.postSnapshot.imageUrl,
+    title: item.postSnapshot.title || 'Verwijderde post',
+    authorId: item.postSnapshot.authorId || '',
+    moodboardUnavailable: true,
+  };
+};
+
+export const resolveMoodboardItemPosts = (items = [], posts = []) => (Array.isArray(items) ? items : [])
+  .map((item) => resolveMoodboardItemPost(item, posts))
+  .filter(Boolean);
+
 export const canShowMoodboardsTab = ({ profileUid, currentUserId } = {}) => Boolean(
   profileUid && currentUserId && profileUid === currentUserId,
 );

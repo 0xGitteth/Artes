@@ -162,12 +162,21 @@ export const updateMoodboard = async ({ uid, moodboardId, title }) => updateDoc(
   updatedAt: serverTimestamp(),
 });
 
+const MOODBOARD_DELETE_BATCH_LIMIT = 450;
+
 export const deleteMoodboard = async ({ uid, moodboardId }) => {
   const items = await getDocs(getUserMoodboardItemsCollection(uid, moodboardId));
-  const batch = writeBatch(getFirebaseDb());
-  items.docs.forEach((itemDoc) => batch.delete(itemDoc.ref));
-  batch.delete(getUserMoodboardRef(uid, moodboardId));
-  await batch.commit();
+  const itemDocs = items.docs;
+
+  for (let index = 0; index < itemDocs.length; index += MOODBOARD_DELETE_BATCH_LIMIT) {
+    const batch = writeBatch(getFirebaseDb());
+    itemDocs.slice(index, index + MOODBOARD_DELETE_BATCH_LIMIT).forEach((itemDoc) => batch.delete(itemDoc.ref));
+    await batch.commit();
+  }
+
+  const moodboardBatch = writeBatch(getFirebaseDb());
+  moodboardBatch.delete(getUserMoodboardRef(uid, moodboardId));
+  await moodboardBatch.commit();
 };
 
 const buildMoodboardItemSnapshot = (post = {}) => ({

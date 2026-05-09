@@ -258,6 +258,67 @@ service cloud.firestore {
         );
     }
 
+
+    function isValidMoodboardData(userId) {
+      return request.resource.data.keys().hasOnly([
+        'ownerUid',
+        'title',
+        'description',
+        'visibility',
+        'createdAt',
+        'updatedAt',
+        'postCount',
+        'coverPostIds',
+        'coverImageUrls',
+        'collaboratorUids',
+        'sharedWith'
+      ])
+      && request.resource.data.ownerUid == userId
+      && request.resource.data.title is string
+      && request.resource.data.title.size() > 0
+      && request.resource.data.title.size() <= 80
+      && (!('description' in request.resource.data) || request.resource.data.description is string)
+      && request.resource.data.visibility == 'private'
+      && request.resource.data.postCount is int
+      && request.resource.data.postCount >= 0
+      && (!('coverPostIds' in request.resource.data) || request.resource.data.coverPostIds is list)
+      && (!('coverImageUrls' in request.resource.data) || request.resource.data.coverImageUrls is list)
+      && (!('collaboratorUids' in request.resource.data) || request.resource.data.collaboratorUids == [])
+      && (!('sharedWith' in request.resource.data) || request.resource.data.sharedWith == []);
+    }
+
+    function isValidMoodboardCreate(userId) {
+      return isValidMoodboardData(userId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.postCount == 0;
+    }
+
+    function isValidMoodboardUpdate(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isValidMoodboardData(userId)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.visibility == resource.data.visibility
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.collaboratorUids == resource.data.collaboratorUids
+        && request.resource.data.sharedWith == resource.data.sharedWith
+        && changed.hasOnly(['title', 'description', 'updatedAt', 'postCount', 'coverPostIds', 'coverImageUrls'])
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function isValidMoodboardItem(userId, moodboardId, postId) {
+      return request.resource.data.keys().hasOnly(['postId', 'ownerUid', 'moodboardId', 'createdAt', 'postSnapshot'])
+        && request.resource.data.postId == postId
+        && request.resource.data.ownerUid == userId
+        && request.resource.data.moodboardId == moodboardId
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.postSnapshot is map
+        && request.resource.data.postSnapshot.keys().hasOnly(['imageUrl', 'title', 'authorId'])
+        && (!('imageUrl' in request.resource.data.postSnapshot) || request.resource.data.postSnapshot.imageUrl is string)
+        && (!('title' in request.resource.data.postSnapshot) || request.resource.data.postSnapshot.title is string)
+        && (!('authorId' in request.resource.data.postSnapshot) || request.resource.data.postSnapshot.authorId is string);
+    }
+
     function hasClaimEligibility(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data.ageVerified == true
         || get(/databases/$(database)/documents/users/$(uid)).data.onboardingStep >= 2;
@@ -480,6 +541,27 @@ service cloud.firestore {
         allow read, create, update: if request.auth != null && request.auth.uid == userId;
         allow delete: if false;
       }
+
+      match /moodboards/{moodboardId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidMoodboardCreate(userId);
+        allow update: if isOwner(userId) && isValidMoodboardUpdate(userId);
+        allow delete: if isOwner(userId);
+
+        match /items/{postId} {
+          allow read: if isOwner(userId);
+          allow create: if isOwner(userId)
+            && exists(/databases/$(database)/documents/users/$(userId)/moodboards/$(moodboardId))
+            && isValidMoodboardItem(userId, moodboardId, postId)
+            && request.resource.data.createdAt == request.time;
+          allow update: if isOwner(userId)
+            && exists(/databases/$(database)/documents/users/$(userId)/moodboards/$(moodboardId))
+            && isValidMoodboardItem(userId, moodboardId, postId)
+            && request.resource.data.createdAt == resource.data.createdAt;
+          allow delete: if isOwner(userId);
+        }
+      }
+
     }
 
     match /announcements/{announcementId} {

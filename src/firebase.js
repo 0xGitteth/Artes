@@ -34,6 +34,7 @@ import {
   getDocs,
   writeBatch,
   limit,
+  increment,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -126,6 +127,110 @@ export const getFirebaseAuthInstance = () => getFirebaseAuth();
 export const getFirebaseDbInstance = () => getFirebaseDb();
 export const getFirebaseFunctionsInstance = () => getFirebaseFunctions();
 export const getFirebaseStorageInstance = () => getFirebaseStorage();
+
+
+const getUserMoodboardsCollection = (uid) => collection(getFirebaseDb(), 'users', uid, 'moodboards');
+const getUserMoodboardRef = (uid, moodboardId) => doc(getFirebaseDb(), 'users', uid, 'moodboards', moodboardId);
+const getUserMoodboardItemsCollection = (uid, moodboardId) => collection(getFirebaseDb(), 'users', uid, 'moodboards', moodboardId, 'items');
+const getUserMoodboardItemRef = (uid, moodboardId, postId) => doc(getFirebaseDb(), 'users', uid, 'moodboards', moodboardId, 'items', postId);
+
+const normalizeMoodboardTitleForWrite = (title) => {
+  const normalized = String(title || '').replace(/\s+/g, ' ').trim() || 'Nieuw moodboard';
+  return normalized.slice(0, 80);
+};
+
+export const createMoodboard = async ({ uid, title }) => {
+  const normalizedTitle = normalizeMoodboardTitleForWrite(title);
+  const ref = await addDoc(getUserMoodboardsCollection(uid), {
+    ownerUid: uid,
+    title: normalizedTitle,
+    description: '',
+    visibility: 'private',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    postCount: 0,
+    coverPostIds: [],
+    coverImageUrls: [],
+    collaboratorUids: [],
+    sharedWith: [],
+  });
+  return ref.id;
+};
+
+export const updateMoodboard = async ({ uid, moodboardId, title }) => updateDoc(getUserMoodboardRef(uid, moodboardId), {
+  title: normalizeMoodboardTitleForWrite(title),
+  updatedAt: serverTimestamp(),
+});
+
+const MOODBOARD_DELETE_BATCH_LIMIT = 450;
+
+export const deleteMoodboard = async ({ uid, moodboardId }) => {
+  const items = await getDocs(getUserMoodboardItemsCollection(uid, moodboardId));
+  const itemDocs = items.docs;
+
+  for (let index = 0; index < itemDocs.length; index += MOODBOARD_DELETE_BATCH_LIMIT) {
+    const batch = writeBatch(getFirebaseDb());
+    itemDocs.slice(index, index + MOODBOARD_DELETE_BATCH_LIMIT).forEach((itemDoc) => batch.delete(itemDoc.ref));
+    await batch.commit();
+  }
+
+  const moodboardBatch = writeBatch(getFirebaseDb());
+  moodboardBatch.delete(getUserMoodboardRef(uid, moodboardId));
+  await moodboardBatch.commit();
+};
+
+const buildMoodboardItemSnapshot = (post = {}) => ({
+  imageUrl: typeof post.imageUrl === 'string' ? post.imageUrl : '',
+  title: typeof post.title === 'string' ? post.title : '',
+  authorId: typeof post.authorId === 'string' ? post.authorId : '',
+});
+
+export const addPostToMoodboard = async ({ uid, moodboardId, post }) => {
+  const postId = String(post?.id || post?.postId || '').trim();
+  if (!postId) throw new Error('Post ontbreekt.');
+  const itemRef = getUserMoodboardItemRef(uid, moodboardId, postId);
+  const boardRef = getUserMoodboardRef(uid, moodboardId);
+  await runTransaction(getFirebaseDb(), async (transaction) => {
+    const existing = await transaction.get(itemRef);
+    transaction.set(itemRef, {
+      postId,
+      ownerUid: uid,
+      moodboardId,
+      createdAt: existing.exists() ? existing.data().createdAt : serverTimestamp(),
+      postSnapshot: buildMoodboardItemSnapshot(post),
+    }, { merge: true });
+    transaction.update(boardRef, {
+      updatedAt: serverTimestamp(),
+      postCount: existing.exists() ? increment(0) : increment(1),
+      coverPostIds: [postId],
+      coverImageUrls: [buildMoodboardItemSnapshot(post).imageUrl].filter(Boolean),
+    });
+  });
+};
+
+export const removePostFromMoodboard = async ({ uid, moodboardId, postId }) => {
+  const itemRef = getUserMoodboardItemRef(uid, moodboardId, postId);
+  const boardRef = getUserMoodboardRef(uid, moodboardId);
+  await runTransaction(getFirebaseDb(), async (transaction) => {
+    const existing = await transaction.get(itemRef);
+    if (!existing.exists()) return;
+    transaction.delete(itemRef);
+    transaction.update(boardRef, {
+      updatedAt: serverTimestamp(),
+      postCount: increment(-1),
+    });
+  });
+};
+
+export const subscribeToUserMoodboards = (uid, callback) => onSnapshot(
+  query(getUserMoodboardsCollection(uid), orderBy('updatedAt', 'desc')),
+  (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
+);
+
+export const subscribeToMoodboardItems = ({ uid, moodboardId }, callback) => onSnapshot(
+  query(getUserMoodboardItemsCollection(uid, moodboardId), orderBy('createdAt', 'desc')),
+  (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
+);
 
 export const CLAIMS_COLLECTIONS = {
   contributors: 'contributors',

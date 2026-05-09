@@ -5,7 +5,7 @@ import {
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
-  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle, GitMerge, Smartphone
+  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle, GitMerge, Smartphone, FolderPlus
 } from 'lucide-react';
 import {
   fetchUserIndex,
@@ -60,6 +60,13 @@ import {
   subscribeToComments,
   subscribeToLikes,
   toggleLike,
+  createMoodboard,
+  updateMoodboard,
+  deleteMoodboard,
+  addPostToMoodboard,
+  removePostFromMoodboard,
+  subscribeToUserMoodboards,
+  subscribeToMoodboardItems,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { signInWithCustomToken } from 'firebase/auth';
@@ -113,6 +120,7 @@ import {
   isApprovedAffiliation,
   getVisibleOrganizationProfileTab,
 } from './utils/profileAffiliations';
+import { canShowMoodboardsTab, getMoodboardCoverImages, normalizeMoodboardTitle } from './utils/moodboards';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
@@ -784,6 +792,7 @@ export default function ArtesApp() {
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [quickProfileId, setQuickProfileId] = useState(null);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [moodboardSavePost, setMoodboardSavePost] = useState(null);
   const [shadowProfile, setShadowProfile] = useState(null);
   const [moderationModal, setModerationModal] = useState(null);
   const [moderationActionPending, setModerationActionPending] = useState(false);
@@ -2686,6 +2695,14 @@ export default function ArtesApp() {
             contentPreference={getPostContentPreference(selectedPost, galleryTriggerVisibility)}
             shouldCover={shouldCoverPost(selectedPost, galleryTriggerVisibility, revealedSensitivePostsById)}
             onRevealSensitivePost={handleRevealSensitivePost}
+            onOpenMoodboardSave={setMoodboardSavePost}
+          />
+        )}
+        {moodboardSavePost && (
+          <MoodboardSaveModal
+            post={moodboardSavePost}
+            uid={authUser?.uid}
+            onClose={() => setMoodboardSavePost(null)}
           />
         )}
         {shadowProfile && (
@@ -4390,6 +4407,285 @@ const seedCountsFromProfile = (profileData, normalizedProfileData = null) => {
   };
 };
 
+
+function formatMoodboardDate(value) {
+  if (!value) return 'Net aangemaakt';
+  const date = value?.toDate ? value.toDate() : value;
+  try {
+    return new Intl.DateTimeFormat('nl-NL', { dateStyle: 'medium' }).format(date);
+  } catch {
+    return 'Net bijgewerkt';
+  }
+}
+
+function MoodboardSaveModal({ post, uid, onClose }) {
+  const [moodboards, setMoodboards] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [newTitle, setNewTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!uid) return () => {};
+    return subscribeToUserMoodboards(uid, setMoodboards);
+  }, [uid]);
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    if (!uid || !post?.id || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      let ids = [...selectedIds];
+      const normalizedNewTitle = newTitle.trim();
+      if (normalizedNewTitle) {
+        const createdId = await createMoodboard({ uid, title: normalizedNewTitle });
+        ids = [...ids, createdId];
+      }
+      if (ids.length === 0) {
+        setError('Kies of maak minimaal één moodboard.');
+        return;
+      }
+      await Promise.all(ids.map((moodboardId) => addPostToMoodboard({ uid, moodboardId, post })));
+      onClose?.();
+    } catch (saveError) {
+      setError(saveError?.message || 'Opslaan in moodboard mislukt.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-300">Moodboards</p>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white">Opslaan in moodboard</h3>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><X /></button>
+        </div>
+        <div className="space-y-3">
+          {moodboards.length > 0 ? moodboards.map((moodboard) => (
+            <label key={moodboard.id} className="flex cursor-pointer items-center justify-between rounded-2xl border border-slate-200 p-3 dark:border-slate-700">
+              <span>
+                <span className="block font-semibold text-slate-900 dark:text-white">{moodboard.title}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{Number(moodboard.postCount || 0)} opgeslagen posts</span>
+              </span>
+              <input type="checkbox" checked={selectedIds.has(moodboard.id)} onChange={() => toggleSelected(moodboard.id)} />
+            </label>
+          )) : <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-300">Nog geen moodboards.</p>}
+          <div className="rounded-2xl border border-dashed border-blue-200 p-3 dark:border-blue-500/40">
+            <label className="text-sm font-semibold text-slate-700 dark:text-slate-200" htmlFor="new-moodboard-title">Nieuw moodboard</label>
+            <Input id="new-moodboard-title" value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Bijv. Styling inspiratie" className="mt-2" />
+          </div>
+          {error && <p className="text-sm font-semibold text-red-600 dark:text-red-300">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>Annuleren</Button>
+            <Button type="button" onClick={handleSave} disabled={busy || !uid}>{busy ? 'Opslaan...' : 'Opslaan'}</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoodboardsSection({ uid, posts, onPostClick, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
+  const [moodboards, setMoodboards] = useState([]);
+  const [itemsByBoard, setItemsByBoard] = useState({});
+  const [activeMoodboardId, setActiveMoodboardId] = useState(null);
+  const [newTitle, setNewTitle] = useState('');
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameTitle, setRenameTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const postById = useMemo(() => new Map((Array.isArray(posts) ? posts : []).map((post) => [post.id, post])), [posts]);
+  const activeMoodboard = moodboards.find((moodboard) => moodboard.id === activeMoodboardId) || null;
+  const activeItems = activeMoodboardId ? (itemsByBoard[activeMoodboardId] || []) : [];
+  const activePosts = activeItems.map((item) => {
+    const livePost = postById.get(item.postId);
+    if (livePost) return livePost;
+    if (!item.postSnapshot?.imageUrl) return null;
+    return { id: item.postId, imageUrl: item.postSnapshot.imageUrl, title: item.postSnapshot.title || 'Verwijderde post', authorId: item.postSnapshot.authorId || '', moodboardUnavailable: true };
+  }).filter(Boolean);
+
+  useEffect(() => {
+    if (!uid) return () => {};
+    return subscribeToUserMoodboards(uid, setMoodboards);
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid || moodboards.length === 0) {
+      setItemsByBoard({});
+      return () => {};
+    }
+    const unsubs = moodboards.map((moodboard) => subscribeToMoodboardItems({ uid, moodboardId: moodboard.id }, (items) => {
+      setItemsByBoard((prev) => ({ ...prev, [moodboard.id]: items }));
+    }));
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [moodboards, uid]);
+
+  useEffect(() => {
+    if (activeMoodboardId && !moodboards.some((moodboard) => moodboard.id === activeMoodboardId)) {
+      setActiveMoodboardId(null);
+    }
+  }, [activeMoodboardId, moodboards]);
+
+  const handleCreate = async (event) => {
+    event.preventDefault();
+    if (!uid || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const moodboardId = await createMoodboard({ uid, title: normalizeMoodboardTitle(newTitle) });
+      setNewTitle('');
+      setActiveMoodboardId(moodboardId);
+    } catch (createError) {
+      setError(createError?.message || 'Moodboard aanmaken mislukt.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRename = async (moodboardId) => {
+    if (!uid || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await updateMoodboard({ uid, moodboardId, title: normalizeMoodboardTitle(renameTitle) });
+      setRenamingId(null);
+      setRenameTitle('');
+    } catch (renameError) {
+      setError(renameError?.message || 'Moodboard hernoemen mislukt.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (moodboardId) => {
+    if (!uid || busy || !window.confirm('Weet je zeker dat je dit moodboard wilt verwijderen?')) return;
+    setBusy(true);
+    setError('');
+    try {
+      await deleteMoodboard({ uid, moodboardId });
+    } catch (deleteError) {
+      setError(deleteError?.message || 'Moodboard verwijderen mislukt.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemovePost = async (postId) => {
+    if (!uid || !activeMoodboardId || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await removePostFromMoodboard({ uid, moodboardId: activeMoodboardId, postId });
+    } catch (removeError) {
+      setError(removeError?.message || 'Verwijderen uit moodboard mislukt.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (activeMoodboard) {
+    return (
+      <div>
+        <button type="button" onClick={() => setActiveMoodboardId(null)} className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-blue-600 dark:text-blue-300"><ChevronLeft className="h-4 w-4" /> Moodboards</button>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Moodboards</p>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{activeMoodboard.title}</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{activeItems.length} opgeslagen posts</p>
+          </div>
+        </div>
+        {error && <p className="mb-4 text-sm font-semibold text-red-600 dark:text-red-300">{error}</p>}
+        {activePosts.length > 0 ? (
+          <div className="space-y-4">
+            <AdaptivePhotoGrid
+              posts={activePosts}
+              onPostClick={(post) => !post.moodboardUnavailable && onPostClick(post)}
+              getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+              renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+              itemClassName="rounded-sm"
+            />
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {activeItems.map((item) => (
+                <button key={item.id} type="button" onClick={() => handleRemovePost(item.postId)} disabled={busy} className="rounded-full border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10">
+                  Verwijderen uit moodboard: {item.postSnapshot?.title || item.postId}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : <p className="rounded-3xl bg-slate-50 p-8 text-center text-slate-500 dark:bg-slate-800 dark:text-slate-300">Nog geen posts in dit moodboard.</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Privé</p>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Moodboards</h2>
+        </div>
+      </div>
+      <form onSubmit={handleCreate} className="mb-6 flex flex-col gap-2 rounded-3xl border border-dashed border-blue-200 bg-blue-50/60 p-4 dark:border-blue-500/40 dark:bg-blue-500/10 sm:flex-row">
+        <Input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Nieuw moodboard" className="flex-1" />
+        <Button type="submit" disabled={busy}><FolderPlus className="mr-2 h-4 w-4" /> Nieuw moodboard</Button>
+      </form>
+      {error && <p className="mb-4 text-sm font-semibold text-red-600 dark:text-red-300">{error}</p>}
+      {moodboards.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {moodboards.map((moodboard) => {
+            const items = itemsByBoard[moodboard.id] || [];
+            const covers = getMoodboardCoverImages(items, posts);
+            return (
+              <div key={moodboard.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-800">
+                <button type="button" onClick={() => setActiveMoodboardId(moodboard.id)} className="block w-full text-left">
+                  <div className="grid h-40 grid-cols-2 gap-1 bg-slate-100 dark:bg-slate-900">
+                    {covers.length > 0 ? covers.map((url, index) => <img key={`${url}-${index}`} src={url} alt="" className="h-full w-full object-cover" />) : <div className="col-span-2 flex h-full items-center justify-center text-sm text-slate-400">Nog geen posts</div>}
+                  </div>
+                </button>
+                <div className="space-y-3 p-4">
+                  {renamingId === moodboard.id ? (
+                    <div className="space-y-2">
+                      <Input value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} />
+                      <div className="flex gap-2">
+                        <Button type="button" onClick={() => handleRename(moodboard.id)} disabled={busy}>Opslaan</Button>
+                        <Button type="button" variant="secondary" onClick={() => setRenamingId(null)} disabled={busy}>Annuleren</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">{moodboard.title}</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">{items.length || Number(moodboard.postCount || 0)} opgeslagen posts · bijgewerkt {formatMoodboardDate(moodboard.updatedAt || moodboard.createdAt)}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="secondary" onClick={() => { setRenamingId(moodboard.id); setRenameTitle(moodboard.title || ''); }} disabled={busy}>Hernoemen</Button>
+                        <Button type="button" variant="secondary" onClick={() => handleDelete(moodboard.id)} disabled={busy} className="text-red-700 dark:text-red-300">Verwijderen</Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : <p className="rounded-3xl bg-slate-50 p-8 text-center text-slate-500 dark:bg-slate-800 dark:text-slate-300">Nog geen moodboards.</p>}
+    </div>
+  );
+}
+
 function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, triggerVisibility, currentUserId = null, isFan = false, fanBusy = false, fanError = '', onToggleFan = null, revealedSensitivePostsById, onRevealSensitivePost }) {
   const normalizedProfile = useMemo(() => (profile ? normalizeProfileData(profile) : null), [profile]);
   const profileUserId = normalizedProfile?.uid || profile?.uid || null;
@@ -4464,6 +4760,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
     [allUsers, normalizedProfile],
   );
   const organizationProfileTab = visibleOrganizationProfileTab || (currentUserId === profileUserId ? baseOrganizationProfileTab : null);
+  const showMoodboardsProfileTab = canShowMoodboardsTab({ profileUid: profileUserId, currentUserId });
   const currentUserProfile = useMemo(
     () => (Array.isArray(allUsers) ? allUsers.find((candidate) => candidate?.uid === currentUserId) : null),
     [allUsers, currentUserId],
@@ -4477,12 +4774,16 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
     return null;
   }, [currentUserId, currentUserProfile, normalizedProfile, profileUserId]);
   useEffect(() => {
-    if (!organizationProfileTab || activeProfileTab === organizationProfileTab.key) {
-      return;
+    const allowedProfileTabs = new Set(['portfolio']);
+    if (organizationProfileTab) allowedProfileTabs.add(organizationProfileTab.key);
+    if (showMoodboardsProfileTab) allowedProfileTabs.add('moodboards');
+    if (!allowedProfileTabs.has(activeProfileTab)) {
+      setActiveProfileTab('portfolio');
     }
-    setActiveProfileTab('portfolio');
-  }, [activeProfileTab, organizationProfileTab, profileUserId]);
+  }, [activeProfileTab, organizationProfileTab, profileUserId, showMoodboardsProfileTab]);
   const showOrganizationProfileTab = Boolean(organizationProfileTab);
+  const showProfileTabs = showOrganizationProfileTab || showMoodboardsProfileTab;
+  const isMoodboardsProfileTabActive = showMoodboardsProfileTab && activeProfileTab === 'moodboards';
   const isOrganizationProfileTabActive = Boolean(organizationProfileTab && activeProfileTab === organizationProfileTab.key);
   const isOrganizationOwnerView = Boolean(currentUserId && profileUserId && currentUserId === profileUserId);
   const pendingAffiliationRequests = useMemo(() => {
@@ -4637,7 +4938,7 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
         </div>
         
         <div className="max-w-6xl mx-auto px-6 py-8 relative z-20">
-           {showOrganizationProfileTab && (
+           {showProfileTabs && (
              <div className="mb-6 flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Profiel tabs">
                <button
                  type="button"
@@ -4648,18 +4949,31 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
                >
                  Portfolio
                </button>
-               <button
-                 type="button"
-                 role="tab"
-                 aria-selected={isOrganizationProfileTabActive}
-                 onClick={() => setActiveProfileTab(organizationProfileTab.key)}
-                 className={`shrink-0 rounded-full border px-4 py-2 text-sm font-bold transition ${isOrganizationProfileTabActive ? 'border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500'}`}
-               >
-                 {organizationProfileTab.label}
-               </button>
+               {organizationProfileTab && (
+                 <button
+                   type="button"
+                   role="tab"
+                   aria-selected={isOrganizationProfileTabActive}
+                   onClick={() => setActiveProfileTab(organizationProfileTab.key)}
+                   className={`shrink-0 rounded-full border px-4 py-2 text-sm font-bold transition ${isOrganizationProfileTabActive ? 'border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500'}`}
+                 >
+                   {organizationProfileTab.label}
+                 </button>
+               )}
+               {showMoodboardsProfileTab && (
+                 <button
+                   type="button"
+                   role="tab"
+                   aria-selected={isMoodboardsProfileTabActive}
+                   onClick={() => setActiveProfileTab('moodboards')}
+                   className={`shrink-0 rounded-full border px-4 py-2 text-sm font-bold transition ${isMoodboardsProfileTabActive ? 'border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500'}`}
+                 >
+                   Moodboards
+                 </button>
+               )}
              </div>
            )}
-           {!isOrganizationProfileTabActive && showPortfolioTabs && (
+           {!isOrganizationProfileTabActive && !isMoodboardsProfileTabActive && showPortfolioTabs && (
              <>
                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                  <div>
@@ -4687,7 +5001,16 @@ function ImmersiveProfile({ profile, isOwn, posts, onOpenSettings, onPostClick, 
                </div>
              </>
            )}
-           {isOrganizationProfileTabActive ? (
+           {isMoodboardsProfileTabActive ? (
+             <MoodboardsSection
+               uid={profileUserId}
+               posts={visiblePosts}
+               onPostClick={onPostClick}
+               triggerVisibility={triggerVisibility}
+               revealedSensitivePostsById={revealedSensitivePostsById}
+               onRevealSensitivePost={onRevealSensitivePost}
+             />
+           ) : isOrganizationProfileTabActive ? (
              <div>
                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                  <div>

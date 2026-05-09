@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, MessageSquare, Calendar, Shield, Loader2, AlertTriangle } from 'lucide-react';
+import { X, MessageSquare, Calendar, Shield, Loader2, AlertTriangle, Bookmark } from 'lucide-react';
 import { addComment, deleteComment, subscribeToComments, subscribeToLikes, toggleLike } from '../firebase';
 import { updatePost, deletePost } from '../services/firebaseClient';
 import { Badge, Button, Input } from './ui';
@@ -42,7 +42,7 @@ const toActionErrorMessage = (error, fallbackMessage) => {
   return error.message || fallbackMessage;
 };
 
-export default function PhotoDetailModal({ post, onClose, currentUser, authUser, currentPublicProfile, moderationApiBase, onChallengeClick, onUserClick, onShadowClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost }) {
+export default function PhotoDetailModal({ post, onClose, currentUser, authUser, currentPublicProfile, moderationApiBase, onChallengeClick, onUserClick, onShadowClick, contentPreference = 'show', shouldCover = false, onRevealSensitivePost, onOpenMoodboardSave }) {
   const user = currentUser || authUser || null;
   const [comments, setComments] = useState([]);
   const [likesCount, setLikesCount] = useState(post.likes || 0);
@@ -291,6 +291,14 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
               <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
                 <CommentIcon size={18} active /> {comments.length}
               </div>
+              <button
+                type="button"
+                onClick={() => onOpenMoodboardSave?.(post)}
+                disabled={!user || !post?.id}
+                className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200"
+              >
+                <Bookmark className="w-4 h-4" /> Opslaan in moodboard
+              </button>
               <button
                 type="button"
                 onClick={handleReport}

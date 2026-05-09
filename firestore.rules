@@ -63,6 +63,51 @@ service cloud.firestore {
         && request.auth.token.email in get(/databases/$(database)/documents/config/moderation).data.moderatorEmails;
     }
 
+    function isAffiliationRequestType(value) {
+      return value == 'agency' || value == 'company';
+    }
+    function hasPendingPublicAffiliationForOrganization(affiliationType, requesterUid, organizationUid) {
+      return (affiliationType == 'agency'
+          && get(/databases/$(database)/documents/publicUsers/$(requesterUid)).data.linkedAgencyId == organizationUid
+          && get(/databases/$(database)/documents/publicUsers/$(requesterUid)).data.linkedAgencyStatus == 'pending')
+        || (affiliationType == 'company'
+          && get(/databases/$(database)/documents/publicUsers/$(requesterUid)).data.linkedCompanyId == organizationUid
+          && get(/databases/$(database)/documents/publicUsers/$(requesterUid)).data.linkedCompanyStatus == 'pending');
+    }
+    function hasMatchingAffiliationRequestMessageAfter(threadId, affiliationType, requesterUid, organizationUid) {
+      let messageId = 'affiliation_' + affiliationType + '_' + requesterUid + '_' + organizationUid;
+      return existsAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId))
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.type == 'affiliationRequest'
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.affiliationType == affiliationType
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.requesterUid == requesterUid
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.targetUid == requesterUid
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.senderUid == requesterUid
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.organizationUid == organizationUid
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.statusSnapshot == 'pending';
+    }
+    function isValidAffiliationRequestThreadIndexWrite(userId, threadId) {
+      return request.auth != null
+        && request.auth.uid != userId
+        && onlyKeys(['threadId', 'pinned', 'hidden', 'displayTitle', 'lastMessageAt', 'hasAffiliationRequest'])
+        && request.resource.data.threadId == threadId
+        && request.resource.data.pinned is bool
+        && request.resource.data.hidden is bool
+        && request.resource.data.displayTitle is string
+        && request.resource.data.displayTitle.size() <= 200
+        && request.resource.data.lastMessageAt == request.time
+        && request.resource.data.hasAffiliationRequest == true
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)).data.participantUids is list
+        && request.auth.uid in getAfter(/databases/$(database)/documents/threads/$(threadId)).data.participantUids
+        && userId in getAfter(/databases/$(database)/documents/threads/$(threadId)).data.participantUids
+        && (
+          (hasMatchingAffiliationRequestMessageAfter(threadId, 'agency', request.auth.uid, userId)
+            && hasPendingPublicAffiliationForOrganization('agency', request.auth.uid, userId))
+          || (hasMatchingAffiliationRequestMessageAfter(threadId, 'company', request.auth.uid, userId)
+            && hasPendingPublicAffiliationForOrganization('company', request.auth.uid, userId))
+        );
+    }
+
     function isApprovedAffiliationStatusValue(value) {
       return value == 'approved' || value == 'verified';
     }
@@ -409,7 +454,10 @@ service cloud.firestore {
       }
 
       match /threadIndex/{threadId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create, update: if (request.auth != null && request.auth.uid == userId)
+          || isValidAffiliationRequestThreadIndexWrite(userId, threadId);
+        allow delete: if request.auth != null && request.auth.uid == userId;
       }
 
       match /drafts/{draftId} {

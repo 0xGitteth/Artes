@@ -678,6 +678,21 @@ async function run() {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }, { merge: true });
+    agencyBatch.set(doc(talentBatchCardDb, 'users', 'talent_batch_card', 'threadIndex', 'dm_agency_owner_talent_batch_card'), {
+      threadId: 'dm_agency_owner_talent_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Agency Owner',
+      lastMessageAt: serverTimestamp(),
+    }, { merge: true });
+    agencyBatch.set(doc(talentBatchCardDb, 'users', 'agency_owner', 'threadIndex', 'dm_agency_owner_talent_batch_card'), {
+      threadId: 'dm_agency_owner_talent_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Talent Batch Card',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+    }, { merge: true });
     await assertSucceeds(agencyBatch.commit());
 
     const companyBatch = writeBatch(teamBatchCardDb);
@@ -705,6 +720,21 @@ async function run() {
       senderRole: 'system',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+    }, { merge: true });
+    companyBatch.set(doc(teamBatchCardDb, 'users', 'team_batch_card', 'threadIndex', 'dm_company_owner_team_batch_card'), {
+      threadId: 'dm_company_owner_team_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Company Owner',
+      lastMessageAt: serverTimestamp(),
+    }, { merge: true });
+    companyBatch.set(doc(teamBatchCardDb, 'users', 'company_owner', 'threadIndex', 'dm_company_owner_team_batch_card'), {
+      threadId: 'dm_company_owner_team_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Team Batch Card',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
     }, { merge: true });
     await assertSucceeds(companyBatch.commit());
 
@@ -734,7 +764,88 @@ async function run() {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }, { merge: true });
+    fakeBatch.set(doc(otherDb, 'users', 'agency_owner', 'threadIndex', 'dm_agency_owner_fake_batch_card'), {
+      threadId: 'dm_agency_owner_fake_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Fake Batch',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+    }, { merge: true });
     await assertFails(fakeBatch.commit());
+
+    const unrelatedOrganizationBatch = writeBatch(talentBatchCardDb);
+    unrelatedOrganizationBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_other_talent_batch_card'), {
+      type: 'dm',
+      participantUids: ['talent_batch_card', 'agency_other'],
+      participants: ['talent_batch_card', 'agency_other'],
+      dmKey: 'agency_other_talent_batch_card',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Fake unrelated organization request',
+      lastSenderUid: 'talent_batch_card',
+    }, { merge: true });
+    unrelatedOrganizationBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_other_talent_batch_card', 'messages', 'affiliation_agency_talent_batch_card_agency_other'), {
+      type: 'affiliationRequest',
+      affiliationType: 'agency',
+      requesterUid: 'talent_batch_card',
+      organizationUid: 'agency_other',
+      targetUid: 'talent_batch_card',
+      statusSnapshot: 'pending',
+      text: 'Fake unrelated organization request',
+      senderUid: 'talent_batch_card',
+      senderId: 'talent_batch_card',
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    unrelatedOrganizationBatch.set(doc(talentBatchCardDb, 'users', 'agency_other', 'threadIndex', 'dm_agency_other_talent_batch_card'), {
+      threadId: 'dm_agency_other_talent_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Talent Batch Card',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+    }, { merge: true });
+    await assertFails(unrelatedOrganizationBatch.commit());
+
+    const arbitraryIndexBatch = writeBatch(talentBatchCardDb);
+    arbitraryIndexBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_owner_talent_batch_card_bad_index'), {
+      type: 'dm',
+      participantUids: ['talent_batch_card', 'agency_owner'],
+      participants: ['talent_batch_card', 'agency_owner'],
+      dmKey: 'agency_owner_talent_batch_card',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Bad index request',
+      lastSenderUid: 'talent_batch_card',
+    }, { merge: true });
+    arbitraryIndexBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_owner_talent_batch_card_bad_index', 'messages', 'affiliation_agency_talent_batch_card_agency_owner'), {
+      type: 'affiliationRequest',
+      affiliationType: 'agency',
+      requesterUid: 'talent_batch_card',
+      organizationUid: 'agency_owner',
+      targetUid: 'talent_batch_card',
+      statusSnapshot: 'pending',
+      text: 'Bad index request',
+      senderUid: 'talent_batch_card',
+      senderId: 'talent_batch_card',
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    arbitraryIndexBatch.set(doc(talentBatchCardDb, 'users', 'agency_owner', 'threadIndex', 'dm_agency_owner_talent_batch_card_bad_index'), {
+      threadId: 'dm_agency_owner_talent_batch_card_bad_index',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Talent Batch Card',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+      arbitrary: 'not allowed',
+    }, { merge: true });
+    await assertFails(arbitraryIndexBatch.commit());
 
     await assertSucceeds(setDoc(doc(talentCardDb, 'threads', 'dm_agency_owner_talent_card'), {
       type: 'dm',

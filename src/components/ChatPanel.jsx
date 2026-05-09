@@ -11,8 +11,12 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { getFirebaseDbInstance } from '../firebase';
+import { getFirebaseDbInstance, updateUserAffiliationStatus } from '../firebase';
 import { normalizeSupportMessage } from '../utils/supportChat';
+import {
+  AFFILIATION_REQUEST_MESSAGE_TYPE,
+  deriveAffiliationRequestCardState,
+} from '../utils/affiliationRequestCards';
 
 const MESSAGE_LIMIT = 50;
 
@@ -265,6 +269,9 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
   const [sendError, setSendError] = useState(null);
   const [archivingThreadId, setArchivingThreadId] = useState(null);
   const [uploadOwnerById, setUploadOwnerById] = useState({});
+  const [affiliationProfilesByUid, setAffiliationProfilesByUid] = useState({});
+  const [affiliationActionKey, setAffiliationActionKey] = useState('');
+  const [affiliationActionError, setAffiliationActionError] = useState('');
   useEffect(() => {
     if (!initialThreadId) return;
     setActiveThreadId(initialThreadId);
@@ -320,6 +327,34 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
       (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Active thread messages listener threads/${activeThreadId}/messages`),
     );
   }, [activeThreadId]);
+
+  useEffect(() => {
+    const requestMessages = (messages || []).filter((message) => message?.type === AFFILIATION_REQUEST_MESSAGE_TYPE);
+    const requesterUids = Array.from(new Set(requestMessages.map((message) => message.requesterUid || message.targetUid).filter(Boolean)));
+    if (requesterUids.length === 0) {
+      setAffiliationProfilesByUid({});
+      return;
+    }
+
+    let active = true;
+    const db = getFirebaseDbInstance();
+    const loadProfiles = async () => {
+      const pairs = await Promise.all(requesterUids.map(async (uid) => {
+        try {
+          const snap = await getDoc(doc(db, 'publicUsers', uid));
+          return [uid, snap.exists() ? { uid, ...snap.data() } : { uid }];
+        } catch (_error) {
+          return [uid, { uid }];
+        }
+      }));
+      if (active) setAffiliationProfilesByUid(Object.fromEntries(pairs));
+    };
+
+    loadProfiles();
+    return () => {
+      active = false;
+    };
+  }, [messages]);
 
   useEffect(() => {
     if (!authUser?.uid || activeThread?.type !== 'support') {
@@ -446,6 +481,30 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
       }
     } finally {
       setArchivingThreadId(null);
+    }
+  };
+
+  const handleAffiliationCardAction = async (message, status) => {
+    if (!authUser?.uid || !message?.requesterUid) return;
+    const state = deriveAffiliationRequestCardState({
+      message,
+      requesterProfile: affiliationProfilesByUid[message.requesterUid] || {},
+      viewerUid: authUser.uid,
+    });
+    if (status === 'removed' && !window.confirm(state.removeConfirm)) return;
+    setAffiliationActionError('');
+    const key = `${message.id}_${status}`;
+    setAffiliationActionKey(key);
+    try {
+      await updateUserAffiliationStatus({
+        targetUid: message.requesterUid,
+        type: message.affiliationType,
+        status,
+      });
+    } catch (error) {
+      setAffiliationActionError(error?.message || 'Affiliatie bijwerken mislukt.');
+    } finally {
+      setAffiliationActionKey('');
     }
   };
 
@@ -617,7 +676,61 @@ export default function ChatPanel({ authUser, functionsBase, initialThreadId, on
                           {message.type === 'moderation_decision' && (
                             <div className="text-[10px] uppercase font-semibold text-blue-700 mb-1">Moderatie</div>
                           )}
-                          <p>{bodyText}</p>
+                          {message.type === AFFILIATION_REQUEST_MESSAGE_TYPE ? (() => {
+                            const requesterProfile = affiliationProfilesByUid[message.requesterUid] || {};
+                            const cardState = deriveAffiliationRequestCardState({
+                              message,
+                              requesterProfile,
+                              viewerUid: authUser.uid,
+                            });
+                            const busyPrefix = `${message.id}_`;
+                            return (
+                              <div className="space-y-3">
+                                <div className="text-[10px] uppercase font-semibold text-blue-700">Aanvraag</div>
+                                <p className="font-semibold">{bodyText}</p>
+                                {cardState.inactiveText && (
+                                  <p className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200">{cardState.inactiveText}</p>
+                                )}
+                                {(cardState.ownerCanApprove || cardState.ownerCanReject || cardState.ownerCanRemove) && (
+                                  <div className="flex flex-wrap gap-2">
+                                    {cardState.ownerCanApprove && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAffiliationCardAction(message, 'approved')}
+                                        disabled={affiliationActionKey.startsWith(busyPrefix)}
+                                        className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                                      >
+                                        Goedkeuren
+                                      </button>
+                                    )}
+                                    {cardState.ownerCanReject && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAffiliationCardAction(message, 'rejected')}
+                                        disabled={affiliationActionKey.startsWith(busyPrefix)}
+                                        className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 disabled:opacity-50 dark:bg-slate-700 dark:text-slate-100"
+                                      >
+                                        Afwijzen
+                                      </button>
+                                    )}
+                                    {cardState.ownerCanRemove && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAffiliationCardAction(message, 'removed')}
+                                        disabled={affiliationActionKey.startsWith(busyPrefix)}
+                                        className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                                      >
+                                        {cardState.removeLabel}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                {affiliationActionError && <p className="text-xs font-semibold text-red-600 dark:text-red-300">{affiliationActionError}</p>}
+                              </div>
+                            );
+                          })() : (
+                            <p>{bodyText}</p>
+                          )}
                           {message.metadata?.reasons?.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1">
                               {message.metadata.reasons.map((reason) => (

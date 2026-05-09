@@ -13,6 +13,7 @@ import {
   deleteDoc,
   deleteField,
   serverTimestamp,
+  writeBatch,
 } from 'firebase/firestore';
 
 const PROJECT_ID = 'artes-rules-test';
@@ -103,6 +104,74 @@ async function run() {
         username: 'teampending',
         displayName: 'Team Pending',
         displayNameLower: 'team pending',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'users', 'talent_card'), {
+        uid: 'talent_card',
+        username: 'talentcard',
+        displayName: 'Talent Card',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'publicUsers', 'talent_card'), {
+        uid: 'talent_card',
+        username: 'talentcard',
+        displayName: 'Talent Card',
+        displayNameLower: 'talent card',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'users', 'team_card'), {
+        uid: 'team_card',
+        username: 'teamcard',
+        displayName: 'Team Card',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'publicUsers', 'team_card'), {
+        uid: 'team_card',
+        username: 'teamcard',
+        displayName: 'Team Card',
+        displayNameLower: 'team card',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'users', 'talent_batch_card'), {
+        uid: 'talent_batch_card',
+        username: 'talentbatchcard',
+        displayName: 'Talent Batch Card',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'publicUsers', 'talent_batch_card'), {
+        uid: 'talent_batch_card',
+        username: 'talentbatchcard',
+        displayName: 'Talent Batch Card',
+        displayNameLower: 'talent batch card',
+        linkedAgencyId: 'agency_owner',
+        linkedAgencyName: 'Agency Owner',
+        linkedAgencyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'users', 'team_batch_card'), {
+        uid: 'team_batch_card',
+        username: 'teambatchcard',
+        displayName: 'Team Batch Card',
+        linkedCompanyId: 'company_owner',
+        linkedCompanyName: 'Company Owner',
+        linkedCompanyStatus: 'pending',
+      });
+      await setDoc(doc(db, 'publicUsers', 'team_batch_card'), {
+        uid: 'team_batch_card',
+        username: 'teambatchcard',
+        displayName: 'Team Batch Card',
+        displayNameLower: 'team batch card',
         linkedCompanyId: 'company_owner',
         linkedCompanyName: 'Company Owner',
         linkedCompanyStatus: 'pending',
@@ -273,7 +342,11 @@ async function run() {
     const agencyOtherDb = authedContext(testEnv, 'agency_other', { email_verified: true }).firestore();
     const companyOtherDb = authedContext(testEnv, 'company_other', { email_verified: true }).firestore();
     const talentDb = authedContext(testEnv, 'talent_pending', { email_verified: true }).firestore();
+    const talentCardDb = authedContext(testEnv, 'talent_card', { email_verified: true }).firestore();
+    const talentBatchCardDb = authedContext(testEnv, 'talent_batch_card', { email_verified: true }).firestore();
     const teamDb = authedContext(testEnv, 'team_pending', { email_verified: true }).firestore();
+    const teamCardDb = authedContext(testEnv, 'team_card', { email_verified: true }).firestore();
+    const teamBatchCardDb = authedContext(testEnv, 'team_batch_card', { email_verified: true }).firestore();
     const selfWithdrawDb = authedContext(testEnv, 'self_withdraw', { email_verified: true }).firestore();
 
     await assertSucceeds(getDoc(doc(ownerDb, 'announcements', 'active_update')));
@@ -578,6 +651,299 @@ async function run() {
         updatedAt: serverTimestamp(),
       }, { merge: true }),
     );
+
+    const agencyBatch = writeBatch(talentBatchCardDb);
+    agencyBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_owner_talent_batch_card'), {
+      type: 'dm',
+      participantUids: ['talent_batch_card', 'agency_owner'],
+      participants: ['talent_batch_card', 'agency_owner'],
+      dmKey: 'agency_owner_talent_batch_card',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Talent Batch Card wil gekoppeld worden aan Agency Owner als Talent.',
+      lastSenderUid: 'talent_batch_card',
+    }, { merge: true });
+    agencyBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_owner_talent_batch_card', 'messages', 'affiliation_agency_talent_batch_card_agency_owner'), {
+      type: 'affiliationRequest',
+      affiliationType: 'agency',
+      requesterUid: 'talent_batch_card',
+      organizationUid: 'agency_owner',
+      targetUid: 'talent_batch_card',
+      statusSnapshot: 'pending',
+      text: 'Talent Batch Card wil gekoppeld worden aan Agency Owner als Talent.',
+      senderUid: 'talent_batch_card',
+      senderId: 'talent_batch_card',
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    agencyBatch.set(doc(talentBatchCardDb, 'users', 'talent_batch_card', 'threadIndex', 'dm_agency_owner_talent_batch_card'), {
+      threadId: 'dm_agency_owner_talent_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Agency Owner',
+      lastMessageAt: serverTimestamp(),
+    }, { merge: true });
+    agencyBatch.set(doc(talentBatchCardDb, 'users', 'agency_owner', 'threadIndex', 'dm_agency_owner_talent_batch_card'), {
+      threadId: 'dm_agency_owner_talent_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Talent Batch Card',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+    }, { merge: true });
+    await assertSucceeds(agencyBatch.commit());
+
+    const companyBatch = writeBatch(teamBatchCardDb);
+    companyBatch.set(doc(teamBatchCardDb, 'threads', 'dm_company_owner_team_batch_card'), {
+      type: 'dm',
+      participantUids: ['team_batch_card', 'company_owner'],
+      participants: ['team_batch_card', 'company_owner'],
+      dmKey: 'company_owner_team_batch_card',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Team Batch Card wil gekoppeld worden aan Company Owner als Team.',
+      lastSenderUid: 'team_batch_card',
+    }, { merge: true });
+    companyBatch.set(doc(teamBatchCardDb, 'threads', 'dm_company_owner_team_batch_card', 'messages', 'affiliation_company_team_batch_card_company_owner'), {
+      type: 'affiliationRequest',
+      affiliationType: 'company',
+      requesterUid: 'team_batch_card',
+      organizationUid: 'company_owner',
+      targetUid: 'team_batch_card',
+      statusSnapshot: 'pending',
+      text: 'Team Batch Card wil gekoppeld worden aan Company Owner als Team.',
+      senderUid: 'team_batch_card',
+      senderId: 'team_batch_card',
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    companyBatch.set(doc(teamBatchCardDb, 'users', 'team_batch_card', 'threadIndex', 'dm_company_owner_team_batch_card'), {
+      threadId: 'dm_company_owner_team_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Company Owner',
+      lastMessageAt: serverTimestamp(),
+    }, { merge: true });
+    companyBatch.set(doc(teamBatchCardDb, 'users', 'company_owner', 'threadIndex', 'dm_company_owner_team_batch_card'), {
+      threadId: 'dm_company_owner_team_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Team Batch Card',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+    }, { merge: true });
+    await assertSucceeds(companyBatch.commit());
+
+    const fakeBatch = writeBatch(otherDb);
+    fakeBatch.set(doc(otherDb, 'threads', 'dm_agency_owner_fake_batch_card'), {
+      type: 'dm',
+      participantUids: [otherUid, 'agency_owner'],
+      participants: [otherUid, 'agency_owner'],
+      dmKey: 'agency_owner_other_1',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Fake batch request',
+      lastSenderUid: otherUid,
+    }, { merge: true });
+    fakeBatch.set(doc(otherDb, 'threads', 'dm_agency_owner_fake_batch_card', 'messages', 'fake_batch_request'), {
+      type: 'affiliationRequest',
+      affiliationType: 'agency',
+      requesterUid: otherUid,
+      organizationUid: 'agency_owner',
+      targetUid: otherUid,
+      statusSnapshot: 'pending',
+      text: 'Fake batch request',
+      senderUid: otherUid,
+      senderId: otherUid,
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    fakeBatch.set(doc(otherDb, 'users', 'agency_owner', 'threadIndex', 'dm_agency_owner_fake_batch_card'), {
+      threadId: 'dm_agency_owner_fake_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Fake Batch',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+    }, { merge: true });
+    await assertFails(fakeBatch.commit());
+
+    const unrelatedOrganizationBatch = writeBatch(talentBatchCardDb);
+    unrelatedOrganizationBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_other_talent_batch_card'), {
+      type: 'dm',
+      participantUids: ['talent_batch_card', 'agency_other'],
+      participants: ['talent_batch_card', 'agency_other'],
+      dmKey: 'agency_other_talent_batch_card',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Fake unrelated organization request',
+      lastSenderUid: 'talent_batch_card',
+    }, { merge: true });
+    unrelatedOrganizationBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_other_talent_batch_card', 'messages', 'affiliation_agency_talent_batch_card_agency_other'), {
+      type: 'affiliationRequest',
+      affiliationType: 'agency',
+      requesterUid: 'talent_batch_card',
+      organizationUid: 'agency_other',
+      targetUid: 'talent_batch_card',
+      statusSnapshot: 'pending',
+      text: 'Fake unrelated organization request',
+      senderUid: 'talent_batch_card',
+      senderId: 'talent_batch_card',
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    unrelatedOrganizationBatch.set(doc(talentBatchCardDb, 'users', 'agency_other', 'threadIndex', 'dm_agency_other_talent_batch_card'), {
+      threadId: 'dm_agency_other_talent_batch_card',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Talent Batch Card',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+    }, { merge: true });
+    await assertFails(unrelatedOrganizationBatch.commit());
+
+    const arbitraryIndexBatch = writeBatch(talentBatchCardDb);
+    arbitraryIndexBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_owner_talent_batch_card_bad_index'), {
+      type: 'dm',
+      participantUids: ['talent_batch_card', 'agency_owner'],
+      participants: ['talent_batch_card', 'agency_owner'],
+      dmKey: 'agency_owner_talent_batch_card',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Bad index request',
+      lastSenderUid: 'talent_batch_card',
+    }, { merge: true });
+    arbitraryIndexBatch.set(doc(talentBatchCardDb, 'threads', 'dm_agency_owner_talent_batch_card_bad_index', 'messages', 'affiliation_agency_talent_batch_card_agency_owner'), {
+      type: 'affiliationRequest',
+      affiliationType: 'agency',
+      requesterUid: 'talent_batch_card',
+      organizationUid: 'agency_owner',
+      targetUid: 'talent_batch_card',
+      statusSnapshot: 'pending',
+      text: 'Bad index request',
+      senderUid: 'talent_batch_card',
+      senderId: 'talent_batch_card',
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    arbitraryIndexBatch.set(doc(talentBatchCardDb, 'users', 'agency_owner', 'threadIndex', 'dm_agency_owner_talent_batch_card_bad_index'), {
+      threadId: 'dm_agency_owner_talent_batch_card_bad_index',
+      pinned: false,
+      hidden: false,
+      displayTitle: 'Talent Batch Card',
+      lastMessageAt: serverTimestamp(),
+      hasAffiliationRequest: true,
+      arbitrary: 'not allowed',
+    }, { merge: true });
+    await assertFails(arbitraryIndexBatch.commit());
+
+    await assertSucceeds(setDoc(doc(talentCardDb, 'threads', 'dm_agency_owner_talent_card'), {
+      type: 'dm',
+      participantUids: ['talent_card', 'agency_owner'],
+      participants: ['talent_card', 'agency_owner'],
+      dmKey: 'agency_owner_talent_card',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Talent Card wil gekoppeld worden aan Agency Owner als Talent.',
+      lastSenderUid: 'talent_card',
+    }, { merge: true }));
+    await assertSucceeds(setDoc(doc(talentCardDb, 'threads', 'dm_agency_owner_talent_card', 'messages', 'affiliation_agency_talent_card_agency_owner'), {
+      type: 'affiliationRequest',
+      affiliationType: 'agency',
+      requesterUid: 'talent_card',
+      organizationUid: 'agency_owner',
+      targetUid: 'talent_card',
+      statusSnapshot: 'pending',
+      text: 'Talent Card wil gekoppeld worden aan Agency Owner als Talent.',
+      senderUid: 'talent_card',
+      senderId: 'talent_card',
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true }));
+    await assertSucceeds(getDoc(doc(agencyOwnerDb, 'threads', 'dm_agency_owner_talent_card', 'messages', 'affiliation_agency_talent_card_agency_owner')));
+    await assertFails(updateDoc(doc(otherDb, 'threads', 'dm_agency_owner_talent_card', 'messages', 'affiliation_agency_talent_card_agency_owner'), {
+      statusSnapshot: 'approved',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(agencyOwnerDb, 'threads', 'dm_agency_owner_talent_card', 'messages', 'affiliation_agency_talent_card_agency_owner'), {
+      statusSnapshot: 'approved',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(otherDb, 'threads', 'dm_agency_owner_talent_card', 'messages', 'fake_agency_request'), {
+      type: 'affiliationRequest',
+      affiliationType: 'agency',
+      requesterUid: 'talent_card',
+      organizationUid: 'agency_owner',
+      targetUid: 'talent_card',
+      statusSnapshot: 'pending',
+      text: 'Fake request',
+      senderUid: otherUid,
+      senderId: otherUid,
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true }));
+
+    await assertSucceeds(setDoc(doc(teamCardDb, 'threads', 'dm_company_owner_team_card'), {
+      type: 'dm',
+      participantUids: ['team_card', 'company_owner'],
+      participants: ['team_card', 'company_owner'],
+      dmKey: 'company_owner_team_card',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Team Card wil gekoppeld worden aan Company Owner als Team.',
+      lastSenderUid: 'team_card',
+    }, { merge: true }));
+    await assertSucceeds(setDoc(doc(teamCardDb, 'threads', 'dm_company_owner_team_card', 'messages', 'affiliation_company_team_card_company_owner'), {
+      type: 'affiliationRequest',
+      affiliationType: 'company',
+      requesterUid: 'team_card',
+      organizationUid: 'company_owner',
+      targetUid: 'team_card',
+      statusSnapshot: 'pending',
+      text: 'Team Card wil gekoppeld worden aan Company Owner als Team.',
+      senderUid: 'team_card',
+      senderId: 'team_card',
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true }));
+    await assertSucceeds(getDoc(doc(companyOwnerDb, 'threads', 'dm_company_owner_team_card', 'messages', 'affiliation_company_team_card_company_owner')));
+    await assertFails(updateDoc(doc(otherDb, 'threads', 'dm_company_owner_team_card', 'messages', 'affiliation_company_team_card_company_owner'), {
+      statusSnapshot: 'rejected',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(companyOwnerDb, 'threads', 'dm_company_owner_team_card', 'messages', 'affiliation_company_team_card_company_owner'), {
+      statusSnapshot: 'rejected',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(otherDb, 'threads', 'dm_company_owner_team_card', 'messages', 'fake_company_request'), {
+      type: 'affiliationRequest',
+      affiliationType: 'company',
+      requesterUid: 'team_card',
+      organizationUid: 'company_owner',
+      targetUid: 'team_card',
+      statusSnapshot: 'pending',
+      text: 'Fake company request',
+      senderUid: otherUid,
+      senderId: otherUid,
+      senderRole: 'system',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true }));
 
     await assertSucceeds(
       setDoc(doc(ownerDb, 'users', ownerUid), {

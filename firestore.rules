@@ -63,6 +63,51 @@ service cloud.firestore {
         && request.auth.token.email in get(/databases/$(database)/documents/config/moderation).data.moderatorEmails;
     }
 
+    function isAffiliationRequestType(value) {
+      return value == 'agency' || value == 'company';
+    }
+    function hasPendingPublicAffiliationForOrganization(affiliationType, requesterUid, organizationUid) {
+      return (affiliationType == 'agency'
+          && get(/databases/$(database)/documents/publicUsers/$(requesterUid)).data.linkedAgencyId == organizationUid
+          && get(/databases/$(database)/documents/publicUsers/$(requesterUid)).data.linkedAgencyStatus == 'pending')
+        || (affiliationType == 'company'
+          && get(/databases/$(database)/documents/publicUsers/$(requesterUid)).data.linkedCompanyId == organizationUid
+          && get(/databases/$(database)/documents/publicUsers/$(requesterUid)).data.linkedCompanyStatus == 'pending');
+    }
+    function hasMatchingAffiliationRequestMessageAfter(threadId, affiliationType, requesterUid, organizationUid) {
+      let messageId = 'affiliation_' + affiliationType + '_' + requesterUid + '_' + organizationUid;
+      return existsAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId))
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.type == 'affiliationRequest'
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.affiliationType == affiliationType
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.requesterUid == requesterUid
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.targetUid == requesterUid
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.senderUid == requesterUid
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.organizationUid == organizationUid
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)/messages/$(messageId)).data.statusSnapshot == 'pending';
+    }
+    function isValidAffiliationRequestThreadIndexWrite(userId, threadId) {
+      return request.auth != null
+        && request.auth.uid != userId
+        && onlyKeys(['threadId', 'pinned', 'hidden', 'displayTitle', 'lastMessageAt', 'hasAffiliationRequest'])
+        && request.resource.data.threadId == threadId
+        && request.resource.data.pinned is bool
+        && request.resource.data.hidden is bool
+        && request.resource.data.displayTitle is string
+        && request.resource.data.displayTitle.size() <= 200
+        && request.resource.data.lastMessageAt == request.time
+        && request.resource.data.hasAffiliationRequest == true
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
+        && getAfter(/databases/$(database)/documents/threads/$(threadId)).data.participantUids is list
+        && request.auth.uid in getAfter(/databases/$(database)/documents/threads/$(threadId)).data.participantUids
+        && userId in getAfter(/databases/$(database)/documents/threads/$(threadId)).data.participantUids
+        && (
+          (hasMatchingAffiliationRequestMessageAfter(threadId, 'agency', request.auth.uid, userId)
+            && hasPendingPublicAffiliationForOrganization('agency', request.auth.uid, userId))
+          || (hasMatchingAffiliationRequestMessageAfter(threadId, 'company', request.auth.uid, userId)
+            && hasPendingPublicAffiliationForOrganization('company', request.auth.uid, userId))
+        );
+    }
+
     function isApprovedAffiliationStatusValue(value) {
       return value == 'approved' || value == 'verified';
     }
@@ -409,7 +454,10 @@ service cloud.firestore {
       }
 
       match /threadIndex/{threadId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create, update: if (request.auth != null && request.auth.uid == userId)
+          || isValidAffiliationRequestThreadIndexWrite(userId, threadId);
+        allow delete: if request.auth != null && request.auth.uid == userId;
       }
 
       match /drafts/{draftId} {
@@ -605,6 +653,25 @@ service cloud.firestore {
             (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
               && request.resource.data.senderUid == request.auth.uid
               && request.resource.data.type == 'text')
+            || (getAfter(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
+              && request.resource.data.type == 'affiliationRequest'
+              && request.resource.data.requesterUid == request.auth.uid
+              && request.resource.data.targetUid == request.auth.uid
+              && request.resource.data.senderUid == request.auth.uid
+              && request.resource.data.organizationUid is string
+              && request.resource.data.organizationUid != request.auth.uid
+              && (request.resource.data.affiliationType == 'agency' || request.resource.data.affiliationType == 'company')
+              && request.resource.data.statusSnapshot == 'pending'
+              && request.auth.uid in getAfter(/databases/$(database)/documents/threads/$(threadId)).data.participantUids
+              && request.resource.data.organizationUid in getAfter(/databases/$(database)/documents/threads/$(threadId)).data.participantUids
+              && (
+                (request.resource.data.affiliationType == 'agency'
+                  && get(/databases/$(database)/documents/publicUsers/$(request.auth.uid)).data.linkedAgencyId == request.resource.data.organizationUid
+                  && get(/databases/$(database)/documents/publicUsers/$(request.auth.uid)).data.linkedAgencyStatus == 'pending')
+                || (request.resource.data.affiliationType == 'company'
+                  && get(/databases/$(database)/documents/publicUsers/$(request.auth.uid)).data.linkedCompanyId == request.resource.data.organizationUid
+                  && get(/databases/$(database)/documents/publicUsers/$(request.auth.uid)).data.linkedCompanyStatus == 'pending')
+              ))
             || (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'support'
               && (
                 (isModerator()
@@ -620,7 +687,34 @@ service cloud.firestore {
           )
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 2000;
-        allow update, delete: if false;
+        allow update: if request.auth != null
+          && resource.data.type == 'affiliationRequest'
+          && request.resource.data.type == 'affiliationRequest'
+          && request.resource.data.requesterUid == resource.data.requesterUid
+          && request.resource.data.organizationUid == resource.data.organizationUid
+          && request.resource.data.affiliationType == resource.data.affiliationType
+          && (
+            (request.auth.uid == resource.data.requesterUid
+              && request.resource.data.statusSnapshot == 'pending'
+              && request.resource.data.diff(resource.data).changedKeys().hasOnly(['text', 'statusSnapshot', 'updatedAt'])
+              && request.resource.data.text is string
+              && request.resource.data.text.size() <= 2000
+              && (
+                (resource.data.affiliationType == 'agency'
+                  && get(/databases/$(database)/documents/publicUsers/$(request.auth.uid)).data.linkedAgencyId == resource.data.organizationUid
+                  && get(/databases/$(database)/documents/publicUsers/$(request.auth.uid)).data.linkedAgencyStatus == 'pending')
+                || (resource.data.affiliationType == 'company'
+                  && get(/databases/$(database)/documents/publicUsers/$(request.auth.uid)).data.linkedCompanyId == resource.data.organizationUid
+                  && get(/databases/$(database)/documents/publicUsers/$(request.auth.uid)).data.linkedCompanyStatus == 'pending')
+              ))
+            || (request.auth.uid == resource.data.organizationUid
+              && request.resource.data.requesterUid != request.auth.uid
+              && request.resource.data.diff(resource.data).changedKeys().hasOnly(['statusSnapshot', 'updatedAt'])
+              && (request.resource.data.statusSnapshot == 'approved'
+                || request.resource.data.statusSnapshot == 'rejected'
+                || request.resource.data.statusSnapshot == 'removed'))
+          );
+        allow delete: if false;
       }
     }
 

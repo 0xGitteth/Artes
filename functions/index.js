@@ -3067,16 +3067,6 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         error.status = 423;
         throw error;
       }
-      const expires = Timestamp.fromDate(new Date(now + lockDurationMs));
-      transaction.update(reviewRef, {
-        lock: {
-          claimedByUid: decoded.uid,
-          claimedByEmail: email,
-          claimedAt: FieldValue.serverTimestamp(),
-          expiresAt: expires,
-        },
-      });
-
       uploadId = data?.uploadId || (Array.isArray(data?.linkedUploadIds) ? data.linkedUploadIds[0] : null);
       userId = data?.userId || reportedPost?.authorId || null;
       if (!uploadId && caseType !== 'report') {
@@ -3090,10 +3080,24 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         throw error;
       }
 
+      let uploadRef = null;
       if (uploadId) {
-        const uploadRef = db.collection('uploads').doc(uploadId);
+        uploadRef = db.collection('uploads').doc(uploadId);
         const uploadSnapshot = await transaction.get(uploadRef);
         uploadSnapshotData = uploadSnapshot.exists ? (uploadSnapshot.data() || null) : null;
+      }
+
+      const expires = Timestamp.fromDate(new Date(now + lockDurationMs));
+      transaction.update(reviewRef, {
+        lock: {
+          claimedByUid: decoded.uid,
+          claimedByEmail: email,
+          claimedAt: FieldValue.serverTimestamp(),
+          expiresAt: expires,
+        },
+      });
+
+      if (uploadRef) {
         const isApproved = normalizedDecision === 'approved';
         const requiresUploaderAcceptance = normalizedModeratorAction === 'requestUserCorrection';
         const uploadReviewStatus = requiresUploaderAcceptance ? 'needs_user_correction' : normalizedDecision;

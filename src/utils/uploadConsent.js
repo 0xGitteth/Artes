@@ -132,6 +132,29 @@ export const normalizeConsentException = (exception = {}) => {
   };
 };
 
+export const sanitizePostCreditForWrite = (credit = {}) => {
+  const safeCredit = {};
+  [
+    'role',
+    'name',
+    'uid',
+    'contributorId',
+    'instagramHandle',
+    'website',
+    'isExternal',
+    'isAnonymous',
+    'isSelf',
+    'isMaker',
+    'makerFunction',
+    'consentStatus',
+    'consentRequired',
+    'consentUpdatedAt',
+  ].forEach((key) => {
+    if (credit[key] !== undefined) safeCredit[key] = credit[key];
+  });
+  return safeCredit;
+};
+
 export const normalizeConsentCredit = (credit = {}, context = {}) => {
   const isSelf = Boolean(credit.isSelf);
   const isAnonymous = Boolean(credit.isAnonymous);

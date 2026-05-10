@@ -78,6 +78,60 @@ if (!admin.apps.length) {
 
 const db = getFirestore();
 const lockDurationMs = 10 * 60 * 1000;
+
+const toContributorString = (value) => String(value ?? '').trim();
+
+const normalizeContributorInstagram = (handle) => toContributorString(handle)
+  .replace(/^@+/, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9_.]/g, '');
+
+const normalizeContributorEmail = (email) => toContributorString(email).toLowerCase();
+
+const makeContributorAliasId = (type, value) => `${type}:${toContributorString(value).toLowerCase()}`;
+
+const isValidContributorEmail = (email) => !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const buildTemporaryContributorAliases = ({ instagramHandle, website, email }) => {
+  const normalizedInstagram = normalizeContributorInstagram(instagramHandle);
+  const normalizedDomain = normalizeDomain(website);
+  const normalizedEmail = normalizeContributorEmail(email);
+  const aliases = [
+    normalizedInstagram ? { type: 'instagram', value: normalizedInstagram } : null,
+    normalizedDomain ? { type: 'domain', value: normalizedDomain } : null,
+    normalizedEmail ? { type: 'email', value: normalizedEmail } : null,
+  ].filter(Boolean);
+
+  return {
+    aliases,
+    normalizedInstagram,
+    normalizedDomain,
+    normalizedEmail,
+  };
+};
+
+const normalizeContributorAliasValue = (type, value) => {
+  if (type === 'instagram') return normalizeContributorInstagram(value);
+  if (type === 'domain') return normalizeDomain(value);
+  if (type === 'email') return normalizeContributorEmail(value);
+  return toContributorString(value).toLowerCase();
+};
+
+const toPublicContributor = (id, data = {}) => ({
+  id,
+  displayName: data.displayName || 'Tijdelijk profiel',
+  instagramHandle: data.instagramHandle || null,
+  website: data.website || null,
+  hasEmail: Boolean(data.hasEmail),
+  status: data.status || null,
+  claimedByUid: data.claimedByUid || data.claimedBy || null,
+});
+
+const getContributorContactRef = (contributorId) => db
+  .collection('contributors')
+  .doc(contributorId)
+  .collection('private')
+  .doc('contact');
 const MODERATION_EXAMPLE_REASON_CODES = new Set([
   'allowed_art_nude',
   'allowed_boudoir',
@@ -1445,7 +1499,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const appliedTriggers = normalizedMakerTags.map((tag) => buildTriggerRecord(tag, 1, 'makerTag'));
   const suggestedTriggers = [];
   const forbiddenReasons = [];
-  const aiSafetySignals = [];
+  let aiSafetySignals = [];
 
   const imageAnnotator = new ImageAnnotatorClient();
   let labels = [];
@@ -1695,6 +1749,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const aiVisionLabels = policyResult.aiVisionLabels;
   aiSafetySignals = policyResult.aiSafetySignals;
   let reviewCaseId = policyResult.reviewCaseId;
+  let uploadId = null;
   let canRequestReview = false;
   let openReviewCase = null;
   let inCooldown = false;
@@ -1883,7 +1938,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
           ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
           aiSummary: buildAiSummary({
             classification,
-            shouldReview: shouldReviewWithPreviousExample,
+            shouldReview: effectiveShouldReview,
             forbiddenReasons: finalForbiddenReasons,
             appliedTriggers: finalAppliedTriggers,
             suggestedTriggers: finalSuggestedTriggers,
@@ -3725,6 +3780,121 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
   }
 });
 
+
+export const getContributorByAliasCallable = onCall({ region: 'europe-west4' }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+
+  const type = request.data?.type === 'domain'
+    ? 'domain'
+    : (request.data?.type === 'email' ? 'email' : 'instagram');
+  const value = normalizeContributorAliasValue(type, request.data?.value);
+  if (!value) return null;
+
+  const aliasId = makeContributorAliasId(type, value);
+  const aliasSnap = await db.collection('contributorAliases').doc(aliasId).get();
+  if (!aliasSnap.exists) return null;
+  const aliasData = aliasSnap.data() || {};
+  const contributorId = aliasData.contributorId || null;
+  if (!contributorId) return null;
+  const contributorSnap = await db.collection('contributors').doc(contributorId).get();
+  if (!contributorSnap.exists) return null;
+
+  return {
+    alias: {
+      id: type === 'email' ? null : aliasSnap.id,
+      type: aliasData.type || type,
+      contributorId,
+    },
+    contributor: toPublicContributor(contributorSnap.id, contributorSnap.data() || {}),
+  };
+});
+
+export const createTemporaryContributor = onCall({ region: 'europe-west4' }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+
+  const displayName = toContributorString(request.data?.displayName).replace(/\s+/g, ' ').slice(0, 80);
+  if (!displayName) {
+    throw new HttpsError('invalid-argument', 'displayName is required');
+  }
+
+  const {
+    aliases,
+    normalizedInstagram,
+    normalizedDomain,
+    normalizedEmail,
+  } = buildTemporaryContributorAliases({
+    instagramHandle: request.data?.instagramHandle,
+    website: request.data?.website,
+    email: request.data?.email,
+  });
+
+  if (normalizedEmail && !isValidContributorEmail(normalizedEmail)) {
+    throw new HttpsError('invalid-argument', 'Invalid email alias');
+  }
+
+  const contributorRef = db.collection('contributors').doc();
+  const aliasRefs = aliases.map((alias) => ({
+    ...alias,
+    aliasId: makeContributorAliasId(alias.type, alias.value),
+    ref: db.collection('contributorAliases').doc(makeContributorAliasId(alias.type, alias.value)),
+  }));
+
+  await db.runTransaction(async (transaction) => {
+    for (const alias of aliasRefs) {
+      const existing = await transaction.get(alias.ref);
+      if (existing.exists) {
+        throw new HttpsError('already-exists', `Alias already claimed: ${alias.aliasId}`);
+      }
+    }
+
+    transaction.set(contributorRef, {
+      displayName,
+      displayNameLower: displayName.toLowerCase(),
+      instagramHandle: normalizedInstagram || null,
+      website: normalizedDomain || null,
+      hasEmail: Boolean(normalizedEmail),
+      status: 'unclaimed',
+      createdByUid: request.auth.uid,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    if (normalizedEmail) {
+      transaction.set(getContributorContactRef(contributorRef.id), {
+        email: normalizedEmail,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    aliasRefs.forEach((alias) => {
+      transaction.set(alias.ref, {
+        type: alias.type,
+        value: alias.value,
+        contributorId: contributorRef.id,
+        createdByUid: request.auth.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+  });
+
+  return {
+    contributorId: contributorRef.id,
+    aliasIds: aliasRefs.filter((alias) => alias.type !== 'email').map((alias) => alias.aliasId),
+    contributor: {
+      id: contributorRef.id,
+      displayName,
+      instagramHandle: normalizedInstagram || null,
+      website: normalizedDomain || null,
+      hasEmail: Boolean(normalizedEmail),
+      status: 'unclaimed',
+    },
+  };
+});
+
 export const createClaimInvite = onCall({ region: 'europe-west4' }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
@@ -3821,12 +3991,15 @@ export const getClaimInvitePreview = onRequest({ cors: true, region: 'europe-wes
     if (contributor?.instagramHandle) availableProofMethods.push('instagram');
     const websiteAlias = await fetchContributorWebsiteAlias(contributorId);
     if (websiteAlias) availableProofMethods.push('website');
-    if (contributor?.email) availableProofMethods.push('email');
+    const contactSnap = await getContributorContactRef(contributorId).get();
+    const contact = contactSnap.exists ? (contactSnap.data() || {}) : {};
+    const contributorEmail = String(contact?.email || '').trim().toLowerCase();
+    if (contributorEmail) availableProofMethods.push('email');
     availableProofMethods.push('vouch');
 
     const hints = {};
     if (websiteAlias?.domain) hints.websiteDomain = websiteAlias.domain;
-    const emailMasked = maskEmailHint(contributor?.email);
+    const emailMasked = maskEmailHint(contributorEmail);
     if (emailMasked) hints.emailMasked = emailMasked;
     const instagramHandle = normalizeInstagramHint(contributor?.instagramHandle);
     if (instagramHandle) hints.instagramHandle = instagramHandle;
@@ -3988,8 +4161,9 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
   if (!contributorSnap.exists) {
     throw new HttpsError('not-found', 'Contributor not found');
   }
-  const contributorData = contributorSnap.data() || {};
-  const email = String(contributorData?.email || '').trim().toLowerCase();
+  const contactSnap = await getContributorContactRef(contributorId).get();
+  const contact = contactSnap.exists ? (contactSnap.data() || {}) : {};
+  const email = String(contact?.email || '').trim().toLowerCase();
   if (!email) {
     throw new HttpsError('failed-precondition', 'No email alias available');
   }

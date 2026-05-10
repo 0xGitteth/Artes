@@ -6,7 +6,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import { canAccessFirestore, devLog } from '../utils/firestoreGate';
-import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException } from '../utils/uploadConsent';
+import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
 import {
   getFirestore,
   collection,
@@ -190,7 +190,7 @@ export const publishPost = async (post) => {
 
   const normalizedException = normalizeConsentException(post.consentException || post.uploadConsent?.exception || {});
   const normalizedCredits = Array.isArray(post.credits)
-    ? post.credits.map((credit) => normalizeConsentCredit(credit, { exception: normalizedException }))
+    ? post.credits.map((credit) => sanitizePostCreditForWrite(normalizeConsentCredit(credit, { exception: normalizedException })))
     : [];
   if (!hasMakerCredit(normalizedCredits)) {
     throw new Error('Upload requires at least one maker credit.');

@@ -43,9 +43,6 @@ import { isCodexDevUser } from './utils/codexDevIdentity';
 import {
   makeAliasId,
   normalizeAliasValue,
-  normalizeDomain,
-  normalizeEmail,
-  normalizeInstagram,
 } from './utils/contributorClaims';
 import { canAccessFirestore, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import {
@@ -329,12 +326,19 @@ export const createContributorContentRequest = async ({ contributorId, postId, r
 export const getContributorByAlias = async (type, rawValue) => {
   const normalizedValue = normalizeAliasValue(type, rawValue);
   if (!normalizedValue) return null;
+  if (type === 'email') {
+    const callable = httpsCallable(getFirebaseFunctions(), 'getContributorByAliasCallable');
+    const result = await callable({ type, value: normalizedValue });
+    return result?.data || null;
+  }
   const aliasId = makeAliasId(type, normalizedValue);
   const aliasSnap = await getDoc(getContributorAliasRef(aliasId));
   if (!aliasSnap.exists()) return null;
   const aliasData = aliasSnap.data();
   const contributorSnap = await getDoc(getContributorRef(aliasData.contributorId));
   if (!contributorSnap.exists()) return null;
+  const contributorData = contributorSnap.data() || {};
+  const { email: _email, ...safeContributorData } = contributorData;
   return {
     alias: {
       id: aliasSnap.id,
@@ -342,7 +346,7 @@ export const getContributorByAlias = async (type, rawValue) => {
     },
     contributor: {
       id: contributorSnap.id,
-      ...contributorSnap.data(),
+      ...safeContributorData,
     },
   };
 };
@@ -363,57 +367,14 @@ export const createContributorWithAliases = async ({
   website,
   email,
 }) => {
-  const db = getFirebaseDb();
-  const displayNameLower = String(displayName || '').trim().toLowerCase();
-  const contributorRef = doc(collection(db, CLAIMS_COLLECTIONS.contributors));
-  const normalizedInstagram = instagramHandle ? normalizeInstagram(instagramHandle) : '';
-  const normalizedDomain = website ? normalizeDomain(website) : '';
-  const normalizedEmail = email ? normalizeEmail(email) : '';
-  const aliasEntries = [
-    normalizedInstagram ? { type: 'instagram', value: normalizedInstagram } : null,
-    normalizedDomain ? { type: 'domain', value: normalizedDomain } : null,
-    normalizedEmail ? { type: 'email', value: normalizedEmail } : null,
-  ].filter(Boolean);
-  const contributorPayload = {
+  const callable = httpsCallable(getFirebaseFunctions(), 'createTemporaryContributor');
+  const result = await callable({
     displayName,
-    displayNameLower,
-    instagramHandle: normalizedInstagram || null,
-    website: normalizedDomain || null,
-    email: normalizedEmail || null,
-    status: 'unclaimed',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-  return runTransaction(db, async (transaction) => {
-    const aliasRefs = aliasEntries.map((entry) => {
-      const aliasId = makeAliasId(entry.type, entry.value);
-      return {
-        aliasId,
-        ref: getContributorAliasRef(aliasId),
-        type: entry.type,
-        value: entry.value,
-      };
-    });
-    for (const alias of aliasRefs) {
-      const existing = await transaction.get(alias.ref);
-      if (existing.exists()) {
-        throw new Error(`Alias already claimed: ${alias.aliasId}`);
-      }
-    }
-    transaction.set(contributorRef, contributorPayload);
-    aliasRefs.forEach((alias) => {
-      transaction.set(alias.ref, {
-        type: alias.type,
-        value: alias.value,
-        contributorId: contributorRef.id,
-        createdAt: serverTimestamp(),
-      });
-    });
-    return {
-      contributorId: contributorRef.id,
-      aliasIds: aliasRefs.map((alias) => alias.aliasId),
-    };
+    instagramHandle,
+    website,
+    email,
   });
+  return result?.data || null;
 };
 
 export const initAuth = async () => {

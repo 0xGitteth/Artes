@@ -7372,7 +7372,6 @@ function UploadModal({
           displayName: contributor.displayName || 'Tijdelijk profiel',
           instagramHandle: contributor.instagramHandle || null,
           website: contributor.website || null,
-          email: contributor.email || null,
           isTemporaryContributor: true,
         } : null);
       })
@@ -7912,7 +7911,6 @@ function UploadModal({
           ...(isTemporaryContributor ? {
             instagramHandle: foundUser.instagramHandle || null,
             website: foundUser.website || null,
-            email: foundUser.email || null,
             isExternal: true,
           } : {}),
           ...getNewCreditMakerFields(),
@@ -7993,7 +7991,6 @@ function UploadModal({
          contributorId,
          instagramHandle: normalizedInstagram || null,
          website: normalizedWebsite || null,
-         email: normalizedEmail || null,
          isExternal: true,
          ...getNewCreditMakerFields(),
        }, { exception: consentException }),
@@ -10590,10 +10587,6 @@ function ShadowProfileModal({
             const label = credit.website.replace(/^https?:\/\//i, '');
             collected.set(url, { type: 'website', label, url });
           }
-          if (credit.email) {
-            const url = `mailto:${credit.email}`;
-            collected.set(url, { type: 'email', label: credit.email, url });
-          }
           if (credit.link) {
             const normalized = normalizeExternalLink(credit.link);
             if (normalized) collected.set(normalized.url, normalized);
@@ -10695,8 +10688,7 @@ function ShadowProfileModal({
     const hasInstagramAlias = Boolean(contributorInfo?.instagramHandle)
       || externalLinks.some((link) => link.type === 'instagram');
     const hasWebsiteAlias = Boolean(websiteAlias?.domain);
-    const hasEmailAlias = Boolean(contributorInfo?.email)
-      || externalLinks.some((link) => link.type === 'email');
+    const hasEmailAlias = Boolean(contributorInfo?.hasEmail);
 
     const claimMethods = useMemo(() => {
       const methods = [];

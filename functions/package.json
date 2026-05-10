@@ -13,6 +13,7 @@
     "sharp": "^0.33.3"
   },
   "scripts": {
-    "cleanup-upload-history": "node scripts/cleanupUploadFingerprintHistory.js"
+    "cleanup-upload-history": "node scripts/cleanupUploadFingerprintHistory.js",
+    "backfill-public-users": "node scripts/backfillPublicUsersFromUsers.js"
   }
 }

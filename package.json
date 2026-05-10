@@ -12,7 +12,9 @@
     "start": "node server/index.js",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore.publicUsers.rules.test.mjs\"",
     "cleanup-upload-history": "node functions/scripts/cleanupUploadFingerprintHistory.js",
-    "test": "npm run test:rules"
+    "test": "npm run test:rules",
+    "backfill-public-users": "node functions/scripts/backfillPublicUsersFromUsers.js",
+    "test:backfill-public-users": "node tests/backfillPublicUsersFromUsers.test.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",

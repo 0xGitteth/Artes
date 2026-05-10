@@ -58,11 +58,15 @@ import {
   shouldCreateAffiliationRequestCard,
 } from './utils/affiliationRequestCards';
 
+const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
+const firebaseStorageBucket = String(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim()
+  || (firebaseProjectId ? `${firebaseProjectId}.firebasestorage.app` : '');
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  projectId: firebaseProjectId,
+  storageBucket: firebaseStorageBucket,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
@@ -72,7 +76,12 @@ let firebaseApp = null;
 const getFirebaseApp = () => {
   if (!firebaseApp) {
     const existing = getApps();
-    firebaseApp = existing.length ? existing[0] : initializeApp(firebaseConfig);
+    const existingApp = existing[0] || null;
+    const resolvedStorageBucket = existingApp?.options?.storageBucket || firebaseConfig.storageBucket;
+    if (!resolvedStorageBucket) {
+      throw new Error('Firebase Storage bucket ontbreekt. Stel VITE_FIREBASE_STORAGE_BUCKET in of configureer VITE_FIREBASE_PROJECT_ID.');
+    }
+    firebaseApp = existingApp || initializeApp(firebaseConfig);
   }
   return firebaseApp;
 };
@@ -498,6 +507,8 @@ const PUBLIC_USER_ALLOWED_FIELDS = [
   'linkedCompanyStatus',
   'linkedAgencyLink',
   'linkedCompanyLink',
+  'quickProfilePreviewMode',
+  'quickProfilePostIds',
 ];
 
 const sanitizePublicProfileField = (key, value) => {
@@ -507,9 +518,12 @@ const sanitizePublicProfileField = (key, value) => {
   if (key === 'displayName' || key === 'bio') return value || '';
   if (key === 'linkedAgencyStatus' || key === 'linkedCompanyStatus') return String(value || '').trim().toLowerCase() || undefined;
   if (key === 'headerPosition') return value || 'center';
-  if (key === 'roles' || key === 'themes') {
+  if (key === 'roles' || key === 'themes' || key === 'quickProfilePostIds') {
     if (!Array.isArray(value)) return [];
     return value.filter(Boolean);
+  }
+  if (key === 'quickProfilePreviewMode') {
+    return ['latest', 'best', 'manual'].includes(value) ? value : 'latest';
   }
   return value;
 };
@@ -534,6 +548,8 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     'linkedCompanyStatus',
     'linkedAgencyLink',
     'linkedCompanyLink',
+    'quickProfilePreviewMode',
+    'quickProfilePostIds',
   ]
     .some((field) => data[field] !== undefined);
   if (!hasRequestedPublicField) return {};
@@ -568,6 +584,8 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     'linkedCompanyStatus',
     'linkedAgencyLink',
     'linkedCompanyLink',
+    'quickProfilePreviewMode',
+    'quickProfilePostIds',
   ];
 
   passthroughFields.forEach((field) => {
@@ -1070,6 +1088,12 @@ export const updateUserProfile = async (uid, data) => {
       throw error;
     }
   }
+  // Sanitize before building the public projection so publicUsers cannot keep
+  // different theme data than users after Profile Edit saves.
+  if (safeData.themes && Array.isArray(safeData.themes)) {
+    safeData.themes = sanitizeThemes(safeData.themes);
+  }
+
   const publicPatch = buildPublicProfilePayload(safeData, resolvedUid, existingPublic);
   const hadLegacyPublicEmail = Object.prototype.hasOwnProperty.call(existingPublic || {}, 'email');
   if (hadLegacyPublicEmail) {

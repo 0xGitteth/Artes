@@ -23,10 +23,15 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 
+const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'demo-project';
+const firebaseStorageBucket = String(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim()
+  || `${firebaseProjectId}.firebasestorage.app`;
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'demo-api-key',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'demo.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'demo-project',
+  projectId: firebaseProjectId,
+  storageBucket: firebaseStorageBucket,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '000000000000',
   appId: import.meta.env.VITE_FIREBASE_APP_ID || '0:000000000000:web:demo',
 };

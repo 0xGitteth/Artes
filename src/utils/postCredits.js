@@ -72,10 +72,8 @@ export const getPostCreditRows = (post = {}) => {
   }
 
   if (post.authorName || post.authorId) {
-    const selfMakerRole = post?.uploadConsent?.selfMakerRole;
-    const selfMakerConfirmed = Boolean(post?.uploadConsent?.selfMakerRoleConfirmed && selfMakerRole);
-    const fallbackRole = selfMakerConfirmed ? selfMakerRole : (post.authorRole || 'maker');
-    const fallbackSecondaryLabel = selfMakerConfirmed ? 'Zelfportret' : '';
+    const fallbackRole = post.authorRole || 'maker';
+    const fallbackSecondaryLabel = '';
 
     return [{
       key: `legacy-author-${post.authorId || post.authorName}`,

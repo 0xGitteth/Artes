@@ -17,12 +17,13 @@ const hasStructuredCredit = (credit) => Boolean(credit && (credit.role || credit
 const getCreditDisplayLabels = (credit = {}) => {
   const role = credit.role || 'maker';
   const makerFunction = getCreditMakerFunction(credit);
+  const isSelf = Boolean(credit.isSelf);
 
   if (makerFunction && (credit.isAnonymous || BEELD_DOOR_ROLES.has(role))) {
     return { roleLabel: 'Beeld door', secondaryLabel: '' };
   }
 
-  if (makerFunction && SELF_PORTRAIT_ROLES.has(role)) {
+  if (isSelf && SELF_PORTRAIT_ROLES.has(role)) {
     return { roleLabel: getRoleLabel(role), secondaryLabel: 'Zelfportret' };
   }
 
@@ -71,11 +72,16 @@ export const getPostCreditRows = (post = {}) => {
   }
 
   if (post.authorName || post.authorId) {
+    const selfMakerRole = post?.uploadConsent?.selfMakerRole;
+    const selfMakerConfirmed = Boolean(post?.uploadConsent?.selfMakerRoleConfirmed && selfMakerRole);
+    const fallbackRole = selfMakerConfirmed ? selfMakerRole : (post.authorRole || 'maker');
+    const fallbackSecondaryLabel = selfMakerConfirmed ? 'Zelfportret' : '';
+
     return [{
       key: `legacy-author-${post.authorId || post.authorName}`,
-      role: post.authorRole || 'maker',
-      roleLabel: getRoleLabel(post.authorRole || 'maker'),
-      secondaryLabel: '',
+      role: fallbackRole,
+      roleLabel: getRoleLabel(fallbackRole),
+      secondaryLabel: fallbackSecondaryLabel,
       name: post.authorName || 'Onbekend',
       uid: post.authorId || null,
       contributorId: null,

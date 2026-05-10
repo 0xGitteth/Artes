@@ -99,6 +99,7 @@ import SearchWithAutocomplete from './components/SearchWithAutocomplete';
 import PhotoDetailModal from './components/PhotoDetailModal';
 import PostImageDisplay from './components/PostImageDisplay';
 import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
+import ModalShell from './components/ModalShell';
 import { getAdaptivePhotoTileSpan } from './utils/adaptivePhotoGrid';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
@@ -2635,24 +2636,22 @@ export default function ArtesApp() {
         )}
 
       {showActiveAppAnnouncement && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-xl border border-slate-200 dark:border-slate-700">
-            <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
-              <h3 className="font-semibold text-lg dark:text-white">{activeAppAnnouncement.title || 'App update'}</h3>
-              <button onClick={handleDismissAnnouncement} disabled={announcementDismissPending} className="text-slate-500">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6">
-              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{activeAppAnnouncement.body || ''}</p>
-            </div>
-            <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end">
-              <Button onClick={handleDismissAnnouncement} disabled={announcementDismissPending}>
-                {announcementDismissPending ? 'Opslaan...' : 'Sluiten'}
-              </Button>
-            </div>
+        <ModalShell className="max-w-lg">
+          <div className="flex shrink-0 items-center justify-between gap-3 px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+            <h3 className="font-semibold text-lg dark:text-white">{activeAppAnnouncement.title || 'App update'}</h3>
+            <button onClick={handleDismissAnnouncement} disabled={announcementDismissPending} className="text-slate-500">
+              <X className="w-5 h-5" />
+            </button>
           </div>
-        </div>
+          <div className="overflow-y-auto px-6 py-4">
+            <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{activeAppAnnouncement.body || ''}</p>
+          </div>
+          <div className="flex shrink-0 justify-end px-6 py-4 border-t border-slate-200 dark:border-slate-700">
+            <Button onClick={handleDismissAnnouncement} disabled={announcementDismissPending}>
+              {announcementDismissPending ? 'Opslaan...' : 'Sluiten'}
+            </Button>
+          </div>
+        </ModalShell>
       )}
         {pendingApprovedReminder && (
           <div className="fixed top-5 right-5 z-[75] w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-blue-200 bg-white/95 dark:bg-slate-900/95 dark:border-slate-700 shadow-2xl p-4">
@@ -4262,7 +4261,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
           </div>
        </div>
 
-       {tab === 'all' && <div className="grid grid-flow-dense grid-cols-2 items-start gap-2 sm:grid-cols-3 md:gap-3 lg:grid-cols-4 lg:gap-4">{mixedContent.map((item, i) => {
+       {tab === 'all' && <div className="columns-3 gap-x-2 gap-y-2 sm:columns-4 md:columns-4 lg:columns-5 xl:columns-6">{mixedContent.map((item, i) => {
          const isPost = item.type === 'post';
          const shouldCover = isPost ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
          const postSpan = isPost ? getAdaptivePhotoTileSpan(item.data) : null;
@@ -4282,7 +4281,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
                 isPost ? onPostClick(item.data) : onUserClick(item.data.uid);
               }
             }}
-            className={`group relative ${isPost ? postSpan.className : 'col-span-1'} overflow-hidden rounded-lg bg-white text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl cursor-pointer`}
+            className="group relative inline-block w-full mb-2 break-inside-avoid overflow-hidden rounded-lg bg-white text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl cursor-pointer"
             data-tile-type={isPost ? postSpan.tileType : 'user'}
           >
              <div className="relative overflow-hidden">
@@ -4844,7 +4843,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
   return (
      <div className="min-h-screen bg-white dark:bg-slate-900 pb-20">
-        <div className="relative h-[520px] w-full overflow-hidden">
+        <div className="relative h-[360px] md:h-[520px] w-full overflow-hidden">
            <img
              src={headerImage}
              className="w-full h-full object-cover"
@@ -4853,9 +4852,9 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
            <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white dark:from-slate-900 to-transparent z-10" /> 
            
-           {isOwn && <div className="absolute top-4 right-4 z-30"><Button onClick={onOpenSettings} className="bg-black/50 text-white hover:bg-black/70 border-none backdrop-blur-md"><Edit3 className="w-4 h-4 mr-2"/> Profiel Bewerken</Button></div>}
+           {isOwn && <div className="absolute right-4 bottom-4 z-30"><Button onClick={onOpenSettings} className="bg-black/50 text-white hover:bg-black/70 border-none backdrop-blur-md"><Edit3 className="w-4 h-4 mr-2"/> Profiel Bewerken</Button></div>}
            
-           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center">
+           <div className="absolute inset-0 z-20 flex flex-col justify-end items-center px-5 pb-6 text-center">
               <h1 className="text-5xl font-bold text-blue-700 dark:text-white mb-3">{normalizedProfile.displayName}</h1>
               <div className="flex flex-wrap justify-center gap-2 mb-4">
                  {roles.map(r => (
@@ -6931,7 +6930,7 @@ function UploadModal({
   resumeUploadId = null,
 }) {
   const makerSelfRoles = getSelfMakerRoles(profile.roles);
-  const defaultRole = makerSelfRoles[0] || profile.roles?.[0] || 'photographer';
+  const defaultRole = makerSelfRoles[0] || profile.roles?.[0] || 'model';
   const selfCredit = { role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true, consentStatus: CONTRIBUTOR_CONSENT_STATUSES.ACCEPTED };
   const triggerLabelMap = useMemo(() => new Map(TRIGGERS.map((trigger) => [trigger.id, trigger.label])), []);
   const getTriggerLabel = (id) => triggerLabelMap.get(id) || id;
@@ -7032,6 +7031,10 @@ function UploadModal({
     userAcknowledgedVisiblePersonPrompt: subjectWarningAcknowledged,
   }), [credits, uploaderRole, aiPeoplePresent, consentException, subjectWarningAcknowledged]);
 
+  const hasSelfModelCredit = useMemo(() => {
+    return credits.some(c => c.isSelf === true && c.role === 'model');
+  }, [credits]);
+
   const confirmSelfMakerRoleForUpload = useCallback((role) => {
     if (!isMakerRole(role)) return;
     setSelfMakerRoleConfirmation({ confirmed: true, role, confirmedAt: new Date().toISOString() });
@@ -7049,6 +7052,10 @@ function UploadModal({
     }
     setPendingSelfMakerRole(role);
   }, [profile.roles]);
+
+  const confirmSelfPortrait = useCallback(() => {
+    setCredits(prev => prev.map(c => c.isSelf && c.role === 'model' ? { ...c, isMaker: true, selfPortrait: true } : c));
+  }, []);
 
   useEffect(() => {
     if (missingMakerPromptState.shouldShowMissingMakerPrompt) {
@@ -7908,6 +7915,7 @@ function UploadModal({
           name: foundUser.displayName,
           ...(foundUser.uid && !isTemporaryContributor ? { uid: foundUser.uid } : {}),
           contributorId: foundUser.contributorId || null,
+          isSelf: foundUser.uid === user.uid,
           ...(isTemporaryContributor ? {
             instagramHandle: foundUser.instagramHandle || null,
             website: foundUser.website || null,
@@ -8785,30 +8793,44 @@ function UploadModal({
                                  Anonieme maker toevoegen
                                </button>
                              </div>
-                             <div className="mt-2.5 rounded-xl border border-rose-200 bg-white/70 p-2.5 dark:border-rose-800 dark:bg-slate-900/50 md:mt-3 md:p-3">
-                               <p className="font-semibold">Ben jij zelf de maker van deze upload?</p>
-                               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                                 <select
-                                   value={selectedSelfMakerRole}
-                                   onChange={(event) => setSelectedSelfMakerRole(event.target.value)}
-                                   className="flex-1 rounded-lg border border-rose-200 bg-white p-2 text-xs text-slate-800 dark:border-rose-800 dark:bg-slate-900 dark:text-slate-100"
-                                 >
-                                   {MAKER_ROLE_IDS.map((roleId) => (
-                                     <option key={roleId} value={roleId}>{ROLES.find((role) => role.id === roleId)?.label || roleId}</option>
-                                   ))}
-                                 </select>
+                             {missingMakerPromptState.shouldShowMissingMakerPrompt && uploaderRole === 'model' && hasSelfModelCredit ? (
+                               <div className="mt-2.5 rounded-xl border border-rose-200 bg-white/70 p-2.5 dark:border-rose-800 dark:bg-slate-900/50 md:mt-3 md:p-3">
+                                 <p className="font-semibold">Dit is een zelfportret</p>
+                                 <p className="mt-1.5 md:mt-2 text-sm text-slate-600 dark:text-slate-300">Bevestig dat je dit beeld zelf hebt gemaakt als model.</p>
                                  <button
                                    type="button"
-                                   onClick={() => selectSelfMakerRoleForUpload(selectedSelfMakerRole)}
-                                   className="rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 font-semibold text-rose-900 hover:bg-rose-50 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-50 md:px-3 md:py-2"
+                                   onClick={confirmSelfPortrait}
+                                   className="mt-2 rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 font-semibold text-rose-900 hover:bg-rose-50 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-50 md:px-3 md:py-2"
                                  >
-                                   Gebruik voor deze upload
+                                   Bevestig zelfportret
                                  </button>
                                </div>
-                               {selfMakerRoleConfirmation.confirmed && selfMakerRoleConfirmation.role === uploaderRole && (
-                                 <p className="mt-2 text-emerald-700 dark:text-emerald-200">Makerrol bevestigd voor deze upload.</p>
-                               )}
-                             </div>
+                             ) : missingMakerPromptState.shouldShowMissingMakerPrompt ? (
+                               <div className="mt-2.5 rounded-xl border border-rose-200 bg-white/70 p-2.5 dark:border-rose-800 dark:bg-slate-900/50 md:mt-3 md:p-3">
+                                 <p className="font-semibold">Ben jij zelf de maker van deze upload?</p>
+                                 <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                                   <select
+                                     value={selectedSelfMakerRole}
+                                     onChange={(event) => setSelectedSelfMakerRole(event.target.value)}
+                                     className="flex-1 rounded-lg border border-rose-200 bg-white p-2 text-xs text-slate-800 dark:border-rose-800 dark:bg-slate-900 dark:text-slate-100"
+                                   >
+                                     {MAKER_ROLE_IDS.map((roleId) => (
+                                       <option key={roleId} value={roleId}>{ROLES.find((role) => role.id === roleId)?.label || roleId}</option>
+                                     ))}
+                                   </select>
+                                   <button
+                                     type="button"
+                                     onClick={() => selectSelfMakerRoleForUpload(selectedSelfMakerRole)}
+                                     className="rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 font-semibold text-rose-900 hover:bg-rose-50 dark:border-rose-700 dark:bg-slate-900 dark:text-rose-50 md:px-3 md:py-2"
+                                   >
+                                     Gebruik voor deze upload
+                                   </button>
+                                 </div>
+                                 {selfMakerRoleConfirmation.confirmed && selfMakerRoleConfirmation.role === uploaderRole && (
+                                   <p className="mt-2 text-emerald-700 dark:text-emerald-200">Makerrol bevestigd voor deze upload.</p>
+                                 )}
+                               </div>
+                             ) : null}
                              {pendingSelfMakerRole && (
                                <div className="mt-2.5 rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-blue-950 dark:border-blue-800 dark:bg-blue-900/25 dark:text-blue-50 md:mt-3 md:p-3">
                                  <p className="text-sm font-bold">Heb jij dit beeld gemaakt?</p>

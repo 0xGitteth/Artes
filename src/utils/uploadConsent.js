@@ -71,7 +71,10 @@ export const getCreditMakerFunction = (credit = {}) => {
   return isMakerRole(role) ? role : '';
 };
 
-export const isExplicitMakerCredit = (credit = {}) => Boolean(getCreditMakerFunction(credit));
+export const isExplicitMakerCredit = (credit = {}) => {
+  if (getCreditMakerFunction(credit)) return true;
+  return Boolean(credit.isSelf && credit.role === 'model');
+};
 
 export const getMakerCreditIndex = (credits = []) => (Array.isArray(credits) ? credits : [])
   .findIndex((credit) => isExplicitMakerCredit(credit));

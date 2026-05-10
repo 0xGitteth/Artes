@@ -6,6 +6,7 @@ import { Badge, Button, Input } from './ui';
 import LikeIcon from './icons/LikeIcon';
 import CommentIcon from './icons/CommentIcon';
 import SensitiveOverlay from './SensitiveOverlay';
+import ModalShell from './ModalShell';
 import { resolvePublicDisplayName } from '../utils/publicIdentity';
 import PostCreditDisplay from './PostCreditDisplay';
 import PostImageDisplay from './PostImageDisplay';
@@ -215,9 +216,8 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
     .map((trigger) => TRIGGER_LABELS[trigger] || trigger);
   const sensitiveFlag = post.sensitive || (post.appliedTriggers || []).length > 0 || (post.makerTags || []).length > 0;
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-2 md:p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl md:rounded-3xl shadow-2xl max-w-5xl w-full max-h-[calc(100dvh-1rem)] md:max-h-[92vh] overflow-hidden flex flex-col">
-        <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-2 md:px-6 md:py-4 border-b border-slate-200 dark:border-slate-800">
+    <ModalShell>
+      <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-800">
           <div>
             <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Post details</p>
             <h3 className="line-clamp-1 text-base md:text-lg font-semibold text-slate-900 dark:text-white">{post.title}</h3>
@@ -226,7 +226,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             <X />
           </button>
         </div>
-        <div className="grid min-h-0 flex-1 md:grid-cols-2 gap-0 overflow-y-auto md:overflow-hidden no-scrollbar">
+        <div className="grid min-h-0 flex-1 md:grid-cols-2 gap-0 overflow-hidden no-scrollbar">
           <PostImageDisplay
             src={post.imageUrl}
             alt={post.title}
@@ -237,7 +237,7 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             shouldCover={shouldCover}
             overlay={<SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
           />
-          <div className="p-3 md:p-6 space-y-3 md:space-y-4 overflow-visible md:overflow-y-auto no-scrollbar md:max-h-[80vh]">
+          <div className="flex flex-col min-h-0 overflow-y-auto p-3 md:p-6 space-y-3 md:space-y-4">
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Calendar size={16} />
               <span>{post.createdAt?.toDate ? post.createdAt.toDate().toLocaleDateString() : 'Nieuw'}</span>
@@ -417,7 +417,6 @@ export default function PhotoDetailModal({ post, onClose, currentUser, authUser,
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </ModalShell>
   );
 }

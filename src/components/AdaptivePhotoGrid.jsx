@@ -12,7 +12,7 @@ export default function AdaptivePhotoGrid({
   itemClassName = '',
 }) {
   return (
-    <div className={`grid grid-flow-dense grid-cols-2 items-start gap-2 sm:grid-cols-3 md:gap-3 lg:grid-cols-4 lg:gap-4 ${className}`.trim()}>
+    <div className={`columns-3 gap-x-2 gap-y-2 sm:columns-4 md:columns-4 lg:columns-5 xl:columns-6 ${className}`.trim()}>
       {posts.map((post) => {
         const span = getAdaptivePhotoTileSpan(post);
         const shouldCover = getShouldCover?.(post) === true;
@@ -33,7 +33,7 @@ export default function AdaptivePhotoGrid({
                 onPostClick(post);
               }
             } : undefined}
-            className={`group relative ${span.className} overflow-hidden rounded-lg bg-slate-100 text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl ${clickable ? 'cursor-pointer' : ''} ${post.isChallenge ? 'ring-2 ring-amber-400' : ''} ${itemClassName}`.trim()}
+            className={`group relative inline-block w-full mb-2 break-inside-avoid overflow-hidden rounded-lg bg-slate-100 text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl ${clickable ? 'cursor-pointer' : ''} ${post.isChallenge ? 'ring-2 ring-amber-400' : ''} ${itemClassName}`.trim()}
             data-tile-type={span.tileType}
           >
             {renderBadge?.(post)}

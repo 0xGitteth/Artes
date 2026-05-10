@@ -17,7 +17,24 @@ const modelSelfMade = rowsFor([
 assert.equal(modelSelfMade.length, 1, 'model self-made credit renders one row');
 assert.equal(modelSelfMade[0].roleLabel, 'Model');
 assert.equal(modelSelfMade[0].name, 'Mara Eliza');
-assert.equal(modelSelfMade[0].secondaryLabel, 'Zelfportret');
+assert.equal(modelSelfMade[0].secondaryLabel, '', 'legacy self model makerFunction without selfPortrait is not labelled as self portrait');
+
+
+const confirmedSelfPortraitWithoutMakerFunction = rowsFor([
+  { role: 'model', isMaker: true, selfPortrait: true, name: 'Mara Eliza', uid: 'author_1', isSelf: true },
+]);
+assert.equal(confirmedSelfPortraitWithoutMakerFunction[0].secondaryLabel, 'Zelfportret', 'confirmed self portrait renders without makerFunction');
+assert.equal(confirmedSelfPortraitWithoutMakerFunction[0].rawCredit.makerFunction, undefined, 'confirmed self portrait fixture does not store makerFunction');
+
+const selfPortraitWithoutMakerFlag = rowsFor([
+  { role: 'model', selfPortrait: true, name: 'Mara Eliza', uid: 'author_1', isSelf: true },
+]);
+assert.equal(selfPortraitWithoutMakerFlag[0].secondaryLabel, '', 'selfPortrait without isMaker is not labelled as self portrait');
+
+const unconfirmedSelfModel = rowsFor([
+  { role: 'model', name: 'Mara Eliza', uid: 'author_1', isSelf: true },
+]);
+assert.equal(unconfirmedSelfModel[0].secondaryLabel, '', 'unconfirmed self model credit is not labelled as self portrait');
 
 const muaSelfMade = rowsFor([
   { role: 'mua', isMaker: true, makerFunction: 'photographer', name: 'Mara Eliza', uid: 'author_1', isSelf: true },

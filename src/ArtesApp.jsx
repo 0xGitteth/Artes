@@ -107,6 +107,7 @@ import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
 import ProfileImageCropper from './components/ProfileImageCropper';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
+
 import { ROLE_OPTIONS } from './utils/roles';
 import {
   ALL_PROFILE_PORTFOLIO_TAB,
@@ -143,6 +144,15 @@ import {
   normalizeConsentCredit,
   validateUploadConsent,
 } from './utils/uploadConsent';
+
+const getContributorAliasSearch = (term) => {
+  const value = String(term || '').trim();
+  if (!value) return null;
+  if (value.startsWith('@')) return { type: 'instagram', value };
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return { type: 'email', value };
+  if (!value.includes(' ') && (/^https?:\/\//i.test(value) || value.includes('.'))) return { type: 'domain', value };
+  return null;
+};
 
 // --- Constants & Styling ---
 
@@ -6945,6 +6955,13 @@ function UploadModal({
     makerFunction: '',
   });
   const [showInvite, setShowInvite] = useState(false);
+  const [externalContributorDisplayName, setExternalContributorDisplayName] = useState('');
+  const [externalContributorInstagram, setExternalContributorInstagram] = useState('');
+  const [externalContributorWebsite, setExternalContributorWebsite] = useState('');
+  const [externalContributorEmail, setExternalContributorEmail] = useState('');
+  const [externalContributorSearchHint, setExternalContributorSearchHint] = useState('');
+  const [externalContributorSaving, setExternalContributorSaving] = useState(false);
+  const [externalContributorError, setExternalContributorError] = useState('');
   const [inviteCandidates, setInviteCandidates] = useState([]);
   const [inviteShareLinks, setInviteShareLinks] = useState([]);
   const [inviteShareOpen, setInviteShareOpen] = useState(false);
@@ -7316,6 +7333,7 @@ function UploadModal({
 
   // Contributor search logic
   const [contributorSearch, setContributorSearch] = useState('');
+  const [aliasSearchResult, setAliasSearchResult] = useState(null);
   const normalizeDisplayName = (value) => String(value || '').trim().toLowerCase();
   const getContributorMatches = (term) => {
     const normalizedTerm = normalizeDisplayName(term);
@@ -7325,10 +7343,48 @@ function UploadModal({
       return candidate === normalizedTerm || candidate.startsWith(normalizedTerm);
     }).slice(0, 5);
   };
-  const searchResults = useMemo(() => {
+  const userSearchResults = useMemo(() => {
     if (!contributorSearch) return [];
     return getContributorMatches(contributorSearch);
   }, [users, contributorSearch]);
+  const searchResults = useMemo(() => {
+    if (!aliasSearchResult) return userSearchResults;
+    const duplicateUser = userSearchResults.some((result) => result.contributorId && result.contributorId === aliasSearchResult.contributorId);
+    return duplicateUser ? userSearchResults : [...userSearchResults, aliasSearchResult].slice(0, 5);
+  }, [userSearchResults, aliasSearchResult]);
+
+  useEffect(() => {
+    const aliasSearch = getContributorAliasSearch(contributorSearch);
+    if (!aliasSearch) {
+      setAliasSearchResult(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    getContributorByAlias(aliasSearch.type, aliasSearch.value)
+      .then((result) => {
+        if (cancelled) return;
+        const contributor = result?.contributor || null;
+        setAliasSearchResult(contributor ? {
+          uid: `temporary:${contributor.id}`,
+          contributorId: contributor.id,
+          displayName: contributor.displayName || 'Tijdelijk profiel',
+          instagramHandle: contributor.instagramHandle || null,
+          website: contributor.website || null,
+          email: contributor.email || null,
+          isTemporaryContributor: true,
+        } : null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (import.meta.env.DEV) console.warn('[ContributorAlias] search failed', error);
+        setAliasSearchResult(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contributorSearch]);
 
   const toDataUrlSize = (dataUrl) => {
     const commaIndex = dataUrl.indexOf(',');
@@ -7814,17 +7870,60 @@ function UploadModal({
     return { isMaker: false, makerFunction: null };
   }, [newCredit]);
 
-  const addCredit = async (foundUser) => {
+  const resetExternalContributorState = () => {
+    setContributorSearch('');
+    setInviteCandidates([]);
+    setAllowExternalOverride(false);
+    setShowInvite(false);
+    setAliasSearchResult(null);
+    setExternalContributorDisplayName('');
+    setExternalContributorInstagram('');
+    setExternalContributorWebsite('');
+    setExternalContributorEmail('');
+    setExternalContributorSearchHint('');
+    setExternalContributorError('');
+    setExternalContributorSaving(false);
+  };
+
+  const openExternalContributorForm = () => {
+    const searchHint = String(contributorSearch || '').trim();
+    const instagramPrefill = searchHint.startsWith('@') ? searchHint : '';
+    setNewCredit((prev) => ({ ...prev, name: '' }));
+    setExternalContributorDisplayName('');
+    setExternalContributorInstagram(instagramPrefill);
+    setExternalContributorWebsite('');
+    setExternalContributorEmail('');
+    setExternalContributorSearchHint(searchHint);
+    setAllowExternalOverride(true);
+    setShowInvite(true);
+    setContributorSearch('');
+    setAliasSearchResult(null);
+    setInviteCandidates([]);
+    setExternalContributorError('');
+  };
+
+  const addCredit = async (foundUser, externalDisplayNameOverride = '') => {
      if(foundUser) {
-        setCredits((prev) => ([...prev, normalizeConsentCredit({ role: newCredit.role, name: foundUser.displayName, uid: foundUser.uid, contributorId: foundUser.contributorId || null, ...getNewCreditMakerFields() }, { exception: consentException })]));
-        setContributorSearch('');
-        setAllowExternalOverride(false);
+        const isTemporaryContributor = Boolean(foundUser.isTemporaryContributor);
+        setCredits((prev) => ([...prev, normalizeConsentCredit({
+          role: newCredit.role,
+          name: foundUser.displayName,
+          ...(foundUser.uid && !isTemporaryContributor ? { uid: foundUser.uid } : {}),
+          contributorId: foundUser.contributorId || null,
+          ...(isTemporaryContributor ? {
+            instagramHandle: foundUser.instagramHandle || null,
+            website: foundUser.website || null,
+            email: foundUser.email || null,
+            isExternal: true,
+          } : {}),
+          ...getNewCreditMakerFields(),
+        }, { exception: consentException })]));
+        resetExternalContributorState();
         setNewCredit({ role: newCredit.role, name: '', instagramHandle: '', website: '', email: '', isMaker: isMakerRole(newCredit.role), makerFunction: isMakerRole(newCredit.role) ? newCredit.role : '' });
-        setShowInvite(false);
         return;
      }
 
-     const displayName = newCredit.name.trim();
+     const displayName = String(externalDisplayNameOverride || '').trim();
      if(!displayName) return;
      const nameMatches = getContributorMatches(displayName);
      if (nameMatches.length > 0 && !allowExternalOverride) {
@@ -7833,9 +7932,9 @@ function UploadModal({
        return;
      }
 
-     const normalizedInstagram = normalizeInstagram(newCredit.instagramHandle);
-     const normalizedWebsite = normalizeDomain(newCredit.website);
-     const normalizedEmail = normalizeEmail(newCredit.email);
+     const normalizedInstagram = normalizeInstagram(externalContributorInstagram);
+     const normalizedWebsite = normalizeDomain(externalContributorWebsite);
+     const normalizedEmail = normalizeEmail(externalContributorEmail);
      const aliasCandidates = [
        normalizedInstagram ? { type: 'instagram', value: normalizedInstagram } : null,
        normalizedWebsite ? { type: 'domain', value: normalizedWebsite } : null,
@@ -7900,10 +7999,28 @@ function UploadModal({
          ...getNewCreditMakerFields(),
        }, { exception: consentException }),
      ]));
-     setContributorSearch('');
-     setAllowExternalOverride(false);
+     resetExternalContributorState();
      setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '', isMaker: false, makerFunction: '' });
-     setShowInvite(false);
+  };
+
+  const addExternalContributor = async () => {
+    if (externalContributorSaving) return;
+    const displayName = externalContributorDisplayName.trim();
+    if (!displayName) {
+      setExternalContributorError('Vul de naam in die onder de post zichtbaar mag zijn.');
+      return;
+    }
+
+    setExternalContributorSaving(true);
+    setExternalContributorError('');
+    try {
+      await addCredit(null, displayName);
+    } catch (error) {
+      console.error('[UploadModal] External contributor creation failed', error);
+      setExternalContributorError(error?.message || 'Extern profiel toevoegen mislukt. Controleer de gegevens en probeer opnieuw.');
+    } finally {
+      setExternalContributorSaving(false);
+    }
   };
 
   const addAnonymousContributor = (roleOverride = newCredit.role) => {
@@ -7916,9 +8033,8 @@ function UploadModal({
         isExternal: true,
       }, { exception: consentException }),
     ]));
-    setContributorSearch('');
+    resetExternalContributorState();
     setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '', isMaker: false, makerFunction: '' });
-    setShowInvite(false);
   };
 
   useEffect(() => {
@@ -8109,6 +8225,9 @@ function UploadModal({
       },
     } : {};
 
+    let firestorePostWriteAttempted = false;
+    const imageUploadSucceeded = Boolean(image);
+
     setPublishing(true);
     setPublishError('');
     logModerationDebug('after-policy-gating', {
@@ -8124,6 +8243,7 @@ function UploadModal({
         if (!moderationApiBase) {
           throw new Error('Publiceren is tijdelijk niet beschikbaar. Probeer opnieuw via de chat.');
         }
+        firestorePostWriteAttempted = true;
         logModerationDebug('before-firestore-write', { firestoreWriteAttempted: true, writeTarget: 'uploads/repaired-publication' });
         const token = await user.getIdToken();
         const response = await fetch(`${moderationApiBase}/userModerationAction`, {
@@ -8178,6 +8298,7 @@ function UploadModal({
         return;
       }
 
+      firestorePostWriteAttempted = true;
       logModerationDebug('before-firestore-write', { firestoreWriteAttempted: true, writeTarget: 'posts/{auto}' });
       const publishedDoc = await publishPost({
         title,
@@ -8192,6 +8313,7 @@ function UploadModal({
         makerTags,
         appliedTriggers: finalAppliedTriggers,
         outcome: nextOutcome || 'unchecked',
+        shouldReview: false,
         forbiddenReasons: effectiveForbiddenReasons,
         reviewCaseId: effectiveReviewCaseId,
         ...correctionMetadata,
@@ -8227,6 +8349,13 @@ function UploadModal({
       setCredits([{ role: defaultRole, name: profile.displayName, uid: profile.uid, isSelf: true, consentStatus: CONTRIBUTOR_CONSENT_STATUSES.ACCEPTED, consentRequired: false }]);
       setNewCredit({ role: 'model', name: '', instagramHandle: '', website: '', email: '', isMaker: false, makerFunction: '' });
       setShowInvite(false);
+      setExternalContributorDisplayName('');
+      setExternalContributorInstagram('');
+      setExternalContributorWebsite('');
+      setExternalContributorEmail('');
+      setExternalContributorSearchHint('');
+      setExternalContributorError('');
+      setExternalContributorSaving(false);
       setAiPeoplePresent(false);
       setSubjectWarningAcknowledged(false);
       setMissingMakerPromptShown(false);
@@ -8289,7 +8418,40 @@ function UploadModal({
       onClose();
     } catch (error) {
       console.error('Publish error', error);
-      setPublishError('Er ging iets mis bij het publiceren. Probeer het opnieuw.');
+      let emailVerified = Boolean(user?.emailVerified);
+      if (import.meta.env.DEV && user?.getIdTokenResult) {
+        try {
+          const tokenResult = await user.getIdTokenResult();
+          emailVerified = Boolean(tokenResult?.claims?.email_verified ?? emailVerified);
+        } catch (tokenError) {
+          console.debug('[UploadModal] publish diagnostics token lookup failed', tokenError?.code || tokenError?.message || tokenError);
+        }
+      }
+      if (import.meta.env.DEV) {
+        console.debug('[UploadModal] publish diagnostics', {
+          code: error?.code || null,
+          message: error?.message || String(error),
+          uid: user?.uid || null,
+          emailVerified,
+          imageUploadSucceeded,
+          firestorePostWriteAttempted,
+          creditsCount: consentCredits.length,
+          makerCreditIndex: uploadConsent?.makerCreditIndex ?? null,
+          hasMaker: uploadConsent?.hasMaker ?? null,
+          consentAuditLength: consentAudit.length,
+          outcome: nextOutcome || 'unchecked',
+          shouldReview: false,
+          selectedStyles,
+          appliedTriggers: finalAppliedTriggers,
+          forbiddenReasons: effectiveForbiddenReasons,
+        });
+      }
+      const safeMessage = error?.code === 'storage/unauthorized'
+        ? 'Uploaden is niet toegestaan voor dit account. Controleer of je account volledig geverifieerd is.'
+        : (error?.code === 'permission-denied'
+          ? 'Publiceren is geblokkeerd door rechten of validatie. Controleer je credits en probeer opnieuw.'
+          : 'Er ging iets mis bij het publiceren. Probeer het opnieuw.');
+      setPublishError(safeMessage);
       setPublishing(false);
     }
   };
@@ -8787,41 +8949,38 @@ function UploadModal({
                                 <input 
                                    className="w-full p-2 border border-slate-300 rounded text-xs bg-white text-slate-800 placeholder:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 md:text-sm"
                                    placeholder="Zoek naam..." 
-                                   value={contributorSearch || newCredit.name} 
+                                   value={contributorSearch}
                                    onChange={e => {
                                       setContributorSearch(e.target.value);
-                                      setNewCredit((prev) => ({...prev, name: e.target.value}));
                                       setAllowExternalOverride(false);
+                                      setExternalContributorError('');
                                       if(!e.target.value) setShowInvite(false);
                                    }} 
                                 />
-                                {contributorSearch && searchResults.length > 0 && (
+                                {contributorSearch && !showInvite && searchResults.length > 0 && (
                                    <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 dark:border-slate-700 dark:bg-slate-900 mt-1 rounded shadow-lg max-h-40 overflow-y-auto no-scrollbar z-10">
                                       <p className="px-2 pt-2 text-[11px] text-slate-500 dark:text-slate-300">Selecteer een bestaande bijdrager.</p>
                                       {searchResults.map(u => (
-                                         <div key={u.uid} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-sm text-slate-700 dark:text-slate-100" onClick={() => void addCredit(u)}>{u.displayName}</div>
+                                         <div key={u.uid} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-sm text-slate-700 dark:text-slate-100" onClick={() => void addCredit(u)}>
+                                           <span>{u.displayName}</span>
+                                           {u.isTemporaryContributor && <span className="ml-2 rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-semibold text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-100">Tijdelijk profiel</span>}
+                                         </div>
                                       ))}
                                       <button
                                         type="button"
                                         className="w-full border-t border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-200 px-2 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800"
-                                        onClick={() => {
-                                          setAllowExternalOverride(true);
-                                          setShowInvite(true);
-                                        }}
+                                        onClick={openExternalContributorForm}
                                       >
                                         Toch extern toevoegen
                                       </button>
                                    </div>
                                 )}
-                                {contributorSearch && searchResults.length === 0 && (
+                                {contributorSearch && !showInvite && searchResults.length === 0 && (
                                     <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 dark:border-slate-700 dark:bg-slate-900 mt-1 rounded shadow-lg p-2 z-10">
                                         <p className="text-xs text-orange-600 dark:text-orange-300 mb-2">Geen gebruiker gevonden.</p>
                                         <button
                                           type="button"
-                                          onClick={() => {
-                                            setAllowExternalOverride(true);
-                                            setShowInvite(true);
-                                          }}
+                                          onClick={openExternalContributorForm}
                                           className="text-xs bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100 p-1 rounded w-full"
                                         >
                                           Voeg toe als extern
@@ -8868,26 +9027,59 @@ function UploadModal({
                          
                          {showInvite && (
                             <div className="bg-yellow-50 p-2.5 rounded text-xs text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-100 mb-2 border border-yellow-200 dark:border-yellow-800 md:p-3">
-                               <p className="mb-2 font-semibold">Ongeclaimd profiel aanmaken voor {newCredit.name}</p>
-                               <input
-                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-1.5 md:mb-2"
-                                 placeholder="Instagram handle (optioneel)"
-                                 value={newCredit.instagramHandle}
-                                 onChange={e => setNewCredit((prev) => ({...prev, instagramHandle: e.target.value}))}
-                               />
-                               <input
-                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-1.5 md:mb-2"
-                                 placeholder="Website domein (optioneel)"
-                                 value={newCredit.website}
-                                 onChange={e => setNewCredit((prev) => ({...prev, website: e.target.value}))}
-                               />
-                               <input
-                                 className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 mb-1.5 md:mb-2"
-                                 placeholder="Email (optioneel)"
-                                 value={newCredit.email}
-                                 onChange={e => setNewCredit((prev) => ({...prev, email: e.target.value}))}
-                               />
-                               <button onClick={() => void addCredit(null)} className="w-full bg-yellow-600 text-white py-1 rounded">Toevoegen</button>
+                               <p className="mb-2 font-semibold">Tijdelijk profiel toevoegen</p>
+                               {externalContributorSearchHint && (
+                                 <p className="mb-2 text-[11px] text-yellow-700 dark:text-yellow-200">Je zocht op: {externalContributorSearchHint}</p>
+                               )}
+                               <label className="mb-2 block">
+                                 <span className="mb-1 block font-semibold">Naam onder de post</span>
+                                 <input
+                                   className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
+                                   value={externalContributorDisplayName}
+                                   onChange={e => {
+                                     setExternalContributorDisplayName(e.target.value);
+                                     setExternalContributorError('');
+                                   }}
+                                 />
+                                 <span className="mt-1 block text-[11px] text-yellow-700 dark:text-yellow-200">Vul de naam of artiestennaam in die zichtbaar wordt bij de credits. Bijvoorbeeld: Mara Eliza.</span>
+                               </label>
+                               {externalContributorDisplayName.trim().startsWith('@') && !externalContributorInstagram.trim() && (
+                                 <p className="mb-2 text-[11px] font-semibold text-orange-700 dark:text-orange-200">Dit lijkt een Instagram handle. Zet deze bij Instagram en vul bij naam de zichtbare naam in.</p>
+                               )}
+                               <label className="mb-2 block">
+                                 <span className="mb-1 block font-semibold">Instagram handle</span>
+                                 <input
+                                   className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
+                                   value={externalContributorInstagram}
+                                   onChange={e => setExternalContributorInstagram(e.target.value)}
+                                 />
+                                 <span className="mt-1 block text-[11px] text-yellow-700 dark:text-yellow-200">Optioneel. Dit helpt om het tijdelijke profiel later terug te vinden of te claimen. Bijvoorbeeld: @maraeliza.portfolio.</span>
+                               </label>
+                               <label className="mb-2 block">
+                                 <span className="mb-1 block font-semibold">Website domein</span>
+                                 <input
+                                   className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
+                                   value={externalContributorWebsite}
+                                   onChange={e => setExternalContributorWebsite(e.target.value)}
+                                 />
+                               </label>
+                               <label className="mb-2 block">
+                                 <span className="mb-1 block font-semibold">Email</span>
+                                 <input
+                                   className="w-full p-2 rounded border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
+                                   value={externalContributorEmail}
+                                   onChange={e => setExternalContributorEmail(e.target.value)}
+                                 />
+                               </label>
+                               {externalContributorError && <p className="mb-2 text-red-600 dark:text-red-300">{externalContributorError}</p>}
+                               <button
+                                 type="button"
+                                 onClick={() => void addExternalContributor()}
+                                 disabled={externalContributorSaving}
+                                 className={`w-full bg-yellow-600 text-white py-1 rounded disabled:cursor-not-allowed disabled:opacity-60 ${externalContributorDisplayName.trim() ? '' : 'opacity-70'}`}
+                               >
+                                 {externalContributorSaving ? 'Toevoegen...' : 'Toevoegen'}
+                               </button>
                             </div>
                          )}
 

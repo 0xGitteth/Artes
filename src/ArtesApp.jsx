@@ -4908,16 +4908,18 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
   const companyName = resolveLinkedProfileName(normalizedProfile.linkedCompanyId, normalizedProfile.linkedCompanyName, allUsers);
   const agencyLink = normalizedProfile.linkedAgencyLink || '';
   const companyLink = normalizedProfile.linkedCompanyLink || '';
-  const headerImage = normalizedProfile.avatar;
+  const hasProfileHeaderImage = Boolean(normalizedProfile.headerImage);
+  const headerImage = normalizedProfile.headerImage || normalizedProfile.avatar;
   const hasAgency = Boolean(agencyName);
   const hasCompany = Boolean(companyName);
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
   return (
      <div className="min-h-screen bg-white dark:bg-slate-900 pb-20">
-        <div className="relative h-[360px] md:h-[520px] w-full overflow-hidden">
+        <div className="relative min-h-[430px] w-full overflow-hidden bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:min-h-[520px]">
            <img
              src={headerImage}
-             className="w-full h-full object-cover"
+             alt=""
+             className={`h-full min-h-[430px] w-full md:min-h-[520px] ${hasProfileHeaderImage ? 'object-cover' : 'object-contain p-12 opacity-70 blur-[1px] md:p-24'}`}
            />
            <div className="absolute inset-0 bg-white/40 dark:bg-black/55" />
            <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
@@ -4936,7 +4938,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
            )}
            
            <div className="absolute inset-0 z-20 flex flex-col justify-end items-center px-5 pb-6 text-center">
-              <h1 className="text-5xl font-bold text-blue-700 dark:text-white mb-3">{normalizedProfile.displayName}</h1>
+              <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{normalizedProfile.displayName}</h1>
               <div className="flex flex-wrap justify-center gap-2 mb-4">
                  {roles.map(r => (
                    <span key={r} className="text-xs font-bold uppercase tracking-widest text-blue-900 dark:text-white bg-white/80 dark:bg-white/10 px-3 py-1 rounded-full backdrop-blur border border-blue-200/60 dark:border-white/20 shadow-sm">
@@ -5178,7 +5180,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                <AdaptivePhotoGrid
                  posts={portfolioPosts}
                  onPostClick={onPostClick}
-                 getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+                 getShouldCover={(post) => !isOwn && shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
                  renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
                  itemClassName="rounded-sm"
                />
@@ -10507,6 +10509,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
       .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed')
       .slice(0, 3);
   }, [manualIds, previewMode, triggerVisibility, userPosts]);
+  const hasPreviewHeaderImage = Boolean(userProfile?.headerImage);
   const headerImage = userProfile?.headerImage || userProfile?.avatar;
   const resolvedFansCount = Number(fanCounts?.fansCount ?? userProfile?.fansCount ?? 0);
   const resolvedFanOfCount = Number(fanCounts?.fanOfCount ?? userProfile?.fanOfCount ?? 0);
@@ -10527,11 +10530,11 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   return (
     <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-2 md:p-6">
       <div className="bg-white dark:bg-slate-900 rounded-2xl md:rounded-[28px] w-full max-w-3xl xl:max-w-4xl max-h-[calc(100dvh-1rem)] md:max-h-[calc(100vh-2rem)] shadow-2xl overflow-hidden border border-white/10 flex flex-col">
-        <div className="relative h-40 md:h-72 w-full shrink-0">
-          <img src={headerImage} className="w-full h-full object-cover" />
+        <div className="relative h-52 w-full shrink-0 bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:h-72">
+          <img src={headerImage} alt="" className={`h-full w-full ${hasPreviewHeaderImage ? 'object-cover' : 'object-contain p-8 opacity-70 blur-[1px] md:p-14'}`} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
           <div className="absolute inset-x-0 bottom-0 p-4 md:p-8 text-white">
-            <h2 className="text-2xl md:text-4xl font-bold mb-2 md:mb-3">{userProfile.displayName}</h2>
+            <h2 className="mb-2 break-words text-2xl font-bold leading-tight md:mb-3 md:text-4xl">{userProfile.displayName}</h2>
             <div className="flex flex-wrap gap-1.5 md:gap-2 mb-2 md:mb-4">
               {roles.map((role) => (
                 <span

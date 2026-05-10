@@ -616,6 +616,8 @@ service cloud.firestore {
           'linkedCompanyStatus',
           'linkedAgencyLink',
           'linkedCompanyLink',
+          'quickProfilePreviewMode',
+          'quickProfilePostIds',
           'authProvider',
           'onboardingComplete',
           'onboardingStep',
@@ -656,6 +658,8 @@ service cloud.firestore {
         && (!('linkedCompanyId' in request.resource.data) || request.resource.data.linkedCompanyId is string || request.resource.data.linkedCompanyId == null)
         && (!('linkedAgencyStatus' in request.resource.data) || request.resource.data.linkedAgencyStatus is string)
         && (!('linkedCompanyStatus' in request.resource.data) || request.resource.data.linkedCompanyStatus is string)
+        && (!('quickProfilePreviewMode' in request.resource.data) || request.resource.data.quickProfilePreviewMode is string)
+        && (!('quickProfilePostIds' in request.resource.data) || request.resource.data.quickProfilePostIds is list)
         && safePublicAffiliationStatuses(uid)
         && isSelfSafePublicAffiliationStatusWrite()
         && (!('linkedAgencyLink' in request.resource.data) || request.resource.data.linkedAgencyLink is string || request.resource.data.linkedAgencyLink == null)

@@ -386,6 +386,25 @@ async function run() {
       }),
     );
 
+    await assertSucceeds(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        quickProfilePreviewMode: 'manual',
+        quickProfilePostIds: ['post_1', 'post_2'],
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        quickProfilePreviewMode: 123,
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        quickProfilePostIds: 'post_1',
+      }),
+    );
+
     await assertFails(
       updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
         fansCount: 99,

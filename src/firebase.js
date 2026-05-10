@@ -326,12 +326,19 @@ export const createContributorContentRequest = async ({ contributorId, postId, r
 export const getContributorByAlias = async (type, rawValue) => {
   const normalizedValue = normalizeAliasValue(type, rawValue);
   if (!normalizedValue) return null;
+  if (type === 'email') {
+    const callable = httpsCallable(getFirebaseFunctions(), 'getContributorByAliasCallable');
+    const result = await callable({ type, value: normalizedValue });
+    return result?.data || null;
+  }
   const aliasId = makeAliasId(type, normalizedValue);
   const aliasSnap = await getDoc(getContributorAliasRef(aliasId));
   if (!aliasSnap.exists()) return null;
   const aliasData = aliasSnap.data();
   const contributorSnap = await getDoc(getContributorRef(aliasData.contributorId));
   if (!contributorSnap.exists()) return null;
+  const contributorData = contributorSnap.data() || {};
+  const { email: _email, ...safeContributorData } = contributorData;
   return {
     alias: {
       id: aliasSnap.id,
@@ -339,7 +346,7 @@ export const getContributorByAlias = async (type, rawValue) => {
     },
     contributor: {
       id: contributorSnap.id,
-      ...contributorSnap.data(),
+      ...safeContributorData,
     },
   };
 };

@@ -869,7 +869,8 @@ service cloud.firestore {
 
     match /contributors/{contributorId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow create: if isSignedIn()
+        && !request.resource.data.keys().hasAny(['email']);
       allow update: if isModerator()
         || (isSignedIn()
           && resource.data.claimedByUid == request.auth.uid
@@ -878,10 +879,15 @@ service cloud.firestore {
           && request.resource.data.status == resource.data.status
           && request.resource.data.mergedInto == resource.data.mergedInto);
       allow delete: if false;
+
+      match /private/{docId} {
+        allow read, write: if false;
+      }
     }
 
     match /contributorAliases/{aliasId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn()
+        && (resource.data.type != 'email' || isModerator());
       allow create, update, delete: if isModerator();
     }
 

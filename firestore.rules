@@ -377,6 +377,26 @@ service cloud.firestore {
         && credit.makerFunction is string
         && isAllowedMakerFunction(credit.makerFunction);
     }
+    function creditAtIsConfirmedSelfPortraitMaker(credits, index) {
+      return index is int
+        && index >= 0
+        && credits.size() > index
+        && credits[index] is map
+        && ('role' in credits[index])
+        && credits[index].role == 'model'
+        && ('isSelf' in credits[index])
+        && credits[index].isSelf == true
+        && ('isMaker' in credits[index])
+        && credits[index].isMaker == true
+        && ('selfPortrait' in credits[index])
+        && credits[index].selfPortrait == true
+        && (
+          !('makerFunction' in credits[index])
+          || credits[index].makerFunction == null
+          || credits[index].makerFunction == ''
+        );
+    }
+
     function creditAtHasMakerRole(credits, index) {
       return index is int
         && index >= 0
@@ -385,6 +405,7 @@ service cloud.firestore {
         && (
           (('role' in credits[index]) && isAllowedMakerRole(credits[index].role))
           || creditHasExplicitMakerFunction(credits[index])
+          || creditAtIsConfirmedSelfPortraitMaker(credits, index)
         );
     }
     // The client-maintained uploadConsent.hasMaker/makerRoles fields are

@@ -6,7 +6,12 @@ export const ADAPTIVE_PHOTO_GRID_THRESHOLDS = {
   panoramaMin: 2.8,
 };
 
-const ROW_SPAN_UNIT = 16;
+const FALLBACK_GRID_METRICS = {
+  columnWidth: 220,
+  columnGap: 8,
+  rowHeight: 4,
+  rowGap: 4,
+};
 
 export const getPostImageAspectRatio = (post) => {
   const imageMeta = post?.imageMeta;
@@ -72,10 +77,34 @@ export const getAdaptivePhotoTileSpan = (post) => {
   };
 };
 
-export const getAdaptivePhotoGridItemStyle = (post, { footerRows = 0 } = {}) => {
-  const { columnSpan } = getAdaptivePhotoTileSpan(post);
-  const aspectRatio = getPostImageAspectRatio(post) || 1;
-  const mediaRows = Math.max(8, Math.ceil((columnSpan / aspectRatio) * ROW_SPAN_UNIT));
+const getPositiveNumber = (value, fallback) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+};
 
-  return { gridRowEnd: `span ${mediaRows + footerRows}` };
+export const getAdaptivePhotoGridItemStyle = (post, {
+  columnWidth,
+  columnGap,
+  rowHeight,
+  rowGap,
+  footerHeight = 0,
+  aspectRatio: aspectRatioOverride = null,
+  columnSpan: columnSpanOverride = null,
+} = {}) => {
+  const span = post ? getAdaptivePhotoTileSpan(post) : { columnSpan: 1 };
+  const columnSpan = getPositiveNumber(columnSpanOverride, span.columnSpan);
+  const aspectRatio = getPositiveNumber(aspectRatioOverride, getPostImageAspectRatio(post) || 1);
+  const measuredColumnWidth = getPositiveNumber(columnWidth, FALLBACK_GRID_METRICS.columnWidth);
+  const measuredColumnGap = getPositiveNumber(columnGap, FALLBACK_GRID_METRICS.columnGap);
+  const measuredRowHeight = getPositiveNumber(rowHeight, FALLBACK_GRID_METRICS.rowHeight);
+  const measuredRowGap = Number.isFinite(Number(rowGap)) && Number(rowGap) >= 0 ? Number(rowGap) : FALLBACK_GRID_METRICS.rowGap;
+  const measuredFooterHeight = Number.isFinite(Number(footerHeight)) && Number(footerHeight) > 0 ? Number(footerHeight) : 0;
+
+  const tileWidth = (measuredColumnWidth * columnSpan) + (measuredColumnGap * Math.max(0, columnSpan - 1));
+  const mediaHeight = tileWidth / aspectRatio;
+  const totalHeight = mediaHeight + measuredFooterHeight;
+  const effectiveRowUnit = measuredRowHeight + measuredRowGap;
+  const rowSpan = Math.max(1, Math.ceil((totalHeight + measuredRowGap) / effectiveRowUnit));
+
+  return { gridRowEnd: `span ${rowSpan}` };
 };

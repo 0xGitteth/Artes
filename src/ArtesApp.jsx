@@ -4205,6 +4205,71 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
   );
 }
 
+
+const parseAdaptiveGridPixelValue = (value, fallback = 0) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+const getAdaptiveGridMetrics = (element) => {
+  if (!element || typeof window === 'undefined') return null;
+
+  const styles = window.getComputedStyle(element);
+  const columns = styles.gridTemplateColumns
+    .split(' ')
+    .map((column) => Number.parseFloat(column))
+    .filter((columnWidth) => Number.isFinite(columnWidth) && columnWidth > 0);
+  const columnGap = parseAdaptiveGridPixelValue(styles.columnGap, 0);
+  const rowGap = parseAdaptiveGridPixelValue(styles.rowGap, 0);
+  const rowHeight = parseAdaptiveGridPixelValue(styles.gridAutoRows, 4);
+  const measuredWidth = element.getBoundingClientRect().width;
+  const columnCount = columns.length || 1;
+  const fallbackColumnWidth = Math.max(1, (measuredWidth - (columnGap * Math.max(0, columnCount - 1))) / columnCount);
+  const columnWidth = columns[0] || fallbackColumnWidth;
+
+  return { columnWidth, columnGap, rowHeight, rowGap };
+};
+
+const areAdaptiveGridMetricsEqual = (a, b) => Boolean(a && b
+  && Math.abs(a.columnWidth - b.columnWidth) < 0.5
+  && Math.abs(a.columnGap - b.columnGap) < 0.5
+  && Math.abs(a.rowHeight - b.rowHeight) < 0.5
+  && Math.abs(a.rowGap - b.rowGap) < 0.5);
+
+const useMeasuredAdaptiveGridMetrics = () => {
+  const gridRef = useRef(null);
+  const [gridMetrics, setGridMetrics] = useState(null);
+
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || typeof window === 'undefined') return undefined;
+
+    const updateGridMetrics = () => {
+      const nextMetrics = getAdaptiveGridMetrics(element);
+      if (!nextMetrics) return;
+      setGridMetrics((previousMetrics) => (areAdaptiveGridMetricsEqual(previousMetrics, nextMetrics) ? previousMetrics : nextMetrics));
+    };
+
+    updateGridMetrics();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateGridMetrics);
+      return () => window.removeEventListener('resize', updateGridMetrics);
+    }
+
+    const resizeObserver = new ResizeObserver(updateGridMetrics);
+    resizeObserver.observe(element);
+    window.addEventListener('resize', updateGridMetrics);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateGridMetrics);
+    };
+  }, []);
+
+  return { gridRef, gridMetrics };
+};
+
 function Discover({ users, posts, profile, currentUserId, onUserClick, onPostClick, setView, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
@@ -4213,6 +4278,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   const [showAllThemes, setShowAllThemes] = useState(false);
   const [showAllRoles, setShowAllRoles] = useState(false);
   const triggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
+  const { gridRef: mixedGridRef, gridMetrics: mixedGridMetrics } = useMeasuredAdaptiveGridMetrics();
 
   const normalizedUsers = useMemo(
     () => (Array.isArray(users) ? users.map((u) => normalizeUserForCollections(u)) : []),
@@ -4261,12 +4327,14 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
           </div>
        </div>
 
-       {tab === 'all' && <div className="grid grid-cols-3 gap-x-2 gap-y-1 [grid-auto-flow:dense] [grid-auto-rows:4px] sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">{mixedContent.map((item, i) => {
+       {tab === 'all' && <div ref={mixedGridRef} className="grid grid-cols-3 gap-x-2 gap-y-1 [grid-auto-flow:dense] [grid-auto-rows:4px] sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">{mixedContent.map((item, i) => {
          const isPost = item.type === 'post';
          const shouldCover = isPost ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
          const postSpan = isPost ? getAdaptivePhotoTileSpan(item.data) : null;
          const postFrameStyle = isPost ? getAdaptivePhotoFrameStyle(item.data) : undefined;
-         const tileStyle = isPost ? getAdaptivePhotoGridItemStyle(item.data, { footerRows: 5 }) : { gridRowEnd: 'span 21' };
+         const tileStyle = isPost
+           ? getAdaptivePhotoGridItemStyle(item.data, { ...mixedGridMetrics, footerHeight: 36 })
+           : getAdaptivePhotoGridItemStyle(null, { ...mixedGridMetrics, aspectRatio: 1, columnSpan: 1, footerHeight: 36 });
          return (
           <article
             key={`${item.type}-${item.data.id || item.data.uid || i}`}

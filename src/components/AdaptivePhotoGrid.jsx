@@ -1,5 +1,70 @@
+import { useEffect, useRef, useState } from 'react';
 import { getAdaptivePhotoFrameStyle, getAdaptivePhotoGridItemStyle, getAdaptivePhotoTileSpan } from '../utils/adaptivePhotoGrid';
 import { shouldIgnoreTileActivation } from '../utils/domInteraction';
+
+const parsePixelValue = (value, fallback = 0) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+const getGridMetrics = (element) => {
+  if (!element || typeof window === 'undefined') return null;
+
+  const styles = window.getComputedStyle(element);
+  const columns = styles.gridTemplateColumns
+    .split(' ')
+    .map((column) => Number.parseFloat(column))
+    .filter((columnWidth) => Number.isFinite(columnWidth) && columnWidth > 0);
+  const columnGap = parsePixelValue(styles.columnGap, 0);
+  const rowGap = parsePixelValue(styles.rowGap, 0);
+  const rowHeight = parsePixelValue(styles.gridAutoRows, 4);
+  const measuredWidth = element.getBoundingClientRect().width;
+  const columnCount = columns.length || 1;
+  const fallbackColumnWidth = Math.max(1, (measuredWidth - (columnGap * Math.max(0, columnCount - 1))) / columnCount);
+  const columnWidth = columns[0] || fallbackColumnWidth;
+
+  return { columnWidth, columnGap, rowHeight, rowGap };
+};
+
+const areGridMetricsEqual = (a, b) => Boolean(a && b
+  && Math.abs(a.columnWidth - b.columnWidth) < 0.5
+  && Math.abs(a.columnGap - b.columnGap) < 0.5
+  && Math.abs(a.rowHeight - b.rowHeight) < 0.5
+  && Math.abs(a.rowGap - b.rowGap) < 0.5);
+
+const useAdaptivePhotoGridMetrics = () => {
+  const gridRef = useRef(null);
+  const [gridMetrics, setGridMetrics] = useState(null);
+
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || typeof window === 'undefined') return undefined;
+
+    const updateGridMetrics = () => {
+      const nextMetrics = getGridMetrics(element);
+      if (!nextMetrics) return;
+      setGridMetrics((previousMetrics) => (areGridMetricsEqual(previousMetrics, nextMetrics) ? previousMetrics : nextMetrics));
+    };
+
+    updateGridMetrics();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateGridMetrics);
+      return () => window.removeEventListener('resize', updateGridMetrics);
+    }
+
+    const resizeObserver = new ResizeObserver(updateGridMetrics);
+    resizeObserver.observe(element);
+    window.addEventListener('resize', updateGridMetrics);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateGridMetrics);
+    };
+  }, []);
+
+  return { gridRef, gridMetrics };
+};
 
 export default function AdaptivePhotoGrid({
   posts = [],
@@ -11,13 +76,15 @@ export default function AdaptivePhotoGrid({
   className = '',
   itemClassName = '',
 }) {
+  const { gridRef, gridMetrics } = useAdaptivePhotoGridMetrics();
+
   return (
-    <div className={`grid grid-cols-3 gap-x-2 gap-y-1 [grid-auto-flow:dense] [grid-auto-rows:4px] sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 ${className}`.trim()}>
+    <div ref={gridRef} className={`grid grid-cols-3 gap-x-2 gap-y-1 [grid-auto-flow:dense] [grid-auto-rows:4px] sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 ${className}`.trim()}>
       {posts.map((post) => {
         const span = getAdaptivePhotoTileSpan(post);
         const shouldCover = getShouldCover?.(post) === true;
         const frameStyle = getAdaptivePhotoFrameStyle(post);
-        const itemStyle = getAdaptivePhotoGridItemStyle(post, { footerRows: renderFooter ? 7 : 0 });
+        const itemStyle = getAdaptivePhotoGridItemStyle(post, { ...gridMetrics, footerHeight: renderFooter ? 88 : 0 });
         const clickable = typeof onPostClick === 'function';
         return (
           <article

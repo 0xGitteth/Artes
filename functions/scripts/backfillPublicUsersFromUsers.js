@@ -28,6 +28,26 @@ const PUBLIC_ARRAY_FIELDS = [
   'themes',
 ];
 
+export const LEGACY_PRIVATE_PUBLIC_USER_FIELDS = [
+  'email',
+  'normalizedEmail',
+  'legalName',
+  'realName',
+  'birthDate',
+  'dateOfBirth',
+  'didit',
+  'diditStatus',
+  'idv',
+  'ageVerified',
+  'ageVerifiedAt',
+  'isAdult',
+  'preferences',
+  'triggerVisibility',
+  'moderation',
+  'support',
+  'private',
+];
+
 const parseServiceAccount = () => {
   const raw = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
   if (!raw) return null;
@@ -85,6 +105,16 @@ export const isPublishEligibleUser = (userData = {}) => (
   userData?.onboardingComplete === true
   && userData?.ageVerified === true
   && userData?.isAdult === true
+);
+
+export const getLegacyPrivatePublicUserFields = (publicUserData = {}) => LEGACY_PRIVATE_PUBLIC_USER_FIELDS
+  .filter((field) => Object.prototype.hasOwnProperty.call(publicUserData || {}, field));
+
+export const buildLegacyPrivateFieldDeletes = (publicUserData = {}, { deleteValue = () => undefined } = {}) => (
+  getLegacyPrivatePublicUserFields(publicUserData).reduce((patch, field) => {
+    patch[field] = deleteValue();
+    return patch;
+  }, {})
 );
 
 export const buildPublicUserBackfillPayload = (uid, userData = {}, { serverTimestamp = () => new Date() } = {}) => {
@@ -175,19 +205,20 @@ const getUserSnapshots = async (db, uid = null) => {
   return snap.docs;
 };
 
-const commitBatch = async ({ batch, count, dryRun, stats }) => {
+const commitBatch = async ({ batch, count, legacyDeleteCount, dryRun, stats }) => {
   if (!count) return;
   if (dryRun) return;
   try {
     await batch.commit();
     stats.written += count;
+    stats.legacyPrivateFieldsDeleted += legacyDeleteCount;
   } catch (error) {
     stats.failed += count;
     console.error('[backfillPublicUsersFromUsers] Batch write failed:', error?.message || error);
   }
 };
 
-export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimestamp = () => new Date() } = {}) => {
+export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimestamp = () => new Date(), deleteValue = () => undefined } = {}) => {
   if (!db) throw new Error('Firestore db is verplicht.');
 
   const stats = {
@@ -197,11 +228,14 @@ export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimesta
     wouldWrite: 0,
     written: 0,
     failed: 0,
+    legacyPrivateFieldsFound: 0,
+    legacyPrivateFieldsDeleted: 0,
   };
 
   const userDocs = await getUserSnapshots(db, uid);
   let batch = db.batch();
   let batchCount = 0;
+  let batchLegacyDeleteCount = 0;
 
   for (const docSnap of userDocs) {
     stats.scanned += 1;
@@ -212,21 +246,33 @@ export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimesta
     }
 
     stats.eligible += 1;
-    const payload = buildPublicUserBackfillPayload(docSnap.id, userData, { serverTimestamp });
+    const publicRef = db.collection('publicUsers').doc(docSnap.id);
+    const publicSnap = await publicRef.get();
+    const publicData = publicSnap.exists ? (publicSnap.data() || {}) : {};
+    const legacyPrivateFields = getLegacyPrivatePublicUserFields(publicData);
+    const legacyDeletePatch = buildLegacyPrivateFieldDeletes(publicData, { deleteValue });
+    stats.legacyPrivateFieldsFound += legacyPrivateFields.length;
+
+    const payload = {
+      ...buildPublicUserBackfillPayload(docSnap.id, userData, { serverTimestamp }),
+      ...legacyDeletePatch,
+    };
     stats.wouldWrite += 1;
 
     if (!dryRun) {
-      batch.set(db.collection('publicUsers').doc(docSnap.id), payload, { merge: true });
+      batch.set(publicRef, payload, { merge: true });
       batchCount += 1;
+      batchLegacyDeleteCount += legacyPrivateFields.length;
       if (batchCount >= BATCH_LIMIT) {
-        await commitBatch({ batch, count: batchCount, dryRun, stats });
+        await commitBatch({ batch, count: batchCount, legacyDeleteCount: batchLegacyDeleteCount, dryRun, stats });
         batch = db.batch();
         batchCount = 0;
+        batchLegacyDeleteCount = 0;
       }
     }
   }
 
-  await commitBatch({ batch, count: batchCount, dryRun, stats });
+  await commitBatch({ batch, count: batchCount, legacyDeleteCount: batchLegacyDeleteCount, dryRun, stats });
   return stats;
 };
 
@@ -238,7 +284,14 @@ const main = async () => {
   }
 
   const { db, serverTimestamp } = await initAdmin();
-  const stats = await runBackfill({ db, uid: options.uid, dryRun: options.dryRun, serverTimestamp });
+  const { FieldValue } = await import('firebase-admin/firestore');
+  const stats = await runBackfill({
+    db,
+    uid: options.uid,
+    dryRun: options.dryRun,
+    serverTimestamp,
+    deleteValue: FieldValue.delete,
+  });
 
   console.log('[backfillPublicUsersFromUsers] Done', {
     dryRun: options.dryRun,

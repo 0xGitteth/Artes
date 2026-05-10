@@ -182,7 +182,6 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
       avatar: clampFrameModel('avatar', prev.avatar),
       header: clampFrameModel('header', prev.header),
     }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [areaSize.width, areaSize.height, headerAspect]);
 
   useEffect(() => {
@@ -202,7 +201,6 @@ export default function ProfileImageCropper({ source, measuredHeaderAspectRatio 
         previewDebounceRef.current = null;
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameByKey, areaSize.width, areaSize.height, imgNatural.width, imgNatural.height, headerAspect]);
 
   const onFramePointerDown = (key) => (e) => {

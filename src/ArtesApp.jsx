@@ -7372,7 +7372,6 @@ function UploadModal({
           displayName: contributor.displayName || 'Tijdelijk profiel',
           instagramHandle: contributor.instagramHandle || null,
           website: contributor.website || null,
-          email: contributor.email || null,
           isTemporaryContributor: true,
         } : null);
       })
@@ -7912,7 +7911,6 @@ function UploadModal({
           ...(isTemporaryContributor ? {
             instagramHandle: foundUser.instagramHandle || null,
             website: foundUser.website || null,
-            email: foundUser.email || null,
             isExternal: true,
           } : {}),
           ...getNewCreditMakerFields(),
@@ -7993,7 +7991,6 @@ function UploadModal({
          contributorId,
          instagramHandle: normalizedInstagram || null,
          website: normalizedWebsite || null,
-         email: normalizedEmail || null,
          isExternal: true,
          ...getNewCreditMakerFields(),
        }, { exception: consentException }),

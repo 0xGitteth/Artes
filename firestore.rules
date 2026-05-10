@@ -909,9 +909,11 @@ service cloud.firestore {
     }
 
     match /claimInvites/{inviteId} {
-      allow create: if isSignedIn();
+      allow create: if false;
       allow read: if isSignedIn()
-        && (isModerator() || request.auth.uid == resource.data.creatorUid);
+        && (isModerator()
+          || request.auth.uid == resource.data.createdByUid
+          || request.auth.uid == resource.data.creatorUid);
       allow update: if isModerator();
       allow delete: if false;
     }

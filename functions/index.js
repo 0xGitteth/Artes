@@ -78,6 +78,37 @@ if (!admin.apps.length) {
 
 const db = getFirestore();
 const lockDurationMs = 10 * 60 * 1000;
+
+const toContributorString = (value) => String(value ?? '').trim();
+
+const normalizeContributorInstagram = (handle) => toContributorString(handle)
+  .replace(/^@+/, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9_.]/g, '');
+
+const normalizeContributorEmail = (email) => toContributorString(email).toLowerCase();
+
+const makeContributorAliasId = (type, value) => `${type}:${toContributorString(value).toLowerCase()}`;
+
+const isValidContributorEmail = (email) => !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const buildTemporaryContributorAliases = ({ instagramHandle, website, email }) => {
+  const normalizedInstagram = normalizeContributorInstagram(instagramHandle);
+  const normalizedDomain = normalizeDomain(website);
+  const normalizedEmail = normalizeContributorEmail(email);
+  const aliases = [
+    normalizedInstagram ? { type: 'instagram', value: normalizedInstagram } : null,
+    normalizedDomain ? { type: 'domain', value: normalizedDomain } : null,
+    normalizedEmail ? { type: 'email', value: normalizedEmail } : null,
+  ].filter(Boolean);
+
+  return {
+    aliases,
+    normalizedInstagram,
+    normalizedDomain,
+    normalizedEmail,
+  };
+};
 const MODERATION_EXAMPLE_REASON_CODES = new Set([
   'allowed_art_nude',
   'allowed_boudoir',
@@ -1445,7 +1476,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const appliedTriggers = normalizedMakerTags.map((tag) => buildTriggerRecord(tag, 1, 'makerTag'));
   const suggestedTriggers = [];
   const forbiddenReasons = [];
-  const aiSafetySignals = [];
+  let aiSafetySignals = [];
 
   const imageAnnotator = new ImageAnnotatorClient();
   let labels = [];
@@ -1695,6 +1726,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const aiVisionLabels = policyResult.aiVisionLabels;
   aiSafetySignals = policyResult.aiSafetySignals;
   let reviewCaseId = policyResult.reviewCaseId;
+  let uploadId = null;
   let canRequestReview = false;
   let openReviewCase = null;
   let inCooldown = false;
@@ -1883,7 +1915,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
           ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
           aiSummary: buildAiSummary({
             classification,
-            shouldReview: shouldReviewWithPreviousExample,
+            shouldReview: effectiveShouldReview,
             forbiddenReasons: finalForbiddenReasons,
             appliedTriggers: finalAppliedTriggers,
             suggestedTriggers: finalSuggestedTriggers,
@@ -3723,6 +3755,84 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to perform action' });
   }
+});
+
+
+export const createTemporaryContributor = onCall({ region: 'europe-west4' }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+
+  const displayName = toContributorString(request.data?.displayName).replace(/\s+/g, ' ').slice(0, 80);
+  if (!displayName) {
+    throw new HttpsError('invalid-argument', 'displayName is required');
+  }
+
+  const {
+    aliases,
+    normalizedInstagram,
+    normalizedDomain,
+    normalizedEmail,
+  } = buildTemporaryContributorAliases({
+    instagramHandle: request.data?.instagramHandle,
+    website: request.data?.website,
+    email: request.data?.email,
+  });
+
+  if (normalizedEmail && !isValidContributorEmail(normalizedEmail)) {
+    throw new HttpsError('invalid-argument', 'Invalid email alias');
+  }
+
+  const contributorRef = db.collection('contributors').doc();
+  const aliasRefs = aliases.map((alias) => ({
+    ...alias,
+    aliasId: makeContributorAliasId(alias.type, alias.value),
+    ref: db.collection('contributorAliases').doc(makeContributorAliasId(alias.type, alias.value)),
+  }));
+
+  await db.runTransaction(async (transaction) => {
+    for (const alias of aliasRefs) {
+      const existing = await transaction.get(alias.ref);
+      if (existing.exists) {
+        throw new HttpsError('already-exists', `Alias already claimed: ${alias.aliasId}`);
+      }
+    }
+
+    transaction.set(contributorRef, {
+      displayName,
+      displayNameLower: displayName.toLowerCase(),
+      instagramHandle: normalizedInstagram || null,
+      website: normalizedDomain || null,
+      email: normalizedEmail || null,
+      status: 'unclaimed',
+      createdByUid: request.auth.uid,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    aliasRefs.forEach((alias) => {
+      transaction.set(alias.ref, {
+        type: alias.type,
+        value: alias.value,
+        contributorId: contributorRef.id,
+        createdByUid: request.auth.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+  });
+
+  return {
+    contributorId: contributorRef.id,
+    aliasIds: aliasRefs.map((alias) => alias.aliasId),
+    contributor: {
+      id: contributorRef.id,
+      displayName,
+      instagramHandle: normalizedInstagram || null,
+      website: normalizedDomain || null,
+      hasEmail: Boolean(normalizedEmail),
+      status: 'unclaimed',
+    },
+  };
 });
 
 export const createClaimInvite = onCall({ region: 'europe-west4' }, async (request) => {

@@ -13,6 +13,7 @@ import {
   hasMakerCredit,
   hasVisibleSubjectCredit,
   normalizeCreditAfterRoleChange,
+  sanitizePostCreditForWrite,
   validateUploadConsent,
 } from '../src/utils/uploadConsent.js';
 
@@ -22,6 +23,24 @@ assert.equal(hasMakerCredit([{ role: 'artist' }]), true, 'artist is an allowed m
 assert.equal(getMakerCreditIndex([{ role: 'model' }, { role: 'retoucher' }]), 1, 'maker index points at first maker credit');
 assert.equal(getMakerCreditIndex([{ role: 'model' }, { role: 'mua' }]), -1, 'missing maker credit has no maker index');
 assert.equal(hasVisibleSubjectCredit([{ role: 'model' }]), true, 'model is a visible subject role');
+
+const sanitizedExternalCredit = sanitizePostCreditForWrite({
+  role: 'model',
+  name: 'External Contributor',
+  contributorId: 'contributor_1',
+  instagramHandle: 'artist',
+  website: 'example.com',
+  email: 'private@example.com',
+  proofData: { emailVerified: true },
+  claimCode: 'secret',
+  isExternal: true,
+  consentStatus: CONTRIBUTOR_CONSENT_STATUSES.PENDING,
+});
+assert.equal(sanitizedExternalCredit.email, undefined, 'post credit sanitization removes email');
+assert.equal(sanitizedExternalCredit.proofData, undefined, 'post credit sanitization removes proof data');
+assert.equal(sanitizedExternalCredit.claimCode, undefined, 'post credit sanitization removes claim verification fields');
+assert.equal(sanitizedExternalCredit.instagramHandle, 'artist', 'post credit sanitization keeps public instagram handle');
+assert.equal(sanitizedExternalCredit.website, 'example.com', 'post credit sanitization keeps public website');
 
 assert.deepEqual(
   normalizeCreditAfterRoleChange({ role: 'photographer', isMaker: true, makerFunction: 'photographer' }, 'model'),

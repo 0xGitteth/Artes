@@ -6962,7 +6962,8 @@ function UploadModal({
   const [externalContributorSearchHint, setExternalContributorSearchHint] = useState('');
   const [externalContributorSaving, setExternalContributorSaving] = useState(false);
   const [externalContributorError, setExternalContributorError] = useState('');
-  const [inviteCandidates, setInviteCandidates] = useState([]);
+  // Newly-created temporary contributors need claim invites after publish; do not clear this in per-credit form resets.
+  const [pendingInviteContributors, setPendingInviteContributors] = useState([]);
   const [inviteShareLinks, setInviteShareLinks] = useState([]);
   const [inviteShareOpen, setInviteShareOpen] = useState(false);
   const [inviteShareError, setInviteShareError] = useState('');
@@ -7872,7 +7873,6 @@ function UploadModal({
 
   const resetExternalContributorState = () => {
     setContributorSearch('');
-    setInviteCandidates([]);
     setAllowExternalOverride(false);
     setShowInvite(false);
     setAliasSearchResult(null);
@@ -7898,7 +7898,6 @@ function UploadModal({
     setShowInvite(true);
     setContributorSearch('');
     setAliasSearchResult(null);
-    setInviteCandidates([]);
     setExternalContributorError('');
   };
 
@@ -7973,7 +7972,7 @@ function UploadModal({
        });
        contributorId = result.contributorId;
        createdAliasIds = result.aliasIds;
-       setInviteCandidates((prev) => {
+       setPendingInviteContributors((prev) => {
          if (prev.some((entry) => entry.contributorId === contributorId)) return prev;
          return [...prev, { contributorId, displayName }];
        });
@@ -8384,13 +8383,13 @@ function UploadModal({
       setStep(1);
       setPublishing(false);
 
-      if (inviteCandidates.length > 0) {
+      if (pendingInviteContributors.length > 0) {
         setInviteShareError('');
         setInviteShareCopied('');
         const baseUrl = window.location.origin;
         try {
           const inviteResults = await Promise.all(
-            inviteCandidates.map(async (candidate) => {
+            pendingInviteContributors.map(async (candidate) => {
               const result = await createClaimInvite({
                 contributorId: candidate.contributorId,
                 postId,
@@ -8405,16 +8404,16 @@ function UploadModal({
           );
           setInviteShareLinks(inviteResults.filter((entry) => entry.url));
           setInviteShareOpen(true);
+          setPendingInviteContributors([]);
         } catch (error) {
           console.error('[UploadModal] Failed to create claim invite', error);
           setInviteShareError(error?.message || 'Invite link maken mislukt.');
           setInviteShareOpen(true);
-        } finally {
-          setInviteCandidates([]);
         }
         return;
       }
 
+      setPendingInviteContributors([]);
       onClose();
     } catch (error) {
       console.error('Publish error', error);

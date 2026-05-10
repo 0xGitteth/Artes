@@ -93,6 +93,21 @@ assert.equal(legacyFallback[0].roleLabel, 'Fotograaf');
 assert.equal(legacyFallback[0].name, 'Legacy Name');
 assert.equal(legacyFallback[0].secondaryLabel, '');
 
+
+const legacySelfMakerConfirmedFallback = getPostCreditRows({
+  authorId: 'legacy_model',
+  authorName: 'Legacy Model',
+  authorRole: 'model',
+  uploadConsent: {
+    selfMakerRoleConfirmed: true,
+    selfMakerRole: 'photographer',
+  },
+});
+assert.equal(legacySelfMakerConfirmedFallback.length, 1, 'legacy uploadConsent self maker post renders one fallback row');
+assert.equal(legacySelfMakerConfirmedFallback[0].roleLabel, 'Model');
+assert.equal(legacySelfMakerConfirmedFallback[0].name, 'Legacy Model');
+assert.equal(legacySelfMakerConfirmedFallback[0].secondaryLabel, '', 'legacy uploadConsent self maker data does not display as self portrait');
+
 // Static guard: timeline and modal must keep using the shared credit renderer.
 const timelineSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 'utf8');
 const modalSource = readFileSync(new URL('../src/components/PhotoDetailModal.jsx', import.meta.url), 'utf8');

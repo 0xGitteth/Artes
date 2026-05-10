@@ -73,7 +73,7 @@ export const getCreditMakerFunction = (credit = {}) => {
 
 export const isExplicitMakerCredit = (credit = {}) => {
   if (getCreditMakerFunction(credit)) return true;
-  return Boolean(credit.isSelf && credit.role === 'model');
+  return Boolean(credit.isSelf && credit.role === 'model' && credit.selfPortrait === true && credit.isMaker === true);
 };
 
 export const getMakerCreditIndex = (credits = []) => (Array.isArray(credits) ? credits : [])
@@ -93,6 +93,7 @@ export const hasValidSelfMakerCredit = ({
 } = {}) => (Array.isArray(credits) ? credits : [])
   .some((credit) => {
     if (!credit?.isSelf || credit.role !== uploaderRole) return false;
+    if (credit.selfPortrait === true && credit.isMaker === true && credit.role === 'model') return true;
     const makerFunction = getCreditMakerFunction(credit);
     if (!makerFunction) return false;
     if (Array.isArray(profileRoles) && profileRoles.includes(credit.role)) return true;
@@ -149,6 +150,7 @@ export const sanitizePostCreditForWrite = (credit = {}) => {
     'isSelf',
     'isMaker',
     'makerFunction',
+    'selfPortrait',
     'consentStatus',
     'consentRequired',
     'consentUpdatedAt',
@@ -166,7 +168,8 @@ export const normalizeConsentCredit = (credit = {}, context = {}) => {
   const explicitMakerFunction = String(credit.makerFunction || '').trim();
   const legacyMakerFunction = isMakerRole(role) ? role : '';
   const makerFunction = isMakerFunction(explicitMakerFunction) ? explicitMakerFunction : legacyMakerFunction;
-  const isMaker = Boolean(legacyMakerFunction || (credit.isMaker && makerFunction));
+  const isSelfPortraitMaker = Boolean(isSelf && role === 'model' && credit.selfPortrait === true && credit.isMaker === true);
+  const isMaker = Boolean(isSelfPortraitMaker || legacyMakerFunction || (credit.isMaker && makerFunction));
   let consentStatus = credit.consentStatus;
 
   if (isAnonymous) {
@@ -182,8 +185,9 @@ export const normalizeConsentCredit = (credit = {}, context = {}) => {
   return {
     ...credit,
     role,
-    makerFunction: isMaker ? makerFunction : null,
+    makerFunction: makerFunction && !isSelfPortraitMaker ? makerFunction : null,
     isMaker,
+    selfPortrait: isSelfPortraitMaker ? true : Boolean(credit.selfPortrait),
     consentStatus,
     consentRequired: consentStatus === CONTRIBUTOR_CONSENT_STATUSES.PENDING,
     consentUpdatedAt: credit.consentUpdatedAt || null,
@@ -210,6 +214,7 @@ export const getMissingMakerPromptState = ({
   const validMakerCredits = creditList.filter((credit) => {
     if (!isExplicitMakerCredit(credit)) return false;
     if (!credit?.isSelf) return true;
+    if (credit.selfPortrait === true && credit.isMaker === true && credit.role === 'model') return credit.role === uploaderRole;
     const makerFunction = getCreditMakerFunction(credit);
     return credit.role === uploaderRole
       && (

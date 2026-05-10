@@ -23,7 +23,7 @@ const getCreditDisplayLabels = (credit = {}) => {
     return { roleLabel: 'Beeld door', secondaryLabel: '' };
   }
 
-  if (isSelf && SELF_PORTRAIT_ROLES.has(role)) {
+  if (isSelf && role === 'model' && credit.isMaker === true && credit.selfPortrait === true) {
     return { roleLabel: getRoleLabel(role), secondaryLabel: 'Zelfportret' };
   }
 

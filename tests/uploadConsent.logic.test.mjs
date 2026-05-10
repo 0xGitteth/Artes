@@ -12,6 +12,7 @@ import {
   getVisiblePersonPromptState,
   hasMakerCredit,
   hasVisibleSubjectCredit,
+  normalizeConsentCredit,
   normalizeCreditAfterRoleChange,
   sanitizePostCreditForWrite,
   validateUploadConsent,
@@ -62,6 +63,24 @@ assert.deepEqual(
   { role: 'photographer', isMaker: true, makerFunction: 'photographer' },
   'changing role model -> photographer sets isMaker true and makerFunction photographer',
 );
+
+const confirmedSelfPortraitConsent = buildUploadConsent({
+  credits: [{ role: 'model', isSelf: true, isMaker: true, selfPortrait: true }],
+  uploaderRole: 'model',
+  profileRoles: ['model'],
+});
+assert.equal(confirmedSelfPortraitConsent.missingMakerPromptResolved, true, 'confirmed self portrait resolves missing maker prompt');
+const normalizedConfirmedSelfPortrait = normalizeConsentCredit({ role: 'model', isSelf: true, isMaker: true, selfPortrait: true });
+assert.equal(normalizedConfirmedSelfPortrait.makerFunction, null, 'confirmed self portrait does not store makerFunction');
+assert.equal(normalizedConfirmedSelfPortrait.selfPortrait, true, 'confirmed self portrait flag is preserved');
+
+const unconfirmedSelfModelConsent = buildUploadConsent({
+  credits: [{ role: 'model', isSelf: true }],
+  uploaderRole: 'model',
+  profileRoles: ['model'],
+});
+assert.equal(unconfirmedSelfModelConsent.missingMakerPromptResolved, false, 'unconfirmed self model does not resolve maker requirement');
+
 const modelRoleAfterReset = normalizeCreditAfterRoleChange({ role: 'photographer', isMaker: true, makerFunction: 'photographer' }, 'model');
 const explicitModelMakerAfterReset = { ...modelRoleAfterReset, isMaker: true, makerFunction: 'photographer' };
 assert.equal(hasMakerCredit([explicitModelMakerAfterReset]), true, 'explicitly marking a non-maker role as maker still works after role change');

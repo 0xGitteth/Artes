@@ -100,7 +100,7 @@ import PhotoDetailModal from './components/PhotoDetailModal';
 import PostImageDisplay from './components/PostImageDisplay';
 import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
 import ModalShell from './components/ModalShell';
-import { getAdaptivePhotoTileSpan } from './utils/adaptivePhotoGrid';
+import { getAdaptivePhotoFrameStyle, getAdaptivePhotoGridItemStyle, getAdaptivePhotoTileSpan } from './utils/adaptivePhotoGrid';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
 import PostCreditDisplay from './components/PostCreditDisplay';
@@ -4205,6 +4205,71 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
   );
 }
 
+
+const parseAdaptiveGridPixelValue = (value, fallback = 0) => {
+  const number = Number.parseFloat(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+const getAdaptiveGridMetrics = (element) => {
+  if (!element || typeof window === 'undefined') return null;
+
+  const styles = window.getComputedStyle(element);
+  const columns = styles.gridTemplateColumns
+    .split(' ')
+    .map((column) => Number.parseFloat(column))
+    .filter((columnWidth) => Number.isFinite(columnWidth) && columnWidth > 0);
+  const columnGap = parseAdaptiveGridPixelValue(styles.columnGap, 0);
+  const rowGap = parseAdaptiveGridPixelValue(styles.rowGap, 0);
+  const rowHeight = parseAdaptiveGridPixelValue(styles.gridAutoRows, 4);
+  const measuredWidth = element.getBoundingClientRect().width;
+  const columnCount = columns.length || 1;
+  const fallbackColumnWidth = Math.max(1, (measuredWidth - (columnGap * Math.max(0, columnCount - 1))) / columnCount);
+  const columnWidth = columns[0] || fallbackColumnWidth;
+
+  return { columnWidth, columnGap, rowHeight, rowGap };
+};
+
+const areAdaptiveGridMetricsEqual = (a, b) => Boolean(a && b
+  && Math.abs(a.columnWidth - b.columnWidth) < 0.5
+  && Math.abs(a.columnGap - b.columnGap) < 0.5
+  && Math.abs(a.rowHeight - b.rowHeight) < 0.5
+  && Math.abs(a.rowGap - b.rowGap) < 0.5);
+
+const useMeasuredAdaptiveGridMetrics = () => {
+  const gridRef = useRef(null);
+  const [gridMetrics, setGridMetrics] = useState(null);
+
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element || typeof window === 'undefined') return undefined;
+
+    const updateGridMetrics = () => {
+      const nextMetrics = getAdaptiveGridMetrics(element);
+      if (!nextMetrics) return;
+      setGridMetrics((previousMetrics) => (areAdaptiveGridMetricsEqual(previousMetrics, nextMetrics) ? previousMetrics : nextMetrics));
+    };
+
+    updateGridMetrics();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateGridMetrics);
+      return () => window.removeEventListener('resize', updateGridMetrics);
+    }
+
+    const resizeObserver = new ResizeObserver(updateGridMetrics);
+    resizeObserver.observe(element);
+    window.addEventListener('resize', updateGridMetrics);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateGridMetrics);
+    };
+  }, []);
+
+  return { gridRef, gridMetrics };
+};
+
 function Discover({ users, posts, profile, currentUserId, onUserClick, onPostClick, setView, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
@@ -4213,6 +4278,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   const [showAllThemes, setShowAllThemes] = useState(false);
   const [showAllRoles, setShowAllRoles] = useState(false);
   const triggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
+  const { gridRef: mixedGridRef, gridMetrics: mixedGridMetrics } = useMeasuredAdaptiveGridMetrics();
 
   const normalizedUsers = useMemo(
     () => (Array.isArray(users) ? users.map((u) => normalizeUserForCollections(u)) : []),
@@ -4261,10 +4327,14 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
           </div>
        </div>
 
-       {tab === 'all' && <div className="columns-3 gap-x-2 gap-y-2 sm:columns-4 md:columns-4 lg:columns-5 xl:columns-6">{mixedContent.map((item, i) => {
+       {tab === 'all' && <div ref={mixedGridRef} className="grid grid-cols-3 gap-x-2 gap-y-1 [grid-auto-flow:dense] [grid-auto-rows:4px] sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">{mixedContent.map((item, i) => {
          const isPost = item.type === 'post';
          const shouldCover = isPost ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
          const postSpan = isPost ? getAdaptivePhotoTileSpan(item.data) : null;
+         const postFrameStyle = isPost ? getAdaptivePhotoFrameStyle(item.data) : undefined;
+         const tileStyle = isPost
+           ? getAdaptivePhotoGridItemStyle(item.data, { ...mixedGridMetrics, footerHeight: 36 })
+           : getAdaptivePhotoGridItemStyle(null, { ...mixedGridMetrics, aspectRatio: 1, columnSpan: 1, footerHeight: 36 });
          return (
           <article
             key={`${item.type}-${item.data.id || item.data.uid || i}`}
@@ -4281,16 +4351,17 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
                 isPost ? onPostClick(item.data) : onUserClick(item.data.uid);
               }
             }}
-            className="group relative inline-block w-full mb-2 break-inside-avoid overflow-hidden rounded-lg bg-white text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl cursor-pointer"
+            className={`group relative w-full overflow-hidden rounded-lg bg-white text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl cursor-pointer ${isPost ? postSpan.className : 'col-span-1'}`}
+            style={tileStyle}
             data-tile-type={isPost ? postSpan.tileType : 'user'}
           >
-             <div className="relative overflow-hidden">
+             <div className="relative w-full overflow-hidden" style={postFrameStyle}>
                {shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(item.data.id)} /> : null}
                <img
                  src={isPost ? item.data.imageUrl : item.data.avatar}
                  alt={isPost ? item.data.title || '' : item.data.displayName || ''}
                  loading="lazy"
-                 className={`relative z-0 block w-full ${isPost ? 'h-auto object-contain' : 'aspect-square h-auto object-cover'}`}
+                 className={`relative z-0 block w-full ${isPost ? `${postFrameStyle ? 'h-full' : 'h-auto'} object-contain` : 'aspect-square h-auto object-cover'}`}
                />
              </div>
              <div className="px-2 py-1.5 font-bold text-[11px] truncate dark:text-white md:p-2 md:text-xs">{isPost ? item.data.title : item.data.displayName}</div>
@@ -4852,7 +4923,17 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
            <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white dark:from-slate-900 to-transparent z-10" /> 
            
-           {isOwn && <div className="absolute right-4 bottom-4 z-30"><Button onClick={onOpenSettings} className="bg-black/50 text-white hover:bg-black/70 border-none backdrop-blur-md"><Edit3 className="w-4 h-4 mr-2"/> Profiel Bewerken</Button></div>}
+           {isOwn && (
+             <div className="absolute right-3 top-3 z-30 md:right-6 md:top-6">
+               <button
+                 type="button"
+                 onClick={onOpenSettings}
+                 className="inline-flex items-center justify-center rounded-full border border-white/70 bg-white/90 px-3 py-2 text-xs font-bold text-blue-900 shadow-sm backdrop-blur-md transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-slate-950/75 dark:text-white dark:hover:bg-slate-950 md:px-4 md:text-sm"
+               >
+                 <Edit3 className="mr-1.5 h-4 w-4 md:mr-2"/> Profiel Bewerken
+               </button>
+             </div>
+           )}
            
            <div className="absolute inset-0 z-20 flex flex-col justify-end items-center px-5 pb-6 text-center">
               <h1 className="text-5xl font-bold text-blue-700 dark:text-white mb-3">{normalizedProfile.displayName}</h1>
@@ -7031,9 +7112,25 @@ function UploadModal({
     userAcknowledgedVisiblePersonPrompt: subjectWarningAcknowledged,
   }), [credits, uploaderRole, aiPeoplePresent, consentException, subjectWarningAcknowledged]);
 
-  const hasSelfModelCredit = useMemo(() => {
-    return credits.some(c => c.isSelf === true && c.role === 'model');
-  }, [credits]);
+  const currentUserModelCreditIndex = useMemo(() => credits.findIndex((credit) => {
+    if (credit?.role !== 'model') return false;
+    return Boolean(
+      (user?.uid && credit.uid === user.uid)
+        || (profile?.uid && credit.uid === profile.uid)
+        || (profile?.contributorId && credit.contributorId === profile.contributorId)
+        || credit.isSelf === true
+    );
+  }), [credits, profile?.contributorId, profile?.uid, user?.uid]);
+  const hasCurrentUserModelCredit = currentUserModelCreditIndex >= 0;
+  const selfPortraitConfirmed = useMemo(() => credits.some((credit) => Boolean(
+    credit?.role === 'model'
+      && credit.selfPortrait === true
+      && (credit.isSelf === true || (user?.uid && credit.uid === user.uid) || (profile?.uid && credit.uid === profile.uid))
+  )), [credits, profile?.uid, user?.uid]);
+  const shouldShowSelfPortraitConfirmation = uploaderRole === 'model'
+    && hasCurrentUserModelCredit
+    && missingMakerPromptState.shouldShowMissingMakerPrompt
+    && !selfPortraitConfirmed;
 
   const confirmSelfMakerRoleForUpload = useCallback((role) => {
     if (!isMakerRole(role)) return;
@@ -7054,8 +7151,19 @@ function UploadModal({
   }, [profile.roles]);
 
   const confirmSelfPortrait = useCallback(() => {
-    setCredits(prev => prev.map(c => c.isSelf && c.role === 'model' ? { ...c, isMaker: true, selfPortrait: true } : c));
-  }, []);
+    setCredits((prev) => prev.map((credit, index) => (index === currentUserModelCreditIndex ? {
+      ...credit,
+      role: 'model',
+      uid: credit.uid || user?.uid || profile?.uid || null,
+      name: credit.name || profile?.displayName || '',
+      isSelf: true,
+      isMaker: true,
+      selfPortrait: true,
+      makerFunction: '',
+      consentStatus: CONTRIBUTOR_CONSENT_STATUSES.ACCEPTED,
+      consentRequired: false,
+    } : credit)));
+  }, [currentUserModelCreditIndex, profile?.displayName, profile?.uid, user?.uid]);
 
   useEffect(() => {
     if (missingMakerPromptState.shouldShowMissingMakerPrompt) {
@@ -8793,7 +8901,7 @@ function UploadModal({
                                  Anonieme maker toevoegen
                                </button>
                              </div>
-                             {missingMakerPromptState.shouldShowMissingMakerPrompt && uploaderRole === 'model' && hasSelfModelCredit ? (
+                             {shouldShowSelfPortraitConfirmation ? (
                                <div className="mt-2.5 rounded-xl border border-rose-200 bg-white/70 p-2.5 dark:border-rose-800 dark:bg-slate-900/50 md:mt-3 md:p-3">
                                  <p className="font-semibold">Dit is een zelfportret</p>
                                  <p className="mt-1.5 md:mt-2 text-sm text-slate-600 dark:text-slate-300">Bevestig dat je dit beeld zelf hebt gemaakt als model.</p>

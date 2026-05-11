@@ -16,6 +16,8 @@ import {
   updatePost,
   deletePost,
 } from './services/firebaseClient';
+import useAdaptivePhotoGridMetrics from './utils/useAdaptivePhotoGridMetrics';
+import useRecoveredImageMeta from './utils/useRecoveredImageMeta';
 import {
   ensureUserProfile,
   fetchUserProfile,
@@ -4211,64 +4213,7 @@ const parseAdaptiveGridPixelValue = (value, fallback = 0) => {
   return Number.isFinite(number) ? number : fallback;
 };
 
-const getAdaptiveGridMetrics = (element) => {
-  if (!element || typeof window === 'undefined') return null;
-
-  const styles = window.getComputedStyle(element);
-  const columns = styles.gridTemplateColumns
-    .split(' ')
-    .map((column) => Number.parseFloat(column))
-    .filter((columnWidth) => Number.isFinite(columnWidth) && columnWidth > 0);
-  const columnGap = parseAdaptiveGridPixelValue(styles.columnGap, 0);
-  const rowGap = parseAdaptiveGridPixelValue(styles.rowGap, 0);
-  const rowHeight = parseAdaptiveGridPixelValue(styles.gridAutoRows, 4);
-  const measuredWidth = element.getBoundingClientRect().width;
-  const columnCount = columns.length || 1;
-  const fallbackColumnWidth = Math.max(1, (measuredWidth - (columnGap * Math.max(0, columnCount - 1))) / columnCount);
-  const columnWidth = columns[0] || fallbackColumnWidth;
-
-  return { columnWidth, columnGap, rowHeight, rowGap };
-};
-
-const areAdaptiveGridMetricsEqual = (a, b) => Boolean(a && b
-  && Math.abs(a.columnWidth - b.columnWidth) < 0.5
-  && Math.abs(a.columnGap - b.columnGap) < 0.5
-  && Math.abs(a.rowHeight - b.rowHeight) < 0.5
-  && Math.abs(a.rowGap - b.rowGap) < 0.5);
-
-const useMeasuredAdaptiveGridMetrics = () => {
-  const gridRef = useRef(null);
-  const [gridMetrics, setGridMetrics] = useState(null);
-
-  useEffect(() => {
-    const element = gridRef.current;
-    if (!element || typeof window === 'undefined') return undefined;
-
-    const updateGridMetrics = () => {
-      const nextMetrics = getAdaptiveGridMetrics(element);
-      if (!nextMetrics) return;
-      setGridMetrics((previousMetrics) => (areAdaptiveGridMetricsEqual(previousMetrics, nextMetrics) ? previousMetrics : nextMetrics));
-    };
-
-    updateGridMetrics();
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateGridMetrics);
-      return () => window.removeEventListener('resize', updateGridMetrics);
-    }
-
-    const resizeObserver = new ResizeObserver(updateGridMetrics);
-    resizeObserver.observe(element);
-    window.addEventListener('resize', updateGridMetrics);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', updateGridMetrics);
-    };
-  }, []);
-
-  return { gridRef, gridMetrics };
-};
+// Use `useAdaptivePhotoGridMetrics` from `src/utils/useAdaptivePhotoGridMetrics.js` instead of local implementation
 
 function Discover({ users, posts, profile, currentUserId, onUserClick, onPostClick, setView, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [tab, setTab] = useState('all');
@@ -4278,7 +4223,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   const [showAllThemes, setShowAllThemes] = useState(false);
   const [showAllRoles, setShowAllRoles] = useState(false);
   const triggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
-  const { gridRef: mixedGridRef, gridMetrics: mixedGridMetrics } = useMeasuredAdaptiveGridMetrics();
+  
 
   const normalizedUsers = useMemo(
     () => (Array.isArray(users) ? users.map((u) => normalizeUserForCollections(u)) : []),
@@ -4310,6 +4255,13 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
      return res.filter(i => (i.type === 'post' ? i.data.title : i.data.displayName).toLowerCase().includes(search.toLowerCase()));
   }, [visibleUsers, visiblePosts, search, tab]);
 
+  const { getOverride, onImageLoad, version: recoveredImageMetaVersion } = useRecoveredImageMeta();
+
+  // build a refresh key for the mixed Discover grid so metrics remeasure when relevant inputs change
+  const mixedImageMetaVersion = useMemo(() => JSON.stringify(visiblePosts.map((p) => (p.imageMeta ? `${p.id}:${p.imageMeta.aspectRatio || p.imageMeta.width || p.imageMeta.height}` : `${p.id}:null`))), [visiblePosts]);
+  const mixedRefreshKey = `${tab}::${search}::${mixedContent.length}::${mixedImageMetaVersion}::${recoveredImageMetaVersion}`;
+  const { gridRef: mixedGridRef, gridMetrics: mixedGridMetrics } = useAdaptivePhotoGridMetrics(mixedRefreshKey);
+
   const filteredPosts = visiblePosts.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) && (activeThemes.length === 0 || p.styles?.some(s => activeThemes.includes(s))));
   const filteredUsers = visibleUsers.filter((u) => (
     u.displayName.toLowerCase().includes(search.toLowerCase())
@@ -4319,21 +4271,23 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
 
   return (
     <div className="max-w-5xl mx-auto px-2.5 pt-0 pb-3 md:px-4 md:py-6">
-       {/* Mobile top-0 sticks to the padded scrollport edge, which is already below the fixed app header. */}
-       <div className="sticky top-0 md:top-16 bg-[#F0F4F8] dark:bg-slate-900 z-20 pb-2 md:pb-4">
+      {/* Mobile top-0 used to stick; make this normal page flow so it scrolls away */}
+      <div className="bg-[#F0F4F8] dark:bg-slate-900 pb-2 md:pb-4">
           <div className="relative mb-2 md:mb-4"><Search className="absolute left-3 top-2 h-4 w-4 text-slate-400 md:left-4 md:top-3.5 md:h-6 md:w-6"/><input className="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border-none shadow-sm dark:bg-slate-800 dark:text-white md:pl-12 md:pr-4 md:py-3 md:text-base md:rounded-2xl" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)}/></div>
           <div className="flex gap-1.5 mb-2 md:gap-2 md:mb-4">
              {['all', 'ideas', 'people'].map(t => <button key={t} onClick={() => setTab(t)} className={`px-2.5 py-1 rounded-md font-bold text-xs transition-all md:px-6 md:py-2 md:rounded-lg md:text-sm ${tab === t ? 'bg-white shadow text-blue-600 dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>{t === 'all' ? 'Alles' : t === 'ideas' ? 'Ideeën' : 'Mensen'}</button>)}
           </div>
        </div>
 
-       {tab === 'all' && <div ref={mixedGridRef} className="grid grid-cols-3 gap-x-2 gap-y-1 [grid-auto-flow:dense] [grid-auto-rows:4px] sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">{mixedContent.map((item, i) => {
+      {tab === 'all' && <div ref={mixedGridRef} className="grid gap-x-2 gap-y-1 [grid-auto-flow:dense] [grid-auto-rows:4px] [grid-template-columns:repeat(12,minmax(0,1fr))] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))]">{mixedContent.map((item, i) => {
          const isPost = item.type === 'post';
+         const key = isPost ? item.data.id : `user-${item.data.uid}`;
+         const override = getOverride(key);
          const shouldCover = isPost ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
-         const postSpan = isPost ? getAdaptivePhotoTileSpan(item.data) : null;
-         const postFrameStyle = isPost ? getAdaptivePhotoFrameStyle(item.data) : undefined;
+         const postSpan = isPost ? getAdaptivePhotoTileSpan(item.data, override?.aspectRatio) : null;
+         const postFrameStyle = isPost ? getAdaptivePhotoFrameStyle(item.data, override?.aspectRatio) : undefined;
          const tileStyle = isPost
-           ? getAdaptivePhotoGridItemStyle(item.data, { ...mixedGridMetrics, footerHeight: 36 })
+           ? getAdaptivePhotoGridItemStyle(item.data, { ...mixedGridMetrics, footerHeight: 36, aspectRatio: override?.aspectRatio })
            : getAdaptivePhotoGridItemStyle(null, { ...mixedGridMetrics, aspectRatio: 1, columnSpan: 1, footerHeight: 36 });
          return (
           <article
@@ -4361,6 +4315,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
                  src={isPost ? item.data.imageUrl : item.data.avatar}
                  alt={isPost ? item.data.title || '' : item.data.displayName || ''}
                  loading="lazy"
+                 onLoad={isPost ? onImageLoad(key) : undefined}
                  className={`relative z-0 block w-full ${isPost ? `${postFrameStyle ? 'h-full' : 'h-auto'} object-contain` : 'aspect-square h-auto object-cover'}`}
                />
              </div>

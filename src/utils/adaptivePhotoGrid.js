@@ -29,19 +29,19 @@ export const getPostImageAspectRatio = (post) => {
   return null;
 };
 
-export const getAdaptivePhotoFrameStyle = (post) => {
-  const aspectRatio = getPostImageAspectRatio(post);
+export const getAdaptivePhotoFrameStyle = (post, aspectRatioOverride = null) => {
+  const aspectRatio = aspectRatioOverride || getPostImageAspectRatio(post);
   if (!aspectRatio) return undefined;
 
   return { aspectRatio: `${aspectRatio} / 1` };
 };
 
-export const classifyAdaptivePhotoTile = (post) => {
-  const aspectRatio = getPostImageAspectRatio(post);
+export const classifyAdaptivePhotoTile = (post, aspectRatioOverride = null) => {
+  const aspectRatio = aspectRatioOverride || getPostImageAspectRatio(post);
   const orientation = post?.imageMeta?.orientation;
 
   if (orientation === 'panorama') return 'panorama';
-  if (orientation === 'landscape') return aspectRatio >= ADAPTIVE_PHOTO_GRID_THRESHOLDS.wideLandscapeMin ? 'wideLandscape' : 'landscape';
+  if (orientation === 'landscape') return aspectRatio > ADAPTIVE_PHOTO_GRID_THRESHOLDS.wideLandscapeMin ? 'wideLandscape' : 'landscape';
   if (orientation === 'portrait') return aspectRatio && aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.largePortraitMax ? 'largePortrait' : 'portrait';
   if (orientation === 'square') return 'square';
 
@@ -49,7 +49,7 @@ export const classifyAdaptivePhotoTile = (post) => {
   if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.largePortraitMax) return 'largePortrait';
   if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.portraitMax) return 'portrait';
   if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.squareMax) return 'square';
-  if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.panoramaMin) return aspectRatio >= ADAPTIVE_PHOTO_GRID_THRESHOLDS.wideLandscapeMin ? 'wideLandscape' : 'landscape';
+  if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.panoramaMin) return aspectRatio > ADAPTIVE_PHOTO_GRID_THRESHOLDS.wideLandscapeMin ? 'wideLandscape' : 'landscape';
   return 'panorama';
 };
 
@@ -65,8 +65,8 @@ const getColumnSpanClassName = (columnSpan) => {
   return 'col-span-1';
 };
 
-export const getAdaptivePhotoTileSpan = (post) => {
-  const tileType = classifyAdaptivePhotoTile(post);
+export const getAdaptivePhotoTileSpan = (post, aspectRatioOverride = null) => {
+  const tileType = classifyAdaptivePhotoTile(post, aspectRatioOverride);
   const columnSpan = getColumnSpanForTileType(tileType);
 
   return {
@@ -91,7 +91,7 @@ export const getAdaptivePhotoGridItemStyle = (post, {
   aspectRatio: aspectRatioOverride = null,
   columnSpan: columnSpanOverride = null,
 } = {}) => {
-  const span = post ? getAdaptivePhotoTileSpan(post) : { columnSpan: 1 };
+  const span = post ? getAdaptivePhotoTileSpan(post, aspectRatioOverride) : { columnSpan: 1 };
   const columnSpan = getPositiveNumber(columnSpanOverride, span.columnSpan);
   const aspectRatio = getPositiveNumber(aspectRatioOverride, getPostImageAspectRatio(post) || 1);
   const measuredColumnWidth = getPositiveNumber(columnWidth, FALLBACK_GRID_METRICS.columnWidth);

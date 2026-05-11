@@ -4263,7 +4263,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
     ...mixedGridMetrics,
     getPost: (layoutItem) => (layoutItem.isPost ? layoutItem.item.data : null),
     getAspectRatio: (layoutItem) => (layoutItem.isPost ? undefined : 1),
-    getColumnSpan: (layoutItem) => (layoutItem.isPost ? undefined : 1),
+    getColumnSpan: (layoutItem) => (layoutItem.isPost ? undefined : null),
     getFooterHeight: () => 36,
     getMinMediaHeight: (layoutItem) => (layoutItem.shouldCover ? 176 : 0),
   });
@@ -4278,9 +4278,10 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
           </div>
        </div>
 
-       {tab === 'all' && <div ref={mixedGridRef} className="grid min-w-0 max-w-full grid-cols-3 gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">{mixedMasonryLayout.map(({ item: layoutItem, index: i, style, className: spanClassName, tileType }) => {
+       {tab === 'all' && <div ref={mixedGridRef} className="grid min-w-0 max-w-full [grid-template-columns:repeat(12,minmax(0,1fr))] gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))]">{mixedMasonryLayout.map((layout) => {
+         const { item: layoutItem, index: i, style, className: spanClassName, tileType } = layout;
          const { item, isPost, shouldCover } = layoutItem;
-         const postFrameStyle = isPost ? getAdaptivePhotoFrameStyle(item.data) : undefined;
+         const postFrameStyle = getAdaptivePhotoFrameStyle(isPost ? item.data : null, layout);
          return (
           <article
             key={`${item.type}-${item.data.id || item.data.uid || i}`}
@@ -4307,7 +4308,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
                  src={isPost ? item.data.imageUrl : item.data.avatar}
                  alt={isPost ? item.data.title || '' : item.data.displayName || ''}
                  loading="lazy"
-                 className={`relative z-0 block w-full ${isPost ? `${postFrameStyle ? 'h-full' : 'h-auto'} object-contain` : 'aspect-square h-auto object-cover'}`}
+                 className={`relative z-0 block w-full ${isPost ? `${layout.shouldFitInsideFrame ? 'h-full' : postFrameStyle ? 'h-full' : 'h-auto'} object-contain` : 'h-full object-cover'}`}
                />
              </div>
              <div className="px-2 py-1.5 font-bold text-[11px] truncate dark:text-white md:p-2 md:text-xs">{isPost ? item.data.title : item.data.displayName}</div>

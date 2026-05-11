@@ -26,10 +26,11 @@ export default function AdaptivePhotoGrid({
   });
 
   return (
-    <div ref={gridRef} className={`grid min-w-0 max-w-full grid-cols-3 gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 ${className}`.trim()}>
-      {masonryLayout.map(({ item, style, className: spanClassName, tileType }) => {
+    <div ref={gridRef} className={`grid min-w-0 max-w-full [grid-template-columns:repeat(12,minmax(0,1fr))] gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))] ${className}`.trim()}>
+      {masonryLayout.map((layout) => {
+        const { item, style, className: spanClassName, tileType } = layout;
         const { post, shouldCover } = item;
-        const frameStyle = getAdaptivePhotoFrameStyle(post);
+        const frameStyle = getAdaptivePhotoFrameStyle(post, layout);
         const clickable = typeof onPostClick === 'function';
         return (
           <article
@@ -58,7 +59,7 @@ export default function AdaptivePhotoGrid({
                 src={post.imageUrl}
                 alt={post.title || ''}
                 loading="lazy"
-                className={`relative z-0 block w-full object-contain ${frameStyle ? 'h-full' : 'h-auto'}`}
+                className={`relative z-0 block w-full object-contain ${layout.shouldFitInsideFrame ? 'h-full' : frameStyle ? 'h-full' : 'h-auto'}`}
               />
             </span>
             {renderFooter?.(post)}

@@ -1,21 +1,24 @@
 export const ADAPTIVE_PHOTO_GRID_THRESHOLDS = {
+  veryNarrowPortraitMax: 0.45,
   portraitMax: 0.9,
   squareMax: 1.15,
   wideLandscapeMin: 1.75,
   panoramaMin: 2.8,
+  fullPanoramaMin: 3.5,
 };
 
 const FALLBACK_GRID_METRICS = {
-  columnWidth: 220,
+  columnWidth: 32,
   columnGap: 8,
   rowHeight: 4,
   rowGap: 4,
-  columnCount: 3,
+  columnCount: 12,
   containerWidth: 0,
 };
 
 export const ADAPTIVE_PHOTO_GRID_MOBILE_MAX_WIDTH = 640;
-export const ADAPTIVE_PHOTO_GRID_MOBILE_MAX_VISUAL_ROWS = 3;
+export const ADAPTIVE_PHOTO_GRID_MAX_MEDIA_HEIGHT_RATIO = 1.25;
+export const ADAPTIVE_PHOTO_GRID_MAX_MEDIA_HEIGHT = 560;
 
 export const getPostImageAspectRatio = (post) => {
   const imageMeta = post?.imageMeta;
@@ -33,7 +36,11 @@ export const getPostImageAspectRatio = (post) => {
   return null;
 };
 
-export const getAdaptivePhotoFrameStyle = (post) => {
+export const getAdaptivePhotoFrameStyle = (post, layout = null) => {
+  if (layout?.mediaHeight) {
+    return { height: `${layout.mediaHeight}px` };
+  }
+
   const aspectRatio = getPostImageAspectRatio(post);
   if (!aspectRatio) return undefined;
 
@@ -46,16 +53,11 @@ export const classifyAdaptivePhotoTile = (post) => {
 
   if (orientation === 'panorama') return 'panorama';
   if (!aspectRatio) return orientation || 'fallback';
+  if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.veryNarrowPortraitMax) return 'veryNarrowPortrait';
   if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.portraitMax) return 'portrait';
   if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.squareMax) return 'square';
   if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.wideLandscapeMin) return 'landscape';
   return aspectRatio >= ADAPTIVE_PHOTO_GRID_THRESHOLDS.panoramaMin ? 'panorama' : 'wideLandscape';
-};
-
-const getDesiredColumnSpanForTileType = (tileType) => {
-  if (tileType === 'panorama' || tileType === 'wideLandscape') return 3;
-  if (tileType === 'landscape') return 2;
-  return 1;
 };
 
 const getColumnSpanClassName = (columnSpan) => {
@@ -71,10 +73,32 @@ const getPositiveNumber = (value, fallback) => {
 
 const getPositiveInteger = (value, fallback) => Math.max(1, Math.floor(getPositiveNumber(value, fallback)));
 
+const getSpanFromFraction = (availableColumns, fraction) => Math.max(1, Math.round(availableColumns * fraction));
+
+const getDesiredColumnSpanForAspectRatio = (aspectRatio, availableColumns) => {
+  if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.veryNarrowPortraitMax) {
+    return getSpanFromFraction(availableColumns, 0.25);
+  }
+  if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.squareMax) {
+    return getSpanFromFraction(availableColumns, 1 / 3);
+  }
+  if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.wideLandscapeMin) {
+    return getSpanFromFraction(availableColumns, 0.5);
+  }
+  if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.panoramaMin) {
+    return getSpanFromFraction(availableColumns, 2 / 3);
+  }
+  if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.fullPanoramaMin) {
+    return getSpanFromFraction(availableColumns, 0.75);
+  }
+  return availableColumns;
+};
+
 export const getAdaptivePhotoTileSpan = (post, { availableColumns = FALLBACK_GRID_METRICS.columnCount } = {}) => {
   const tileType = classifyAdaptivePhotoTile(post);
-  const desiredColumnSpan = getDesiredColumnSpanForTileType(tileType);
+  const aspectRatio = getPositiveNumber(getPostImageAspectRatio(post), 1);
   const safeAvailableColumns = getPositiveInteger(availableColumns, FALLBACK_GRID_METRICS.columnCount);
+  const desiredColumnSpan = getDesiredColumnSpanForAspectRatio(aspectRatio, safeAvailableColumns);
   const columnSpan = Math.min(desiredColumnSpan, safeAvailableColumns);
 
   return {
@@ -102,6 +126,11 @@ const getMeasuredMetrics = ({
   containerWidth: Number.isFinite(Number(containerWidth)) && Number(containerWidth) > 0 ? Number(containerWidth) : FALLBACK_GRID_METRICS.containerWidth,
 });
 
+const getViewportSafeMediaHeight = (metrics, maxMediaHeightRatio, maxMediaHeight) => {
+  const containerBasedLimit = metrics.containerWidth > 0 ? metrics.containerWidth * maxMediaHeightRatio : Number.POSITIVE_INFINITY;
+  return Math.min(containerBasedLimit, maxMediaHeight);
+};
+
 export const getAdaptivePhotoGridItemLayout = (post, {
   columnWidth,
   columnGap,
@@ -111,26 +140,28 @@ export const getAdaptivePhotoGridItemLayout = (post, {
   containerWidth,
   footerHeight = 0,
   minMediaHeight = 0,
-  mobileMaxVisualRows = ADAPTIVE_PHOTO_GRID_MOBILE_MAX_VISUAL_ROWS,
-  mobileMaxWidth = ADAPTIVE_PHOTO_GRID_MOBILE_MAX_WIDTH,
+  maxMediaHeightRatio = ADAPTIVE_PHOTO_GRID_MAX_MEDIA_HEIGHT_RATIO,
+  maxMediaHeight = ADAPTIVE_PHOTO_GRID_MAX_MEDIA_HEIGHT,
   aspectRatio: aspectRatioOverride = null,
   columnSpan: columnSpanOverride = null,
 } = {}) => {
   const metrics = getMeasuredMetrics({ columnWidth, columnGap, rowHeight, rowGap, columnCount, containerWidth });
-  const span = post ? getAdaptivePhotoTileSpan(post, { availableColumns: metrics.columnCount }) : { columnSpan: 1, tileType: 'fallback' };
-  const columnSpan = Math.min(getPositiveInteger(columnSpanOverride, span.columnSpan), metrics.columnCount);
   const aspectRatio = getPositiveNumber(aspectRatioOverride, getPostImageAspectRatio(post) || 1);
+  const span = post
+    ? getAdaptivePhotoTileSpan(post, { availableColumns: metrics.columnCount })
+    : {
+      columnSpan: getDesiredColumnSpanForAspectRatio(aspectRatio, metrics.columnCount),
+      tileType: aspectRatio === 1 ? 'square' : 'fallback',
+    };
+  const columnSpan = Math.min(getPositiveInteger(columnSpanOverride, span.columnSpan), metrics.columnCount);
   const measuredFooterHeight = Number.isFinite(Number(footerHeight)) && Number(footerHeight) > 0 ? Number(footerHeight) : 0;
   const measuredMinMediaHeight = Number.isFinite(Number(minMediaHeight)) && Number(minMediaHeight) > 0 ? Number(minMediaHeight) : 0;
-  const measuredMobileMaxVisualRows = getPositiveNumber(mobileMaxVisualRows, ADAPTIVE_PHOTO_GRID_MOBILE_MAX_VISUAL_ROWS);
-  const measuredMobileMaxWidth = getPositiveNumber(mobileMaxWidth, ADAPTIVE_PHOTO_GRID_MOBILE_MAX_WIDTH);
+  const safeMediaHeight = getViewportSafeMediaHeight(metrics, getPositiveNumber(maxMediaHeightRatio, ADAPTIVE_PHOTO_GRID_MAX_MEDIA_HEIGHT_RATIO), getPositiveNumber(maxMediaHeight, ADAPTIVE_PHOTO_GRID_MAX_MEDIA_HEIGHT));
 
   const tileWidth = (metrics.columnWidth * columnSpan) + (metrics.columnGap * Math.max(0, columnSpan - 1));
-  const uncappedMediaHeight = tileWidth / aspectRatio;
-  const mobileMediaHeightCap = (metrics.columnWidth * measuredMobileMaxVisualRows) + (metrics.rowGap * Math.max(0, measuredMobileMaxVisualRows - 1));
-  const shouldApplyMobileCap = metrics.containerWidth > 0 && metrics.containerWidth <= measuredMobileMaxWidth;
-  const cappedMediaHeight = shouldApplyMobileCap ? Math.min(uncappedMediaHeight, mobileMediaHeightCap) : uncappedMediaHeight;
-  const mediaHeight = Math.max(cappedMediaHeight, measuredMinMediaHeight);
+  const naturalMediaHeight = tileWidth / aspectRatio;
+  const shouldFitInsideFrame = naturalMediaHeight > safeMediaHeight;
+  const mediaHeight = Math.max(shouldFitInsideFrame ? safeMediaHeight : naturalMediaHeight, measuredMinMediaHeight);
   const totalHeight = mediaHeight + measuredFooterHeight;
   const effectiveRowUnit = metrics.rowHeight + metrics.rowGap;
   const rowSpan = Math.max(1, Math.ceil((totalHeight + metrics.rowGap) / effectiveRowUnit));
@@ -142,9 +173,12 @@ export const getAdaptivePhotoGridItemLayout = (post, {
     className: getColumnSpanClassName(columnSpan),
     tileWidth,
     mediaHeight,
-    uncappedMediaHeight,
+    naturalMediaHeight,
+    uncappedMediaHeight: naturalMediaHeight,
     rowSpan,
-    mobileMediaHeightCap: shouldApplyMobileCap ? mobileMediaHeightCap : null,
+    shouldFitInsideFrame,
+    frameStyle: { height: `${mediaHeight}px` },
+    maxMediaHeight: Number.isFinite(safeMediaHeight) ? safeMediaHeight : null,
   };
 };
 

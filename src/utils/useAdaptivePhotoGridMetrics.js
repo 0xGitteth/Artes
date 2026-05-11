@@ -25,6 +25,7 @@ const getAdaptiveGridMetrics = (element) => {
   const rowGap = parsePixelValue(styles.rowGap, 0);
   const rowHeight = parsePixelValue(styles.gridAutoRows, 4);
   const measuredWidth = element.getBoundingClientRect().width;
+
   // try to infer column count from explicit columns or repeat() syntax
   let columnCount = columns.length;
   if (!columnCount) {
@@ -42,7 +43,9 @@ const areAdaptiveGridMetricsEqual = (a, b) => Boolean(a && b
   && Math.abs(a.columnWidth - b.columnWidth) < 0.5
   && Math.abs(a.columnGap - b.columnGap) < 0.5
   && Math.abs(a.rowHeight - b.rowHeight) < 0.5
-  && Math.abs(a.rowGap - b.rowGap) < 0.5);
+  && Math.abs(a.rowGap - b.rowGap) < 0.5
+  && a.columnCount === b.columnCount
+  && Math.abs(a.measuredWidth - b.measuredWidth) < 0.5);
 
 export default function useAdaptivePhotoGridMetrics(refreshKey) {
   const gridRef = useRef(null);
@@ -52,12 +55,12 @@ export default function useAdaptivePhotoGridMetrics(refreshKey) {
     const element = gridRef.current;
     if (!element || typeof window === 'undefined') return undefined;
 
-      const isValidMetrics = (m) => m
-        && Number.isFinite(Number(m.measuredWidth)) && Number(m.measuredWidth) > 0
-        && Number.isFinite(Number(m.columnWidth)) && Number(m.columnWidth) > 0
-        && Number.isFinite(Number(m.columnCount)) && Number(m.columnCount) > 0
-        && Number.isFinite(Number(m.rowHeight)) && Number(m.rowHeight) > 0
-        && Number.isFinite(Number(m.columnGap)) && Number(m.columnGap) >= 0;
+    const isValidMetrics = (m) => m
+      && Number.isFinite(Number(m.measuredWidth)) && Number(m.measuredWidth) > 0
+      && Number.isFinite(Number(m.columnWidth)) && Number(m.columnWidth) > 0
+      && Number.isFinite(Number(m.columnCount)) && Number(m.columnCount) > 0
+      && Number.isFinite(Number(m.rowHeight)) && Number(m.rowHeight) > 0
+      && Number.isFinite(Number(m.columnGap)) && Number(m.columnGap) >= 0;
 
     const updateGridMetrics = (attempt = 0) => {
       const nextMetrics = getAdaptiveGridMetrics(element);

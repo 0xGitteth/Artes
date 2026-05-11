@@ -16,7 +16,6 @@ import {
   updatePost,
   deletePost,
 } from './services/firebaseClient';
-import useAdaptivePhotoGridMetrics from './utils/useAdaptivePhotoGridMetrics';
 import useRecoveredImageMeta from './utils/useRecoveredImageMeta';
 import {
   ensureUserProfile,
@@ -102,7 +101,8 @@ import PhotoDetailModal from './components/PhotoDetailModal';
 import PostImageDisplay from './components/PostImageDisplay';
 import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
 import ModalShell from './components/ModalShell';
-import { getAdaptivePhotoFrameStyle, getAdaptivePhotoGridItemStyle, getAdaptivePhotoTileSpan } from './utils/adaptivePhotoGrid';
+import { getAdaptivePhotoFrameStyle, getAdaptivePhotoMasonryLayout } from './utils/adaptivePhotoGrid';
+import useAdaptivePhotoGridMetrics from './utils/useAdaptivePhotoGridMetrics';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
 import PostCreditDisplay from './components/PostCreditDisplay';
@@ -4207,14 +4207,6 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
   );
 }
 
-
-const parseAdaptiveGridPixelValue = (value, fallback = 0) => {
-  const number = Number.parseFloat(value);
-  return Number.isFinite(number) ? number : fallback;
-};
-
-// Use `useAdaptivePhotoGridMetrics` from `src/utils/useAdaptivePhotoGridMetrics.js` instead of local implementation
-
 function Discover({ users, posts, profile, currentUserId, onUserClick, onPostClick, setView, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
@@ -4223,7 +4215,6 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   const [showAllThemes, setShowAllThemes] = useState(false);
   const [showAllRoles, setShowAllRoles] = useState(false);
   const triggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
-  
 
   const normalizedUsers = useMemo(
     () => (Array.isArray(users) ? users.map((u) => normalizeUserForCollections(u)) : []),
@@ -4268,6 +4259,19 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
     && (!activeRole || (Array.isArray(u.roles) && u.roles.includes(activeRole)))
     && (activeThemes.length === 0 || u.themes?.some((theme) => activeThemes.includes(theme)))
   ));
+  const mixedLayoutItems = mixedContent.map((item) => ({
+    item,
+    isPost: item.type === 'post',
+    shouldCover: item.type === 'post' ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false,
+  }));
+  const mixedMasonryLayout = getAdaptivePhotoMasonryLayout(mixedLayoutItems, {
+    ...mixedGridMetrics,
+    getPost: (layoutItem) => (layoutItem.isPost ? layoutItem.item.data : null),
+    getAspectRatio: (layoutItem) => (layoutItem.isPost ? undefined : 1),
+    getColumnSpan: (layoutItem) => (layoutItem.isPost ? undefined : null),
+    getFooterHeight: () => 36,
+    getMinMediaHeight: (layoutItem) => (layoutItem.shouldCover ? 176 : 0),
+  });
 
   return (
     <div className="max-w-5xl mx-auto px-2.5 pt-0 pb-3 md:px-4 md:py-6">
@@ -4279,16 +4283,10 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
           </div>
        </div>
 
-      {tab === 'all' && <div ref={mixedGridRef} className="grid gap-x-2 gap-y-1 [grid-auto-flow:dense] [grid-auto-rows:4px] [grid-template-columns:repeat(12,minmax(0,1fr))] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))]">{mixedContent.map((item, i) => {
-         const isPost = item.type === 'post';
-         const key = isPost ? item.data.id : `user-${item.data.uid}`;
-         const override = getOverride(key);
-         const shouldCover = isPost ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false;
-         const postSpan = isPost ? getAdaptivePhotoTileSpan(item.data, override?.aspectRatio) : null;
-         const postFrameStyle = isPost ? getAdaptivePhotoFrameStyle(item.data, override?.aspectRatio) : undefined;
-         const tileStyle = isPost
-           ? getAdaptivePhotoGridItemStyle(item.data, { ...mixedGridMetrics, footerHeight: 36, aspectRatio: override?.aspectRatio })
-           : getAdaptivePhotoGridItemStyle(null, { ...mixedGridMetrics, aspectRatio: 1, columnSpan: 1, footerHeight: 36 });
+      {tab === 'all' && <div ref={mixedGridRef} className="grid min-w-0 max-w-full [grid-template-columns:repeat(12,minmax(0,1fr))] gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))]">{mixedMasonryLayout.map((layout) => {
+        const { item: layoutItem, index: i, style, className: spanClassName, tileType } = layout;
+        const { item, isPost, shouldCover } = layoutItem;
+        const postFrameStyle = getAdaptivePhotoFrameStyle(isPost ? item.data : null, layout);
          return (
           <article
             key={`${item.type}-${item.data.id || item.data.uid || i}`}
@@ -4305,9 +4303,9 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
                 isPost ? onPostClick(item.data) : onUserClick(item.data.uid);
               }
             }}
-            className={`group relative w-full overflow-hidden rounded-lg bg-white text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl cursor-pointer ${isPost ? postSpan.className : 'col-span-1'}`}
-            style={tileStyle}
-            data-tile-type={isPost ? postSpan.tileType : 'user'}
+            className={`group relative min-w-0 w-full overflow-hidden rounded-lg bg-white text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-800 md:rounded-xl cursor-pointer ${spanClassName}`}
+            style={style}
+            data-tile-type={isPost ? tileType : 'user'}
           >
              <div className="relative w-full overflow-hidden" style={postFrameStyle}>
                {shouldCover ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(item.data.id)} /> : null}
@@ -4315,8 +4313,8 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
                  src={isPost ? item.data.imageUrl : item.data.avatar}
                  alt={isPost ? item.data.title || '' : item.data.displayName || ''}
                  loading="lazy"
-                 onLoad={isPost ? onImageLoad(key) : undefined}
-                 className={`relative z-0 block w-full ${isPost ? `${postFrameStyle ? 'h-full' : 'h-auto'} object-contain` : 'aspect-square h-auto object-cover'}`}
+                 onLoad={isPost ? onImageLoad(item.data.id) : undefined}
+                 className={`relative z-0 block w-full ${isPost ? `${layout.shouldFitInsideFrame ? 'h-full' : postFrameStyle ? 'h-full' : 'h-auto'} object-contain` : 'h-full object-cover'}`}
                />
              </div>
              <div className="px-2 py-1.5 font-bold text-[11px] truncate dark:text-white md:p-2 md:text-xs">{isPost ? item.data.title : item.data.displayName}</div>
@@ -10269,20 +10267,12 @@ function ChallengeDetail({ setView, posts, onPostClick, challenge, triggerVisibi
             <h1 className="text-4xl font-bold text-amber-900 dark:text-amber-100 mb-2">{challengeData.theme}</h1>
             <p className="text-sm text-amber-800 dark:text-amber-200/80">{challengeData.description}</p>
          </div>
-         <div className="grid grid-cols-2 md:grid-cols-3 gap-1 md:gap-4">
-            {visiblePosts.map(post => {
-              const covered = shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById);
-              return (
-              <div
-                key={post.id}
-                onClick={() => onPostClick(post)}
-                className={`aspect-square bg-slate-200 rounded-lg overflow-hidden cursor-pointer relative ${post.isChallenge ? 'ring-4 ring-amber-400' : ''}`}
-              >
-                {covered ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} /> : null}
-                <img src={post.imageUrl} className="relative z-0 w-full h-full object-cover" />
-              </div>
-            );})}
-         </div>
+         <AdaptivePhotoGrid
+           posts={visiblePosts}
+           onPostClick={onPostClick}
+           getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+           renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+         />
       </div>
    );
 }
@@ -11451,19 +11441,14 @@ function ShadowProfileModal({
               <X />
             </button>
           </div>
-          <div className="flex-1 p-6 overflow-y-auto no-scrollbar">
-            <div className="grid grid-cols-3 gap-2">
-              {shadowPosts
-                .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed')
-                .map((p) => {
-                  const covered = shouldCoverPost(p, triggerVisibility, revealedSensitivePostsById);
-                  return (
-                <div key={p.id} onClick={() => onPostClick(p)} className="relative aspect-square bg-slate-800 overflow-hidden">
-                  {covered ? <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(p.id)} /> : null}
-                  <img src={p.imageUrl} className="relative z-0 w-full h-full object-cover" />
-                </div>
-              );})}
-            </div>
+          <div className="flex-1 min-w-0 overflow-y-auto p-6 no-scrollbar">
+            <AdaptivePhotoGrid
+              posts={shadowPosts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed')}
+              onPostClick={onPostClick}
+              getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+              renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+              itemClassName="rounded-sm bg-slate-800"
+            />
           </div>
         </div>
       </div>

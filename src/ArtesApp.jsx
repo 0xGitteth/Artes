@@ -4267,7 +4267,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   const mixedMasonryLayout = getAdaptivePhotoMasonryLayout(mixedLayoutItems, {
     ...mixedGridMetrics,
     getPost: (layoutItem) => (layoutItem.isPost ? layoutItem.item.data : null),
-    getAspectRatio: (layoutItem) => (layoutItem.isPost ? undefined : 1),
+    getAspectRatio: (layoutItem) => (layoutItem.isPost ? getOverride?.(layoutItem.item.data.id)?.aspectRatio : 1),
     getColumnSpan: (layoutItem) => (layoutItem.isPost ? undefined : null),
     getFooterHeight: () => 36,
     getMinMediaHeight: (layoutItem) => (layoutItem.shouldCover ? 176 : 0),
@@ -4284,9 +4284,9 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
        </div>
 
       {tab === 'all' && <div ref={mixedGridRef} className="grid min-w-0 max-w-full [grid-template-columns:repeat(12,minmax(0,1fr))] gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))]">{mixedMasonryLayout.map((layout) => {
-        const { item: layoutItem, index: i, style, className: spanClassName, tileType } = layout;
+        const { item: layoutItem, index: i, style, className: spanClassName, tileType, frameStyle: layoutFrameStyle } = layout;
         const { item, isPost, shouldCover } = layoutItem;
-        const postFrameStyle = getAdaptivePhotoFrameStyle(isPost ? item.data : null, layout);
+        const postFrameStyle = layoutFrameStyle || (isPost ? getAdaptivePhotoFrameStyle(item.data, getOverride?.(item.data.id)?.aspectRatio) : undefined);
          return (
           <article
             key={`${item.type}-${item.data.id || item.data.uid || i}`}

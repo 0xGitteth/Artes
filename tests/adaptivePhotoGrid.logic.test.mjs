@@ -11,6 +11,7 @@ const post = (imageMeta) => ({ id: 'post', imageMeta });
 const spanNumber = (style) => Number(String(style.gridRowEnd).replace('span ', ''));
 const metrics = { columnWidth: 24, columnGap: 8, rowHeight: 4, rowGap: 4, columnCount: 12, containerWidth: 376 };
 
+// Classification
 assert.equal(classifyAdaptivePhotoTile(post({ aspectRatio: 0.35 })), 'veryNarrowPortrait');
 assert.equal(classifyAdaptivePhotoTile(post({ aspectRatio: 0.75 })), 'portrait');
 assert.equal(classifyAdaptivePhotoTile(post({ aspectRatio: 1 })), 'square');
@@ -19,6 +20,7 @@ assert.equal(classifyAdaptivePhotoTile(post({ aspectRatio: 1.8 })), 'wideLandsca
 assert.equal(classifyAdaptivePhotoTile(post({ aspectRatio: 3.2 })), 'panorama');
 assert.equal(classifyAdaptivePhotoTile(post(null)), 'fallback');
 
+// Tile span behaviour
 assert.equal(getAdaptivePhotoTileSpan(post({ aspectRatio: 0.75 }), { availableColumns: 12 }).columnSpan, 4);
 assert.equal(getAdaptivePhotoTileSpan(post({ aspectRatio: 1 }), { availableColumns: 12 }).columnSpan, 4);
 assert.equal(getAdaptivePhotoTileSpan(post({ aspectRatio: 0.35 }), { availableColumns: 12 }).columnSpan, 3);
@@ -31,6 +33,7 @@ assert.equal(getAdaptivePhotoTileSpan(post({ aspectRatio: 0.35 }), { availableCo
 assert.equal(getAdaptivePhotoTileSpan(post({ aspectRatio: 1.4 }), { availableColumns: 20 }).columnSpan, 10);
 assert.equal(getAdaptivePhotoTileSpan(post({ aspectRatio: 3.2 }), { availableColumns: 24 }).columnSpan, 18);
 
+// Layout metrics and row span
 const normalPortrait = getAdaptivePhotoGridItemLayout(post({ aspectRatio: 0.75 }), metrics);
 const narrowPortrait = getAdaptivePhotoGridItemLayout(post({ aspectRatio: 0.35 }), metrics);
 const landscape = getAdaptivePhotoGridItemLayout(post({ aspectRatio: 1.4 }), metrics);
@@ -56,6 +59,7 @@ const compactSensitiveStyle = getAdaptivePhotoGridItemStyle(post({ aspectRatio: 
 });
 assert.ok(spanNumber(compactSensitiveStyle) > spanNumber(rowSpanStyle));
 
+// Masonry layout behaviour
 const mixedItems = [
   { id: 'landscape', post: post({ aspectRatio: 1.4 }) },
   { id: 'user', aspectRatio: 1, columnSpan: 3 },
@@ -95,3 +99,12 @@ assert.equal(desktopMasonry[2].columnSpan, 4);
 assert.ok(desktopMasonry[2].gridRowStart < desktopMasonry[1].gridRowStart + desktopMasonry[1].rowSpan);
 
 console.log('adaptivePhotoGrid logic tests passed');
+
+// Row span computation with aspectRatio override
+const testPost = post(null);
+const style = getAdaptivePhotoGridItemStyle(testPost, { columnWidth: 100, columnGap: 8, rowHeight: 4, rowGap: 4, aspectRatio: 2, columnSpan: 2, footerHeight: 0 });
+// tileWidth = (100*2) + (8*1) = 208, mediaHeight = 208/2 = 104, totalHeight = 104
+// effectiveRowUnit = 4 + 4 = 8 -> rowSpan = ceil((104 + 4) / 8) = ceil(108/8) = 14
+assert.equal(style.gridRowEnd, 'span 14');
+
+console.log('adaptivePhotoGrid derived-style tests passed');

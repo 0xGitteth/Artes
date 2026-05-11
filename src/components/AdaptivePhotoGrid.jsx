@@ -1,6 +1,7 @@
 import { getAdaptivePhotoFrameStyle, getAdaptivePhotoMasonryLayout } from '../utils/adaptivePhotoGrid';
 import useAdaptivePhotoGridMetrics from '../utils/useAdaptivePhotoGridMetrics';
 import { shouldIgnoreTileActivation } from '../utils/domInteraction';
+import useRecoveredImageMeta from '../utils/useRecoveredImageMeta';
 
 export default function AdaptivePhotoGrid({
   posts = [],
@@ -13,16 +14,16 @@ export default function AdaptivePhotoGrid({
   itemClassName = '',
   sensitiveMinMediaHeight = 176,
 }) {
-  const { gridRef, gridMetrics } = useAdaptivePhotoGridMetrics();
-  const layoutItems = posts.map((post) => ({
-    post,
-    shouldCover: getShouldCover?.(post) === true,
-  }));
+  const { getOverride, onImageLoad, version: imageMetaVersion } = useRecoveredImageMeta();
+  const { gridRef, gridMetrics } = useAdaptivePhotoGridMetrics(imageMetaVersion);
+
+  const layoutItems = posts.map((post) => ({ post, shouldCover: getShouldCover?.(post) === true }));
   const masonryLayout = getAdaptivePhotoMasonryLayout(layoutItems, {
     ...gridMetrics,
     getPost: (item) => item.post,
     getFooterHeight: () => (renderFooter ? 88 : 0),
     getMinMediaHeight: (item) => (item.shouldCover ? sensitiveMinMediaHeight : 0),
+    getAspectRatio: (item) => getOverride(item.post.id)?.aspectRatio,
   });
 
   return (
@@ -30,8 +31,10 @@ export default function AdaptivePhotoGrid({
       {masonryLayout.map((layout) => {
         const { item, style, className: spanClassName, tileType } = layout;
         const { post, shouldCover } = item;
-        const frameStyle = getAdaptivePhotoFrameStyle(post, layout);
+        const override = getOverride(post.id);
+        const frameStyle = layout.frameStyle || getAdaptivePhotoFrameStyle(post, override?.aspectRatio);
         const clickable = typeof onPostClick === 'function';
+
         return (
           <article
             key={post.id}
@@ -59,6 +62,7 @@ export default function AdaptivePhotoGrid({
                 src={post.imageUrl}
                 alt={post.title || ''}
                 loading="lazy"
+                onLoad={onImageLoad(post.id)}
                 className={`relative z-0 block w-full object-contain ${layout.shouldFitInsideFrame ? 'h-full' : frameStyle ? 'h-full' : 'h-auto'}`}
               />
             </span>

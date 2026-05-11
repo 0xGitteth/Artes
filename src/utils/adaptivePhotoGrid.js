@@ -35,20 +35,14 @@ export const getPostImageAspectRatio = (post) => {
 
   return null;
 };
-
-export const getAdaptivePhotoFrameStyle = (post, layout = null) => {
-  if (layout?.mediaHeight) {
-    return { height: `${layout.mediaHeight}px` };
-  }
-
-  const aspectRatio = getPostImageAspectRatio(post);
+export const getAdaptivePhotoFrameStyle = (post, aspectRatioOverride = null) => {
+  const aspectRatio = aspectRatioOverride || getPostImageAspectRatio(post);
   if (!aspectRatio) return undefined;
-
   return { aspectRatio: `${aspectRatio} / 1` };
 };
 
-export const classifyAdaptivePhotoTile = (post) => {
-  const aspectRatio = getPostImageAspectRatio(post);
+export const classifyAdaptivePhotoTile = (post, aspectRatioOverride = null) => {
+  const aspectRatio = aspectRatioOverride || getPostImageAspectRatio(post);
   const orientation = post?.imageMeta?.orientation;
 
   if (orientation === 'panorama') return 'panorama';
@@ -66,6 +60,33 @@ const getColumnSpanClassName = (columnSpan) => {
   return 'col-span-1';
 };
 
+export const getAdaptivePhotoTileSpan = (post, aspectOrOptions = null) => {
+  // Support two calling conventions for compatibility:
+  // - getAdaptivePhotoTileSpan(post, aspectRatioNumber)
+  // - getAdaptivePhotoTileSpan(post, { availableColumns, aspectRatio })
+  let availableColumns = FALLBACK_GRID_METRICS.columnCount;
+  let aspectRatioOverride = null;
+  if (typeof aspectOrOptions === 'number') {
+    aspectRatioOverride = aspectOrOptions;
+  } else if (aspectOrOptions && typeof aspectOrOptions === 'object') {
+    availableColumns = aspectOrOptions.availableColumns ?? availableColumns;
+    aspectRatioOverride = aspectOrOptions.aspectRatio ?? null;
+  }
+
+  const aspectRatio = getPositiveNumber(aspectRatioOverride, getPostImageAspectRatio(post) || 1);
+  const safeAvailableColumns = getPositiveInteger(availableColumns, FALLBACK_GRID_METRICS.columnCount);
+  const desiredColumnSpan = getDesiredColumnSpanForAspectRatio(aspectRatio, safeAvailableColumns);
+  const columnSpan = Math.min(desiredColumnSpan, safeAvailableColumns);
+  const tileType = classifyAdaptivePhotoTile(post, aspectRatioOverride);
+
+  return {
+    tileType,
+    className: getColumnSpanClassName(columnSpan),
+    desiredColumnSpan,
+    columnSpan,
+    columns: { mobile: columnSpan, tablet: columnSpan, desktop: columnSpan },
+  };
+};
 const getPositiveNumber = (value, fallback) => {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
@@ -92,22 +113,6 @@ const getDesiredColumnSpanForAspectRatio = (aspectRatio, availableColumns) => {
     return getSpanFromFraction(availableColumns, 0.75);
   }
   return availableColumns;
-};
-
-export const getAdaptivePhotoTileSpan = (post, { availableColumns = FALLBACK_GRID_METRICS.columnCount } = {}) => {
-  const tileType = classifyAdaptivePhotoTile(post);
-  const aspectRatio = getPositiveNumber(getPostImageAspectRatio(post), 1);
-  const safeAvailableColumns = getPositiveInteger(availableColumns, FALLBACK_GRID_METRICS.columnCount);
-  const desiredColumnSpan = getDesiredColumnSpanForAspectRatio(aspectRatio, safeAvailableColumns);
-  const columnSpan = Math.min(desiredColumnSpan, safeAvailableColumns);
-
-  return {
-    tileType,
-    className: getColumnSpanClassName(columnSpan),
-    desiredColumnSpan,
-    columnSpan,
-    columns: { mobile: columnSpan, tablet: columnSpan, desktop: columnSpan },
-  };
 };
 
 const getMeasuredMetrics = ({
@@ -148,7 +153,7 @@ export const getAdaptivePhotoGridItemLayout = (post, {
   const metrics = getMeasuredMetrics({ columnWidth, columnGap, rowHeight, rowGap, columnCount, containerWidth });
   const aspectRatio = getPositiveNumber(aspectRatioOverride, getPostImageAspectRatio(post) || 1);
   const span = post
-    ? getAdaptivePhotoTileSpan(post, { availableColumns: metrics.columnCount })
+    ? getAdaptivePhotoTileSpan(post, { availableColumns: metrics.columnCount, aspectRatio: aspectRatioOverride })
     : {
       columnSpan: getDesiredColumnSpanForAspectRatio(aspectRatio, metrics.columnCount),
       tileType: aspectRatio === 1 ? 'square' : 'fallback',

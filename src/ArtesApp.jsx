@@ -16,6 +16,7 @@ import {
   updatePost,
   deletePost,
 } from './services/firebaseClient';
+import useRecoveredImageMeta from './utils/useRecoveredImageMeta';
 import {
   ensureUserProfile,
   fetchUserProfile,
@@ -4206,8 +4207,6 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
   );
 }
 
-
-
 function Discover({ users, posts, profile, currentUserId, onUserClick, onPostClick, setView, revealedSensitivePostsById, onRevealSensitivePost }) {
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
@@ -4216,7 +4215,6 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   const [showAllThemes, setShowAllThemes] = useState(false);
   const [showAllRoles, setShowAllRoles] = useState(false);
   const triggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
-  const { gridRef: mixedGridRef, gridMetrics: mixedGridMetrics } = useAdaptivePhotoGridMetrics();
 
   const normalizedUsers = useMemo(
     () => (Array.isArray(users) ? users.map((u) => normalizeUserForCollections(u)) : []),
@@ -4248,6 +4246,13 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
      return res.filter(i => (i.type === 'post' ? i.data.title : i.data.displayName).toLowerCase().includes(search.toLowerCase()));
   }, [visibleUsers, visiblePosts, search, tab]);
 
+  const { getOverride, onImageLoad, version: recoveredImageMetaVersion } = useRecoveredImageMeta();
+
+  // build a refresh key for the mixed Discover grid so metrics remeasure when relevant inputs change
+  const mixedImageMetaVersion = useMemo(() => JSON.stringify(visiblePosts.map((p) => (p.imageMeta ? `${p.id}:${p.imageMeta.aspectRatio || p.imageMeta.width || p.imageMeta.height}` : `${p.id}:null`))), [visiblePosts]);
+  const mixedRefreshKey = `${tab}::${search}::${mixedContent.length}::${mixedImageMetaVersion}::${recoveredImageMetaVersion}`;
+  const { gridRef: mixedGridRef, gridMetrics: mixedGridMetrics } = useAdaptivePhotoGridMetrics(mixedRefreshKey);
+
   const filteredPosts = visiblePosts.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) && (activeThemes.length === 0 || p.styles?.some(s => activeThemes.includes(s))));
   const filteredUsers = visibleUsers.filter((u) => (
     u.displayName.toLowerCase().includes(search.toLowerCase())
@@ -4262,7 +4267,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   const mixedMasonryLayout = getAdaptivePhotoMasonryLayout(mixedLayoutItems, {
     ...mixedGridMetrics,
     getPost: (layoutItem) => (layoutItem.isPost ? layoutItem.item.data : null),
-    getAspectRatio: (layoutItem) => (layoutItem.isPost ? undefined : 1),
+    getAspectRatio: (layoutItem) => (layoutItem.isPost ? getOverride?.(layoutItem.item.data.id)?.aspectRatio : 1),
     getColumnSpan: (layoutItem) => (layoutItem.isPost ? undefined : null),
     getFooterHeight: () => 36,
     getMinMediaHeight: (layoutItem) => (layoutItem.shouldCover ? 176 : 0),
@@ -4270,18 +4275,18 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
 
   return (
     <div className="max-w-5xl mx-auto px-2.5 pt-0 pb-3 md:px-4 md:py-6">
-       {/* Mobile top-0 sticks to the padded scrollport edge, which is already below the fixed app header. */}
-       <div className="sticky top-0 md:top-16 bg-[#F0F4F8] dark:bg-slate-900 z-20 pb-2 md:pb-4">
+      {/* Mobile top-0 used to stick; make this normal page flow so it scrolls away */}
+      <div className="bg-[#F0F4F8] dark:bg-slate-900 pb-2 md:pb-4">
           <div className="relative mb-2 md:mb-4"><Search className="absolute left-3 top-2 h-4 w-4 text-slate-400 md:left-4 md:top-3.5 md:h-6 md:w-6"/><input className="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border-none shadow-sm dark:bg-slate-800 dark:text-white md:pl-12 md:pr-4 md:py-3 md:text-base md:rounded-2xl" placeholder="Zoeken..." value={search} onChange={e => setSearch(e.target.value)}/></div>
           <div className="flex gap-1.5 mb-2 md:gap-2 md:mb-4">
              {['all', 'ideas', 'people'].map(t => <button key={t} onClick={() => setTab(t)} className={`px-2.5 py-1 rounded-md font-bold text-xs transition-all md:px-6 md:py-2 md:rounded-lg md:text-sm ${tab === t ? 'bg-white shadow text-blue-600 dark:bg-slate-700 dark:text-white' : 'text-slate-500'}`}>{t === 'all' ? 'Alles' : t === 'ideas' ? 'Ideeën' : 'Mensen'}</button>)}
           </div>
        </div>
 
-       {tab === 'all' && <div ref={mixedGridRef} className="grid min-w-0 max-w-full [grid-template-columns:repeat(12,minmax(0,1fr))] gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))]">{mixedMasonryLayout.map((layout) => {
-         const { item: layoutItem, index: i, style, className: spanClassName, tileType } = layout;
-         const { item, isPost, shouldCover } = layoutItem;
-         const postFrameStyle = getAdaptivePhotoFrameStyle(isPost ? item.data : null, layout);
+      {tab === 'all' && <div ref={mixedGridRef} className="grid min-w-0 max-w-full [grid-template-columns:repeat(12,minmax(0,1fr))] gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))]">{mixedMasonryLayout.map((layout) => {
+        const { item: layoutItem, index: i, style, className: spanClassName, tileType, frameStyle: layoutFrameStyle } = layout;
+        const { item, isPost, shouldCover } = layoutItem;
+        const postFrameStyle = layoutFrameStyle || (isPost ? getAdaptivePhotoFrameStyle(item.data, getOverride?.(item.data.id)?.aspectRatio) : undefined);
          return (
           <article
             key={`${item.type}-${item.data.id || item.data.uid || i}`}
@@ -4308,6 +4313,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
                  src={isPost ? item.data.imageUrl : item.data.avatar}
                  alt={isPost ? item.data.title || '' : item.data.displayName || ''}
                  loading="lazy"
+                 onLoad={isPost ? onImageLoad(item.data.id) : undefined}
                  className={`relative z-0 block w-full ${isPost ? `${layout.shouldFitInsideFrame ? 'h-full' : postFrameStyle ? 'h-full' : 'h-auto'} object-contain` : 'h-full object-cover'}`}
                />
              </div>

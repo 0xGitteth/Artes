@@ -103,6 +103,7 @@ import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
 import ModalShell from './components/ModalShell';
 import { getAdaptivePhotoFrameStyle, getAdaptivePhotoMasonryLayout } from './utils/adaptivePhotoGrid';
 import useAdaptivePhotoGridMetrics from './utils/useAdaptivePhotoGridMetrics';
+import { stableDiscoverOrder } from './utils/discoverOrdering';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
 import PostCreditDisplay from './components/PostCreditDisplay';
@@ -229,6 +230,11 @@ const formatDateTimeNl = (value) => {
 const hasCompletedOnboarding = isOnboardingComplete;
 
 const DIAG_TRACE_ID = `trace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+// Session seed used for Discover stable ordering. Generated once per session.
+const DISCOVER_SESSION_SEED = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+  ? crypto.randomUUID()
+  : `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`;
 
 const computeOnboardingStep = (profileData, authUserData, queryParams, authIsReady = true) => {
   const debugPayload = {
@@ -4239,12 +4245,25 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
      if (tab !== 'all') return [];
      const res = [];
      const max = Math.max(visibleUsers.length, visiblePosts.length);
-     for(let i=0; i<max; i++) {
-        if(visiblePosts[i]) res.push({type: 'post', data: visiblePosts[i]});
-        if(visibleUsers[i]) res.push({type: 'user', data: visibleUsers[i]});
+     for (let i = 0; i < max; i += 1) {
+        if (visiblePosts[i]) res.push({ type: 'post', data: visiblePosts[i] });
+        if (visibleUsers[i]) res.push({ type: 'user', data: visibleUsers[i] });
      }
-     return res.filter(i => (i.type === 'post' ? i.data.title : i.data.displayName).toLowerCase().includes(search.toLowerCase()));
+     return res.filter((i) => (i.type === 'post' ? i.data.title : i.data.displayName).toLowerCase().includes(search.toLowerCase()));
   }, [visibleUsers, visiblePosts, search, tab]);
+
+  const mixedOrderedContent = useMemo(() => {
+    try {
+      return stableDiscoverOrder(mixedContent, {
+        sessionSeed: DISCOVER_SESSION_SEED,
+        query: search,
+        getId: (i) => (i && i.type === 'post' ? i.data.id : i && i.data ? i.data.uid : undefined),
+        getType: (i) => (i && i.type) || (i && i.isPost ? 'post' : 'post'),
+      });
+    } catch (e) {
+      return mixedContent;
+    }
+  }, [mixedContent, search]);
 
   const { getOverride, onImageLoad, version: recoveredImageMetaVersion } = useRecoveredImageMeta();
 
@@ -4259,7 +4278,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
     && (!activeRole || (Array.isArray(u.roles) && u.roles.includes(activeRole)))
     && (activeThemes.length === 0 || u.themes?.some((theme) => activeThemes.includes(theme)))
   ));
-  const mixedLayoutItems = mixedContent.map((item) => ({
+  const mixedLayoutItems = mixedOrderedContent.map((item) => ({
     item,
     isPost: item.type === 'post',
     shouldCover: item.type === 'post' ? shouldCoverPost(item.data, triggerVisibility, revealedSensitivePostsById) : false,

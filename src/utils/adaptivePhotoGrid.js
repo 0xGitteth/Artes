@@ -218,16 +218,68 @@ export const getAdaptivePhotoMasonryLayout = (items = [], {
       minMediaHeight: getMinMediaHeight?.(item, index),
     });
     const columnSpan = Math.min(itemLayout.columnSpan, measuredMetrics.columnCount);
-    let bestColumn = 0;
-    let bestTop = Number.POSITIVE_INFINITY;
+      // Choose best column with deterministic tiebreaker to reduce left bias.
+      // Collect all candidate columns that yield the minimal top, then pick the best by cost.
+      let bestColumn = 0;
+      let bestTop = Number.POSITIVE_INFINITY;
+      const candidates = [];
 
-    for (let column = 0; column <= measuredMetrics.columnCount - columnSpan; column += 1) {
-      const candidateTop = Math.max(...columnHeights.slice(column, column + columnSpan));
-      if (candidateTop < bestTop) {
-        bestTop = candidateTop;
-        bestColumn = column;
+      for (let column = 0; column <= measuredMetrics.columnCount - columnSpan; column += 1) {
+        const candidateTop = Math.max(...columnHeights.slice(column, column + columnSpan));
+        if (candidateTop < bestTop - 1e-6) {
+          bestTop = candidateTop;
+          candidates.length = 0;
+          candidates.push(column);
+        } else if (Math.abs(candidateTop - bestTop) <= 1e-6) {
+          candidates.push(column);
+        }
       }
-    }
+
+      // If multiple equally-good columns and the item is relatively narrow, compute a small deterministic cost to pick the most balanced placement.
+      // For large spanning items prefer the original left-most behavior to avoid large placement shifts.
+      if (candidates.length > 1 && columnSpan <= 3) {
+        // simple stable string->int hash (FNV-1a like)
+        const hashString32 = (str) => {
+          let h = 2166136261 >>> 0;
+          const s = String(str);
+          for (let i = 0; i < s.length; i += 1) {
+            h ^= s.charCodeAt(i);
+            h = Math.imul(h, 16777619) >>> 0;
+          }
+          return h >>> 0;
+        };
+
+        const containerCenter = measuredMetrics.containerWidth > 0 ? measuredMetrics.containerWidth / 2 : 0;
+        let bestCost = Number.POSITIVE_INFINITY;
+        let chosen = candidates[0];
+
+        for (const column of candidates) {
+          const unaffectedLeft = columnHeights.slice(0, column);
+          const unaffectedRight = columnHeights.slice(column + columnSpan);
+          const maxUnaffected = Math.max(0, ...(unaffectedLeft.length ? unaffectedLeft : [0]), ...(unaffectedRight.length ? unaffectedRight : [0]));
+          const predictedMax = Math.max(maxUnaffected, bestTop + itemLayout.rowSpan);
+
+          const leftEdgePx = column * (measuredMetrics.columnWidth + measuredMetrics.columnGap);
+          const itemCenterPx = leftEdgePx + (itemLayout.tileWidth / 2);
+          const centerDist = Math.abs(itemCenterPx - containerCenter);
+
+          const post = getPost?.(item, index);
+          const idForHash = (post && (post.id ?? post.uid)) || index;
+          const tieHash = hashString32(String(idForHash)) % 100;
+
+          // Cost: predictedMax primary (weighted large), center distance secondary, small stable hash tertiary
+          const cost = predictedMax * 100000 + centerDist * 10 + tieHash;
+          if (cost < bestCost) {
+            bestCost = cost;
+            chosen = column;
+          }
+        }
+
+        bestColumn = chosen;
+        bestTop = Math.max(...columnHeights.slice(bestColumn, bestColumn + columnSpan));
+      } else {
+        bestColumn = candidates[0] ?? 0;
+      }
 
     const gridColumnStart = bestColumn + 1;
     const gridRowStart = bestTop + 1;

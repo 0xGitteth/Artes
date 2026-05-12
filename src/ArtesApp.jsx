@@ -4287,7 +4287,18 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
     ...mixedGridMetrics,
     getPost: (layoutItem) => (layoutItem.isPost ? layoutItem.item.data : null),
     getAspectRatio: (layoutItem) => (layoutItem.isPost ? getOverride?.(layoutItem.item.data.id)?.aspectRatio : 1),
-    getColumnSpan: (layoutItem) => (layoutItem.isPost ? undefined : null),
+    getColumnSpan: (layoutItem) => {
+      // Discover-only user/profile card sizing: map a target pixel width to column span
+      if (layoutItem.isPost) return undefined;
+      const metricsLocal = mixedGridMetrics || {};
+      const containerWidth = metricsLocal.containerWidth || 0;
+      // Target pixel width for user cards by breakpoints (desktop more compact)
+      const targetPx = containerWidth >= 1200 ? 160 : (containerWidth >= 900 ? 150 : (containerWidth >= 640 ? 140 : 120));
+      const cw = metricsLocal.columnWidth || 32;
+      const gap = metricsLocal.columnGap || 8;
+      const cols = Math.max(1, Math.min(metricsLocal.columnCount || 12, Math.ceil((targetPx + gap) / (cw + gap))));
+      return cols;
+    },
     getFooterHeight: () => 36,
     getMinMediaHeight: (layoutItem) => (layoutItem.shouldCover ? 176 : 0),
   });

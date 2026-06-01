@@ -153,6 +153,26 @@ const desktopUserSpan = getDiscoverUserCardColumnSpan(desktop24Metrics);
 const desktopSquareSpan = getAdaptivePhotoTileSpan(post({ aspectRatio: 1 }), { availableColumns: desktop24Metrics.columnCount }).columnSpan;
 assert.ok(desktopUserSpan < desktopSquareSpan, 'Discover user cards should be more compact than desktop square photo cards');
 assert.ok(getDiscoverUserCardColumnSpan(metrics) >= 3, 'Discover user cards should stay readable on mobile-sized grids');
+assert.equal(
+  getDiscoverUserCardColumnSpan({ ...desktop24Metrics, containerWidth: undefined, measuredWidth: 760 }),
+  desktopUserSpan,
+  'Discover user card sizing should use measuredWidth when containerWidth is missing',
+);
+assert.equal(
+  getDiscoverUserCardColumnSpan({ ...desktop24Metrics, containerWidth: undefined, measuredWidth: 900 }),
+  5,
+  'Desktop measuredWidth should select the 150px target instead of the 120px fallback',
+);
+assert.equal(
+  getDiscoverUserCardColumnSpan({ ...desktop24Metrics, containerWidth: undefined, measuredWidth: 1200 }),
+  6,
+  'Wide desktop measuredWidth should select the 160px target instead of the 120px fallback',
+);
+assert.equal(
+  getDiscoverUserCardColumnSpan({ ...desktop24Metrics, containerWidth: 900 }),
+  5,
+  'Existing containerWidth-based desktop sizing should keep using the 150px target',
+);
 const discoverUserLayout = getAdaptivePhotoGridItemLayout(null, { ...desktop24Metrics, aspectRatio: 1, columnSpan: desktopUserSpan });
 assert.equal(discoverUserLayout.aspectRatio, 1, 'Discover user cards should keep square media');
 assert.equal(discoverUserLayout.mediaHeight, discoverUserLayout.tileWidth, 'Discover user card media should render square before footer height is added');

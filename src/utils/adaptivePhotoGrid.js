@@ -98,6 +98,7 @@ const getSpanFromFraction = (availableColumns, fraction) => Math.max(1, Math.rou
 
 export const getDiscoverUserCardColumnSpan = ({
   containerWidth,
+  measuredWidth,
   columnWidth,
   columnGap,
   columnCount,
@@ -105,7 +106,8 @@ export const getDiscoverUserCardColumnSpan = ({
   const safeColumnCount = getPositiveInteger(columnCount, FALLBACK_GRID_METRICS.columnCount);
   const safeColumnWidth = getPositiveNumber(columnWidth, FALLBACK_GRID_METRICS.columnWidth);
   const safeColumnGap = Number.isFinite(Number(columnGap)) && Number(columnGap) >= 0 ? Number(columnGap) : FALLBACK_GRID_METRICS.columnGap;
-  const measuredContainerWidth = Number.isFinite(Number(containerWidth)) && Number(containerWidth) > 0 ? Number(containerWidth) : 0;
+  const width = Number(containerWidth ?? measuredWidth ?? 0);
+  const measuredContainerWidth = Number.isFinite(width) && width > 0 ? width : 0;
   const targetPx = measuredContainerWidth >= 1200 ? 160 : (measuredContainerWidth >= 900 ? 150 : (measuredContainerWidth >= 640 ? 140 : 120));
 
   return Math.max(1, Math.min(safeColumnCount, Math.ceil((targetPx + safeColumnGap) / (safeColumnWidth + safeColumnGap))));

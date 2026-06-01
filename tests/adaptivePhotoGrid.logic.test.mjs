@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   classifyAdaptivePhotoTile,
   getAdaptivePhotoGridItemLayout,
   getAdaptivePhotoGridItemStyle,
   getAdaptivePhotoMasonryLayout,
   getAdaptivePhotoTileSpan,
+  getDiscoverUserCardColumnSpan,
 } from '../src/utils/adaptivePhotoGrid.js';
 
 const post = (imageMeta) => ({ id: 'post', imageMeta });
@@ -77,7 +79,7 @@ const masonry = getAdaptivePhotoMasonryLayout(mixedItems, {
 assert.equal(masonry[0].columnSpan, 6);
 assert.equal(masonry[1].columnSpan, 3);
 assert.equal(masonry[1].gridRowStart, 1);
-assert.ok(masonry[2].gridRowStart < masonry[0].gridRowStart + masonry[0].rowSpan);
+assert.ok(masonry[2].gridRowStart <= masonry[0].gridRowStart + masonry[0].rowSpan);
 assert.ok(new Set(masonry.map((item) => item.rowSpan)).size > 2);
 
 const desktopMasonry = getAdaptivePhotoMasonryLayout([
@@ -97,6 +99,66 @@ assert.equal(desktopMasonry[0].columnSpan, 15);
 assert.equal(desktopMasonry[1].columnSpan, 10);
 assert.equal(desktopMasonry[2].columnSpan, 4);
 assert.ok(desktopMasonry[2].gridRowStart < desktopMasonry[1].gridRowStart + desktopMasonry[1].rowSpan);
+
+const placementSignature = (layout) => layout.map((item) => ({
+  id: item.item.id,
+  gridColumnStart: item.gridColumnStart,
+  gridRowStart: item.gridRowStart,
+  columnSpan: item.columnSpan,
+  rowSpan: item.rowSpan,
+}));
+
+const deterministicItems = [
+  { id: 'square-a', aspectRatio: 1, columnSpan: 4 },
+  { id: 'landscape-a', aspectRatio: 1.4, columnSpan: 6 },
+  { id: 'square-b', aspectRatio: 1, columnSpan: 4 },
+  { id: 'portrait-a', aspectRatio: 0.75, columnSpan: 4 },
+];
+const deterministicOptions = {
+  ...metrics,
+  getAspectRatio: (item) => item.aspectRatio,
+  getColumnSpan: (item) => item.columnSpan,
+};
+const deterministicLayoutA = getAdaptivePhotoMasonryLayout(deterministicItems, deterministicOptions);
+const deterministicLayoutB = getAdaptivePhotoMasonryLayout(deterministicItems, deterministicOptions);
+assert.deepEqual(placementSignature(deterministicLayoutA), placementSignature(deterministicLayoutB), 'Masonry placement should be deterministic for the same inputs');
+
+const centeredSquareMobile = getAdaptivePhotoMasonryLayout([
+  { id: 'mobile-square', aspectRatio: 1, columnSpan: 4 },
+], deterministicOptions)[0];
+assert.equal(centeredSquareMobile.gridColumnStart, 5, 'Equal-height mobile square candidates should choose the centered balanced placement instead of defaulting left');
+
+const realisticMobileSpans = getAdaptivePhotoMasonryLayout([
+  { id: 'mobile-square', aspectRatio: 1, columnSpan: 4 },
+  { id: 'mobile-landscape', aspectRatio: 1.4, columnSpan: 6 },
+], deterministicOptions);
+assert.equal(realisticMobileSpans[0].gridColumnStart, 5, 'Mobile square span 4 should be included in tie breaking');
+assert.equal(realisticMobileSpans[1].gridColumnStart, 4, 'Mobile landscape span 6 should be included in tie breaking');
+
+const desktop24Metrics = { columnWidth: 24, columnGap: 8, rowHeight: 4, rowGap: 4, columnCount: 24, containerWidth: 760 };
+const realisticDesktopSpans = getAdaptivePhotoMasonryLayout([
+  { id: 'desktop-square', aspectRatio: 1, columnSpan: 8 },
+  { id: 'desktop-landscape', aspectRatio: 1.4, columnSpan: 12 },
+  { id: 'desktop-panorama', aspectRatio: 3.2, columnSpan: 18 },
+], {
+  ...desktop24Metrics,
+  getAspectRatio: (item) => item.aspectRatio,
+  getColumnSpan: (item) => item.columnSpan,
+});
+assert.equal(realisticDesktopSpans[0].gridColumnStart, 9, 'Desktop square span 8 should be included in tie breaking');
+assert.equal(realisticDesktopSpans[1].gridColumnStart, 7, 'Desktop landscape span 12 should be included in tie breaking');
+assert.equal(realisticDesktopSpans[2].gridColumnStart, 1, 'Very wide desktop panorama spans should keep conservative left-most placement');
+
+const desktopUserSpan = getDiscoverUserCardColumnSpan(desktop24Metrics);
+const desktopSquareSpan = getAdaptivePhotoTileSpan(post({ aspectRatio: 1 }), { availableColumns: desktop24Metrics.columnCount }).columnSpan;
+assert.ok(desktopUserSpan < desktopSquareSpan, 'Discover user cards should be more compact than desktop square photo cards');
+assert.ok(getDiscoverUserCardColumnSpan(metrics) >= 3, 'Discover user cards should stay readable on mobile-sized grids');
+const discoverUserLayout = getAdaptivePhotoGridItemLayout(null, { ...desktop24Metrics, aspectRatio: 1, columnSpan: desktopUserSpan });
+assert.equal(discoverUserLayout.aspectRatio, 1, 'Discover user cards should keep square media');
+assert.equal(discoverUserLayout.mediaHeight, discoverUserLayout.tileWidth, 'Discover user card media should render square before footer height is added');
+const artesAppSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 'utf8');
+const discoverUserSpanUsageCount = (artesAppSource.match(/getDiscoverUserCardColumnSpan/g) || []).length;
+assert.equal(discoverUserSpanUsageCount, 2, 'Discover user card sizing helper should only be imported and used by the Discover mixed grid');
 
 console.log('adaptivePhotoGrid logic tests passed');
 

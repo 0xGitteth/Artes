@@ -101,7 +101,7 @@ import PhotoDetailModal from './components/PhotoDetailModal';
 import PostImageDisplay from './components/PostImageDisplay';
 import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
 import ModalShell from './components/ModalShell';
-import { getAdaptivePhotoFrameStyle, getAdaptivePhotoMasonryLayout } from './utils/adaptivePhotoGrid';
+import { getAdaptivePhotoFrameStyle, getAdaptivePhotoMasonryLayout, getDiscoverUserCardColumnSpan } from './utils/adaptivePhotoGrid';
 import useAdaptivePhotoGridMetrics from './utils/useAdaptivePhotoGridMetrics';
 import { stableDiscoverOrder } from './utils/discoverOrdering';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
@@ -4287,7 +4287,11 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
     ...mixedGridMetrics,
     getPost: (layoutItem) => (layoutItem.isPost ? layoutItem.item.data : null),
     getAspectRatio: (layoutItem) => (layoutItem.isPost ? getOverride?.(layoutItem.item.data.id)?.aspectRatio : 1),
-    getColumnSpan: (layoutItem) => (layoutItem.isPost ? undefined : null),
+    getColumnSpan: (layoutItem) => {
+      // Discover-only user/profile card sizing: map a target pixel width to column span.
+      if (layoutItem.isPost) return undefined;
+      return getDiscoverUserCardColumnSpan(mixedGridMetrics);
+    },
     getFooterHeight: () => 36,
     getMinMediaHeight: (layoutItem) => (layoutItem.shouldCover ? 176 : 0),
   });

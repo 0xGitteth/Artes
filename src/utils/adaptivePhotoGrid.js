@@ -96,6 +96,23 @@ const getPositiveInteger = (value, fallback) => Math.max(1, Math.floor(getPositi
 
 const getSpanFromFraction = (availableColumns, fraction) => Math.max(1, Math.round(availableColumns * fraction));
 
+export const getDiscoverUserCardColumnSpan = ({
+  containerWidth,
+  measuredWidth,
+  columnWidth,
+  columnGap,
+  columnCount,
+} = {}) => {
+  const safeColumnCount = getPositiveInteger(columnCount, FALLBACK_GRID_METRICS.columnCount);
+  const safeColumnWidth = getPositiveNumber(columnWidth, FALLBACK_GRID_METRICS.columnWidth);
+  const safeColumnGap = Number.isFinite(Number(columnGap)) && Number(columnGap) >= 0 ? Number(columnGap) : FALLBACK_GRID_METRICS.columnGap;
+  const width = Number(containerWidth ?? measuredWidth ?? 0);
+  const measuredContainerWidth = Number.isFinite(width) && width > 0 ? width : 0;
+  const targetPx = measuredContainerWidth >= 1200 ? 160 : (measuredContainerWidth >= 900 ? 150 : (measuredContainerWidth >= 640 ? 140 : 120));
+
+  return Math.max(1, Math.min(safeColumnCount, Math.ceil((targetPx + safeColumnGap) / (safeColumnWidth + safeColumnGap))));
+};
+
 const getDesiredColumnSpanForAspectRatio = (aspectRatio, availableColumns) => {
   if (aspectRatio < ADAPTIVE_PHOTO_GRID_THRESHOLDS.veryNarrowPortraitMax) {
     return getSpanFromFraction(availableColumns, 0.25);
@@ -218,15 +235,68 @@ export const getAdaptivePhotoMasonryLayout = (items = [], {
       minMediaHeight: getMinMediaHeight?.(item, index),
     });
     const columnSpan = Math.min(itemLayout.columnSpan, measuredMetrics.columnCount);
+    // Choose best column with deterministic tiebreaker to reduce left bias.
+    // Collect all candidate columns that yield the minimal top, then pick the best by cost.
     let bestColumn = 0;
     let bestTop = Number.POSITIVE_INFINITY;
+    const candidates = [];
 
     for (let column = 0; column <= measuredMetrics.columnCount - columnSpan; column += 1) {
       const candidateTop = Math.max(...columnHeights.slice(column, column + columnSpan));
-      if (candidateTop < bestTop) {
+      if (candidateTop < bestTop - 1e-6) {
         bestTop = candidateTop;
-        bestColumn = column;
+        candidates.length = 0;
+        candidates.push(column);
+      } else if (Math.abs(candidateTop - bestTop) <= 1e-6) {
+        candidates.push(column);
       }
+    }
+
+    // If multiple equally-good columns and the item fits within half of the micro-column grid, compute a small deterministic cost to pick the most balanced placement.
+    // For very wide spanning items prefer the original left-most behavior to avoid large placement shifts.
+    const tieBreakerColumnSpanLimit = Math.ceil(measuredMetrics.columnCount / 2);
+    if (candidates.length > 1 && columnSpan <= tieBreakerColumnSpanLimit) {
+      // simple stable string->int hash (FNV-1a like)
+      const hashString32 = (str) => {
+        let h = 2166136261 >>> 0;
+        const s = String(str);
+        for (let i = 0; i < s.length; i += 1) {
+          h ^= s.charCodeAt(i);
+          h = Math.imul(h, 16777619) >>> 0;
+        }
+        return h >>> 0;
+      };
+
+      const containerCenter = measuredMetrics.containerWidth > 0 ? measuredMetrics.containerWidth / 2 : 0;
+      let bestCost = Number.POSITIVE_INFINITY;
+      let chosen = candidates[0];
+
+      for (const column of candidates) {
+        const unaffectedLeft = columnHeights.slice(0, column);
+        const unaffectedRight = columnHeights.slice(column + columnSpan);
+        const maxUnaffected = Math.max(0, ...(unaffectedLeft.length ? unaffectedLeft : [0]), ...(unaffectedRight.length ? unaffectedRight : [0]));
+        const predictedMax = Math.max(maxUnaffected, bestTop + itemLayout.rowSpan);
+
+        const leftEdgePx = column * (measuredMetrics.columnWidth + measuredMetrics.columnGap);
+        const itemCenterPx = leftEdgePx + (itemLayout.tileWidth / 2);
+        const centerDist = Math.abs(itemCenterPx - containerCenter);
+
+        const post = getPost?.(item, index);
+        const idForHash = (post && (post.id ?? post.uid)) || index;
+        const tieHash = hashString32(String(idForHash)) % 100;
+
+        // Cost: predictedMax primary (weighted large), center distance secondary, small stable hash tertiary
+        const cost = predictedMax * 100000 + centerDist * 10 + tieHash;
+        if (cost < bestCost) {
+          bestCost = cost;
+          chosen = column;
+        }
+      }
+
+      bestColumn = chosen;
+      bestTop = Math.max(...columnHeights.slice(bestColumn, bestColumn + columnSpan));
+    } else {
+      bestColumn = candidates[0] ?? 0;
     }
 
     const gridColumnStart = bestColumn + 1;

@@ -111,6 +111,7 @@ import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
 import ProfileImageCropper from './components/ProfileImageCropper';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
+import { selectPendingApprovedUploadReminder } from './utils/pendingApprovedUpload';
 
 import { ROLE_OPTIONS } from './utils/roles';
 import {
@@ -828,6 +829,7 @@ export default function ArtesApp() {
   const [latestActionableSupportMs, setLatestActionableSupportMs] = useState(0);
   const [moderationLastSeenMs, setModerationLastSeenMs] = useState(0);
   const [pendingApprovedReminder, setPendingApprovedReminder] = useState(null);
+  const [pendingApprovedReminderAction, setPendingApprovedReminderAction] = useState('');
   const [acknowledgedApprovedUploadIds, setAcknowledgedApprovedUploadIds] = useState(() => new Set());
   const [claimInviteToken, setClaimInviteToken] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
@@ -1830,31 +1832,31 @@ export default function ArtesApp() {
       });
   };
 
-  const approvedReminderStorageKey = authUser?.uid
-    ? `artes.approvedReminderAcknowledged.${authUser.uid}`
-    : '';
-
   useEffect(() => {
-    if (!approvedReminderStorageKey) {
-      setAcknowledgedApprovedUploadIds(new Set());
-      return;
-    }
-    try {
-      const raw = window.localStorage.getItem(approvedReminderStorageKey);
-      if (!raw) {
-        setAcknowledgedApprovedUploadIds(new Set());
-        return;
-      }
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        setAcknowledgedApprovedUploadIds(new Set());
-        return;
-      }
-      setAcknowledgedApprovedUploadIds(new Set(parsed.filter((value) => typeof value === 'string' && value.trim())));
-    } catch {
+    if (!authUser?.uid) {
       setAcknowledgedApprovedUploadIds(new Set());
     }
-  }, [approvedReminderStorageKey]);
+  }, [authUser?.uid]);
+
+  const callUserModerationAction = useCallback(async (uploadId, action) => {
+    if (!uploadId || !action || !authUser || !moderationApiBase) {
+      throw new Error('Moderatie actie is momenteel niet beschikbaar.');
+    }
+    const token = await authUser.getIdToken();
+    const response = await fetch(`${moderationApiBase}/userModerationAction`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ uploadId, action }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new Error(data?.error || 'Moderatie actie mislukt.');
+    }
+    return response.json().catch(() => ({ ok: true }));
+  }, [authUser, moderationApiBase]);
 
   const markApprovedUploadReminderAcknowledged = useCallback((uploadId) => {
     if (!uploadId) return;
@@ -1862,23 +1864,39 @@ export default function ArtesApp() {
       if (prev.has(uploadId)) return prev;
       const next = new Set(prev);
       next.add(uploadId);
-      if (approvedReminderStorageKey) {
-        try {
-          window.localStorage.setItem(approvedReminderStorageKey, JSON.stringify(Array.from(next)));
-        } catch {
-          // noop: localStorage can fail in restricted browser modes.
-        }
-      }
       return next;
     });
-  }, [approvedReminderStorageKey]);
+  }, []);
 
-  const handleResumeApprovedUpload = useCallback((uploadId) => {
+  const handleResumeApprovedUpload = useCallback(async (uploadId) => {
     if (!uploadId) return;
     markApprovedUploadReminderAcknowledged(uploadId);
-    handleOpenUploadModal({ resumeUploadId: uploadId, isChallenge: false });
     setPendingApprovedReminder(null);
-  }, [handleOpenUploadModal, markApprovedUploadReminderAcknowledged]);
+    try {
+      await callUserModerationAction(uploadId, 'markPublicationPromptOpened');
+    } catch (error) {
+      console.error('Failed to persist approved upload prompt action', error);
+      setToastMessage('We openen de editor, maar konden de herinnering nog niet opslaan.');
+    }
+    handleOpenUploadModal({ resumeUploadId: uploadId, isChallenge: false });
+  }, [callUserModerationAction, handleOpenUploadModal, markApprovedUploadReminderAcknowledged]);
+
+  const handleDiscardPendingApprovedUpload = useCallback(async () => {
+    const uploadId = pendingApprovedReminder?.uploadId;
+    if (!uploadId || pendingApprovedReminderAction) return;
+    setPendingApprovedReminderAction('discard');
+    try {
+      await callUserModerationAction(uploadId, 'discardApprovedUpload');
+      markApprovedUploadReminderAcknowledged(uploadId);
+      setPendingApprovedReminder(null);
+      setToastMessage('Goedgekeurde upload verworpen.');
+    } catch (error) {
+      console.error('Failed to discard approved upload', error);
+      setToastMessage(error?.message || 'Verwerpen mislukt. Probeer opnieuw.');
+    } finally {
+      setPendingApprovedReminderAction('');
+    }
+  }, [callUserModerationAction, markApprovedUploadReminderAcknowledged, pendingApprovedReminder?.uploadId, pendingApprovedReminderAction]);
 
   const handlePendingReminderToChat = useCallback(() => {
     setPendingApprovedReminder(null);
@@ -1892,14 +1910,6 @@ export default function ArtesApp() {
     }
     let active = true;
     const db = getFirebaseDbInstance();
-
-    const resolveTimestamp = (value) => {
-      if (!value) return 0;
-      if (typeof value.toMillis === 'function') return value.toMillis();
-      if (typeof value.seconds === 'number') return value.seconds * 1000;
-      if (typeof value === 'number') return value;
-      return 0;
-    };
 
     const loadPendingApprovedUpload = async () => {
       try {
@@ -1915,38 +1925,19 @@ export default function ArtesApp() {
           return;
         }
 
-        const candidates = snapshot.docs
-          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter((item) => !acknowledgedApprovedUploadIds.has(item.id))
-          .sort((a, b) => {
-            const left = resolveTimestamp(b.reviewDecisionAt) || resolveTimestamp(b.approvedAt) || resolveTimestamp(b.createdAt);
-            const right = resolveTimestamp(a.reviewDecisionAt) || resolveTimestamp(a.approvedAt) || resolveTimestamp(a.createdAt);
-            return left - right;
+        const uploads = [];
+        for (const docSnap of snapshot.docs) {
+          const upload = { id: docSnap.id, ...docSnap.data() };
+          const postSnap = await getDoc(doc(db, 'posts', docSnap.id));
+          uploads.push({
+            ...upload,
+            postId: upload.postId || (postSnap.exists() ? docSnap.id : null),
+            publishedAt: upload.publishedAt || (postSnap.exists() ? postSnap.data()?.createdAt || true : null),
           });
-
-        if (!candidates.length) {
-          setPendingApprovedReminder(null);
-          return;
         }
 
-        let openCandidate = null;
-        for (const item of candidates) {
-          const postSnap = await getDoc(doc(db, 'posts', item.id));
-          if (!postSnap.exists()) {
-            openCandidate = item;
-            break;
-          }
-        }
-
-        if (!active || !openCandidate) {
-          setPendingApprovedReminder(null);
-          return;
-        }
-
-        setPendingApprovedReminder({
-          uploadId: openCandidate.id,
-          count: candidates.length,
-        });
+        if (!active) return;
+        setPendingApprovedReminder(selectPendingApprovedUploadReminder(uploads, { acknowledgedUploadIds: acknowledgedApprovedUploadIds }));
       } catch (error) {
         if (!active) return;
         setPendingApprovedReminder(null);
@@ -2665,22 +2656,40 @@ export default function ArtesApp() {
           <div className="fixed top-5 right-5 z-[75] w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-blue-200 bg-white/95 dark:bg-slate-900/95 dark:border-slate-700 shadow-2xl p-4">
             <p className="text-sm font-semibold text-slate-900 dark:text-white">Je goedgekeurde upload wacht nog op publicatie.</p>
             <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-              Open de chat met Artes Moderatie en kies “Open in editor” om je post af te ronden.
+              Open de editor om je post af te ronden, ga naar Artes Moderatie of verwerp de upload.
             </p>
-            <div className="mt-3 flex gap-2 justify-end">
+            <div className="mt-3 flex flex-wrap gap-2 justify-end">
               <button
                 type="button"
-                className="text-xs px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-600"
+                className="text-xs px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-600 disabled:opacity-60"
                 onClick={() => setPendingApprovedReminder(null)}
+                disabled={Boolean(pendingApprovedReminderAction)}
               >
                 Sluiten
               </button>
               <button
                 type="button"
-                className="text-xs px-3 py-1.5 rounded-full bg-blue-600 text-white"
+                className="text-xs px-3 py-1.5 rounded-full border border-red-200 text-red-600 dark:border-red-900/60 disabled:opacity-60"
+                onClick={handleDiscardPendingApprovedUpload}
+                disabled={Boolean(pendingApprovedReminderAction)}
+              >
+                {pendingApprovedReminderAction === 'discard' ? 'Verwerpen...' : 'Verwerpen'}
+              </button>
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-600 disabled:opacity-60"
                 onClick={handlePendingReminderToChat}
+                disabled={Boolean(pendingApprovedReminderAction)}
               >
                 Naar chat
+              </button>
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-full bg-blue-600 text-white disabled:opacity-60"
+                onClick={() => handleResumeApprovedUpload(pendingApprovedReminder.uploadId)}
+                disabled={Boolean(pendingApprovedReminderAction)}
+              >
+                Open in editor
               </button>
             </div>
           </div>
@@ -7226,6 +7235,11 @@ function UploadModal({
           return;
         }
         const uploadData = uploadSnap.data() || {};
+        if (String(uploadData.publicationStatus || uploadData.publishStatus || '').trim() === 'discarded') {
+          setResumeUpload(null);
+          setResumeError('Deze goedgekeurde upload is verworpen en kan niet meer hervat worden.');
+          return;
+        }
         const ownerId = uploadData.userId || uploadData.ownerUid || uploadData.userUid || null;
         if (ownerId !== user.uid) {
           setResumeUpload(null);

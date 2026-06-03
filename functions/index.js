@@ -3502,14 +3502,14 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       res.status(400).json({ error: 'uploadId and action are required (messageId required for this action)' });
       return;
     }
-    if (!['publishNow', 'saveDraft', 'dismiss', 'repairPublished', 'acceptCorrection', 'rejectCorrection'].includes(action)) {
+    if (!['publishNow', 'saveDraft', 'dismiss', 'repairPublished', 'acceptCorrection', 'rejectCorrection', 'markPublicationPromptOpened', 'discardApprovedUpload'].includes(action)) {
       res.status(400).json({ error: 'Invalid action' });
       return;
     }
     const userId = decoded.uid;
     const threadId = `support_${userId}`;
     const threadRef = db.collection('threads').doc(threadId);
-    const messageRef = action === 'repairPublished' ? null : threadRef.collection('messages').doc(messageId);
+    const messageRef = action === 'repairPublished' || !messageId ? null : threadRef.collection('messages').doc(messageId);
     const uploadRef = db.collection('uploads').doc(uploadId);
 
     const [messageSnap, uploadSnap] = await Promise.all([
@@ -3546,8 +3546,82 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       res.status(409).json({ error: 'Upload is not approved' });
       return;
     }
+    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && upload?.reviewStatus !== 'approved') {
+      res.status(409).json({ error: 'Upload is not approved' });
+      return;
+    }
+    const currentPublicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
+    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && currentPublicationStatus === 'published') {
+      res.status(409).json({ error: 'Upload is already published' });
+      return;
+    }
 
+    if (action === 'markPublicationPromptOpened') {
+      await uploadRef.set({
+        publicationPromptOpenedAt: FieldValue.serverTimestamp(),
+        publicationPromptOpenedByUid: userId,
+        publicationPromptDismissedAt: FieldValue.serverTimestamp(),
+        publicationPromptDismissedByUid: userId,
+      }, { merge: true });
 
+      if (messageRef) {
+        await messageRef.set({ unread: false }, { merge: true });
+      }
+    }
+
+    if (action === 'discardApprovedUpload') {
+      await db.runTransaction(async (transaction) => {
+        const latestUploadSnap = await transaction.get(uploadRef);
+        if (!latestUploadSnap.exists) {
+          const error = new Error('Upload not found');
+          error.status = 404;
+          throw error;
+        }
+        const latestUpload = latestUploadSnap.data() || {};
+        const latestOwnerId = latestUpload?.userId || latestUpload?.ownerUid || latestUpload?.userUid || null;
+        if (latestOwnerId !== userId) {
+          const error = new Error('Not authorized for this action');
+          error.status = 403;
+          throw error;
+        }
+        if (String(latestUpload?.publicationStatus || latestUpload?.publishStatus || '').trim() === 'published') {
+          const error = new Error('Upload is already published');
+          error.status = 409;
+          throw error;
+        }
+        if (latestUpload?.reviewStatus !== 'approved') {
+          const error = new Error('Upload is not approved');
+          error.status = 409;
+          throw error;
+        }
+
+        transaction.set(uploadRef, {
+          publicationStatus: 'discarded',
+          publishStatus: 'discarded',
+          discardedAt: FieldValue.serverTimestamp(),
+          discardedByUid: userId,
+          publicationPromptDismissedAt: FieldValue.serverTimestamp(),
+          publicationPromptDismissedByUid: userId,
+        }, { merge: true });
+
+        const reviewCaseId = latestUpload?.reviewCaseId || null;
+        if (reviewCaseId) {
+          transaction.set(db.collection('reviewCases').doc(reviewCaseId), {
+            userPublicationStatus: 'discarded',
+            userDiscardedAt: FieldValue.serverTimestamp(),
+            userDiscardedByUid: userId,
+          }, { merge: true });
+        }
+      });
+
+      if (messageRef) {
+        await messageRef.set({
+          unread: false,
+          resolved: true,
+          resolvedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    }
 
     if (action === 'acceptCorrection' || action === 'rejectCorrection') {
       const validation = validateUploaderCorrectionAction({ action, upload, userId });

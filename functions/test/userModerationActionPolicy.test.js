@@ -29,4 +29,10 @@ test('messageId required only for publishNow/saveDraft/dismiss', () => {
   assert.equal(requiresMessageIdForAction('acceptCorrection'), false);
   assert.equal(requiresMessageIdForAction('rejectCorrection'), false);
   assert.equal(requiresMessageIdForAction('repairPublished'), false);
+  assert.equal(requiresMessageIdForAction('markPublicationPromptOpened'), false);
+  assert.equal(requiresMessageIdForAction('discardApprovedUpload'), false);
+});
+
+test('publishNow is denied after an approved upload is discarded', () => {
+  assert.equal(canPublishUpload({ reviewStatus: 'approved', publicationStatus: 'discarded' }), false);
 });

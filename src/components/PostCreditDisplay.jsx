@@ -21,8 +21,8 @@ export default function PostCreditDisplay({
   return (
     <div className={`${alignmentClass} flex flex-col gap-2 ${className}`}>
       {rows.map((row) => {
-        const canOpenUser = Boolean(row.uid && onUserClick);
-        const canOpenShadow = Boolean(!row.uid && onShadowClick && (row.name || row.contributorId));
+        const canOpenUser = Boolean(!row.isAnonymous && row.uid && onUserClick);
+        const canOpenShadow = Boolean(!row.isAnonymous && !row.uid && row.contributorId && row.name && onShadowClick);
         const isClickable = canOpenUser || canOpenShadow;
 
         return (
@@ -35,13 +35,13 @@ export default function PostCreditDisplay({
                 onUserClick(row.uid);
                 return;
               }
-              onShadowClick({ name: row.name, contributorId: row.contributorId || null });
+              onShadowClick({ name: row.name, contributorId: row.contributorId });
             } : undefined}
             disabled={!isClickable}
           >
             <div className={roleClassName}>{row.roleLabel}</div>
             <div className={`${nameClassName} flex items-center ${nameAlignmentClass} gap-1`}>
-              {row.name} {!row.uid && row.contributorId && <ExternalLink className="w-3 h-3 text-slate-400" />}
+              {row.name} {!row.isAnonymous && !row.uid && row.contributorId && <ExternalLink className="w-3 h-3 text-slate-400" />}
             </div>
             {row.secondaryLabel && (
               <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{row.secondaryLabel}</div>

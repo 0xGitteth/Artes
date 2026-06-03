@@ -4913,93 +4913,99 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
              </div>
            )}
            
-           <div className="absolute inset-0 z-20 flex flex-col justify-end items-center px-5 pb-6 text-center">
-              <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{normalizedProfile.displayName}</h1>
-              <div className="flex flex-wrap justify-center gap-2 mb-4">
-                 {roles.map(r => (
-                   <span key={r} className="text-xs font-bold uppercase tracking-widest text-blue-900 dark:text-white bg-white/80 dark:bg-white/10 px-3 py-1 rounded-full backdrop-blur border border-blue-200/60 dark:border-white/20 shadow-sm">
-                     {roleLabel(r)}
-                   </span>
-                 ))}
-              </div>
-              {showBio && <p className="text-slate-700 dark:text-slate-200 max-w-xl text-base md:text-lg mb-5 leading-relaxed">{bio}</p>}
-              <div className="flex flex-wrap justify-center gap-4 text-xs font-semibold text-slate-700/90 dark:text-slate-200/90 mb-5">
-                <span>Fans: {fansCount}</span>
-                <span>Fan van: {fanOfCount}</span>
-              </div>
-              {canFanUser ? (
-                <div className="flex flex-col items-center gap-2 mb-5">
-                  <Button onClick={onToggleFan} variant="secondary" disabled={fanBusy}>
-                    {fanBusy ? 'Fanstatus opslaan...' : (isFan ? 'Stop fan zijn' : 'Word fan')}
-                  </Button>
-                  {fanError ? <p className="text-sm text-red-500 dark:text-red-300">{fanError}</p> : null}
+           <div className="absolute inset-x-0 bottom-0 z-20 px-5 pb-6 text-center">
+              <div className="mx-auto flex max-h-[min(370px,calc(100dvh-5rem))] w-full max-w-4xl flex-col items-center overflow-hidden md:max-h-[440px]">
+                <div className="w-full shrink-0">
+                  <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{normalizedProfile.displayName}</h1>
+                  <div className="no-scrollbar -mx-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-1">
+                     {roles.map(r => (
+                       <span key={r} className="shrink-0 whitespace-nowrap text-xs font-bold uppercase tracking-widest text-blue-900 dark:text-white bg-white/80 dark:bg-white/10 px-3 py-1 rounded-full backdrop-blur border border-blue-200/60 dark:border-white/20 shadow-sm">
+                         {roleLabel(r)}
+                       </span>
+                     ))}
+                  </div>
                 </div>
-              ) : null}
-              {linkedProfileRemovalType && (
-                <div className="flex flex-col items-center gap-2 mb-5">
-                  <Button
-                    onClick={() => handleAffiliationAction(profileUserId, 'removed', linkedProfileRemovalType)}
-                    variant="secondary"
-                    disabled={Boolean(affiliationActionBusyUid)}
-                    className="border-red-200 bg-white/80 text-red-700 hover:bg-red-50 dark:border-red-500/40 dark:bg-slate-900/80 dark:text-red-300 dark:hover:bg-red-500/10"
-                  >
-                    {AFFILIATION_REMOVAL_LABELS[linkedProfileRemovalType]}
-                  </Button>
-                  {affiliationActionError ? <p className="text-sm font-semibold text-red-600 dark:text-red-300">{affiliationActionError}</p> : null}
-                </div>
-              )}
-              {(hasAgency || hasCompany) && (
-                <div className="flex flex-col sm:flex-row flex-wrap justify-center gap-2 sm:gap-6 text-xs text-slate-700/80 dark:text-white/80 mb-5">
-                  {hasAgency && (
-                    <span className="flex items-center gap-1.5">
-                      <span className="uppercase tracking-widest text-[10px] font-semibold text-slate-500 dark:text-slate-300">Agency</span>
-                      {agencyLink ? (
-                        <a href={agencyLink} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors">
-                          {agencyName}
-                        </a>
-                      ) : normalizedProfile.linkedAgencyId && onLinkedProfileClick ? (
-                        <button
-                          type="button"
-                          onClick={() => onLinkedProfileClick?.(normalizedProfile.linkedAgencyId)}
-                          className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors"
-                        >
-                          {agencyName}
-                        </button>
-                      ) : (
-                        <span className="font-semibold text-slate-700 dark:text-white">{agencyName}</span>
-                      )}
-                    </span>
+                <div className="no-scrollbar mt-4 flex min-h-0 w-full flex-col items-center gap-4 overflow-y-auto px-1">
+                  {showBio && <p className="line-clamp-4 max-w-xl text-base leading-relaxed text-slate-700 dark:text-slate-200 md:line-clamp-5 md:text-lg">{bio}</p>}
+                  <div className="flex flex-wrap justify-center gap-4 text-xs font-semibold text-slate-700/90 dark:text-slate-200/90">
+                    <span>Fans: {fansCount}</span>
+                    <span>Fan van: {fanOfCount}</span>
+                  </div>
+                  {canFanUser ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Button onClick={onToggleFan} variant="secondary" disabled={fanBusy}>
+                        {fanBusy ? 'Fanstatus opslaan...' : (isFan ? 'Stop fan zijn' : 'Word fan')}
+                      </Button>
+                      {fanError ? <p className="text-sm text-red-500 dark:text-red-300">{fanError}</p> : null}
+                    </div>
+                  ) : null}
+                  {linkedProfileRemovalType && (
+                    <div className="flex flex-col items-center gap-2">
+                      <Button
+                        onClick={() => handleAffiliationAction(profileUserId, 'removed', linkedProfileRemovalType)}
+                        variant="secondary"
+                        disabled={Boolean(affiliationActionBusyUid)}
+                        className="border-red-200 bg-white/80 text-red-700 hover:bg-red-50 dark:border-red-500/40 dark:bg-slate-900/80 dark:text-red-300 dark:hover:bg-red-500/10"
+                      >
+                        {AFFILIATION_REMOVAL_LABELS[linkedProfileRemovalType]}
+                      </Button>
+                      {affiliationActionError ? <p className="text-sm font-semibold text-red-600 dark:text-red-300">{affiliationActionError}</p> : null}
+                    </div>
                   )}
-                  {hasCompany && (
-                    <span className="flex items-center gap-1.5">
-                      <span className="uppercase tracking-widest text-[10px] font-semibold text-slate-500 dark:text-slate-300">Bedrijf</span>
-                      {companyLink ? (
-                        <a href={companyLink} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors">
-                          {companyName}
-                        </a>
-                      ) : normalizedProfile.linkedCompanyId && onLinkedProfileClick ? (
-                        <button
-                          type="button"
-                          onClick={() => onLinkedProfileClick?.(normalizedProfile.linkedCompanyId)}
-                          className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors"
-                        >
-                          {companyName}
-                        </button>
-                      ) : (
-                        <span className="font-semibold text-slate-700 dark:text-white">{companyName}</span>
+                  {(hasAgency || hasCompany) && (
+                    <div className="flex max-w-full flex-col justify-center gap-2 text-xs text-slate-700/80 dark:text-white/80 sm:flex-row sm:flex-wrap sm:gap-6">
+                      {hasAgency && (
+                        <span className="flex items-center justify-center gap-1.5">
+                          <span className="uppercase tracking-widest text-[10px] font-semibold text-slate-500 dark:text-slate-300">Agency</span>
+                          {agencyLink ? (
+                            <a href={agencyLink} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors">
+                              {agencyName}
+                            </a>
+                          ) : normalizedProfile.linkedAgencyId && onLinkedProfileClick ? (
+                            <button
+                              type="button"
+                              onClick={() => onLinkedProfileClick?.(normalizedProfile.linkedAgencyId)}
+                              className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors"
+                            >
+                              {agencyName}
+                            </button>
+                          ) : (
+                            <span className="font-semibold text-slate-700 dark:text-white">{agencyName}</span>
+                          )}
+                        </span>
                       )}
-                    </span>
+                      {hasCompany && (
+                        <span className="flex items-center justify-center gap-1.5">
+                          <span className="uppercase tracking-widest text-[10px] font-semibold text-slate-500 dark:text-slate-300">Bedrijf</span>
+                          {companyLink ? (
+                            <a href={companyLink} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors">
+                              {companyName}
+                            </a>
+                          ) : normalizedProfile.linkedCompanyId && onLinkedProfileClick ? (
+                            <button
+                              type="button"
+                              onClick={() => onLinkedProfileClick?.(normalizedProfile.linkedCompanyId)}
+                              className="font-semibold text-blue-700 dark:text-white hover:text-blue-800 dark:hover:text-white/90 transition-colors"
+                            >
+                              {companyName}
+                            </button>
+                          ) : (
+                            <span className="font-semibold text-slate-700 dark:text-white">{companyName}</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
                   )}
+                  {themes && themes.length > 0 ? (
+                    <div className="no-scrollbar -mx-5 flex w-[calc(100%+2.5rem)] max-w-[calc(100%+2.5rem)] gap-2 overflow-x-auto px-5 pb-1">
+                      {themes.map((theme) => (
+                        <span key={theme} className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
+                          {theme}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-              )}
-              <div className="flex flex-wrap justify-center gap-2 mt-1">
-                {themes && themes.length > 0 ? (
-                  themes.map((theme) => (
-                    <span key={theme} className={`px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
-                      {theme}
-                    </span>
-                  ))
-                ) : null}
               </div>
            </div>
         </div>
@@ -10501,26 +10507,30 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
         <div className="relative h-52 w-full shrink-0 bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:h-72">
           <img src={headerImage} alt="" className={`h-full w-full ${hasPreviewHeaderImage ? 'object-cover' : 'object-contain p-8 opacity-70 blur-[1px] md:p-14'}`} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
-          <div className="absolute inset-x-0 bottom-0 p-4 md:p-8 text-white">
-            <h2 className="mb-2 break-words text-2xl font-bold leading-tight md:mb-3 md:text-4xl">{userProfile.displayName}</h2>
-            <div className="flex flex-wrap gap-1.5 md:gap-2 mb-2 md:mb-4">
-              {roles.map((role) => (
-                <span
-                  key={role}
-                  className="text-xs font-bold uppercase tracking-widest text-white bg-white/20 px-3 py-1 rounded-full border border-white/30 backdrop-blur"
-                >
-                  {roleLabel(role)}
-                </span>
-              ))}
+          <div className="absolute inset-x-0 bottom-0 flex max-h-full flex-col overflow-hidden p-4 text-white md:p-8">
+            <div className="shrink-0">
+              <h2 className="mb-2 break-words text-2xl font-bold leading-tight md:mb-3 md:text-4xl">{userProfile.displayName}</h2>
+              <div className="no-scrollbar -mx-1 mb-2 flex gap-1.5 overflow-x-auto px-1 pb-1 md:mb-3 md:gap-2">
+                {roles.map((role) => (
+                  <span
+                    key={role}
+                    className="shrink-0 whitespace-nowrap text-xs font-bold uppercase tracking-widest text-white bg-white/20 px-3 py-1 rounded-full border border-white/30 backdrop-blur"
+                  >
+                    {roleLabel(role)}
+                  </span>
+                ))}
+              </div>
             </div>
-            {userProfile.bio && (
-              <p className="text-white/80 max-w-2xl text-sm md:text-base leading-relaxed">
-                {userProfile.bio}
-              </p>
-            )}
-            <div className="flex gap-4 mt-3 text-xs font-semibold text-white/85">
-              <span>Fans: {resolvedFansCount}</span>
-              <span>Fan van: {resolvedFanOfCount}</span>
+            <div className="no-scrollbar min-h-0 overflow-y-auto">
+              {userProfile.bio && (
+                <p className="line-clamp-3 max-w-2xl text-sm leading-relaxed text-white/80 md:line-clamp-4 md:text-base">
+                  {userProfile.bio}
+                </p>
+              )}
+              <div className="mt-3 flex flex-wrap gap-4 text-xs font-semibold text-white/85">
+                <span>Fans: {resolvedFansCount}</span>
+                <span>Fan van: {resolvedFanOfCount}</span>
+              </div>
             </div>
           </div>
           <button
@@ -10533,15 +10543,15 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
         </div>
 
         <div className="p-3 md:p-8 space-y-4 md:space-y-6 overflow-y-auto no-scrollbar">
-          <div className="flex flex-wrap gap-2">
-            {themes && themes.length > 0 ? (
-              themes.map((theme) => (
-                <span key={theme} className={`px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
+          {themes && themes.length > 0 ? (
+            <div className="no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 md:-mx-8 md:px-8">
+              {themes.map((theme) => (
+                <span key={theme} className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
                   {theme}
                 </span>
-              ))
-            ) : null}
-          </div>
+              ))}
+            </div>
+          ) : null}
 
           <div>
             <div className="flex items-center justify-between mb-4">

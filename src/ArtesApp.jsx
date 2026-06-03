@@ -2690,7 +2690,12 @@ export default function ArtesApp() {
           <UserPreviewModal
             userId={quickProfileId}
             onClose={() => setQuickProfileId(null)}
-            onFullProfile={() => { setView(`profile_${quickProfileId}`); setQuickProfileId(null); }}
+            onFullProfile={() => {
+              const profileId = quickProfileId;
+              setQuickProfileId(null);
+              setSelectedPost(null);
+              setView(`profile_${profileId}`);
+            }}
             posts={posts}
             allUsers={users}
             currentUserId={user?.uid}

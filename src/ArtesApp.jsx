@@ -1917,7 +1917,6 @@ export default function ArtesApp() {
           collection(db, 'uploads'),
           where('userId', '==', authUser.uid),
           where('reviewStatus', '==', 'approved'),
-          where('publicationStatus', '==', 'pending'),
           limit(10),
         ));
         if (!active || snapshot.empty) {

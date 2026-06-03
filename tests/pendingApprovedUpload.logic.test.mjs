@@ -23,6 +23,32 @@ assert.deepEqual(
   'approved unpublished upload is selected for the reminder',
 );
 
+const approvedWithoutPublicationStatus = { ...baseUpload };
+delete approvedWithoutPublicationStatus.publicationStatus;
+assert.equal(
+  isPendingApprovedUploadCandidate(approvedWithoutPublicationStatus),
+  true,
+  'approved upload without publicationStatus shows pending publication modal',
+);
+
+assert.equal(
+  isPendingApprovedUploadCandidate({ ...baseUpload, publicationStatus: '' }),
+  true,
+  'approved upload with empty publicationStatus shows pending publication modal',
+);
+
+assert.equal(
+  isPendingApprovedUploadCandidate({ ...approvedWithoutPublicationStatus, publishStatus: 'discarded' }),
+  false,
+  'approved upload with only publishStatus discarded does not show modal',
+);
+
+assert.equal(
+  isPendingApprovedUploadCandidate({ ...baseUpload, publicationStatus: 'draft' }),
+  false,
+  'approved upload with publicationStatus draft does not show modal',
+);
+
 assert.equal(
   isPendingApprovedUploadCandidate({ ...baseUpload, publicationPromptOpenedAt: { seconds: 30 } }),
   false,

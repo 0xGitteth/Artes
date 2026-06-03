@@ -35,4 +35,5 @@ test('messageId required only for publishNow/saveDraft/dismiss', () => {
 
 test('publishNow is denied after an approved upload is discarded', () => {
   assert.equal(canPublishUpload({ reviewStatus: 'approved', publicationStatus: 'discarded' }), false);
+  assert.equal(canPublishUpload({ reviewStatus: 'approved', publishStatus: 'discarded' }), false);
 });

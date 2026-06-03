@@ -3,6 +3,7 @@ const CLOSED_PUBLICATION_STATUSES = new Set([
   'discarded',
   'draft',
   'blocked',
+  'needs_user_correction',
   'user_disagreed',
 ]);
 
@@ -20,7 +21,6 @@ export function isPendingApprovedUploadCandidate(upload = {}, options = {}) {
   if (options.acknowledgedUploadIds?.has?.(uploadId)) return false;
   if (upload?.reviewStatus !== 'approved') return false;
   const publicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
-  if (publicationStatus !== 'pending') return false;
   if (CLOSED_PUBLICATION_STATUSES.has(publicationStatus)) return false;
   if (upload?.publishedAt || upload?.postId) return false;
   if (upload?.discardedAt || upload?.discardedByUid) return false;

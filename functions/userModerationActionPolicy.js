@@ -4,7 +4,7 @@ export function requiresMessageIdForAction(action) {
 
 export function canPublishUpload(upload = {}) {
   if (upload?.requiresUploaderAcceptance === true) return false;
-  const publicationStatus = String(upload?.publicationStatus || '').trim();
+  const publicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
   if (publicationStatus === 'needs_user_correction' || publicationStatus === 'user_disagreed' || publicationStatus === 'discarded') return false;
   if (upload?.correctedTaxonomy) {
     const responseStatus = String(upload?.uploaderCorrectionResponse?.status || '').trim();

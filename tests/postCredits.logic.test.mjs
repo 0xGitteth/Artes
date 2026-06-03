@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { getPostCreditRows } from '../src/utils/postCredits.js';
+import {
+  getPostCreditRows,
+  isAnonymousDisplayOnlyShadowProfile,
+  isClaimableTemporaryContributor,
+} from '../src/utils/postCredits.js';
 
 const rowsFor = (credits, post = {}) => getPostCreditRows({
   id: 'post_1',
@@ -84,8 +88,8 @@ const anonymousMaker = rowsFor([
   { role: 'photographer', isMaker: true, makerFunction: 'photographer', isAnonymous: true },
 ], { authorId: null, authorName: '' });
 assert.equal(anonymousMaker.length, 1, 'anonymous maker credit renders one row');
-assert.equal(anonymousMaker[0].roleLabel, 'Beeld door');
-assert.equal(anonymousMaker[0].name, 'Anonieme maker');
+assert.equal(anonymousMaker[0].roleLabel, 'Fotograaf');
+assert.equal(anonymousMaker[0].name, 'Anonieme fotograaf');
 
 const legacyFallback = getPostCreditRows({ authorId: 'legacy_author', authorName: 'Legacy Name', authorRole: 'photographer' });
 assert.equal(legacyFallback.length, 1, 'legacy post without structured credits renders fallback row');
@@ -114,4 +118,73 @@ const modalSource = readFileSync(new URL('../src/components/PhotoDetailModal.jsx
 assert.match(timelineSource, /<PostCreditDisplay\b/, 'timeline uses PostCreditDisplay');
 assert.match(modalSource, /<PostCreditDisplay\b/, 'photo detail modal uses PostCreditDisplay');
 
-console.log('PASS postCredits.logic.test');
+const anonymousModel = rowsFor([
+  { role: { label: 'Model', value: 'model' }, name: 'Anonieme bijdrager', anonymous: true },
+], { authorId: null, authorName: '' });
+assert.equal(anonymousModel.length, 1, 'anonymous model credit renders one row');
+assert.equal(anonymousModel[0].roleLabel, 'Model');
+assert.equal(anonymousModel[0].name, 'Anoniem model');
+assert.equal(anonymousModel[0].isAnonymous, true, 'anonymous model is flagged display-only');
+assert.equal(anonymousModel[0].contributorId, null, 'anonymous model does not expose a claimable contributor id');
+assert.notEqual(anonymousModel[0].roleLabel, '[object Object]', 'role objects are normalized before rendering');
+
+const anonymousPhotographer = rowsFor([
+  { role: 'photographer', name: 'Anonieme bijdrager', isAnonymous: true, isMaker: true, makerFunction: 'photographer' },
+], { authorId: null, authorName: '' });
+assert.equal(anonymousPhotographer[0].roleLabel, 'Fotograaf');
+assert.equal(anonymousPhotographer[0].name, 'Anonieme fotograaf');
+
+const anonymousMissingRole = rowsFor([
+  { name: 'Anonieme bijdrager', isAnonymous: true },
+], { authorId: null, authorName: '' });
+assert.equal(anonymousMissingRole[0].roleLabel, 'Bijdrager');
+assert.equal(anonymousMissingRole[0].name, 'Anonieme bijdrager');
+
+const legacyAnonymousContributor = rowsFor([
+  { role: 'model', name: 'Anonieme bijdrager', contributorId: 'legacy_bad_temp' },
+], { authorId: null, authorName: '' });
+assert.equal(legacyAnonymousContributor[0].isAnonymous, true, 'legacy anonymous temporary names are guarded as anonymous');
+assert.equal(legacyAnonymousContributor[0].contributorId, null, 'legacy anonymous temporary names are not claimable');
+
+
+const anonymousLabelOnlyModel = rowsFor([
+  { role: { label: 'Model' }, anonymous: true },
+], { authorId: null, authorName: '' });
+assert.equal(anonymousLabelOnlyModel[0].roleLabel, 'Model', 'label-only model role object is canonicalized');
+assert.equal(anonymousLabelOnlyModel[0].name, 'Anoniem model');
+assert.equal(anonymousLabelOnlyModel[0].isAnonymous, true);
+assert.equal(anonymousLabelOnlyModel[0].contributorId, null);
+
+const anonymousLabelOnlyPhotographer = rowsFor([
+  { role: { label: 'Fotograaf' }, anonymous: true },
+], { authorId: null, authorName: '' });
+assert.equal(anonymousLabelOnlyPhotographer[0].roleLabel, 'Fotograaf', 'label-only photographer role object is canonicalized');
+assert.equal(anonymousLabelOnlyPhotographer[0].name, 'Anonieme fotograaf');
+assert.equal(anonymousLabelOnlyPhotographer[0].isAnonymous, true);
+assert.equal(anonymousLabelOnlyPhotographer[0].contributorId, null);
+
+const pendingInviteCandidates = [
+  { contributorId: 'anon_flag', displayName: 'Anon flag', anonymous: true },
+  { contributorId: 'is_anon_flag', displayName: 'Is anon flag', isAnonymous: true },
+  { contributorId: 'anon_mode_flag', displayName: 'Anon mode flag', anonymousMode: true },
+  { contributorId: 'anon_contributor_flag', displayName: 'Anon contributor flag', isAnonymousContributor: true },
+  { contributorId: 'mode_anon', displayName: 'Mode anon', mode: 'anonymous' },
+  { contributorId: 'type_anon', displayName: 'Type anon', type: 'anonymous' },
+  { contributorId: 'consent_anon', displayName: 'Consent anon', consentStatus: 'anonymous' },
+  { contributorId: 'credit_type_anon', displayName: 'Credit type anon', creditType: 'anonymous' },
+  { contributorId: 'anon_model_name', displayName: 'Anoniem model' },
+  { contributorId: 'anon_photographer_name', displayName: 'Anonieme fotograaf' },
+  { contributorId: 'claimable_temp', displayName: 'Mara Eliza' },
+];
+assert.deepEqual(
+  pendingInviteCandidates.filter(isClaimableTemporaryContributor).map((candidate) => candidate.contributorId),
+  ['claimable_temp'],
+  'claim invite filter only keeps named temporary contributors',
+);
+
+assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Anoniem model', externalLinks: [] }), true, 'shadow modal treats anonymous model as display-only');
+assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Anonieme fotograaf', externalLinks: [] }), true, 'shadow modal treats anonymous photographer as display-only');
+assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Anonieme fotograaf', externalLinks: [{ type: 'website', url: 'https://example.com' }] }), false, 'shadow modal keeps public identity entries claimable');
+assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Named contributor', isAnonymous: true, externalLinks: [{ type: 'website', url: 'https://example.com' }] }), true, 'explicit anonymous flag wins for shadow modal');
+
+console.log('PASS postCredits.logic.test.mjs');

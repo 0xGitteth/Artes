@@ -107,12 +107,13 @@ import { stableDiscoverOrder } from './utils/discoverOrdering';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
 import PostCreditDisplay from './components/PostCreditDisplay';
+import { isAnonymousDisplayOnlyShadowProfile, isClaimableTemporaryContributor } from './utils/postCredits';
 import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
 import ProfileImageCropper from './components/ProfileImageCropper';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 
-import { ROLE_OPTIONS } from './utils/roles';
+import { ROLE_OPTIONS, normalizeRoleValue } from './utils/roles';
 import {
   ALL_PROFILE_PORTFOLIO_TAB,
   filterProfilePostsByRole,
@@ -2733,6 +2734,7 @@ export default function ArtesApp() {
           <ShadowProfileModal
             name={shadowProfile.name}
             contributorId={shadowProfile.contributorId}
+            isAnonymous={shadowProfile.isAnonymous}
             posts={posts}
             onClose={() => setShadowProfile(null)}
             onPostClick={handleOpenPost}
@@ -7962,8 +7964,9 @@ function UploadModal({
   };
 
   const getNewCreditMakerFields = useCallback((credit = newCredit) => {
-    const makerFunction = String(credit.makerFunction || '').trim();
-    if (isMakerRole(credit.role)) return { isMaker: true, makerFunction: credit.role };
+    const role = normalizeRoleValue(credit.role);
+    const makerFunction = normalizeRoleValue(credit.makerFunction);
+    if (isMakerRole(role)) return { isMaker: true, makerFunction: role };
     if (credit.isMaker && makerFunction) return { isMaker: true, makerFunction };
     return { isMaker: false, makerFunction: null };
   }, [newCredit]);
@@ -8021,6 +8024,13 @@ function UploadModal({
 
      const displayName = String(externalDisplayNameOverride || '').trim();
      if(!displayName) return;
+     const normalizedInstagram = normalizeInstagram(externalContributorInstagram);
+     const normalizedWebsite = normalizeDomain(externalContributorWebsite);
+     const normalizedEmail = normalizeEmail(externalContributorEmail);
+     if (displayName === 'Anonieme bijdrager' && !normalizedInstagram && !normalizedWebsite && !normalizedEmail) {
+       addAnonymousContributor(newCredit.role);
+       return;
+     }
      const nameMatches = getContributorMatches(displayName);
      if (nameMatches.length > 0 && !allowExternalOverride) {
        setContributorSearch(displayName);
@@ -8028,9 +8038,6 @@ function UploadModal({
        return;
      }
 
-     const normalizedInstagram = normalizeInstagram(externalContributorInstagram);
-     const normalizedWebsite = normalizeDomain(externalContributorWebsite);
-     const normalizedEmail = normalizeEmail(externalContributorEmail);
      const aliasCandidates = [
        normalizedInstagram ? { type: 'instagram', value: normalizedInstagram } : null,
        normalizedWebsite ? { type: 'domain', value: normalizedWebsite } : null,
@@ -8479,13 +8486,15 @@ function UploadModal({
       setStep(1);
       setPublishing(false);
 
-      if (pendingInviteContributors.length > 0) {
+      const claimableInviteContributors = pendingInviteContributors.filter(isClaimableTemporaryContributor);
+
+      if (claimableInviteContributors.length > 0) {
         setInviteShareError('');
         setInviteShareCopied('');
         const baseUrl = window.location.origin;
         try {
           const inviteResults = await Promise.all(
-            pendingInviteContributors.map(async (candidate) => {
+            claimableInviteContributors.map(async (candidate) => {
               const result = await createClaimInvite({
                 contributorId: candidate.contributorId,
                 postId,
@@ -10596,6 +10605,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
 function ShadowProfileModal({
   name,
   contributorId,
+  isAnonymous = false,
   posts,
   onClose,
   onPostClick,
@@ -10702,9 +10712,11 @@ function ShadowProfileModal({
       return Array.from(collected.values());
     }, [contributorId, name, shadowPosts]);
 
+    const isAnonymousDisplayOnly = isAnonymousDisplayOnlyShadowProfile({ name, isAnonymous, externalLinks });
+
     useEffect(() => {
       let isMounted = true;
-      if (!authReady || !contributorId) {
+      if (isAnonymousDisplayOnly || !authReady || !contributorId) {
         setContributorInfo(null);
         return () => {};
       }
@@ -10728,11 +10740,11 @@ function ShadowProfileModal({
       return () => {
         isMounted = false;
       };
-    }, [authReady, contributorId]);
+    }, [authReady, contributorId, isAnonymousDisplayOnly]);
 
     useEffect(() => {
       let active = true;
-      if (!authReady || !contributorId) {
+      if (isAnonymousDisplayOnly || !authReady || !contributorId) {
         setWebsiteAlias(null);
         return () => {};
       }
@@ -10765,7 +10777,7 @@ function ShadowProfileModal({
       return () => {
         active = false;
       };
-    }, [authReady, contributorId]);
+    }, [authReady, contributorId, isAnonymousDisplayOnly]);
 
     useEffect(() => {
       if (!authReady || !claimRequestId) {
@@ -11128,7 +11140,9 @@ function ShadowProfileModal({
           <div className="relative h-64 bg-indigo-900 flex items-center justify-center flex-col text-white px-6 text-center">
             <div className="text-4xl font-bold mb-2">{name}</div>
             <p className="text-sm text-white/80">
-              Ongeclaimd profiel. Laat deze persoon weten dat er een profiel is aangemaakt zodat ze het kunnen claimen.
+              {isAnonymousDisplayOnly
+                ? 'Anonieme credits zijn alleen display-only en kunnen niet worden geclaimd.'
+                : 'Ongeclaimd profiel. Laat deze persoon weten dat er een profiel is aangemaakt zodat ze het kunnen claimen.'}
             </p>
             {externalLinks.length > 0 && (
               <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-sm">
@@ -11145,7 +11159,7 @@ function ShadowProfileModal({
                 ))}
               </div>
             )}
-            {contributorId && (
+            {!isAnonymousDisplayOnly && contributorId && (
               <div className="mt-4 w-full max-w-2xl space-y-2">
                 <button
                   type="button"
@@ -11213,7 +11227,7 @@ function ShadowProfileModal({
                   )}
                 </div>
               )}
-              {!loadingContributor && !claimedByOther && (
+              {!isAnonymousDisplayOnly && !loadingContributor && !claimedByOther && (
                 <div className="rounded-2xl bg-white/10 px-4 py-3 text-left space-y-3">
                   {!isLoggedIn && (
                     <p className="text-sm text-white/80">Log in om te claimen.</p>
@@ -11424,7 +11438,7 @@ function ShadowProfileModal({
                 </div>
               )}
             </div>
-            {claimedByCurrentUser && (
+            {!isAnonymousDisplayOnly && claimedByCurrentUser && (
               <div className="absolute left-6 right-6 bottom-4 rounded-2xl bg-white/10 p-3 text-left text-xs text-white shadow-lg backdrop-blur">
                 <p className="font-semibold">Geclaimd profiel: correctie, verbergen of verwijderen aanvragen</p>
                 <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr]">

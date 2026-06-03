@@ -1,3 +1,4 @@
+import { normalizeRoleValue } from './roles.js';
 export const CONTRIBUTOR_CONSENT_STATUSES = Object.freeze({
   PENDING: 'pending',
   ACCEPTED: 'accepted',
@@ -56,24 +57,25 @@ const MAKER_FUNCTION_SET = new Set(MAKER_FUNCTION_IDS);
 const SUBJECT_ROLE_SET = new Set(SUBJECT_ROLE_IDS);
 const CONSENT_STATUS_SET = new Set(Object.values(CONTRIBUTOR_CONSENT_STATUSES));
 
-export const isMakerRole = (role) => MAKER_ROLE_SET.has(String(role || ''));
-export const isMakerFunction = (makerFunction) => MAKER_FUNCTION_SET.has(String(makerFunction || ''));
-export const isSubjectRole = (role) => SUBJECT_ROLE_SET.has(String(role || ''));
+export const isMakerRole = (role) => MAKER_ROLE_SET.has(normalizeRoleValue(role));
+export const isMakerFunction = (makerFunction) => MAKER_FUNCTION_SET.has(normalizeRoleValue(makerFunction));
+export const isSubjectRole = (role) => SUBJECT_ROLE_SET.has(normalizeRoleValue(role));
 export const isContributorConsentStatus = (status) => CONSENT_STATUS_SET.has(String(status || ''));
 
 export const getSelfMakerRoles = (profileRoles = []) => (Array.isArray(profileRoles) ? profileRoles : [])
   .filter(isMakerRole);
 
 export const getCreditMakerFunction = (credit = {}) => {
-  const explicitMakerFunction = String(credit?.makerFunction || '').trim();
+  const explicitMakerFunction = normalizeRoleValue(credit?.makerFunction);
   if (Boolean(credit?.isMaker) && isMakerFunction(explicitMakerFunction)) return explicitMakerFunction;
-  const role = String(credit?.role || '').trim();
+  const role = normalizeRoleValue(credit?.role);
   return isMakerRole(role) ? role : '';
 };
 
 export const isExplicitMakerCredit = (credit = {}) => {
   if (getCreditMakerFunction(credit)) return true;
-  return Boolean(credit.isSelf && credit.role === 'model' && credit.selfPortrait === true && credit.isMaker === true);
+  const role = normalizeRoleValue(credit.role);
+  return Boolean(credit.isSelf && role === 'model' && credit.selfPortrait === true && credit.isMaker === true);
 };
 
 export const getMakerCreditIndex = (credits = []) => (Array.isArray(credits) ? credits : [])
@@ -92,16 +94,20 @@ export const hasValidSelfMakerCredit = ({
   selfMakerRole = '',
 } = {}) => (Array.isArray(credits) ? credits : [])
   .some((credit) => {
-    if (!credit?.isSelf || credit.role !== uploaderRole) return false;
-    if (credit.selfPortrait === true && credit.isMaker === true && credit.role === 'model') return true;
-    const makerFunction = getCreditMakerFunction(credit);
+    const role = normalizeRoleValue(credit?.role);
+    const normalizedUploaderRole = normalizeRoleValue(uploaderRole);
+    const normalizedSelfMakerRole = normalizeRoleValue(selfMakerRole);
+    const normalizedProfileRoles = Array.isArray(profileRoles) ? profileRoles.map((entry) => normalizeRoleValue(entry)) : [];
+    if (!credit?.isSelf || role !== normalizedUploaderRole) return false;
+    if (credit.selfPortrait === true && credit.isMaker === true && role === 'model') return true;
+    const makerFunction = getCreditMakerFunction({ ...credit, role });
     if (!makerFunction) return false;
-    if (Array.isArray(profileRoles) && profileRoles.includes(credit.role)) return true;
-    return Boolean(selfMakerRoleConfirmed && selfMakerRole === makerFunction);
+    if (normalizedProfileRoles.includes(role)) return true;
+    return Boolean(selfMakerRoleConfirmed && normalizedSelfMakerRole === makerFunction);
   });
 
 export const normalizeCreditAfterRoleChange = (previousCredit = {}, nextRole = '') => {
-  const role = String(nextRole || '').trim();
+  const role = normalizeRoleValue(nextRole);
   if (isMakerRole(role)) {
     return {
       ...previousCredit,
@@ -164,8 +170,8 @@ export const normalizeConsentCredit = (credit = {}, context = {}) => {
   const isSelf = Boolean(credit.isSelf);
   const isAnonymous = Boolean(credit.isAnonymous);
   const exception = normalizeConsentException(context.exception);
-  const role = String(credit.role || '').trim();
-  const explicitMakerFunction = String(credit.makerFunction || '').trim();
+  const role = normalizeRoleValue(credit.role);
+  const explicitMakerFunction = normalizeRoleValue(credit.makerFunction);
   const legacyMakerFunction = isMakerRole(role) ? role : '';
   const makerFunction = isMakerFunction(explicitMakerFunction) ? explicitMakerFunction : legacyMakerFunction;
   const isSelfPortraitMaker = Boolean(isSelf && role === 'model' && credit.selfPortrait === true && credit.isMaker === true);
@@ -214,12 +220,16 @@ export const getMissingMakerPromptState = ({
   const validMakerCredits = creditList.filter((credit) => {
     if (!isExplicitMakerCredit(credit)) return false;
     if (!credit?.isSelf) return true;
-    if (credit.selfPortrait === true && credit.isMaker === true && credit.role === 'model') return credit.role === uploaderRole;
-    const makerFunction = getCreditMakerFunction(credit);
-    return credit.role === uploaderRole
+    const role = normalizeRoleValue(credit.role);
+    const normalizedUploaderRole = normalizeRoleValue(uploaderRole);
+    const normalizedSelfMakerRole = normalizeRoleValue(selfMakerRole);
+    const normalizedProfileRoles = Array.isArray(profileRoles) ? profileRoles.map((entry) => normalizeRoleValue(entry)) : [];
+    if (credit.selfPortrait === true && credit.isMaker === true && role === 'model') return role === normalizedUploaderRole;
+    const makerFunction = getCreditMakerFunction({ ...credit, role });
+    return role === normalizedUploaderRole
       && (
-        (Array.isArray(profileRoles) && profileRoles.includes(credit.role))
-        || Boolean(selfMakerRoleConfirmed && selfMakerRole === makerFunction)
+        normalizedProfileRoles.includes(role)
+        || Boolean(selfMakerRoleConfirmed && normalizedSelfMakerRole === makerFunction)
       );
   });
   const hasResolvableMaker = validMakerCredits.length > 0;
@@ -347,8 +357,8 @@ export const buildUploadConsent = ({
     missingMakerResolvedBy: missingMakerPrompt.missingMakerResolvedBy,
     missingMakerResolvedAt: missingMakerPrompt.missingMakerPromptResolved ? missingMakerPromptResolvedAt : null,
     selfMakerRoleConfirmed: Boolean(selfMakerRoleConfirmed),
-    selfMakerRole: selfMakerRoleConfirmed ? selfMakerRole : null,
-    selfMakerRoleOutsideProfile: Boolean(selfMakerRoleConfirmed && selfMakerRole && (!Array.isArray(profileRoles) || !profileRoles.includes(selfMakerRole))),
+    selfMakerRole: selfMakerRoleConfirmed ? normalizeRoleValue(selfMakerRole) : null,
+    selfMakerRoleOutsideProfile: Boolean(selfMakerRoleConfirmed && normalizeRoleValue(selfMakerRole) && (!Array.isArray(profileRoles) || !profileRoles.map((entry) => normalizeRoleValue(entry)).includes(normalizeRoleValue(selfMakerRole)))),
     selfMakerRoleConfirmedAt: selfMakerRoleConfirmed ? selfMakerRoleConfirmedAt : null,
     exception: normalizedException,
     audit: [
@@ -371,8 +381,8 @@ export const buildUploadConsent = ({
         missingMakerResolvedBy: missingMakerPrompt.missingMakerResolvedBy,
         missingMakerResolvedAt: missingMakerPrompt.missingMakerPromptResolved ? missingMakerPromptResolvedAt : null,
         selfMakerRoleConfirmed: Boolean(selfMakerRoleConfirmed),
-        selfMakerRole: selfMakerRoleConfirmed ? selfMakerRole : null,
-        selfMakerRoleOutsideProfile: Boolean(selfMakerRoleConfirmed && selfMakerRole && (!Array.isArray(profileRoles) || !profileRoles.includes(selfMakerRole))),
+        selfMakerRole: selfMakerRoleConfirmed ? normalizeRoleValue(selfMakerRole) : null,
+        selfMakerRoleOutsideProfile: Boolean(selfMakerRoleConfirmed && normalizeRoleValue(selfMakerRole) && (!Array.isArray(profileRoles) || !profileRoles.map((entry) => normalizeRoleValue(entry)).includes(normalizeRoleValue(selfMakerRole)))),
         selfMakerRoleConfirmedAt: selfMakerRoleConfirmed ? selfMakerRoleConfirmedAt : null,
       },
     ],
@@ -398,14 +408,14 @@ export const validateUploadConsent = ({
   }
 
   if (selfCredit) {
-    const selfRoleInProfile = Array.isArray(profileRoles) && profileRoles.includes(selfCredit.role);
+    const selfRoleInProfile = Array.isArray(profileRoles) && profileRoles.map((entry) => normalizeRoleValue(entry)).includes(normalizeRoleValue(selfCredit.role));
     const confirmedSelfMakerForUpload = Boolean(
       selfMakerRoleConfirmed
-      && selfMakerRole === getCreditMakerFunction(selfCredit)
-      && selfCredit.role === uploaderRole
+      && normalizeRoleValue(selfMakerRole) === getCreditMakerFunction(selfCredit)
+      && normalizeRoleValue(selfCredit.role) === normalizeRoleValue(uploaderRole)
       && isExplicitMakerCredit(selfCredit)
     );
-    if ((!selfRoleInProfile && !confirmedSelfMakerForUpload) || selfCredit.role !== uploaderRole) {
+    if ((!selfRoleInProfile && !confirmedSelfMakerForUpload) || normalizeRoleValue(selfCredit.role) !== normalizeRoleValue(uploaderRole)) {
       errors.selfRole = 'Kies je eigen rol uit je profielrollen of bevestig een makerrol voor deze upload.';
     }
   }

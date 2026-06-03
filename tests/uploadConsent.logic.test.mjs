@@ -489,4 +489,15 @@ const noMakerConsent = buildUploadConsent({
 assert.equal(noMakerConsent.hasMaker, false);
 assert.equal(noMakerConsent.makerCreditIndex, -1, 'existing makerCreditIndex logic still works when missing maker');
 
-console.log('PASS uploadConsent.logic.test');
+const roleObjectCredit = normalizeConsentCredit({ role: { label: 'Model', value: 'model' }, name: 'Anonieme bijdrager', isAnonymous: true });
+assert.equal(roleObjectCredit.role, 'model', 'role object values are normalized before write');
+assert.equal(roleObjectCredit.consentStatus, CONTRIBUTOR_CONSENT_STATUSES.ANONYMOUS, 'anonymous role object credits remain anonymous');
+assert.notEqual(String(roleObjectCredit.role), '[object Object]', 'raw role objects are never stored as display roles');
+
+
+const labelOnlyModelCredit = normalizeConsentCredit({ role: { label: 'Model' }, name: 'Anon model', isAnonymous: true });
+assert.equal(labelOnlyModelCredit.role, 'model', 'label-only model role objects normalize to canonical ids');
+const labelOnlyPhotographerCredit = normalizeConsentCredit({ role: { label: 'Fotograaf' }, name: 'Anon photographer', isAnonymous: true });
+assert.equal(labelOnlyPhotographerCredit.role, 'photographer', 'label-only photographer role objects normalize to canonical ids');
+
+console.log('PASS uploadConsent.logic.test.mjs');

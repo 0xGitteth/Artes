@@ -1,25 +1,90 @@
 import { getCreditMakerFunction } from './uploadConsent.js';
-import { getRoleLabel } from './roles.js';
+import { getRoleLabel, normalizeRoleValue } from './roles.js';
 
 const SELF_PORTRAIT_ROLES = new Set(['model']);
 const OWN_WORK_ROLES = new Set(['mua', 'stylist', 'hair']);
 const BEELD_DOOR_ROLES = new Set(['company', 'agency']);
 
+const ANONYMOUS_FALLBACK_NAME = 'Anonieme bijdrager';
+const ANONYMOUS_DISPLAY_NAMES = new Set([
+  ANONYMOUS_FALLBACK_NAME,
+  'Anoniem model',
+  'Anonieme fotograaf',
+]);
+const ANONYMOUS_ROLE_FALLBACKS = {
+  model: { roleLabel: 'Model', name: 'Anoniem model' },
+  photographer: { roleLabel: 'Fotograaf', name: 'Anonieme fotograaf' },
+};
+
+export const hasAnonymousCreditFlag = (credit = {}) => Boolean(
+  credit?.isAnonymous === true
+    || credit?.anonymous === true
+    || credit?.anonymousMode === true
+    || credit?.isAnonymousContributor === true
+    || credit?.mode === 'anonymous'
+    || credit?.creditType === 'anonymous'
+    || credit?.type === 'anonymous'
+    || credit?.consentStatus === 'anonymous',
+);
+
+const hasPublicIdentityHint = (credit = {}) => Boolean(
+  credit?.uid
+    || credit?.userId
+    || credit?.profileId
+    || credit?.instagramHandle
+    || credit?.website
+    || credit?.email
+    || credit?.link,
+);
+
+const hasAnonymousDisplayName = (credit = {}) => {
+  const displayName = String(credit?.displayName || credit?.name || '').trim();
+  return ANONYMOUS_DISPLAY_NAMES.has(displayName);
+};
+
+export const isLegacyAnonymousContributorCredit = (credit = {}) => (
+  hasAnonymousDisplayName(credit) && !hasPublicIdentityHint(credit)
+);
+
+export const isAnonymousContributorCredit = (credit = {}) => (
+  hasAnonymousCreditFlag(credit) || isLegacyAnonymousContributorCredit(credit)
+);
+
+export const getAnonymousCreditDisplay = (roleValue) => {
+  const role = normalizeRoleValue(roleValue);
+  return ANONYMOUS_ROLE_FALLBACKS[role] || { roleLabel: 'Bijdrager', name: ANONYMOUS_FALLBACK_NAME };
+};
+
+export const isClaimableTemporaryContributor = (candidate = {}) => Boolean(
+  candidate?.contributorId
+    && !hasAnonymousDisplayName(candidate)
+    && !isAnonymousContributorCredit(candidate),
+);
+
+export const isAnonymousDisplayOnlyShadowProfile = ({ name = '', displayName = '', isAnonymous = false, externalLinks = [] } = {}) => {
+  if (isAnonymous === true) return true;
+  const candidateName = String(displayName || name || '').trim();
+  return ANONYMOUS_DISPLAY_NAMES.has(candidateName) && (!Array.isArray(externalLinks) || externalLinks.length === 0);
+};
+
+
 const getCreditName = (credit = {}, roleLabel = '') => {
-  if (credit.isAnonymous && roleLabel === 'Beeld door') return 'Anonieme maker';
-  if (credit.name) return credit.name;
-  if (credit.isAnonymous) return 'Anoniem';
+  if (isAnonymousContributorCredit(credit)) {
+    return getAnonymousCreditDisplay(credit.role).name;
+  }
+  if (credit.name) return String(credit.name);
+  if (credit.displayName) return String(credit.displayName);
   return 'Onbekend';
 };
 
-const hasStructuredCredit = (credit) => Boolean(credit && (credit.role || credit.name || credit.uid || credit.contributorId || credit.isAnonymous));
+const hasStructuredCredit = (credit) => Boolean(credit && (credit.role || credit.name || credit.displayName || credit.uid || credit.userId || credit.profileId || credit.contributorId || hasAnonymousCreditFlag(credit)));
 
 const getCreditDisplayLabels = (credit = {}) => {
-  const role = credit.role || 'maker';
-  const makerFunction = getCreditMakerFunction(credit);
+  const role = normalizeRoleValue(credit.role, 'maker');
+  const makerFunction = getCreditMakerFunction({ ...credit, role });
   const isSelf = Boolean(credit.isSelf);
 
-  if (makerFunction && (credit.isAnonymous || BEELD_DOOR_ROLES.has(role))) {
+  if (makerFunction && BEELD_DOOR_ROLES.has(role)) {
     return { roleLabel: 'Beeld door', secondaryLabel: '' };
   }
 
@@ -29,6 +94,10 @@ const getCreditDisplayLabels = (credit = {}) => {
 
   if (makerFunction && OWN_WORK_ROLES.has(role)) {
     return { roleLabel: getRoleLabel(role), secondaryLabel: 'Eigen werk' };
+  }
+
+  if (isAnonymousContributorCredit(credit)) {
+    return { roleLabel: getAnonymousCreditDisplay(role).roleLabel, secondaryLabel: '' };
   }
 
   return { roleLabel: getRoleLabel(role), secondaryLabel: '' };
@@ -46,7 +115,7 @@ export const getPostCreditRows = (post = {}) => {
 
     const fallbackAuthorCredit = !hasAuthorCredit && (post.authorName || post.authorId)
       ? [{
-        role: post.authorRole || 'maker',
+        role: normalizeRoleValue(post.authorRole, 'maker'),
         name: post.authorName || 'Onbekend',
         uid: post.authorId || null,
         isLegacyAuthorFallback: true,
@@ -57,14 +126,14 @@ export const getPostCreditRows = (post = {}) => {
       const { roleLabel, secondaryLabel } = getCreditDisplayLabels(credit);
 
       return {
-        key: `${credit.uid || credit.contributorId || credit.name || credit.role || 'credit'}-${index}`,
-        role: credit.role || 'maker',
+        key: `${credit.uid || credit.userId || credit.profileId || credit.contributorId || credit.name || credit.displayName || normalizeRoleValue(credit.role) || 'credit'}-${index}`,
+        role: normalizeRoleValue(credit.role, 'maker'),
         roleLabel,
         secondaryLabel,
         name: getCreditName(credit, roleLabel),
-        uid: credit.uid || null,
-        contributorId: credit.contributorId || null,
-        isAnonymous: Boolean(credit.isAnonymous),
+        uid: credit.uid || credit.userId || credit.profileId || null,
+        contributorId: isAnonymousContributorCredit(credit) ? null : (credit.contributorId || null),
+        isAnonymous: isAnonymousContributorCredit(credit),
         isLegacyAuthorFallback: Boolean(credit.isLegacyAuthorFallback),
         rawCredit: credit,
       };
@@ -72,7 +141,7 @@ export const getPostCreditRows = (post = {}) => {
   }
 
   if (post.authorName || post.authorId) {
-    const fallbackRole = post.authorRole || 'maker';
+    const fallbackRole = normalizeRoleValue(post.authorRole, 'maker');
     const fallbackSecondaryLabel = '';
 
     return [{

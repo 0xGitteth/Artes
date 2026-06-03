@@ -4925,8 +4925,12 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                      ))}
                   </div>
                 </div>
-                <div className="no-scrollbar mt-4 flex min-h-0 w-full flex-col items-center gap-4 overflow-y-auto px-1">
-                  {showBio && <p className="line-clamp-4 max-w-xl text-base leading-relaxed text-slate-700 dark:text-slate-200 md:line-clamp-5 md:text-lg">{bio}</p>}
+                <div className="mt-4 flex min-h-0 w-full flex-col items-center gap-4 overflow-hidden px-1">
+                  {showBio && (
+                    <div className="no-scrollbar max-h-28 w-full max-w-xl overflow-y-auto pr-1 md:max-h-36">
+                      <p className="text-base leading-relaxed text-slate-700 dark:text-slate-200 md:text-lg">{bio}</p>
+                    </div>
+                  )}
                   <div className="flex flex-wrap justify-center gap-4 text-xs font-semibold text-slate-700/90 dark:text-slate-200/90">
                     <span>Fans: {fansCount}</span>
                     <span>Fan van: {fanOfCount}</span>
@@ -10521,11 +10525,13 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
                 ))}
               </div>
             </div>
-            <div className="no-scrollbar min-h-0 overflow-y-auto">
+            <div className="min-h-0 overflow-hidden">
               {userProfile.bio && (
-                <p className="line-clamp-3 max-w-2xl text-sm leading-relaxed text-white/80 md:line-clamp-4 md:text-base">
-                  {userProfile.bio}
-                </p>
+                <div className="no-scrollbar max-h-16 max-w-2xl overflow-y-auto pr-1 md:max-h-24">
+                  <p className="text-sm leading-relaxed text-white/80 md:text-base">
+                    {userProfile.bio}
+                  </p>
+                </div>
               )}
               <div className="mt-3 flex flex-wrap gap-4 text-xs font-semibold text-white/85">
                 <span>Fans: {resolvedFansCount}</span>

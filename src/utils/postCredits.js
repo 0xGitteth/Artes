@@ -124,6 +124,7 @@ export const getPostCreditRows = (post = {}) => {
 
     return [...fallbackAuthorCredit, ...credits].map((credit, index) => {
       const { roleLabel, secondaryLabel } = getCreditDisplayLabels(credit);
+      const explicitCreditName = String(credit.name || credit.displayName || '').trim();
 
       return {
         key: `${credit.uid || credit.userId || credit.profileId || credit.contributorId || credit.name || credit.displayName || normalizeRoleValue(credit.role) || 'credit'}-${index}`,
@@ -134,6 +135,7 @@ export const getPostCreditRows = (post = {}) => {
         uid: credit.uid || credit.userId || credit.profileId || null,
         contributorId: isAnonymousContributorCredit(credit) ? null : (credit.contributorId || null),
         isAnonymous: isAnonymousContributorCredit(credit),
+        canOpenShadowByName: Boolean(explicitCreditName),
         isLegacyAuthorFallback: Boolean(credit.isLegacyAuthorFallback),
         rawCredit: credit,
       };
@@ -153,6 +155,7 @@ export const getPostCreditRows = (post = {}) => {
       uid: post.authorId || null,
       contributorId: null,
       isAnonymous: false,
+      canOpenShadowByName: Boolean(String(post.authorName || '').trim()),
       isLegacyAuthorFallback: true,
       rawCredit: null,
     }];

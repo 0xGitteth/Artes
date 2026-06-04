@@ -22,7 +22,12 @@ export default function PostCreditDisplay({
     <div className={`${alignmentClass} flex flex-col gap-2 ${className}`}>
       {rows.map((row) => {
         const canOpenUser = Boolean(!row.isAnonymous && row.uid && onUserClick);
-        const canOpenShadow = Boolean(!row.isAnonymous && !row.uid && onShadowClick && (row.contributorId || row.name));
+        const canOpenShadow = Boolean(
+          !row.isAnonymous
+            && !row.uid
+            && onShadowClick
+            && (row.contributorId || row.canOpenShadowByName),
+        );
         const isClickable = canOpenUser || canOpenShadow;
 
         return (

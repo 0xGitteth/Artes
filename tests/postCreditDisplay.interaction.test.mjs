@@ -41,6 +41,19 @@ try {
   );
 
   shadowPayload = null;
+  const displayNameOnlyButton = renderSingleCreditButton(
+    { role: 'model', displayName: 'Mara Eliza' },
+    { onShadowClick: (payload) => { shadowPayload = payload; } },
+  );
+  assert.equal(displayNameOnlyButton.props.disabled, false, 'non-anonymous displayName-only shadow row stays clickable');
+  displayNameOnlyButton.props.onClick();
+  assert.deepEqual(
+    shadowPayload,
+    { name: 'Mara Eliza', contributorId: null, isAnonymous: false },
+    'non-anonymous displayName-only shadow row emits the expected payload',
+  );
+
+  shadowPayload = null;
   const anonymousButton = renderSingleCreditButton(
     { role: 'model', name: 'Anonieme bijdrager', isAnonymous: true },
     { onShadowClick: (payload) => { shadowPayload = payload; } },
@@ -61,6 +74,15 @@ try {
     { name: 'Mara Eliza', contributorId: 'temp_mara', isAnonymous: false },
     'named temporary contributor emits the expected shadow payload',
   );
+
+  shadowPayload = null;
+  const roleOnlyButton = renderSingleCreditButton(
+    { role: 'model' },
+    { onShadowClick: (payload) => { shadowPayload = payload; } },
+  );
+  assert.equal(roleOnlyButton.props.disabled, true, 'role-only row with fallback name is not clickable');
+  assert.equal(roleOnlyButton.props.onClick, undefined, 'role-only row with fallback name has no click handler');
+  assert.equal(shadowPayload, null, 'role-only row with fallback name does not emit a shadow payload');
 
   let clickedUid = null;
   const realProfileButton = renderSingleCreditButton(

@@ -1,5 +1,38 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
+import { creditMatchesShadowProfile, getCanClaimShadowProfile } from '../src/utils/shadowProfile.js';
+
+assert.equal(
+  getCanClaimShadowProfile({ isAnonymousDisplayOnly: false, contributorId: null }),
+  false,
+  'name-only shadow profiles open display-only without claim UI when contributorId is missing',
+);
+assert.equal(
+  getCanClaimShadowProfile({ isAnonymousDisplayOnly: false, contributorId: 'temp_mara' }),
+  true,
+  'temporary contributors with contributorId remain claimable',
+);
+assert.equal(
+  getCanClaimShadowProfile({ isAnonymousDisplayOnly: true, contributorId: 'anon_mara' }),
+  false,
+  'anonymous shadow profiles remain display-only even with a contributorId',
+);
+assert.equal(
+  creditMatchesShadowProfile(
+    { role: 'model', displayName: 'Mara Eliza', instagramHandle: '@mara' },
+    { name: 'Mara Eliza', contributorId: null },
+  ),
+  true,
+  'displayName-only credits match a name-only shadow profile',
+);
+assert.equal(
+  creditMatchesShadowProfile(
+    { role: 'model', name: 'Other Person', contributorId: 'temp_mara' },
+    { name: 'Mara Eliza', contributorId: 'temp_mara' },
+  ),
+  true,
+  'contributorId match still wins for temporary contributors',
+);
 
 const server = await createServer({
   appType: 'custom',

@@ -108,6 +108,7 @@ import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
 import PostCreditDisplay from './components/PostCreditDisplay';
 import { isAnonymousDisplayOnlyShadowProfile, isClaimableTemporaryContributor } from './utils/postCredits';
+import { creditMatchesShadowProfile, getCanClaimShadowProfile } from './utils/shadowProfile';
 import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
 import ProfileImageCropper from './components/ProfileImageCropper';
@@ -10649,8 +10650,8 @@ function ShadowProfileModal({
   logListenerStart,
   handleListenerError,
 }) {
-    const shadowPosts = posts.filter(p => p.credits && p.credits.some((c) => (
-      (contributorId && c.contributorId === contributorId) || c.name === name
+    const shadowPosts = posts.filter(p => p.credits && p.credits.some((credit) => (
+      creditMatchesShadowProfile(credit, { name, contributorId })
     )));
     const [claimPanelOpen, setClaimPanelOpen] = useState(false);
     const [claimBusy, setClaimBusy] = useState(false);
@@ -10720,8 +10721,7 @@ function ShadowProfileModal({
       const collected = new Map();
       shadowPosts.forEach((post) => {
         post.credits?.forEach((credit) => {
-          const matches = (contributorId && credit.contributorId === contributorId) || credit.name === name;
-          if (!matches) return;
+          if (!creditMatchesShadowProfile(credit, { name, contributorId })) return;
           if (credit.instagramHandle) {
             const handle = credit.instagramHandle.replace(/^@+/, '');
             const url = `https://instagram.com/${handle}`;
@@ -10742,10 +10742,11 @@ function ShadowProfileModal({
     }, [contributorId, name, shadowPosts]);
 
     const isAnonymousDisplayOnly = isAnonymousDisplayOnlyShadowProfile({ name, isAnonymous, externalLinks });
+    const canClaimShadowProfile = getCanClaimShadowProfile({ isAnonymousDisplayOnly, contributorId });
 
     useEffect(() => {
       let isMounted = true;
-      if (isAnonymousDisplayOnly || !authReady || !contributorId) {
+      if (!canClaimShadowProfile || !authReady) {
         setContributorInfo(null);
         return () => {};
       }
@@ -10769,11 +10770,11 @@ function ShadowProfileModal({
       return () => {
         isMounted = false;
       };
-    }, [authReady, contributorId, isAnonymousDisplayOnly]);
+    }, [authReady, contributorId, canClaimShadowProfile]);
 
     useEffect(() => {
       let active = true;
-      if (isAnonymousDisplayOnly || !authReady || !contributorId) {
+      if (!canClaimShadowProfile || !authReady) {
         setWebsiteAlias(null);
         return () => {};
       }
@@ -10806,7 +10807,7 @@ function ShadowProfileModal({
       return () => {
         active = false;
       };
-    }, [authReady, contributorId, isAnonymousDisplayOnly]);
+    }, [authReady, contributorId, canClaimShadowProfile]);
 
     useEffect(() => {
       if (!authReady || !claimRequestId) {
@@ -10881,6 +10882,10 @@ function ShadowProfileModal({
     }, [hasInstagramAlias, hasWebsiteAlias, hasEmailAlias]);
 
     const startClaimRequest = useCallback(async ({ mode, method, status, statusReason }) => {
+      if (!canClaimShadowProfile) {
+        setClaimError('Dit profiel kan niet worden geclaimd zonder contributor ID.');
+        return;
+      }
       if (!authUser?.uid) {
         setClaimError('Log in om te claimen.');
         return;
@@ -10920,7 +10925,7 @@ function ShadowProfileModal({
             Authorization: `Bearer ${authToken}`,
           },
           body: JSON.stringify({
-            contributorId: contributorId || null,
+            contributorId,
             mode,
             method,
             status,
@@ -10944,7 +10949,7 @@ function ShadowProfileModal({
       } finally {
         setClaimBusy(false);
       }
-    }, [authUser?.uid, contributorId, name]);
+    }, [authUser?.uid, contributorId, canClaimShadowProfile, functionsBase]);
 
     const handleStartVouchClaim = () => {
       startClaimRequest({ mode: 'link', method: 'vouch' });
@@ -11086,7 +11091,7 @@ function ShadowProfileModal({
 
 
     const handleContributorContentRequest = async () => {
-      if (!claimedByCurrentUser || !contributorId) return;
+      if (!claimedByCurrentUser || !canClaimShadowProfile) return;
       const postId = contentRequest.postId || shadowPosts[0]?.id || '';
       if (!postId) {
         setContentRequestError('Kies eerst een post.');
@@ -11112,7 +11117,7 @@ function ShadowProfileModal({
     };
 
     const handleShareInvite = async () => {
-      if (!contributorId) return;
+      if (!canClaimShadowProfile) return;
       if (!authUser?.uid) {
         setInviteError('Log in om een invite link te delen.');
         return;
@@ -11188,7 +11193,7 @@ function ShadowProfileModal({
                 ))}
               </div>
             )}
-            {!isAnonymousDisplayOnly && contributorId && (
+            {canClaimShadowProfile && (
               <div className="mt-4 w-full max-w-2xl space-y-2">
                 <button
                   type="button"
@@ -11226,12 +11231,12 @@ function ShadowProfileModal({
               </div>
             )}
             <div className="mt-5 w-full max-w-2xl">
-              {loadingContributor && (
+              {canClaimShadowProfile && loadingContributor && (
                 <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm text-white/70">
                   Claim status laden...
                 </div>
               )}
-              {!loadingContributor && claimedByOther && (
+              {canClaimShadowProfile && !loadingContributor && claimedByOther && (
                 <div className="rounded-2xl bg-white/10 px-4 py-3 text-left space-y-3">
                   <div>
                     <p className="text-sm font-semibold text-white">Dit profiel is al geclaimd</p>
@@ -11256,7 +11261,7 @@ function ShadowProfileModal({
                   )}
                 </div>
               )}
-              {!isAnonymousDisplayOnly && !loadingContributor && !claimedByOther && (
+              {canClaimShadowProfile && !loadingContributor && !claimedByOther && (
                 <div className="rounded-2xl bg-white/10 px-4 py-3 text-left space-y-3">
                   {!isLoggedIn && (
                     <p className="text-sm text-white/80">Log in om te claimen.</p>
@@ -11467,7 +11472,7 @@ function ShadowProfileModal({
                 </div>
               )}
             </div>
-            {!isAnonymousDisplayOnly && claimedByCurrentUser && (
+            {canClaimShadowProfile && claimedByCurrentUser && (
               <div className="absolute left-6 right-6 bottom-4 rounded-2xl bg-white/10 p-3 text-left text-xs text-white shadow-lg backdrop-blur">
                 <p className="font-semibold">Geclaimd profiel: correctie, verbergen of verwijderen aanvragen</p>
                 <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr]">

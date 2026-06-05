@@ -135,7 +135,7 @@ export const getPostCreditRows = (post = {}) => {
         uid: credit.uid || credit.userId || credit.profileId || null,
         contributorId: isAnonymousContributorCredit(credit) ? null : (credit.contributorId || null),
         isAnonymous: isAnonymousContributorCredit(credit),
-        canOpenShadowByName: Boolean(explicitCreditName),
+        canOpenShadowByName: !credit.isLegacyAuthorFallback && Boolean(explicitCreditName),
         isLegacyAuthorFallback: Boolean(credit.isLegacyAuthorFallback),
         rawCredit: credit,
       };
@@ -155,7 +155,7 @@ export const getPostCreditRows = (post = {}) => {
       uid: post.authorId || null,
       contributorId: null,
       isAnonymous: false,
-      canOpenShadowByName: Boolean(String(post.authorName || '').trim()),
+      canOpenShadowByName: false,
       isLegacyAuthorFallback: true,
       rawCredit: null,
     }];

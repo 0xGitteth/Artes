@@ -97,6 +97,15 @@ assert.equal(legacyFallback[0].roleLabel, 'Fotograaf');
 assert.equal(legacyFallback[0].name, 'Legacy Name');
 assert.equal(legacyFallback[0].secondaryLabel, '');
 
+assert.equal(legacyFallback[0].canOpenShadowByName, false, 'legacy fallback author name is not shadow-openable by name');
+
+const synthesizedFallbackAuthor = rowsFor([
+  { role: 'model', name: 'Mara Eliza' },
+], { authorName: 'Legacy Author', authorId: null, authorRole: 'photographer' });
+assert.equal(synthesizedFallbackAuthor.length, 2, 'structured credits synthesize an author fallback when no credit matches author');
+assert.equal(synthesizedFallbackAuthor[0].isLegacyAuthorFallback, true, 'first row is synthesized legacy author fallback');
+assert.equal(synthesizedFallbackAuthor[0].canOpenShadowByName, false, 'synthesized legacy author fallback is not shadow-openable by name');
+assert.equal(synthesizedFallbackAuthor[1].canOpenShadowByName, true, 'explicit structured name credit remains shadow-openable by name');
 
 const legacySelfMakerConfirmedFallback = getPostCreditRows({
   authorId: 'legacy_model',

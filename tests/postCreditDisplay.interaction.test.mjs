@@ -43,18 +43,22 @@ const server = await createServer({
 try {
   const { default: PostCreditDisplay } = await server.ssrLoadModule('/src/components/PostCreditDisplay.jsx');
 
-  const renderSingleCreditButton = (credit, handlers = {}) => {
+  const renderPostButtons = (post, handlers = {}) => {
     const element = PostCreditDisplay({
       post: {
         id: 'post_1',
         authorId: null,
         authorName: '',
-        credits: [credit],
+        ...post,
       },
       ...handlers,
     });
 
-    const buttons = Array.isArray(element.props.children) ? element.props.children : [element.props.children];
+    return Array.isArray(element.props.children) ? element.props.children : [element.props.children];
+  };
+
+  const renderSingleCreditButton = (credit, handlers = {}) => {
+    const buttons = renderPostButtons({ credits: [credit] }, handlers);
     assert.equal(buttons.length, 1, 'fixture renders exactly one credit button');
     return buttons[0];
   };
@@ -118,6 +122,40 @@ try {
   assert.equal(shadowPayload, null, 'role-only row with fallback name does not emit a shadow payload');
 
   let clickedUid = null;
+
+  shadowPayload = null;
+  const legacyAuthorNameOnlyButton = renderPostButtons(
+    { authorName: 'Legacy Author', authorRole: 'photographer' },
+    { onShadowClick: (payload) => { shadowPayload = payload; } },
+  )[0];
+  assert.equal(legacyAuthorNameOnlyButton.props.disabled, true, 'legacy author fallback with only authorName is not shadow-clickable');
+  assert.equal(legacyAuthorNameOnlyButton.props.onClick, undefined, 'legacy author fallback with only authorName has no click handler');
+  assert.equal(shadowPayload, null, 'legacy author fallback with only authorName does not emit a shadow payload');
+
+  shadowPayload = null;
+  const synthesizedFallbackButtons = renderPostButtons(
+    {
+      authorName: 'Legacy Author',
+      authorRole: 'photographer',
+      credits: [{ role: 'model', name: 'Mara Eliza' }],
+    },
+    { onShadowClick: (payload) => { shadowPayload = payload; } },
+  );
+  assert.equal(synthesizedFallbackButtons.length, 2, 'fixture renders synthesized author fallback plus explicit credit');
+  assert.equal(synthesizedFallbackButtons[0].props.disabled, true, 'synthesized fallback author row is not shadow-clickable by name');
+  assert.equal(synthesizedFallbackButtons[0].props.onClick, undefined, 'synthesized fallback author row has no click handler');
+  assert.equal(synthesizedFallbackButtons[1].props.disabled, false, 'explicit credit after synthesized fallback remains shadow-clickable');
+  assert.equal(shadowPayload, null, 'synthesized fallback author row does not emit a shadow payload');
+
+  clickedUid = null;
+  const legacyAuthorWithUidButton = renderPostButtons(
+    { authorName: 'Legacy Author', authorId: 'author_1', authorRole: 'photographer' },
+    { onUserClick: (uid) => { clickedUid = uid; }, onShadowClick: () => assert.fail('legacy author with uid should not use shadow click') },
+  )[0];
+  assert.equal(legacyAuthorWithUidButton.props.disabled, false, 'legacy author fallback with uid stays clickable through onUserClick');
+  legacyAuthorWithUidButton.props.onClick();
+  assert.equal(clickedUid, 'author_1', 'legacy author fallback with uid opens through onUserClick');
+
   const realProfileButton = renderSingleCreditButton(
     { role: 'model', name: 'Mara Eliza', uid: 'user_mara' },
     { onUserClick: (uid) => { clickedUid = uid; }, onShadowClick: () => assert.fail('real profile should not use shadow click') },

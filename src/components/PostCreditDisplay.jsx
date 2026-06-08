@@ -21,8 +21,17 @@ export default function PostCreditDisplay({
   return (
     <div className={`${alignmentClass} flex flex-col gap-2 ${className}`}>
       {rows.map((row) => {
-        const canOpenUser = Boolean(!row.isAnonymous && row.uid && onUserClick);
-        const canOpenShadow = Boolean(!row.isAnonymous && !row.uid && row.contributorId && row.name && onShadowClick);
+        const canOpenUser = Boolean(
+          !row.isAnonymous
+            && row.uid
+            && onUserClick,
+        );
+        const canOpenShadow = Boolean(
+          !row.isAnonymous
+            && !row.uid
+            && row.contributorId
+            && onShadowClick,
+        );
         const isClickable = canOpenUser || canOpenShadow;
 
         return (
@@ -35,7 +44,11 @@ export default function PostCreditDisplay({
                 onUserClick(row.uid);
                 return;
               }
-              onShadowClick({ name: row.name, contributorId: row.contributorId });
+              onShadowClick({
+                name: row.name,
+                contributorId: row.contributorId || null,
+                isAnonymous: row.isAnonymous || false,
+              });
             } : undefined}
             disabled={!isClickable}
           >

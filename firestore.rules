@@ -598,6 +598,8 @@ service cloud.firestore {
       allow create, update: if (isOwner(uid)
         && onlyKeys([
           'uid',
+          'profileId',
+          'ownerUid',
           'username',
           'displayName',
           'displayNameLower',
@@ -630,6 +632,8 @@ service cloud.firestore {
         // Rules evaluate request.resource.data as the post-update full doc state,
         // so uid is optional, but if present it must match the document id.
         && (!('uid' in request.resource.data) || request.resource.data.uid == uid)
+        && (!('profileId' in request.resource.data) || request.resource.data.profileId == uid)
+        && (!('ownerUid' in request.resource.data) || request.resource.data.ownerUid == uid)
         && request.resource.data.username is string
         && request.resource.data.username.size() >= 3
         && request.resource.data.username.size() <= 20

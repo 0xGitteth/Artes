@@ -53,9 +53,13 @@ const toPublicProfilePayload = (payload = {}, uid) => {
     ...rest
   } = payload || {};
 
+  const profileId = payload?.profileId || uid;
+  const ownerUid = payload?.ownerUid || uid;
   const publicPayload = {
     ...rest,
     uid,
+    profileId,
+    ownerUid,
     updatedAt: serverTimestamp(),
   };
 
@@ -148,10 +152,13 @@ export const subscribeToUsers = (callback, gate = {}) => {
     (snapshot) => callback(snapshot.docs.map((docSnap) => {
       const data = docSnap.data() || {};
       const { email, ...safeData } = data;
+      const resolvedUid = safeData.uid || docSnap.id;
       return {
         id: docSnap.id,
         ...safeData,
-        uid: safeData.uid || docSnap.id,
+        uid: resolvedUid,
+        profileId: safeData.profileId || resolvedUid,
+        ownerUid: safeData.ownerUid || resolvedUid,
       };
     })),
     (err) => console.error('PUBLICUSERS LISTENER ERROR:', err.code, err.message, 'path=publicUsers')
@@ -172,6 +179,9 @@ export const createProfile = async (uid, profile) => {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     ...profile,
+    uid: profile?.uid || uid,
+    profileId: profile?.profileId || uid,
+    ownerUid: profile?.ownerUid || uid,
   };
   logFirestoreOp('WRITE', `users/${uid}`, 'createProfile');
   await setDoc(doc(db, 'users', uid), payload);
@@ -216,6 +226,8 @@ export const publishPost = async (post) => {
     uploadConsent,
     consentException: normalizedException,
     contributorIds,
+    authorProfileId: post.authorProfileId || auth.currentUser.uid,
+    authorOwnerUid: post.authorOwnerUid || auth.currentUser.uid,
     authorUid: auth.currentUser.uid,
     ...(isCodexActor ? { testActor: 'codex' } : {}),
     createdAt: serverTimestamp(),
@@ -248,17 +260,22 @@ export const fetchUserIndex = async (userId, gate = {}) => {
 
   const publicData = snapshot.data() || {};
   const { email: _publicEmail, ...safePublicData } = publicData;
+  const resolvedPublicData = {
+    ...safePublicData,
+    profileId: safePublicData.profileId || safePublicData.uid || userId,
+    ownerUid: safePublicData.ownerUid || safePublicData.uid || userId,
+  };
 
   if (user?.uid !== userId) {
-    return safePublicData;
+    return resolvedPublicData;
   }
 
   const privateSnap = await getDoc(doc(db, 'users', userId));
-  if (!privateSnap.exists()) return safePublicData;
+  if (!privateSnap.exists()) return resolvedPublicData;
 
   const privateData = privateSnap.data() || {};
   return {
-    ...safePublicData,
+    ...resolvedPublicData,
     email: privateData.email ?? null,
   };
 };

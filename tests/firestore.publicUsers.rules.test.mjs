@@ -393,6 +393,25 @@ async function run() {
       }),
     );
 
+    await assertSucceeds(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        profileId: ownerUid,
+        ownerUid,
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        profileId: 'other_profile',
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        ownerUid: otherUid,
+      }),
+    );
+
     await assertFails(
       updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
         quickProfilePreviewMode: 123,

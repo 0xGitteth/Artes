@@ -38,6 +38,8 @@ const payload = buildPublicUserBackfillPayload('user_1234', {
 }, { serverTimestamp: fakeTimestamp });
 
 assert.equal(payload.uid, 'user_1234');
+assert.equal(payload.profileId, 'user_1234');
+assert.equal(payload.ownerUid, 'user_1234');
 assert.equal(payload.username, 'codexuser');
 assert.equal(payload.displayName, 'Codex User');
 assert.equal(payload.displayNameLower, 'codex user');
@@ -184,6 +186,8 @@ for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {
   assert.equal(writtenPayload[legacyField], '__DELETE__', `${legacyField} should be deleted in the merge payload`);
 }
 assert.equal(writtenPayload.displayName, 'Eligible User');
+assert.equal(writtenPayload.profileId, 'eligible_user');
+assert.equal(writtenPayload.ownerUid, 'eligible_user');
 assert.deepEqual(writtenPayload.themes, ['Product']);
 assert.equal(writtenPayload.quickProfilePreviewMode, 'manual');
 assert.deepEqual(writtenPayload.quickProfilePostIds, ['post_1', 'post_2']);
@@ -193,6 +197,8 @@ for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {
   assert.equal(Object.prototype.hasOwnProperty.call(updatedPublicUser, legacyField), false, `${legacyField} should be removed`);
 }
 assert.equal(updatedPublicUser.displayName, 'Eligible User');
+assert.equal(updatedPublicUser.profileId, 'eligible_user');
+assert.equal(updatedPublicUser.ownerUid, 'eligible_user');
 assert.deepEqual(updatedPublicUser.themes, ['Product']);
 assert.equal(updatedPublicUser.quickProfilePreviewMode, 'manual');
 assert.deepEqual(updatedPublicUser.quickProfilePostIds, ['post_1', 'post_2']);

@@ -53,13 +53,11 @@ const toPublicProfilePayload = (payload = {}, uid) => {
     ...rest
   } = payload || {};
 
-  const profileId = payload?.profileId || uid;
-  const ownerUid = payload?.ownerUid || uid;
   const publicPayload = {
     ...rest,
     uid,
-    profileId,
-    ownerUid,
+    profileId: uid,
+    ownerUid: uid,
     updatedAt: serverTimestamp(),
   };
 

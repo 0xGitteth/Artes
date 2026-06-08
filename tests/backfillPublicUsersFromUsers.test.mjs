@@ -10,6 +10,8 @@ const fakeDelete = () => '__DELETE__';
 const payload = buildPublicUserBackfillPayload('user_1234', {
   username: 'Codex User!',
   displayName: 'Codex User',
+  profileId: 'spoofed_profile',
+  ownerUid: 'spoofed_owner',
   photoURL: 'https://example.com/photo.jpg',
   avatar: 'https://example.com/avatar.jpg',
   roles: ['assistant', '', 42, 'model'],
@@ -71,6 +73,8 @@ const docs = [
     id: 'eligible_user',
     data: () => ({
       displayName: 'Eligible User',
+      profileId: 'spoofed_profile',
+      ownerUid: 'spoofed_owner',
       themes: ['Product'],
       quickProfilePreviewMode: 'manual',
       quickProfilePostIds: ['post_1', 'post_2'],

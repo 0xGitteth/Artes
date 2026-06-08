@@ -1157,6 +1157,24 @@ async function run() {
 
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), basePost));
 
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+      ...basePost,
+      authorProfileId: ownerUid,
+      authorOwnerUid: ownerUid,
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'profile_identity_spoof_profile'), {
+      ...basePost,
+      authorProfileId: otherUid,
+      authorOwnerUid: ownerUid,
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'profile_identity_spoof_owner'), {
+      ...basePost,
+      authorProfileId: ownerUid,
+      authorOwnerUid: otherUid,
+    }));
+
     // P1: uploadConsent.hasMaker/makerRoles are not enough without an actual maker credit.
     await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_fake_maker_model_only'), {
       ...basePost,

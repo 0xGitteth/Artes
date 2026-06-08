@@ -847,6 +847,8 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isVerifiedOrDev()
         && request.resource.data.authorId == request.auth.uid
+        && (!('authorProfileId' in request.resource.data) || request.resource.data.authorProfileId == request.auth.uid)
+        && (!('authorOwnerUid' in request.resource.data) || request.resource.data.authorOwnerUid == request.auth.uid)
         && isPostModerationPublishAllowed(request.resource.data);
       allow update: if isVerifiedOrDev()
         && request.resource.data.authorId == resource.data.authorId

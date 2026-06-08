@@ -92,7 +92,7 @@ try {
 
   shadowPayload = null;
   const badLegacyAnonymousButton = renderSingleCreditButton(
-    { role: 'model', name: 'Anoniem model', contributorId: 'bad_legacy_id' },
+    { role: 'model', name: 'Anoniem model', contributorId: 'bad_legacy_id', instagramHandle: '@mara' },
     { onShadowClick: (payload) => { shadowPayload = payload; } },
   );
   assert.equal(badLegacyAnonymousButton.props.disabled, true, 'bad legacy anonymous row with contributorId is display-only');

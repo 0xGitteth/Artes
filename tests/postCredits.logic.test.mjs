@@ -156,6 +156,13 @@ const legacyAnonymousContributor = rowsFor([
 assert.equal(legacyAnonymousContributor[0].isAnonymous, true, 'legacy anonymous temporary names are guarded as anonymous');
 assert.equal(legacyAnonymousContributor[0].contributorId, null, 'legacy anonymous temporary names are not claimable');
 
+const legacyAnonymousWithIdentityHints = rowsFor([
+  { role: 'model', name: 'Anoniem model', contributorId: 'bad_legacy_id', instagramHandle: '@mara' },
+], { authorId: null, authorName: '' });
+assert.equal(legacyAnonymousWithIdentityHints[0].isAnonymous, true, 'legacy anonymous display names stay anonymous with identity hints');
+assert.equal(legacyAnonymousWithIdentityHints[0].contributorId, null, 'legacy anonymous display names strip bad contributor ids even with identity hints');
+assert.equal(legacyAnonymousWithIdentityHints[0].name, 'Anoniem model', 'legacy anonymous display name keeps anonymous display text');
+
 
 const anonymousLabelOnlyModel = rowsFor([
   { role: { label: 'Model' }, anonymous: true },
@@ -194,7 +201,7 @@ assert.deepEqual(
 
 assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Anoniem model', externalLinks: [] }), true, 'shadow modal treats anonymous model as display-only');
 assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Anonieme fotograaf', externalLinks: [] }), true, 'shadow modal treats anonymous photographer as display-only');
-assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Anonieme fotograaf', externalLinks: [{ type: 'website', url: 'https://example.com' }] }), false, 'shadow modal keeps public identity entries claimable');
+assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Anonieme fotograaf', externalLinks: [{ type: 'website', url: 'https://example.com' }] }), true, 'shadow modal keeps anonymous display names display-only even with links');
 assert.equal(isAnonymousDisplayOnlyShadowProfile({ name: 'Named contributor', isAnonymous: true, externalLinks: [{ type: 'website', url: 'https://example.com' }] }), true, 'explicit anonymous flag wins for shadow modal');
 
 console.log('PASS postCredits.logic.test.mjs');

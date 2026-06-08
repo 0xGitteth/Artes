@@ -27,24 +27,12 @@ export const hasAnonymousCreditFlag = (credit = {}) => Boolean(
     || credit?.consentStatus === 'anonymous',
 );
 
-const hasPublicIdentityHint = (credit = {}) => Boolean(
-  credit?.uid
-    || credit?.userId
-    || credit?.profileId
-    || credit?.instagramHandle
-    || credit?.website
-    || credit?.email
-    || credit?.link,
-);
-
 const hasAnonymousDisplayName = (credit = {}) => {
   const displayName = String(credit?.displayName || credit?.name || '').trim();
   return ANONYMOUS_DISPLAY_NAMES.has(displayName);
 };
 
-export const isLegacyAnonymousContributorCredit = (credit = {}) => (
-  hasAnonymousDisplayName(credit) && !hasPublicIdentityHint(credit)
-);
+export const isLegacyAnonymousContributorCredit = (credit = {}) => hasAnonymousDisplayName(credit);
 
 export const isAnonymousContributorCredit = (credit = {}) => (
   hasAnonymousCreditFlag(credit) || isLegacyAnonymousContributorCredit(credit)
@@ -61,10 +49,10 @@ export const isClaimableTemporaryContributor = (candidate = {}) => Boolean(
     && !isAnonymousContributorCredit(candidate),
 );
 
-export const isAnonymousDisplayOnlyShadowProfile = ({ name = '', displayName = '', isAnonymous = false, externalLinks = [] } = {}) => {
+export const isAnonymousDisplayOnlyShadowProfile = ({ name = '', displayName = '', isAnonymous = false } = {}) => {
   if (isAnonymous === true) return true;
   const candidateName = String(displayName || name || '').trim();
-  return ANONYMOUS_DISPLAY_NAMES.has(candidateName) && (!Array.isArray(externalLinks) || externalLinks.length === 0);
+  return ANONYMOUS_DISPLAY_NAMES.has(candidateName);
 };
 
 

@@ -1304,6 +1304,20 @@ async function run() {
       uploadConsent: { ...baseConsent, hasMaker: true, makerCreditIndex: 1 },
     }));
 
+    await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+      title: 'Profile identity update ok',
+      authorProfileId: ownerUid,
+      authorOwnerUid: ownerUid,
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+      authorProfileId: otherUid,
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+      authorOwnerUid: otherUid,
+    }));
+
     const { outcome: _unusedOutcome, ...postWithoutOutcome } = basePost;
     await assertFails(setDoc(doc(ownerDb, 'posts', 'missing_outcome'), postWithoutOutcome));
 

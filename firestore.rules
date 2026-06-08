@@ -853,6 +853,8 @@ service cloud.firestore {
       allow update: if isVerifiedOrDev()
         && request.resource.data.authorId == resource.data.authorId
         && resource.data.authorId == request.auth.uid
+        && (!('authorProfileId' in request.resource.data) || request.resource.data.authorProfileId == request.auth.uid)
+        && (!('authorOwnerUid' in request.resource.data) || request.resource.data.authorOwnerUid == request.auth.uid)
         && (
           (
             isLegacyPostWithoutModerationProof(resource.data)

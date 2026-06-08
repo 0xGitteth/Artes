@@ -104,8 +104,9 @@ const synthesizedFallbackAuthor = rowsFor([
 ], { authorName: 'Legacy Author', authorId: null, authorRole: 'photographer' });
 assert.equal(synthesizedFallbackAuthor.length, 2, 'structured credits synthesize an author fallback when no credit matches author');
 assert.equal(synthesizedFallbackAuthor[0].isLegacyAuthorFallback, true, 'first row is synthesized legacy author fallback');
-assert.equal(synthesizedFallbackAuthor[0].canOpenShadowByName, false, 'synthesized legacy author fallback is not shadow-openable by name');
-assert.equal(synthesizedFallbackAuthor[1].canOpenShadowByName, true, 'explicit structured name credit remains shadow-openable by name');
+assert.equal(synthesizedFallbackAuthor[0].canOpenShadowByName, false, 'synthesized legacy author fallback has no explicit-name shadow flag');
+assert.equal(synthesizedFallbackAuthor[1].name, 'Mara Eliza', 'explicit structured name credit keeps its display name');
+assert.equal(synthesizedFallbackAuthor[1].canOpenShadowByName, true, 'explicit structured name credit keeps its explicit-name flag for analysis');
 
 const legacySelfMakerConfirmedFallback = getPostCreditRows({
   authorId: 'legacy_model',

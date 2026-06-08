@@ -560,12 +560,11 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
   if (!hasRequestedPublicField) return {};
 
   const payload = {};
-  const resolvedUid = data.uid || uid;
   if (data.uid !== undefined) {
     payload.uid = data.uid;
   }
-  payload.profileId = data.profileId || existingPublic?.profileId || resolvedUid;
-  payload.ownerUid = data.ownerUid || existingPublic?.ownerUid || resolvedUid;
+  payload.profileId = uid;
+  payload.ownerUid = uid;
   if (data.displayName !== undefined) {
     payload.displayName = data.displayName;
   }

@@ -46,6 +46,24 @@ async function run() {
         fanOfCount: 2,
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'profiles', 'active_agency_profile'), {
+        type: 'agency',
+        displayName: 'Active Agency Profile',
+        ownerUid,
+        managerUids: [ownerUid],
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'profiles', 'private_agency_profile'), {
+        type: 'agency',
+        displayName: 'Private Agency Profile',
+        ownerUid,
+        managerUids: [],
+        status: 'draft',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'users', ownerUid), {
         uid: ownerUid,
         displayName: 'Owner One',
@@ -333,6 +351,7 @@ async function run() {
       });
     });
 
+    const publicDb = testEnv.unauthenticatedContext().firestore();
     const ownerDb = authedContext(testEnv, ownerUid, { email_verified: true }).firestore();
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
@@ -360,6 +379,58 @@ async function run() {
       isCurrent: true,
       version: 3,
     }));
+
+    await assertSucceeds(getDoc(doc(publicDb, 'profiles', 'active_agency_profile')));
+    await assertFails(getDoc(doc(publicDb, 'profiles', 'private_agency_profile')));
+    await assertSucceeds(getDoc(doc(ownerDb, 'profiles', 'private_agency_profile')));
+    await assertSucceeds(setDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      type: 'company',
+      displayName: 'Owner Company Profile',
+      ownerUid,
+      managerUids: [ownerUid],
+      status: 'active',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      displayName: 'Owner Company Profile Updated',
+      managerUids: [ownerUid, 'manager_1'],
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(otherDb, 'profiles', 'spoofed_company_profile'), {
+      type: 'company',
+      displayName: 'Spoofed Company Profile',
+      ownerUid,
+      managerUids: [],
+      status: 'active',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(otherDb, 'profiles', 'owner_company_profile'), {
+      displayName: 'Hijacked Company Profile',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'profiles', 'legal_identity_profile'), {
+      type: 'agency',
+      displayName: 'Legal Identity Profile',
+      ownerUid,
+      managerUids: [],
+      status: 'active',
+      legalName: 'Private Legal BV',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'profiles', 'personal_profile_not_allowed'), {
+      type: 'personal',
+      displayName: 'Personal Profile Not Allowed',
+      ownerUid,
+      managerUids: [],
+      status: 'active',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(otherDb, 'profiles', 'owner_company_profile')));
+    await assertSucceeds(deleteDoc(doc(ownerDb, 'profiles', 'owner_company_profile')));
 
     await assertSucceeds(setDoc(doc(ownerDb, 'users', ownerUid, 'announcementReads', 'active_update'), {
       dismissedAt: serverTimestamp(),

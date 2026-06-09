@@ -259,6 +259,53 @@ service cloud.firestore {
     }
 
 
+
+    function isManagedExternalProfileType(value) {
+      return value == 'company' || value == 'agency' || value == 'collective';
+    }
+
+    function isValidManagedExternalProfileData() {
+      return onlyKeys([
+          'type',
+          'displayName',
+          'ownerUid',
+          'managerUids',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isManagedExternalProfileType(request.resource.data.type)
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0
+        && request.resource.data.displayName.size() <= 120
+        && request.resource.data.ownerUid is string
+        && request.resource.data.ownerUid.size() > 0
+        && (!('managerUids' in request.resource.data) || request.resource.data.managerUids is list)
+        && (!('managerUids' in request.resource.data) || request.resource.data.managerUids.size() <= 50)
+        && request.resource.data.status == 'active'
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    function isValidManagedExternalProfileCreate() {
+      return isSignedIn()
+        && isValidManagedExternalProfileData()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function isValidManagedExternalProfileUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isSignedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && isValidManagedExternalProfileData()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && changed.hasOnly(['type', 'displayName', 'managerUids', 'status', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time;
+    }
+
     function isValidMoodboardData(userId) {
       return request.resource.data.keys().hasOnly([
         'ownerUid',
@@ -591,6 +638,14 @@ service cloud.firestore {
         && resource.data.status == 'active'
         && resource.data.isCurrent == true;
       allow create, update, delete: if isModerator();
+    }
+
+    match /profiles/{profileId} {
+      allow read: if resource.data.status == 'active'
+        || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isValidManagedExternalProfileCreate();
+      allow update: if isValidManagedExternalProfileUpdate();
+      allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
     }
 
     match /publicUsers/{uid} {

@@ -35,6 +35,7 @@ import {
   writeBatch,
   limit,
   increment,
+  where,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -57,6 +58,7 @@ import {
   getAffiliationFields,
   shouldCreateAffiliationRequestCard,
 } from './utils/affiliationRequestCards';
+import { normalizeManagedExternalProfiles } from './utils/managedProfiles';
 
 const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
 const firebaseStorageBucket = String(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim()
@@ -237,6 +239,25 @@ export const subscribeToMoodboardItems = ({ uid, moodboardId }, callback) => onS
   query(getUserMoodboardItemsCollection(uid, moodboardId), orderBy('createdAt', 'desc')),
   (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
 );
+
+
+export const loadManagedExternalProfiles = async (uid) => {
+  const ownerUid = String(uid || '').trim();
+  if (!ownerUid) return [];
+
+  const profileSnapshots = await getDocs(query(
+    collection(getFirebaseDb(), 'profiles'),
+    where('ownerUid', '==', ownerUid),
+  ));
+
+  const candidates = profileSnapshots.docs.map((docSnap) => ({
+    id: docSnap.id,
+    profileId: docSnap.id,
+    ...docSnap.data(),
+  }));
+
+  return normalizeManagedExternalProfiles(candidates, ownerUid);
+};
 
 export const CLAIMS_COLLECTIONS = {
   contributors: 'contributors',

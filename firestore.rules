@@ -284,17 +284,19 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp;
     }
 
-    function isValidManagedExternalProfileCreate() {
+    function isValidManagedExternalProfileCreate(profileId) {
       return isSignedIn()
+        && profileId != request.auth.uid
         && isValidManagedExternalProfileData()
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
     }
 
-    function isValidManagedExternalProfileUpdate() {
+    function isValidManagedExternalProfileUpdate(profileId) {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return isSignedIn()
+        && profileId != request.auth.uid
         && resource.data.ownerUid == request.auth.uid
         && isValidManagedExternalProfileData()
         && request.resource.data.ownerUid == resource.data.ownerUid
@@ -640,8 +642,8 @@ service cloud.firestore {
     match /profiles/{profileId} {
       allow read: if resource.data.status == 'active'
         || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isValidManagedExternalProfileCreate();
-      allow update: if isValidManagedExternalProfileUpdate();
+      allow create: if isValidManagedExternalProfileCreate(profileId);
+      allow update: if isValidManagedExternalProfileUpdate(profileId);
       allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
     }
 

@@ -62,6 +62,14 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'profiles', ownerUid), {
+        type: 'company',
+        displayName: 'Collision Company Profile',
+        ownerUid,
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'users', ownerUid), {
         uid: ownerUid,
         displayName: 'Owner One',
@@ -381,6 +389,19 @@ async function run() {
     await assertSucceeds(getDoc(doc(publicDb, 'profiles', 'active_agency_profile')));
     await assertFails(getDoc(doc(publicDb, 'profiles', 'private_agency_profile')));
     await assertSucceeds(getDoc(doc(ownerDb, 'profiles', 'private_agency_profile')));
+    await assertFails(setDoc(doc(ownerDb, 'profiles', ownerUid), {
+      type: 'company',
+      displayName: 'Collision Company Profile Write',
+      ownerUid,
+      status: 'active',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'profiles', ownerUid), {
+      displayName: 'Collision Company Profile Updated',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(deleteDoc(doc(ownerDb, 'profiles', ownerUid)));
     await assertSucceeds(setDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
       type: 'company',
       displayName: 'Owner Company Profile',

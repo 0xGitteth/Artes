@@ -29,6 +29,23 @@ const activeProfile = resolveActiveProfile({
 
 assert.equal(activeProfile?.profileId, 'user_123', 'Unknown activeProfileId should fall back to the personal profile');
 
+const uidlessPrivateOnlyProfiles = deriveManagedProfiles({
+  authUser: { uid: 'user_B' },
+  profile: { displayName: 'Uidless Stale Private User' },
+});
+
+assert.deepEqual(uidlessPrivateOnlyProfiles, [], 'Uid-less private profile data must not match authenticated user_B');
+
+const uidlessPrivateMatchingPublicProfiles = deriveManagedProfiles({
+  authUser: { uid: 'user_B' },
+  profile: { displayName: 'Uidless Stale Private User' },
+  publicProfile: { uid: 'user_B', displayName: 'Matching Public User B' },
+});
+
+assert.equal(uidlessPrivateMatchingPublicProfiles.length, 1, 'Matching public profile can be used when private profile is uid-less');
+assert.equal(uidlessPrivateMatchingPublicProfiles[0].uid, 'user_B', 'Uid-less private profile must not override auth uid');
+assert.equal(uidlessPrivateMatchingPublicProfiles[0].displayName, 'Matching Public User B', 'Matching public data should seed the profile when private data is uid-less');
+
 const stalePrivateOnlyProfiles = deriveManagedProfiles({
   authUser: { uid: 'user_B' },
   profile: { uid: 'user_A', displayName: 'Stale Private User A' },

@@ -3,7 +3,7 @@ const normalizeId = (value) => String(value || '').trim();
 const profileMatchesAuthUser = (candidate, authUid) => {
   if (!candidate || typeof candidate !== 'object') return false;
   const candidateUid = normalizeId(candidate.uid);
-  return !candidateUid || candidateUid === authUid;
+  return Boolean(candidateUid) && candidateUid === authUid;
 };
 
 const pickSourceProfile = ({ authUid, profile, publicProfile }) => {

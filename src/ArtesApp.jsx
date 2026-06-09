@@ -68,6 +68,7 @@ import {
   removePostFromMoodboard,
   subscribeToUserMoodboards,
   subscribeToMoodboardItems,
+  loadManagedExternalProfiles,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { signInWithCustomToken } from 'firebase/auth';
@@ -958,13 +959,14 @@ export default function ArtesApp() {
   // Data
   const [posts, setPosts] = useState([]);
   const [users, setUsers] = useState([]);
+  const [managedExternalProfiles, setManagedExternalProfiles] = useState([]);
   const currentPublicProfile = useMemo(
     () => users.find((entry) => entry?.uid === authUser?.uid) || null,
     [users, authUser?.uid],
   );
   const managedProfiles = useMemo(
-    () => deriveManagedProfiles({ authUser, profile, publicProfile: currentPublicProfile }),
-    [authUser, profile, currentPublicProfile],
+    () => deriveManagedProfiles({ authUser, profile, publicProfile: currentPublicProfile, managedExternalProfiles }),
+    [authUser, profile, currentPublicProfile, managedExternalProfiles],
   );
   const activeProfile = useMemo(
     () => resolveActiveProfile({
@@ -1456,6 +1458,27 @@ export default function ArtesApp() {
       unsubscribeFollowing?.();
     };
   }, [authReady, user?.uid]);
+
+  useEffect(() => {
+    let active = true;
+    const uid = user?.uid || null;
+    if (!canAccessFirestore({ authReady, user }) || !uid) {
+      setManagedExternalProfiles([]);
+      return () => { active = false; };
+    }
+
+    loadManagedExternalProfiles(uid)
+      .then((profiles) => {
+        if (active) setManagedExternalProfiles(profiles);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setManagedExternalProfiles([]);
+        handleListenerError('Managed external profiles loader', error);
+      });
+
+    return () => { active = false; };
+  }, [authReady, user, handleListenerError]);
 
   useEffect(() => {
      if (!canAccessFirestore({ authReady, user })) return;

@@ -102,4 +102,102 @@ assert.equal(publicOnlyProfiles[0].ownerUid, 'user_456', 'Public-only personal p
 const noProfile = deriveManagedProfiles({ authUser: { uid: 'visitor_1' } });
 assert.deepEqual(noProfile, [], 'Visitors without a loaded own profile should not receive a managed profile context');
 
+const profilesWithExternal = deriveManagedProfiles({
+  authUser: { uid: 'owner_user' },
+  profile: { uid: 'owner_user', displayName: 'Owner User' },
+  managedExternalProfiles: [
+    {
+      id: 'agency_profile_1',
+      type: 'agency',
+      displayName: 'Owner Agency',
+      ownerUid: 'owner_user',
+      managerUids: ['owner_user', 'manager_2', ''],
+      status: 'active',
+      uid: 'spoofed_uid',
+      legalName: 'Should Not Leak',
+      privateData: { legalRepresentativeEmail: 'private@example.com' },
+    },
+    {
+      id: 'company_profile_1',
+      type: 'company',
+      displayName: 'Other Company',
+      ownerUid: 'other_owner',
+      status: 'active',
+    },
+  ],
+});
+
+assert.equal(profilesWithExternal.length, 2, 'A valid owned external profile should be added next to the personal profile');
+assert.equal(profilesWithExternal[0].profileId, 'owner_user', 'The personal profile remains first and auth uid based');
+assert.equal(profilesWithExternal[1].profileId, 'agency_profile_1', 'External profileId is derived from the supplied root profiles document id');
+assert.equal(profilesWithExternal[1].ownerUid, 'owner_user', 'External profile keeps ownerUid as the managing identity');
+assert.equal(profilesWithExternal[1].type, 'agency', 'External profile keeps its allowed organization type');
+assert.equal(profilesWithExternal[1].kind, 'agency', 'External profile kind mirrors its organization type');
+assert.equal(profilesWithExternal[1].isPersonal, false, 'External profile is explicitly non-personal');
+assert.equal('managerUids' in profilesWithExternal[1], false, 'External profiles do not expose managerUids while manager access is not used yet');
+assert.equal('uid' in profilesWithExternal[1], false, 'External profiles do not receive a personal uid field');
+assert.equal('legalName' in profilesWithExternal[1], false, 'External profile normalization only exposes the safe public profile model');
+assert.equal('privateData' in profilesWithExternal[1], false, 'External profile normalization drops nested/private candidate data');
+
+const companyExternal = deriveManagedProfiles({
+  authUser: { uid: 'company_owner' },
+  publicProfile: { uid: 'company_owner', displayName: 'Company Owner' },
+  managedExternalProfiles: [
+    {
+      profileId: 'company_profile_1',
+      type: 'company',
+      displayName: 'Company Profile',
+      ownerUid: 'company_owner',
+      status: 'active',
+    },
+  ],
+});
+
+assert.equal(companyExternal.length, 2, 'A valid company profile can be normalized when explicitly provided');
+assert.equal(companyExternal[1].profileId, 'company_profile_1', 'External profileId can come from profileId');
+assert.equal(companyExternal[1].ownerUid, 'company_owner', 'Company external profile ownerUid remains leading');
+
+const collectiveExternal = deriveManagedProfiles({
+  authUser: { uid: 'collective_owner' },
+  profile: { uid: 'collective_owner', displayName: 'Collective Owner' },
+  managedExternalProfiles: [
+    {
+      id: 'collective_profile_1',
+      type: 'collective',
+      displayName: 'Collective Profile',
+      ownerUid: 'collective_owner',
+      status: 'active',
+    },
+  ],
+});
+
+assert.equal(collectiveExternal.length, 2, 'A valid collective profile can be normalized when explicitly provided');
+assert.equal(collectiveExternal[1].type, 'collective', 'External collective profiles keep their allowed organization type');
+
+const invalidExternalProfiles = deriveManagedProfiles({
+  authUser: { uid: 'owner_user' },
+  profile: { uid: 'owner_user', displayName: 'Owner User' },
+  managedExternalProfiles: [
+    { id: 'personal_spoof', type: 'personal', displayName: 'Personal Spoof', ownerUid: 'owner_user', status: 'active' },
+    { id: 'inactive_agency', type: 'agency', displayName: 'Inactive Agency', ownerUid: 'owner_user', status: 'draft' },
+    { id: 'missing_owner', type: 'agency', displayName: 'Missing Owner', status: 'active' },
+    { id: 'missing_name', type: 'agency', displayName: '', ownerUid: 'owner_user', status: 'active' },
+    { id: 'owner_user', type: 'agency', displayName: 'Uid Collision', ownerUid: 'owner_user', status: 'active' },
+  ],
+});
+
+assert.equal(invalidExternalProfiles.length, 1, 'Invalid, inactive, spoofed, and personal-id external profiles are ignored');
+
+const duplicateExternalProfiles = deriveManagedProfiles({
+  authUser: { uid: 'owner_user' },
+  profile: { uid: 'owner_user', displayName: 'Owner User' },
+  managedExternalProfiles: [
+    { id: 'agency_profile_1', type: 'agency', displayName: 'First Agency', ownerUid: 'owner_user', status: 'active' },
+    { id: 'agency_profile_1', type: 'agency', displayName: 'Duplicate Agency', ownerUid: 'owner_user', status: 'active' },
+  ],
+});
+
+assert.equal(duplicateExternalProfiles.length, 2, 'Duplicate external profile ids are normalized once');
+assert.equal(duplicateExternalProfiles[1].displayName, 'First Agency', 'The first valid external profile wins when duplicates are supplied');
+
 console.log('PASS managedProfiles.logic.test');

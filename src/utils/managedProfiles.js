@@ -1,33 +1,31 @@
-const firstNonEmpty = (...values) => {
-  for (const value of values) {
-    const normalized = String(value || '').trim();
-    if (normalized) return normalized;
-  }
-  return '';
+const normalizeId = (value) => String(value || '').trim();
+
+const profileMatchesAuthUser = (candidate, authUid) => {
+  if (!candidate || typeof candidate !== 'object') return false;
+  const candidateUid = normalizeId(candidate.uid);
+  return !candidateUid || candidateUid === authUid;
 };
 
-const pickSourceProfile = ({ profile, publicProfile }) => {
-  if (profile && typeof profile === 'object') return profile;
-  if (publicProfile && typeof publicProfile === 'object') return publicProfile;
+const pickSourceProfile = ({ authUid, profile, publicProfile }) => {
+  if (profileMatchesAuthUser(profile, authUid)) return profile;
+  if (profileMatchesAuthUser(publicProfile, authUid)) return publicProfile;
   return null;
 };
 
 export const deriveManagedProfiles = ({ authUser = null, profile = null, publicProfile = null } = {}) => {
-  const sourceProfile = pickSourceProfile({ profile, publicProfile });
-  const personalUid = firstNonEmpty(profile?.uid, publicProfile?.uid, authUser?.uid);
+  const personalUid = normalizeId(authUser?.uid);
+  if (!personalUid) return [];
 
-  if (!personalUid || !sourceProfile) return [];
-
-  const profileId = personalUid;
-  const ownerUid = firstNonEmpty(authUser?.uid, personalUid);
+  const sourceProfile = pickSourceProfile({ authUid: personalUid, profile, publicProfile });
+  if (!sourceProfile) return [];
 
   return [
     {
       ...sourceProfile,
-      id: profileId,
+      id: personalUid,
       uid: personalUid,
-      profileId,
-      ownerUid,
+      profileId: personalUid,
+      ownerUid: personalUid,
       kind: 'personal',
       isPersonal: true,
     },
@@ -38,13 +36,13 @@ export const resolveActiveProfile = ({ managedProfiles = [], activeProfileId = n
   const profiles = Array.isArray(managedProfiles) ? managedProfiles.filter(Boolean) : [];
   if (!profiles.length) return null;
 
-  const requestedId = String(activeProfileId || '').trim();
+  const requestedId = normalizeId(activeProfileId);
   if (requestedId) {
     const requestedProfile = profiles.find((candidate) => candidate?.profileId === requestedId || candidate?.id === requestedId);
     if (requestedProfile) return requestedProfile;
   }
 
-  const fallbackId = String(personalProfileId || '').trim();
+  const fallbackId = normalizeId(personalProfileId);
   if (fallbackId) {
     const personalProfile = profiles.find((candidate) => (
       candidate?.profileId === fallbackId

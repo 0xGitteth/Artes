@@ -121,6 +121,8 @@ export const buildPublicUserBackfillPayload = (uid, userData = {}, { serverTimes
   const displayName = typeof userData.displayName === 'string' ? userData.displayName : '';
   const payload = {
     uid,
+    profileId: uid,
+    ownerUid: uid,
     username: normalizeUsername(userData.username) || generateUsername(displayName, uid),
     displayName,
     displayNameLower: displayName.toLowerCase(),

@@ -10,6 +10,8 @@ const fakeDelete = () => '__DELETE__';
 const payload = buildPublicUserBackfillPayload('user_1234', {
   username: 'Codex User!',
   displayName: 'Codex User',
+  profileId: 'spoofed_profile',
+  ownerUid: 'spoofed_owner',
   photoURL: 'https://example.com/photo.jpg',
   avatar: 'https://example.com/avatar.jpg',
   roles: ['assistant', '', 42, 'model'],
@@ -38,6 +40,8 @@ const payload = buildPublicUserBackfillPayload('user_1234', {
 }, { serverTimestamp: fakeTimestamp });
 
 assert.equal(payload.uid, 'user_1234');
+assert.equal(payload.profileId, 'user_1234');
+assert.equal(payload.ownerUid, 'user_1234');
 assert.equal(payload.username, 'codexuser');
 assert.equal(payload.displayName, 'Codex User');
 assert.equal(payload.displayNameLower, 'codex user');
@@ -69,6 +73,8 @@ const docs = [
     id: 'eligible_user',
     data: () => ({
       displayName: 'Eligible User',
+      profileId: 'spoofed_profile',
+      ownerUid: 'spoofed_owner',
       themes: ['Product'],
       quickProfilePreviewMode: 'manual',
       quickProfilePostIds: ['post_1', 'post_2'],
@@ -184,6 +190,8 @@ for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {
   assert.equal(writtenPayload[legacyField], '__DELETE__', `${legacyField} should be deleted in the merge payload`);
 }
 assert.equal(writtenPayload.displayName, 'Eligible User');
+assert.equal(writtenPayload.profileId, 'eligible_user');
+assert.equal(writtenPayload.ownerUid, 'eligible_user');
 assert.deepEqual(writtenPayload.themes, ['Product']);
 assert.equal(writtenPayload.quickProfilePreviewMode, 'manual');
 assert.deepEqual(writtenPayload.quickProfilePostIds, ['post_1', 'post_2']);
@@ -193,6 +201,8 @@ for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {
   assert.equal(Object.prototype.hasOwnProperty.call(updatedPublicUser, legacyField), false, `${legacyField} should be removed`);
 }
 assert.equal(updatedPublicUser.displayName, 'Eligible User');
+assert.equal(updatedPublicUser.profileId, 'eligible_user');
+assert.equal(updatedPublicUser.ownerUid, 'eligible_user');
 assert.deepEqual(updatedPublicUser.themes, ['Product']);
 assert.equal(updatedPublicUser.quickProfilePreviewMode, 'manual');
 assert.deepEqual(updatedPublicUser.quickProfilePostIds, ['post_1', 'post_2']);

@@ -489,6 +489,8 @@ const stripClientGateFields = (payload = {}) => {
 
 const PUBLIC_USER_ALLOWED_FIELDS = [
   'uid',
+  'profileId',
+  'ownerUid',
   'username',
   'displayName',
   'displayNameLower',
@@ -514,6 +516,7 @@ const PUBLIC_USER_ALLOWED_FIELDS = [
 const sanitizePublicProfileField = (key, value) => {
   if (value === undefined) return undefined;
   if (key === 'username') return normalizeUsername(value);
+  if (key === 'profileId' || key === 'ownerUid') return value || '';
   if (key === 'photoURL' || key === 'avatar' || key === 'headerImage') return value || null;
   if (key === 'displayName' || key === 'bio') return value || '';
   if (key === 'linkedAgencyStatus' || key === 'linkedCompanyStatus') return String(value || '').trim().toLowerCase() || undefined;
@@ -531,6 +534,8 @@ const sanitizePublicProfileField = (key, value) => {
 const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
   const hasRequestedPublicField = [
     'uid',
+    'profileId',
+    'ownerUid',
     'displayName',
     'username',
     'photoURL',
@@ -558,6 +563,8 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
   if (data.uid !== undefined) {
     payload.uid = data.uid;
   }
+  payload.profileId = uid;
+  payload.ownerUid = uid;
   if (data.displayName !== undefined) {
     payload.displayName = data.displayName;
   }
@@ -805,6 +812,9 @@ export const sanitizeThemes = (themes) => {
 // avatar, headerImage, headerPosition, quickProfilePreviewMode, quickProfilePostIds.
 export const createUserProfile = async (uid, profile) => {
   const safeProfile = stripClientGateFields(profile);
+  safeProfile.uid = safeProfile.uid || uid;
+  safeProfile.profileId = safeProfile.profileId || uid;
+  safeProfile.ownerUid = safeProfile.ownerUid || uid;
   const affiliationTransition = applyAffiliationStatusTransitions(safeProfile, {}, {
     timestamp: serverTimestamp(),
     deleteValue: deleteField(),

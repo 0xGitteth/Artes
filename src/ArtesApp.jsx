@@ -639,9 +639,15 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options 
     ? profileData.quickProfilePostIds.filter(Boolean)
     : [];
 
+  const uid = profileData?.uid ?? profileData?.id ?? null;
+  const profileId = profileData?.profileId || uid || null;
+  const ownerUid = profileData?.ownerUid || uid || null;
+
   return {
     ...profileData,
-    uid: profileData?.uid ?? profileData?.id ?? null,
+    uid,
+    profileId,
+    ownerUid,
     displayName: profileData?.displayName || 'Onbekende maker',
     bio: profileData?.bio || 'Nog geen bio toegevoegd.',
     roles,
@@ -8394,6 +8400,8 @@ function UploadModal({
                   sizeBytes: imageMeta.sizeBytes,
                 },
               } : {}),
+              authorProfileId: profile.profileId || profile.uid || user.uid,
+              authorOwnerUid: profile.ownerUid || user.uid,
               authorName: profile.displayName,
               authorRole: uploaderRole,
               styles: selectedStyles,
@@ -8431,6 +8439,8 @@ function UploadModal({
         description: desc,
         imageUrl: image,
         authorId: user.uid,
+        authorProfileId: profile.profileId || profile.uid || user.uid,
+        authorOwnerUid: profile.ownerUid || user.uid,
         authorName: profile.displayName,
         authorRole: uploaderRole,
         styles: selectedStyles,

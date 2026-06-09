@@ -2741,6 +2741,8 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
           title: String(postDraftInput.title || '').trim(),
           description: String(postDraftInput.description || postDraftInput.caption || '').trim(),
           imageUrl: String(postDraftInput.imageUrl || '').trim(),
+          authorProfileId: decoded.uid,
+          authorOwnerUid: decoded.uid,
           authorName: String(postDraftInput.authorName || '').trim(),
           authorRole: String(postDraftInput.authorRole || '').trim(),
           styles: Array.isArray(postDraftInput.styles)
@@ -3778,6 +3780,8 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             imageUrl: normalizedImageUrl,
             authorId: userId,
             authorUid: userId,
+            authorProfileId: userId,
+            authorOwnerUid: userId,
             authorName: normalizedAuthorName || null,
             authorRole: normalizedAuthorRole || null,
             styles: normalizedStyles,

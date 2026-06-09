@@ -393,6 +393,25 @@ async function run() {
       }),
     );
 
+    await assertSucceeds(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        profileId: ownerUid,
+        ownerUid,
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        profileId: 'other_profile',
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        ownerUid: otherUid,
+      }),
+    );
+
     await assertFails(
       updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
         quickProfilePreviewMode: 123,
@@ -1138,6 +1157,24 @@ async function run() {
 
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), basePost));
 
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+      ...basePost,
+      authorProfileId: ownerUid,
+      authorOwnerUid: ownerUid,
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'profile_identity_spoof_profile'), {
+      ...basePost,
+      authorProfileId: otherUid,
+      authorOwnerUid: ownerUid,
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'profile_identity_spoof_owner'), {
+      ...basePost,
+      authorProfileId: ownerUid,
+      authorOwnerUid: otherUid,
+    }));
+
     // P1: uploadConsent.hasMaker/makerRoles are not enough without an actual maker credit.
     await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_fake_maker_model_only'), {
       ...basePost,
@@ -1265,6 +1302,20 @@ async function run() {
         { uid: 'photographer_moved', role: 'photographer', name: 'Moved Photographer', consentStatus: 'accepted' },
       ],
       uploadConsent: { ...baseConsent, hasMaker: true, makerCreditIndex: 1 },
+    }));
+
+    await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+      title: 'Profile identity update ok',
+      authorProfileId: ownerUid,
+      authorOwnerUid: ownerUid,
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+      authorProfileId: otherUid,
+    }));
+
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+      authorOwnerUid: otherUid,
     }));
 
     const { outcome: _unusedOutcome, ...postWithoutOutcome } = basePost;

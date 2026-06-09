@@ -33,10 +33,6 @@ export const normalizeManagedExternalProfile = (candidate, authUid) => {
   const displayName = String(candidate.displayName || '').trim();
   if (!displayName) return null;
 
-  const managerUids = Array.isArray(candidate.managerUids)
-    ? candidate.managerUids.map(normalizeId).filter(Boolean)
-    : [];
-
   const normalized = {
     id: profileId,
     profileId,
@@ -44,7 +40,6 @@ export const normalizeManagedExternalProfile = (candidate, authUid) => {
     kind: type,
     displayName,
     ownerUid,
-    managerUids,
     status: ACTIVE_PROFILE_STATUS,
     isPersonal: false,
   };

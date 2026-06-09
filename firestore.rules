@@ -269,7 +269,6 @@ service cloud.firestore {
           'type',
           'displayName',
           'ownerUid',
-          'managerUids',
           'status',
           'createdAt',
           'updatedAt'
@@ -280,8 +279,6 @@ service cloud.firestore {
         && request.resource.data.displayName.size() <= 120
         && request.resource.data.ownerUid is string
         && request.resource.data.ownerUid.size() > 0
-        && (!('managerUids' in request.resource.data) || request.resource.data.managerUids is list)
-        && (!('managerUids' in request.resource.data) || request.resource.data.managerUids.size() <= 50)
         && request.resource.data.status == 'active'
         && request.resource.data.createdAt is timestamp
         && request.resource.data.updatedAt is timestamp;
@@ -302,7 +299,7 @@ service cloud.firestore {
         && isValidManagedExternalProfileData()
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.createdAt == resource.data.createdAt
-        && changed.hasOnly(['type', 'displayName', 'managerUids', 'status', 'updatedAt'])
+        && changed.hasOnly(['type', 'displayName', 'status', 'updatedAt'])
         && request.resource.data.updatedAt == request.time;
     }
 

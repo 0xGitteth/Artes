@@ -50,7 +50,6 @@ async function run() {
         type: 'agency',
         displayName: 'Active Agency Profile',
         ownerUid,
-        managerUids: [ownerUid],
         status: 'active',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -59,7 +58,6 @@ async function run() {
         type: 'agency',
         displayName: 'Private Agency Profile',
         ownerUid,
-        managerUids: [],
         status: 'draft',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -387,21 +385,39 @@ async function run() {
       type: 'company',
       displayName: 'Owner Company Profile',
       ownerUid,
-      managerUids: [ownerUid],
       status: 'active',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }));
     await assertSucceeds(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
       displayName: 'Owner Company Profile Updated',
-      managerUids: [ownerUid, 'manager_1'],
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'profiles', 'manager_uids_not_allowed_profile'), {
+      type: 'agency',
+      displayName: 'Manager Uids Not Allowed Profile',
+      ownerUid,
+      managerUids: [ownerUid],
+      status: 'active',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      managerUids: [ownerUid],
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(setDoc(doc(ownerDb, 'profiles', 'owner_collective_profile'), {
+      type: 'collective',
+      displayName: 'Owner Collective Profile',
+      ownerUid,
+      status: 'active',
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }));
     await assertFails(setDoc(doc(otherDb, 'profiles', 'spoofed_company_profile'), {
       type: 'company',
       displayName: 'Spoofed Company Profile',
       ownerUid,
-      managerUids: [],
       status: 'active',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -414,7 +430,6 @@ async function run() {
       type: 'agency',
       displayName: 'Legal Identity Profile',
       ownerUid,
-      managerUids: [],
       status: 'active',
       legalName: 'Private Legal BV',
       createdAt: serverTimestamp(),
@@ -424,7 +439,6 @@ async function run() {
       type: 'personal',
       displayName: 'Personal Profile Not Allowed',
       ownerUid,
-      managerUids: [],
       status: 'active',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),

@@ -133,6 +133,7 @@ import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
 import { resolvePublicDisplayName } from './utils/publicIdentity';
+import { deriveManagedProfiles, resolveActiveProfile } from './utils/managedProfiles';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
 import {
   CONSENT_EXCEPTION_REASONS,
@@ -840,6 +841,7 @@ export default function ArtesApp() {
   const [pendingApprovedReminderAction, setPendingApprovedReminderAction] = useState('');
   const [acknowledgedApprovedUploadIds, setAcknowledgedApprovedUploadIds] = useState(() => new Set());
   const [claimInviteToken, setClaimInviteToken] = useState(null);
+  const [requestedActiveProfileId, setRequestedActiveProfileId] = useState(null);
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
   const authUserRef = useRef(null);
@@ -960,9 +962,32 @@ export default function ArtesApp() {
     () => users.find((entry) => entry?.uid === authUser?.uid) || null,
     [users, authUser?.uid],
   );
+  const managedProfiles = useMemo(
+    () => deriveManagedProfiles({ authUser, profile, publicProfile: currentPublicProfile }),
+    [authUser, profile, currentPublicProfile],
+  );
+  const activeProfile = useMemo(
+    () => resolveActiveProfile({
+      managedProfiles,
+      activeProfileId: requestedActiveProfileId,
+      personalProfileId: authUser?.uid,
+    }),
+    [managedProfiles, requestedActiveProfileId, authUser?.uid],
+  );
   const [followingIds, setFollowingIds] = useState(() => new Set());
   const [followingLoaded, setFollowingLoaded] = useState(false);
   const [revealedSensitivePostsById, setRevealedSensitivePostsById] = useState({});
+  useEffect(() => {
+    const fallbackProfileId = activeProfile?.profileId || null;
+    setRequestedActiveProfileId((currentProfileId) => {
+      if (!fallbackProfileId) return null;
+      const currentProfileStillManaged = managedProfiles.some((candidate) => (
+        candidate?.profileId === currentProfileId || candidate?.id === currentProfileId
+      ));
+      return currentProfileStillManaged ? currentProfileId : fallbackProfileId;
+    });
+  }, [activeProfile?.profileId, managedProfiles]);
+
   const moderationApiBase = useMemo(() => {
     const explicitBase = import.meta.env.VITE_MODERATION_API_BASE;
     if (explicitBase) return explicitBase;

@@ -134,7 +134,13 @@ import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
 import { resolvePublicDisplayName } from './utils/publicIdentity';
-import { deriveManagedProfiles, resolveActiveProfile } from './utils/managedProfiles';
+import {
+  buildManagedProfilesSettingsModel,
+  deriveManagedProfiles,
+  getManagedProfileDisplayName,
+  getManagedProfileTypeLabel,
+  resolveActiveProfile,
+} from './utils/managedProfiles';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
 import {
   CONSENT_EXCEPTION_REASONS,
@@ -2656,6 +2662,7 @@ export default function ArtesApp() {
             onToggleDark={handleToggleDarkMode}
             onLogout={handleSettingsLogout}
             showModerationDot={hasNewModerationWork}
+            managedProfiles={managedProfiles}
           />
         )}
         {showEditProfile && (
@@ -12349,7 +12356,9 @@ function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabe
   );
 }
 
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [] }) { 
+    const { personalProfile, externalProfiles, hasExternalProfiles, hasPersonalOrganizationHints } = buildManagedProfilesSettingsModel(managedProfiles);
+
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white dark:bg-slate-900 w-[min(20rem,calc(100vw-1rem))] h-[calc(100dvh-1rem)] m-2 md:m-0 md:h-full p-3 flex flex-col gap-3 text-slate-900 dark:text-slate-100 md:w-80 md:p-6 md:gap-6 rounded-2xl md:rounded-none overflow-y-auto no-scrollbar">
@@ -12369,6 +12378,65 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                       <span>Log uit</span>
                       <LogOut className="w-4 h-4" />
                     </button>
+                    <h4 className="text-xs uppercase font-bold text-slate-400">Mijn profielen</h4>
+                    <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-700 dark:bg-slate-800/70 md:rounded-2xl md:p-3">
+                      {personalProfile && (
+                        <div className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70">
+                          <div className="flex items-start gap-3">
+                            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-200">
+                              <User className="h-4 w-4" />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(personalProfile)}</p>
+                              <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(personalProfile)}</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {hasPersonalOrganizationHints && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
+                          Je persoonlijke profiel bevat nu bedrijfs of agency informatie. Binnen Artes worden persoonlijke profielen en bedrijfsprofielen voortaan apart beheerd. Je persoonlijke account blijft bestaan. Daarnaast kun je straks één of meer bedrijfsprofielen, agencyprofielen of collectieven instellen die je met hetzelfde account beheert.
+                        </div>
+                      )}
+                      <div className="space-y-2 pt-1">
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Beheerde profielen</p>
+                        {hasExternalProfiles ? (
+                          <div className="space-y-2">
+                            {externalProfiles.map((externalProfile) => (
+                              <div
+                                key={externalProfile.profileId || externalProfile.id}
+                                className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70"
+                              >
+                                <div className="flex items-start gap-3">
+                                  <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                                    <Building2 className="h-4 w-4" />
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(externalProfile)}</p>
+                                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+                            Je beheert nog geen bedrijfsprofielen, agencyprofielen of collectieven.
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled
+                        className="mt-1 flex w-full cursor-not-allowed items-center justify-between rounded-lg border border-dashed border-slate-300 bg-white/60 p-3 text-left text-sm font-semibold text-slate-400 dark:border-slate-700 dark:bg-slate-900/30 dark:text-slate-500"
+                      >
+                        <span>Nieuw profiel toevoegen</span>
+                        <span className="flex items-center gap-1 text-xs font-medium">
+                          Nog niet beschikbaar
+                          <Plus className="h-4 w-4" />
+                        </span>
+                      </button>
+                    </section>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Weergave</h4>
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between gap-2 md:p-3 md:gap-3">
                       <button

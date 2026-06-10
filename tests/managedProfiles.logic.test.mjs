@@ -6,6 +6,11 @@ import {
   deriveManagedProfiles,
   getBrowserStorage,
   buildPostAuthorFields,
+  getManagedProfileHeaderSwipeDirection,
+  getManagedProfileSwitcherActiveIndex,
+  getNextManagedProfileForSwipe,
+  getPreviousManagedProfileForSwipe,
+  shouldShowManagedProfileHeaderSwitcher,
   normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
   resolveActiveProfile,
@@ -80,6 +85,77 @@ assert.deepEqual(
   )),
   ['company_multi_1', 'agency_multi_1', 'collective_multi_1'],
   'Multiple external profiles remain individually selectable as active profiles',
+);
+
+const activeAgencyProfile = resolveActiveProfile({
+  managedProfiles: ownerManagedProfiles,
+  activeProfileId: 'agency_multi_1',
+  personalProfileId: 'owner_multi',
+});
+assert.equal(
+  getManagedProfileSwitcherActiveIndex({ managedProfiles: ownerManagedProfiles, activeProfile: activeAgencyProfile }),
+  2,
+  'Header switcher helper resolves the active profile index from activeProfile.profileId',
+);
+assert.equal(
+  getManagedProfileSwitcherActiveIndex({ managedProfiles: ownerManagedProfiles, activeProfile: { profileId: 'stale_external' } }),
+  0,
+  'Header switcher helper falls back to the personal profile for stale activeProfile values',
+);
+assert.equal(
+  getNextManagedProfileForSwipe({ managedProfiles: ownerManagedProfiles, activeProfile: activeAgencyProfile })?.profileId,
+  'collective_multi_1',
+  'Swipe left helper selects the next managed profile',
+);
+assert.equal(
+  getPreviousManagedProfileForSwipe({ managedProfiles: ownerManagedProfiles, activeProfile: activeAgencyProfile })?.profileId,
+  'company_multi_1',
+  'Swipe right helper selects the previous managed profile',
+);
+assert.equal(
+  getNextManagedProfileForSwipe({ managedProfiles: ownerManagedProfiles, activeProfile: ownerManagedProfiles[3] })?.profileId,
+  'owner_multi',
+  'Swipe left helper wraps from the last profile to the personal profile',
+);
+assert.equal(
+  shouldShowManagedProfileHeaderSwitcher({ isOwn: true, managedProfiles }),
+  false,
+  'Header switcher is hidden when only the personal profile is available',
+);
+assert.equal(
+  shouldShowManagedProfileHeaderSwitcher({ isOwn: true, managedProfiles: ownerManagedProfiles }),
+  true,
+  'Header switcher is shown for the owner when multiple managed profiles are available',
+);
+assert.equal(
+  shouldShowManagedProfileHeaderSwitcher({ isOwn: false, managedProfiles: ownerManagedProfiles }),
+  false,
+  'Header switcher is hidden for visitors viewing another profile',
+);
+assert.equal(
+  getManagedProfileHeaderSwipeDirection({ deltaX: -80, deltaY: 12 }),
+  'next',
+  'Clear horizontal swipe left on the header maps to the next profile',
+);
+assert.equal(
+  getManagedProfileHeaderSwipeDirection({ deltaX: 80, deltaY: 12 }),
+  'previous',
+  'Clear horizontal swipe right on the header maps to the previous profile',
+);
+assert.equal(
+  getManagedProfileHeaderSwipeDirection({ deltaX: -80, deltaY: 75 }),
+  null,
+  'Mostly vertical movement is ignored so mobile scrolling remains normal',
+);
+assert.equal(
+  getManagedProfileHeaderSwipeDirection({ deltaX: -24, deltaY: 4 }),
+  null,
+  'Small horizontal movement below the swipe threshold is ignored',
+);
+assert.equal(
+  getManagedProfileHeaderSwipeDirection({ deltaX: 0, deltaY: 0 }),
+  null,
+  'No movement, including touches outside the header handlers, has no switch direction',
 );
 
 const storageWrites = new Map();

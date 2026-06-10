@@ -148,6 +148,64 @@ export const isManagedProfileActive = (profile = {}, activeProfile = {}) => {
   return Boolean(profileId && activeProfileId && profileId === activeProfileId);
 };
 
+
+
+export const getManagedProfileSwitcherProfiles = (managedProfiles = []) => (
+  Array.isArray(managedProfiles) ? managedProfiles.filter((profile) => getManagedProfileId(profile)) : []
+);
+
+export const getManagedProfileSwitcherActiveIndex = ({ managedProfiles = [], activeProfile = null } = {}) => {
+  const profiles = getManagedProfileSwitcherProfiles(managedProfiles);
+  if (!profiles.length) return -1;
+
+  const activeProfileId = getManagedProfileId(activeProfile);
+  if (activeProfileId) {
+    const activeIndex = profiles.findIndex((profile) => getManagedProfileId(profile) === activeProfileId);
+    if (activeIndex >= 0) return activeIndex;
+  }
+
+  const personalIndex = profiles.findIndex((profile) => profile?.isPersonal);
+  return personalIndex >= 0 ? personalIndex : 0;
+};
+
+export const shouldShowManagedProfileHeaderSwitcher = ({ isOwn = false, managedProfiles = [] } = {}) => (
+  Boolean(isOwn) && getManagedProfileSwitcherProfiles(managedProfiles).length > 1
+);
+
+export const getManagedProfileAtSwitcherOffset = ({ managedProfiles = [], activeProfile = null, offset = 0 } = {}) => {
+  const profiles = getManagedProfileSwitcherProfiles(managedProfiles);
+  if (!profiles.length) return null;
+
+  const activeIndex = getManagedProfileSwitcherActiveIndex({ managedProfiles: profiles, activeProfile });
+  if (activeIndex < 0) return null;
+
+  const normalizedOffset = Number.isFinite(offset) ? offset : 0;
+  const nextIndex = (activeIndex + normalizedOffset + profiles.length) % profiles.length;
+  return profiles[nextIndex] || null;
+};
+
+export const getNextManagedProfileForSwipe = ({ managedProfiles = [], activeProfile = null } = {}) => (
+  getManagedProfileAtSwitcherOffset({ managedProfiles, activeProfile, offset: 1 })
+);
+
+export const getPreviousManagedProfileForSwipe = ({ managedProfiles = [], activeProfile = null } = {}) => (
+  getManagedProfileAtSwitcherOffset({ managedProfiles, activeProfile, offset: -1 })
+);
+
+export const getManagedProfileHeaderSwipeDirection = ({ deltaX = 0, deltaY = 0, threshold = 48, dominanceRatio = 1.25 } = {}) => {
+  const horizontalDelta = Number(deltaX) || 0;
+  const verticalDelta = Number(deltaY) || 0;
+  const minimumDistance = Math.max(0, Number(threshold) || 0);
+  const requiredDominance = Math.max(1, Number(dominanceRatio) || 1);
+  const absX = Math.abs(horizontalDelta);
+  const absY = Math.abs(verticalDelta);
+
+  if (absX < minimumDistance) return null;
+  if (absX < absY * requiredDominance) return null;
+
+  return horizontalDelta < 0 ? 'next' : 'previous';
+};
+
 export const getManagedProfileSettingsAction = (profile = {}, activeProfile = {}) => {
   const isActive = isManagedProfileActive(profile, activeProfile);
   return {

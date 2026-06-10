@@ -58,7 +58,11 @@ import {
   getAffiliationFields,
   shouldCreateAffiliationRequestCard,
 } from './utils/affiliationRequestCards';
-import { normalizeManagedExternalProfiles } from './utils/managedProfiles';
+import {
+  buildManagedExternalProfileCreatePayload,
+  createManagedExternalProfileId,
+  normalizeManagedExternalProfiles,
+} from './utils/managedProfiles';
 
 const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
 const firebaseStorageBucket = String(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim()
@@ -240,6 +244,39 @@ export const subscribeToMoodboardItems = ({ uid, moodboardId }, callback) => onS
   (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
 );
 
+
+
+export const createManagedExternalProfile = async ({ type, displayName }) => {
+  const authUser = await waitForAuthReady();
+  if (!authUser?.uid) {
+    throw new Error('Je moet ingelogd zijn om een profiel aan te maken.');
+  }
+
+  const db = getFirebaseDb();
+  let profileRef = null;
+  const profileId = createManagedExternalProfileId({
+    authUid: authUser.uid,
+    createId: () => {
+      profileRef = doc(collection(db, 'profiles'));
+      return profileRef.id;
+    },
+  });
+  const now = serverTimestamp();
+  const payload = buildManagedExternalProfileCreatePayload({
+    authUid: authUser.uid,
+    type,
+    displayName,
+    timestamp: now,
+  });
+
+  await setDoc(profileRef, payload);
+
+  return {
+    id: profileId,
+    profileId,
+    ...payload,
+  };
+};
 
 export const loadManagedExternalProfiles = async (uid) => {
   const ownerUid = String(uid || '').trim();

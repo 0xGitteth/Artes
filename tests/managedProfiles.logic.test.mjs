@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import { deriveManagedProfiles, resolveActiveProfile } from '../src/utils/managedProfiles.js';
+import {
+  buildManagedExternalProfileCreatePayload,
+  createManagedExternalProfileId,
+  deriveManagedProfiles,
+  resolveActiveProfile,
+  validateManagedExternalProfileDraft,
+} from '../src/utils/managedProfiles.js';
 
 const managedProfiles = deriveManagedProfiles({
   authUser: { uid: 'user_123' },
@@ -199,5 +205,64 @@ const duplicateExternalProfiles = deriveManagedProfiles({
 
 assert.equal(duplicateExternalProfiles.length, 2, 'Duplicate external profile ids are normalized once');
 assert.equal(duplicateExternalProfiles[1].displayName, 'First Agency', 'The first valid external profile wins when duplicates are supplied');
+
+const fakeTimestamp = { __serverTimestamp: true };
+const createPayload = buildManagedExternalProfileCreatePayload({
+  authUid: 'owner_user',
+  type: 'company',
+  displayName: '  Studio Veilig  ',
+  timestamp: fakeTimestamp,
+});
+
+assert.deepEqual(
+  Object.keys(createPayload).sort(),
+  ['createdAt', 'displayName', 'ownerUid', 'status', 'type', 'updatedAt'],
+  'Create payload only contains safe public profiles/{profileId} fields',
+);
+assert.equal(createPayload.ownerUid, 'owner_user', 'Create payload ownerUid always comes from authUser.uid');
+assert.equal(createPayload.displayName, 'Studio Veilig', 'Create payload trims displayName whitespace');
+assert.equal(createPayload.type, 'company', 'Create payload stores the selected external profile type');
+assert.equal(createPayload.status, 'active', 'Create payload always stores active status');
+assert.equal(createPayload.createdAt, fakeTimestamp, 'Create payload uses the provided Firestore timestamp for createdAt');
+assert.equal(createPayload.updatedAt, fakeTimestamp, 'Create payload uses the provided Firestore timestamp for updatedAt');
+assert.equal('managerUids' in createPayload, false, 'Create payload never writes managerUids');
+assert.equal('email' in createPayload, false, 'Create payload never writes email');
+assert.equal('legalName' in createPayload, false, 'Create payload never writes legalName');
+assert.equal('private' in createPayload, false, 'Create payload never writes private nested data');
+
+assert.equal(validateManagedExternalProfileDraft({ type: 'agency', displayName: '' }).ok, false, 'Empty displayName is rejected');
+assert.equal(validateManagedExternalProfileDraft({ type: 'agency', displayName: '   ' }).ok, false, 'Whitespace-only displayName is rejected');
+assert.equal(validateManagedExternalProfileDraft({ type: 'collective', displayName: '  Nacht Collectief  ' }).displayName, 'Nacht Collectief', 'Validation trims displayName');
+assert.equal(validateManagedExternalProfileDraft({ type: 'company', displayName: 'x'.repeat(121) }).ok, false, 'Display names longer than 120 characters are rejected');
+assert.equal(validateManagedExternalProfileDraft({ type: 'collective', displayName: 'Projectgroep' }).ok, true, 'Collective profile type is accepted');
+
+const generatedProfileId = createManagedExternalProfileId({
+  authUid: 'auth_user',
+  createId: (() => {
+    const ids = ['auth_user', 'external_profile_1'];
+    return () => ids.shift();
+  })(),
+});
+assert.equal(generatedProfileId, 'external_profile_1', 'Generated profileId retries when a generated id equals authUser.uid');
+assert.notEqual(generatedProfileId, 'auth_user', 'Generated profileId is not authUser.uid');
+
+const multipleSameTypeProfiles = deriveManagedProfiles({
+  authUser: { uid: 'same_type_owner' },
+  profile: { uid: 'same_type_owner', displayName: 'Same Type Owner' },
+  managedExternalProfiles: [
+    { id: 'company_one', type: 'company', displayName: 'Company One', ownerUid: 'same_type_owner', status: 'active' },
+    { id: 'company_two', type: 'company', displayName: 'Company Two', ownerUid: 'same_type_owner', status: 'active' },
+    { id: 'agency_one', type: 'agency', displayName: 'Agency One', ownerUid: 'same_type_owner', status: 'active' },
+    { id: 'agency_two', type: 'agency', displayName: 'Agency Two', ownerUid: 'same_type_owner', status: 'active' },
+    { id: 'collective_one', type: 'collective', displayName: 'Collective One', ownerUid: 'same_type_owner', status: 'active' },
+    { id: 'collective_two', type: 'collective', displayName: 'Collective Two', ownerUid: 'same_type_owner', status: 'active' },
+  ],
+});
+assert.deepEqual(
+  multipleSameTypeProfiles.slice(1).map((profile) => profile.profileId),
+  ['company_one', 'company_two', 'agency_one', 'agency_two', 'collective_one', 'collective_two'],
+  'Multiple profiles of the same type remain allowed and are not collapsed by type',
+);
+
 
 console.log('PASS managedProfiles.logic.test');

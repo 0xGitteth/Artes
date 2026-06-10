@@ -3,6 +3,67 @@ const normalizeId = (value) => String(value || '').trim();
 const EXTERNAL_PROFILE_TYPES = new Set(['company', 'agency', 'collective']);
 const ACTIVE_PROFILE_STATUS = 'active';
 
+
+export const MANAGED_EXTERNAL_PROFILE_TYPES = ['company', 'agency', 'collective'];
+export const MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH = 120;
+
+export const validateManagedExternalProfileDraft = ({ type, displayName } = {}) => {
+  const normalizedType = normalizeId(type);
+  const normalizedDisplayName = String(displayName || '').trim();
+
+  if (!EXTERNAL_PROFILE_TYPES.has(normalizedType)) {
+    return { ok: false, error: 'Kies een profieltype.', type: normalizedType, displayName: normalizedDisplayName };
+  }
+  if (!normalizedDisplayName) {
+    return { ok: false, error: 'Vul een naam in voor dit profiel.', type: normalizedType, displayName: normalizedDisplayName };
+  }
+  if (normalizedDisplayName.length > MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH) {
+    return { ok: false, error: `Gebruik maximaal ${MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH} tekens.`, type: normalizedType, displayName: normalizedDisplayName };
+  }
+
+  return { ok: true, type: normalizedType, displayName: normalizedDisplayName, error: null };
+};
+
+export const buildManagedExternalProfileCreatePayload = ({ authUid, type, displayName, timestamp } = {}) => {
+  const ownerUid = normalizeId(authUid);
+  if (!ownerUid) throw new Error('Je moet ingelogd zijn om een profiel aan te maken.');
+
+  const validation = validateManagedExternalProfileDraft({ type, displayName });
+  if (!validation.ok) throw new Error(validation.error);
+
+  return {
+    type: validation.type,
+    displayName: validation.displayName,
+    ownerUid,
+    status: ACTIVE_PROFILE_STATUS,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+};
+
+export const createManagedExternalProfileId = ({ authUid, createId, maxAttempts = 5 } = {}) => {
+  const ownerUid = normalizeId(authUid);
+  if (!ownerUid) throw new Error('Je moet ingelogd zijn om een profiel aan te maken.');
+  if (typeof createId !== 'function') throw new Error('Profiel-id aanmaken mislukt.');
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const profileId = normalizeId(createId());
+    if (profileId && profileId !== ownerUid) return profileId;
+  }
+
+  throw new Error('Profiel-id aanmaken mislukt. Probeer het opnieuw.');
+};
+
+export const getManagedProfilePrefillDisplayName = (profile = {}, type = 'company') => {
+  if (!profile || typeof profile !== 'object') return '';
+  const normalizedType = normalizeId(type);
+  const fields = normalizedType === 'agency'
+    ? ['linkedAgencyName', 'agencyName', 'businessName']
+    : ['linkedCompanyName', 'companyName', 'businessName'];
+  const value = fields.map((field) => String(profile[field] || '').trim()).find(Boolean) || '';
+  return value.slice(0, MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH);
+};
+
 export const PROFILE_TYPE_LABELS = {
   personal: 'Persoonlijk profiel',
   company: 'Bedrijfsprofiel',

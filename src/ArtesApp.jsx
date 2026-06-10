@@ -140,13 +140,16 @@ import {
   MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH,
   PROFILE_TYPE_LABELS,
   buildManagedProfilesSettingsModel,
+  getBrowserStorage,
   getManagedProfileId,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
   getManagedProfilePrefillDisplayName,
   getManagedProfileTypeLabel,
+  normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
   resolveActiveProfile,
+  shouldDelayActiveProfilePersistence,
   validateManagedExternalProfileDraft,
   writeStoredActiveProfileId,
 } from './utils/managedProfiles';
@@ -858,7 +861,7 @@ export default function ArtesApp() {
   const [acknowledgedApprovedUploadIds, setAcknowledgedApprovedUploadIds] = useState(() => new Set());
   const [claimInviteToken, setClaimInviteToken] = useState(null);
   const [requestedActiveProfileId, setRequestedActiveProfileId] = useState(() => (
-    typeof window === 'undefined' ? null : readStoredActiveProfileId(window.localStorage)
+    typeof window === 'undefined' ? null : readStoredActiveProfileId(getBrowserStorage(() => window.localStorage))
   ));
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
@@ -977,6 +980,7 @@ export default function ArtesApp() {
   const [posts, setPosts] = useState([]);
   const [users, setUsers] = useState([]);
   const [managedExternalProfiles, setManagedExternalProfiles] = useState([]);
+  const [managedExternalProfilesLoaded, setManagedExternalProfilesLoaded] = useState(false);
   const currentPublicProfile = useMemo(
     () => users.find((entry) => entry?.uid === authUser?.uid) || null,
     [users, authUser?.uid],
@@ -997,20 +1001,23 @@ export default function ArtesApp() {
   const [followingLoaded, setFollowingLoaded] = useState(false);
   const [revealedSensitivePostsById, setRevealedSensitivePostsById] = useState({});
   useEffect(() => {
-    const fallbackProfileId = getManagedProfileId(activeProfile) || null;
-    setRequestedActiveProfileId((currentProfileId) => {
-      if (!fallbackProfileId) return null;
-      const currentProfileStillManaged = managedProfiles.some((candidate) => (
-        getManagedProfileId(candidate) === currentProfileId
-      ));
-      return currentProfileStillManaged ? currentProfileId : fallbackProfileId;
-    });
-  }, [activeProfile, managedProfiles]);
+    setRequestedActiveProfileId((currentProfileId) => normalizeRequestedActiveProfileId({
+      managedProfiles,
+      activeProfile,
+      requestedActiveProfileId: currentProfileId,
+      managedExternalProfilesLoaded,
+    }));
+  }, [activeProfile, managedExternalProfilesLoaded, managedProfiles]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    writeStoredActiveProfileId(window.localStorage, getManagedProfileId(activeProfile));
-  }, [activeProfile]);
+    if (shouldDelayActiveProfilePersistence({
+      managedProfiles,
+      requestedActiveProfileId,
+      managedExternalProfilesLoaded,
+    })) return;
+    writeStoredActiveProfileId(getBrowserStorage(() => window.localStorage), getManagedProfileId(activeProfile));
+  }, [activeProfile, managedExternalProfilesLoaded, managedProfiles, requestedActiveProfileId]);
 
   const handleSelectActiveProfile = useCallback((nextProfile) => {
     const nextProfileId = getManagedProfileId(nextProfile);
@@ -1492,16 +1499,21 @@ export default function ArtesApp() {
     const uid = user?.uid || null;
     if (!canAccessFirestore({ authReady, user }) || !uid) {
       setManagedExternalProfiles([]);
+      setManagedExternalProfilesLoaded(true);
       return () => { active = false; };
     }
 
+    setManagedExternalProfilesLoaded(false);
     loadManagedExternalProfiles(uid)
       .then((profiles) => {
-        if (active) setManagedExternalProfiles(profiles);
+        if (!active) return;
+        setManagedExternalProfiles(profiles);
+        setManagedExternalProfilesLoaded(true);
       })
       .catch((error) => {
         if (!active) return;
         setManagedExternalProfiles([]);
+        setManagedExternalProfilesLoaded(true);
         handleListenerError('Managed external profiles loader', error);
       });
 

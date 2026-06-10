@@ -4,8 +4,11 @@ import {
   buildManagedExternalProfileCreatePayload,
   createManagedExternalProfileId,
   deriveManagedProfiles,
+  getBrowserStorage,
+  normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
   resolveActiveProfile,
+  shouldDelayActiveProfilePersistence,
   validateManagedExternalProfileDraft,
   writeStoredActiveProfileId,
 } from '../src/utils/managedProfiles.js';
@@ -91,6 +94,67 @@ assert.deepEqual(
 assert.equal(readStoredActiveProfileId(fakeStorage), 'agency_multi_1', 'Stored activeProfileId can be read back');
 writeStoredActiveProfileId(fakeStorage, '');
 assert.equal(storageWrites.has(ACTIVE_PROFILE_STORAGE_KEY), false, 'Empty activeProfileId clears the stored value');
+
+const personalOnlyWhileExternalProfilesLoad = ownerManagedProfiles.slice(0, 1);
+const personalFallbackWhileLoading = resolveActiveProfile({
+  managedProfiles: personalOnlyWhileExternalProfilesLoad,
+  activeProfileId: 'agency_multi_1',
+  personalProfileId: 'owner_multi',
+});
+assert.equal(personalFallbackWhileLoading?.profileId, 'owner_multi', 'Personal profile remains the safe UI fallback while external profiles load');
+assert.equal(
+  normalizeRequestedActiveProfileId({
+    managedProfiles: personalOnlyWhileExternalProfilesLoad,
+    activeProfile: personalFallbackWhileLoading,
+    requestedActiveProfileId: 'agency_multi_1',
+    managedExternalProfilesLoaded: false,
+  }),
+  'agency_multi_1',
+  'Stored external activeProfileId survives while external profiles are still loading',
+);
+assert.equal(
+  shouldDelayActiveProfilePersistence({
+    managedProfiles: personalOnlyWhileExternalProfilesLoad,
+    requestedActiveProfileId: 'agency_multi_1',
+    managedExternalProfilesLoaded: false,
+  }),
+  true,
+  'Personal fallback is not persisted while a stored external activeProfileId may still load',
+);
+assert.equal(
+  resolveActiveProfile({ managedProfiles: ownerManagedProfiles, activeProfileId: 'agency_multi_1', personalProfileId: 'owner_multi' })?.profileId,
+  'agency_multi_1',
+  'Stored external activeProfileId becomes active once external profiles load',
+);
+assert.equal(
+  normalizeRequestedActiveProfileId({
+    managedProfiles: ownerManagedProfiles,
+    activeProfile: resolveActiveProfile({ managedProfiles: ownerManagedProfiles, activeProfileId: 'stale_external', personalProfileId: 'owner_multi' }),
+    requestedActiveProfileId: 'stale_external',
+    managedExternalProfilesLoaded: true,
+  }),
+  'owner_multi',
+  'Stored stale activeProfileId falls back to personal only after external profiles finished loading',
+);
+assert.equal(
+  shouldDelayActiveProfilePersistence({
+    managedProfiles: ownerManagedProfiles,
+    requestedActiveProfileId: 'stale_external',
+    managedExternalProfilesLoaded: true,
+  }),
+  false,
+  'Stale activeProfileId fallback can be persisted after external profiles finished loading',
+);
+
+const throwingStorage = {
+  getItem: () => { throw new Error('blocked read'); },
+  setItem: () => { throw new Error('blocked write'); },
+  removeItem: () => { throw new Error('blocked remove'); },
+};
+assert.equal(readStoredActiveProfileId(throwingStorage), null, 'localStorage read errors return null and do not throw');
+assert.doesNotThrow(() => writeStoredActiveProfileId(throwingStorage, 'agency_multi_1'), 'localStorage write errors do not throw');
+assert.doesNotThrow(() => writeStoredActiveProfileId(throwingStorage, ''), 'localStorage remove errors do not throw');
+assert.equal(getBrowserStorage(() => { throw new Error('blocked access'); }), null, 'localStorage access errors return null and do not throw');
 
 const uidlessPrivateOnlyProfiles = deriveManagedProfiles({
   authUser: { uid: 'user_B' },

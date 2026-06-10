@@ -289,17 +289,63 @@ export const resolveActiveProfile = ({ managedProfiles = [], activeProfileId = n
 };
 
 
+export const getBrowserStorage = (storageGetter) => {
+  if (typeof storageGetter !== 'function') return null;
+  try {
+    const storage = storageGetter();
+    if (!storage || typeof storage !== 'object') return null;
+    return storage;
+  } catch {
+    return null;
+  }
+};
+
 export const readStoredActiveProfileId = (storage) => {
-  if (!storage || typeof storage.getItem !== 'function') return null;
-  return normalizeId(storage.getItem(ACTIVE_PROFILE_STORAGE_KEY)) || null;
+  try {
+    if (!storage || typeof storage.getItem !== 'function') return null;
+    return normalizeId(storage.getItem(ACTIVE_PROFILE_STORAGE_KEY)) || null;
+  } catch {
+    return null;
+  }
 };
 
 export const writeStoredActiveProfileId = (storage, activeProfileId) => {
-  if (!storage || typeof storage.setItem !== 'function') return;
-  const normalizedActiveProfileId = normalizeId(activeProfileId);
-  if (!normalizedActiveProfileId) {
-    if (typeof storage.removeItem === 'function') storage.removeItem(ACTIVE_PROFILE_STORAGE_KEY);
-    return;
+  try {
+    if (!storage || typeof storage.setItem !== 'function') return;
+    const normalizedActiveProfileId = normalizeId(activeProfileId);
+    if (!normalizedActiveProfileId) {
+      if (typeof storage.removeItem === 'function') storage.removeItem(ACTIVE_PROFILE_STORAGE_KEY);
+      return;
+    }
+    storage.setItem(ACTIVE_PROFILE_STORAGE_KEY, normalizedActiveProfileId);
+  } catch {
+    // Active profile persistence is best effort; unavailable storage must not break rendering.
   }
-  storage.setItem(ACTIVE_PROFILE_STORAGE_KEY, normalizedActiveProfileId);
+};
+
+export const shouldDelayActiveProfilePersistence = ({
+  managedProfiles = [],
+  requestedActiveProfileId = null,
+  managedExternalProfilesLoaded = true,
+} = {}) => {
+  const requestedId = normalizeId(requestedActiveProfileId);
+  if (!requestedId || managedExternalProfilesLoaded) return false;
+  const profiles = Array.isArray(managedProfiles) ? managedProfiles.filter(Boolean) : [];
+  return !profiles.some((candidate) => getManagedProfileId(candidate) === requestedId);
+};
+
+export const normalizeRequestedActiveProfileId = ({
+  managedProfiles = [],
+  activeProfile = null,
+  requestedActiveProfileId = null,
+  managedExternalProfilesLoaded = true,
+} = {}) => {
+  const fallbackProfileId = getManagedProfileId(activeProfile) || null;
+  if (!fallbackProfileId) return null;
+  const requestedId = normalizeId(requestedActiveProfileId);
+  const profiles = Array.isArray(managedProfiles) ? managedProfiles.filter(Boolean) : [];
+  const requestedProfileStillManaged = profiles.some((candidate) => getManagedProfileId(candidate) === requestedId);
+  if (requestedProfileStillManaged) return requestedId;
+  if (requestedId && !managedExternalProfilesLoaded) return requestedId;
+  return fallbackProfileId;
 };

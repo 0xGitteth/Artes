@@ -137,6 +137,7 @@ import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/
 import { resolvePublicDisplayName } from './utils/publicIdentity';
 import {
   MANAGED_EXTERNAL_PROFILE_TYPES,
+  MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH,
   PROFILE_TYPE_LABELS,
   buildManagedProfilesSettingsModel,
   deriveManagedProfiles,
@@ -12539,7 +12540,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                               value={createDisplayName}
                               onChange={(event) => { setCreateDisplayName(event.target.value); setCreateError(''); }}
                               disabled={createPending}
-                              maxLength={140}
+                              maxLength={MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH}
                               placeholder="Bijvoorbeeld Studio Luna"
                               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
                             />

@@ -14,7 +14,9 @@ import {
   normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
   resolveActiveProfile,
+  resolveAuthorQuickProfileTarget,
   resolvePostAuthorDisplayNameFromProfiles,
+  isPublicManagedExternalProfileVisible,
   resolvePostAuthorProfile,
   shouldDelayActiveProfilePersistence,
   validateManagedExternalProfileDraft,
@@ -583,6 +585,70 @@ assert.equal(
   }),
   'Legacy Name',
   'Post display does not crash and falls back when external profile info is missing',
+);
+
+
+const quickExternalCompanyProfile = { profileId: 'company_profile', ownerUid: 'owner_user', type: 'company', status: 'active', displayName: 'Studio X' };
+const quickExternalAgencyProfile = { profileId: 'agency_profile', ownerUid: 'owner_user', type: 'agency', status: 'active', displayName: 'Agency Y' };
+const quickExternalCollectiveProfile = { profileId: 'collective_profile', ownerUid: 'owner_user', type: 'collective', status: 'active', displayName: 'Collectief Z' };
+
+assert.deepEqual(
+  resolveAuthorQuickProfileTarget({
+    post: { authorId: 'owner_user', authorOwnerUid: 'owner_user', authorProfileId: 'company_profile' },
+    profilesById: { company_profile: quickExternalCompanyProfile },
+    viewerUid: 'visitor_user',
+  }),
+  { kind: 'external', profileId: 'company_profile', ownerUid: 'owner_user', profile: quickExternalCompanyProfile },
+  'Active company authorProfileId opens an external quick profile target',
+);
+assert.deepEqual(
+  resolveAuthorQuickProfileTarget({
+    post: { authorId: 'owner_user', authorOwnerUid: 'owner_user', authorProfileId: 'agency_profile' },
+    profilesById: { agency_profile: quickExternalAgencyProfile },
+    viewerUid: 'visitor_user',
+  }),
+  { kind: 'external', profileId: 'agency_profile', ownerUid: 'owner_user', profile: quickExternalAgencyProfile },
+  'Active agency authorProfileId opens an external quick profile target',
+);
+assert.deepEqual(
+  resolveAuthorQuickProfileTarget({
+    post: { authorId: 'owner_user', authorOwnerUid: 'owner_user', authorProfileId: 'collective_profile' },
+    profilesById: { collective_profile: quickExternalCollectiveProfile },
+    viewerUid: 'visitor_user',
+  }),
+  { kind: 'external', profileId: 'collective_profile', ownerUid: 'owner_user', profile: quickExternalCollectiveProfile },
+  'Active collective authorProfileId opens an external quick profile target',
+);
+assert.deepEqual(
+  resolveAuthorQuickProfileTarget({
+    post: { authorId: 'owner_user', authorOwnerUid: 'owner_user', authorProfileId: 'owner_user' },
+    profilesById: { owner_user: { type: 'personal', displayName: 'Owner' } },
+  }),
+  { kind: 'personal', userId: 'owner_user', profileId: null, ownerUid: 'owner_user' },
+  'Personal authorProfileId keeps opening the personal quick profile',
+);
+assert.deepEqual(
+  resolveAuthorQuickProfileTarget({ post: { authorId: 'owner_user', authorName: 'Legacy Owner' }, profilesById: {} }),
+  { kind: 'personal', userId: 'owner_user', profileId: null, ownerUid: 'owner_user' },
+  'Old post without authorProfileId keeps using the personal fallback',
+);
+assert.deepEqual(
+  resolveAuthorQuickProfileTarget({
+    post: { authorId: 'owner_user', authorOwnerUid: 'owner_user', authorProfileId: 'missing_profile' },
+    profilesById: {},
+  }),
+  { kind: 'personal', userId: 'owner_user', profileId: null, ownerUid: 'owner_user', fallbackReason: 'missing-external-profile' },
+  'Missing external profile falls back safely to the owner personal profile target',
+);
+assert.equal(
+  isPublicManagedExternalProfileVisible({ profile: { type: 'company', ownerUid: 'owner_user', status: 'inactive' }, viewerUid: 'visitor_user' }),
+  false,
+  'Inactive external profile is hidden from visitors',
+);
+assert.equal(
+  isPublicManagedExternalProfileVisible({ profile: { type: 'company', ownerUid: 'owner_user', status: 'inactive' }, viewerUid: 'owner_user' }),
+  true,
+  'Owner can recognize their inactive external profile',
 );
 
 console.log('PASS managedProfiles.logic.test');

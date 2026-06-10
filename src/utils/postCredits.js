@@ -93,6 +93,9 @@ const getCreditDisplayLabels = (credit = {}) => {
 
 export const getPostCreditRows = (post = {}) => {
   const credits = Array.isArray(post.credits) ? post.credits.filter(hasStructuredCredit) : [];
+  const authorOwnerUid = String(post.authorOwnerUid || post.authorUid || post.authorId || '').trim();
+  const authorProfileId = String(post.authorProfileId || '').trim();
+  const hasExternalAuthorProfile = Boolean(authorOwnerUid && authorProfileId && authorProfileId !== authorOwnerUid);
 
   if (credits.length > 0) {
     const hasAuthorCredit = credits.some((credit) => Boolean(
@@ -105,7 +108,9 @@ export const getPostCreditRows = (post = {}) => {
       ? [{
         role: normalizeRoleValue(post.authorRole, 'maker'),
         name: post.authorName || 'Onbekend',
-        uid: post.authorId || null,
+        uid: authorOwnerUid || post.authorId || null,
+        publicProfileId: hasExternalAuthorProfile ? authorProfileId : null,
+        ownerUid: authorOwnerUid || post.authorId || null,
         isLegacyAuthorFallback: true,
       }]
       : [];
@@ -121,6 +126,8 @@ export const getPostCreditRows = (post = {}) => {
         secondaryLabel,
         name: getCreditName(credit, roleLabel),
         uid: credit.uid || credit.userId || credit.profileId || null,
+        publicProfileId: credit.publicProfileId || credit.authorProfileId || null,
+        ownerUid: credit.ownerUid || credit.authorOwnerUid || credit.uid || credit.userId || null,
         contributorId: isAnonymousContributorCredit(credit) ? null : (credit.contributorId || null),
         isAnonymous: isAnonymousContributorCredit(credit),
         canOpenShadowByName: !credit.isLegacyAuthorFallback && Boolean(explicitCreditName),
@@ -140,7 +147,9 @@ export const getPostCreditRows = (post = {}) => {
       roleLabel: getRoleLabel(fallbackRole),
       secondaryLabel: fallbackSecondaryLabel,
       name: post.authorName || 'Onbekend',
-      uid: post.authorId || null,
+      uid: authorOwnerUid || post.authorId || null,
+      publicProfileId: hasExternalAuthorProfile ? authorProfileId : null,
+      ownerUid: authorOwnerUid || post.authorId || null,
       contributorId: null,
       isAnonymous: false,
       canOpenShadowByName: false,

@@ -72,6 +72,41 @@ export const PROFILE_TYPE_LABELS = {
   collective: 'Collectief',
 };
 
+
+export const isManagedExternalProfileType = (type) => EXTERNAL_PROFILE_TYPES.has(normalizeId(type));
+
+export const isExternalManagedProfile = (profile = {}) => isManagedExternalProfileType(profile?.type || profile?.kind);
+
+export const isPublicManagedExternalProfileVisible = ({ profile = {}, viewerUid = '' } = {}) => {
+  if (!profile || typeof profile !== 'object') return false;
+  if (!isExternalManagedProfile(profile)) return false;
+  const ownerUid = normalizeId(profile.ownerUid || profile.authorOwnerUid || profile.uid);
+  if (normalizeId(viewerUid) && ownerUid && normalizeId(viewerUid) === ownerUid) return true;
+  return normalizeId(profile.status || ACTIVE_PROFILE_STATUS) === ACTIVE_PROFILE_STATUS;
+};
+
+export const getPostOwnerUid = (post = {}) => normalizeId(post?.authorOwnerUid || post?.authorUid || post?.authorId);
+
+export const isExternalAuthorProfilePost = (post = {}) => {
+  const authorProfileId = normalizeId(post?.authorProfileId);
+  const ownerUid = getPostOwnerUid(post);
+  return Boolean(authorProfileId && ownerUid && authorProfileId !== ownerUid);
+};
+
+export const resolveAuthorQuickProfileTarget = ({ post = {}, profilesById = {}, viewerUid = '' } = {}) => {
+  const ownerUid = getPostOwnerUid(post);
+  const authorProfileId = normalizeId(post?.authorProfileId);
+  if (!isExternalAuthorProfilePost(post)) {
+    return { kind: 'personal', userId: ownerUid || normalizeId(post?.authorId), profileId: null, ownerUid: ownerUid || null };
+  }
+
+  const externalProfile = profilesById?.[authorProfileId] || null;
+  if (externalProfile && isPublicManagedExternalProfileVisible({ profile: externalProfile, viewerUid })) {
+    return { kind: 'external', profileId: authorProfileId, ownerUid: ownerUid || normalizeId(externalProfile.ownerUid), profile: externalProfile };
+  }
+
+  return { kind: 'personal', userId: ownerUid || null, profileId: null, ownerUid: ownerUid || null, fallbackReason: externalProfile ? 'inactive-external-profile' : 'missing-external-profile' };
+};
 export const getManagedProfileTypeLabel = (profile = {}) => {
   const kind = normalizeId(profile?.kind || profile?.type || (profile?.isPersonal ? 'personal' : ''));
   return PROFILE_TYPE_LABELS[kind] || PROFILE_TYPE_LABELS.personal;

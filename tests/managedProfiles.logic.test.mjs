@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {
   ACTIVE_PROFILE_STORAGE_KEY,
+  EXTERNAL_PROFILE_VIEW_PREFIX,
   buildManagedExternalProfileCreatePayload,
   createManagedExternalProfileId,
   deriveManagedProfiles,
   getBrowserStorage,
+  getExternalProfileIdFromView,
   buildPostAuthorFields,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfileSwitcherActiveIndex,
@@ -637,8 +639,36 @@ assert.deepEqual(
     post: { authorId: 'owner_user', authorOwnerUid: 'owner_user', authorProfileId: 'missing_profile' },
     profilesById: {},
   }),
-  { kind: 'personal', userId: 'owner_user', profileId: null, ownerUid: 'owner_user', fallbackReason: 'missing-external-profile' },
-  'Missing external profile falls back safely to the owner personal profile target',
+  { kind: 'externalUnavailable', profileId: 'missing_profile', ownerUid: 'owner_user', profile: null, reason: 'missing-external-profile' },
+  'Missing external profile keeps the external target unavailable instead of falling back to the owner',
+);
+assert.deepEqual(
+  resolveAuthorQuickProfileTarget({
+    post: { authorId: 'owner_user', authorOwnerUid: 'owner_user', authorProfileId: 'inactive_profile' },
+    profilesById: { inactive_profile: { profileId: 'inactive_profile', ownerUid: 'owner_user', type: 'agency', status: 'inactive' } },
+    viewerUid: 'visitor_user',
+  }),
+  { kind: 'externalUnavailable', profileId: 'inactive_profile', ownerUid: 'owner_user', profile: null, reason: 'inactive-external-profile' },
+  'Inactive external profile for a visitor keeps the external target unavailable instead of falling back to the owner',
+);
+assert.deepEqual(
+  resolveAuthorQuickProfileTarget({
+    post: { authorId: 'owner_user', authorOwnerUid: 'owner_user', authorProfileId: 'inactive_profile' },
+    profilesById: { inactive_profile: { profileId: 'inactive_profile', ownerUid: 'owner_user', type: 'agency', status: 'inactive' } },
+    viewerUid: 'owner_user',
+  }),
+  { kind: 'externalUnavailable', profileId: 'inactive_profile', ownerUid: 'owner_user', profile: null, reason: 'inactive-external-profile' },
+  'Inactive external profile for the owner keeps the external target unavailable instead of falling back to the owner',
+);
+assert.equal(
+  getExternalProfileIdFromView(`${EXTERNAL_PROFILE_VIEW_PREFIX}company_profile`),
+  'company_profile',
+  'External profile view parsing preserves profile ids with underscores',
+);
+assert.equal(
+  getExternalProfileIdFromView(`${EXTERNAL_PROFILE_VIEW_PREFIX}companyprofile`),
+  'companyprofile',
+  'External profile view parsing also supports profile ids without underscores',
 );
 assert.equal(
   isPublicManagedExternalProfileVisible({ profile: { type: 'company', ownerUid: 'owner_user', status: 'inactive' }, viewerUid: 'visitor_user' }),
@@ -647,8 +677,8 @@ assert.equal(
 );
 assert.equal(
   isPublicManagedExternalProfileVisible({ profile: { type: 'company', ownerUid: 'owner_user', status: 'inactive' }, viewerUid: 'owner_user' }),
-  true,
-  'Owner can recognize their inactive external profile',
+  false,
+  'Inactive external profile is unavailable even when the owner is viewing the public surface',
 );
 
 console.log('PASS managedProfiles.logic.test');

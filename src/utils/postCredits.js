@@ -96,13 +96,20 @@ export const getPostCreditRows = (post = {}) => {
   const authorOwnerUid = String(post.authorOwnerUid || post.authorUid || post.authorId || '').trim();
   const authorProfileId = String(post.authorProfileId || '').trim();
   const hasExternalAuthorProfile = Boolean(authorOwnerUid && authorProfileId && authorProfileId !== authorOwnerUid);
+  const isAuthorCredit = (credit = {}) => {
+    const creditUid = String(credit.uid || credit.userId || '').trim();
+    const creditName = String(credit.name || credit.displayName || '').trim();
+    const authorName = String(post.authorName || '').trim();
+    return Boolean(
+      credit?.isSelf
+        || (authorOwnerUid && creditUid === authorOwnerUid)
+        || (post.authorId && creditUid === String(post.authorId).trim())
+        || (authorName && creditName === authorName),
+    );
+  };
 
   if (credits.length > 0) {
-    const hasAuthorCredit = credits.some((credit) => Boolean(
-      credit?.isSelf
-        || (post.authorId && credit?.uid === post.authorId)
-        || (post.authorName && credit?.name === post.authorName),
-    ));
+    const hasAuthorCredit = credits.some(isAuthorCredit);
 
     const fallbackAuthorCredit = !hasAuthorCredit && (post.authorName || post.authorId)
       ? [{
@@ -126,8 +133,8 @@ export const getPostCreditRows = (post = {}) => {
         secondaryLabel,
         name: getCreditName(credit, roleLabel),
         uid: credit.uid || credit.userId || credit.profileId || null,
-        publicProfileId: credit.publicProfileId || credit.authorProfileId || null,
-        ownerUid: credit.ownerUid || credit.authorOwnerUid || credit.uid || credit.userId || null,
+        publicProfileId: credit.publicProfileId || credit.authorProfileId || (hasExternalAuthorProfile && isAuthorCredit(credit) ? authorProfileId : null),
+        ownerUid: credit.ownerUid || credit.authorOwnerUid || (hasExternalAuthorProfile && isAuthorCredit(credit) ? authorOwnerUid : null) || credit.uid || credit.userId || null,
         contributorId: isAnonymousContributorCredit(credit) ? null : (credit.contributorId || null),
         isAnonymous: isAnonymousContributorCredit(credit),
         canOpenShadowByName: !credit.isLegacyAuthorFallback && Boolean(explicitCreditName),

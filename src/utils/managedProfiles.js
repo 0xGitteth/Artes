@@ -7,6 +7,15 @@ const ACTIVE_PROFILE_STATUS = 'active';
 export const MANAGED_EXTERNAL_PROFILE_TYPES = ['company', 'agency', 'collective'];
 export const MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH = 120;
 export const ACTIVE_PROFILE_STORAGE_KEY = 'artes.activeProfileId';
+export const EXTERNAL_PROFILE_VIEW_PREFIX = 'externalProfile_';
+
+
+export const getExternalProfileIdFromView = (view = '') => {
+  const normalizedView = String(view || '');
+  return normalizedView.startsWith(EXTERNAL_PROFILE_VIEW_PREFIX)
+    ? normalizedView.slice(EXTERNAL_PROFILE_VIEW_PREFIX.length)
+    : '';
+};
 
 export const validateManagedExternalProfileDraft = ({ type, displayName } = {}) => {
   const normalizedType = normalizeId(type);
@@ -77,11 +86,9 @@ export const isManagedExternalProfileType = (type) => EXTERNAL_PROFILE_TYPES.has
 
 export const isExternalManagedProfile = (profile = {}) => isManagedExternalProfileType(profile?.type || profile?.kind);
 
-export const isPublicManagedExternalProfileVisible = ({ profile = {}, viewerUid = '' } = {}) => {
+export const isPublicManagedExternalProfileVisible = ({ profile = {} } = {}) => {
   if (!profile || typeof profile !== 'object') return false;
   if (!isExternalManagedProfile(profile)) return false;
-  const ownerUid = normalizeId(profile.ownerUid || profile.authorOwnerUid || profile.uid);
-  if (normalizeId(viewerUid) && ownerUid && normalizeId(viewerUid) === ownerUid) return true;
   return normalizeId(profile.status || ACTIVE_PROFILE_STATUS) === ACTIVE_PROFILE_STATUS;
 };
 
@@ -105,7 +112,13 @@ export const resolveAuthorQuickProfileTarget = ({ post = {}, profilesById = {}, 
     return { kind: 'external', profileId: authorProfileId, ownerUid: ownerUid || normalizeId(externalProfile.ownerUid), profile: externalProfile };
   }
 
-  return { kind: 'personal', userId: ownerUid || null, profileId: null, ownerUid: ownerUid || null, fallbackReason: externalProfile ? 'inactive-external-profile' : 'missing-external-profile' };
+  return {
+    kind: 'externalUnavailable',
+    profileId: authorProfileId,
+    ownerUid: ownerUid || normalizeId(externalProfile?.ownerUid) || null,
+    profile: null,
+    reason: externalProfile ? 'inactive-external-profile' : 'missing-external-profile',
+  };
 };
 export const getManagedProfileTypeLabel = (profile = {}) => {
   const kind = normalizeId(profile?.kind || profile?.type || (profile?.isPersonal ? 'personal' : ''));

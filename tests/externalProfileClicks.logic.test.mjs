@@ -16,6 +16,31 @@ assert.equal(companyAuthorRow.uid, 'owner_user', 'External author row keeps owne
 assert.equal(companyAuthorRow.publicProfileId, 'company_profile', 'External author row exposes public profile id for click handling');
 assert.equal(companyAuthorRow.ownerUid, 'owner_user', 'External author row keeps owner uid separate from public profile id');
 
+
+const externalPostWithSelfCredit = {
+  ...externalCompanyPost,
+  credits: [
+    { role: 'photographer', name: 'Owner User', uid: 'owner_user', isSelf: true },
+    { role: 'model', name: 'Model One', uid: 'model_user' },
+  ],
+};
+const [externalSelfAuthorRow, externalContributorRow] = getPostCreditRows(externalPostWithSelfCredit);
+assert.equal(externalSelfAuthorRow.publicProfileId, 'company_profile', 'Existing self author credit keeps external public profile id');
+assert.equal(externalSelfAuthorRow.ownerUid, 'owner_user', 'Existing self author credit keeps owner uid for internal ownership');
+assert.equal(externalContributorRow.publicProfileId, null, 'Contributor credit is not remapped to external authorProfileId');
+assert.equal(externalContributorRow.uid, 'model_user', 'Contributor credit keeps its own click target');
+
+const [personalSelfAuthorRow] = getPostCreditRows({
+  authorId: 'owner_user',
+  authorUid: 'owner_user',
+  authorOwnerUid: 'owner_user',
+  authorProfileId: 'owner_user',
+  authorName: 'Owner User',
+  credits: [{ role: 'photographer', name: 'Owner User', uid: 'owner_user', isSelf: true }],
+});
+assert.equal(personalSelfAuthorRow.publicProfileId, null, 'Personal self author credit does not receive an external public profile id');
+assert.equal(personalSelfAuthorRow.uid, 'owner_user', 'Personal self author credit keeps opening the personal quick profile');
+
 const [personalAuthorRow] = getPostCreditRows({
   authorId: 'owner_user',
   authorUid: 'owner_user',

@@ -138,12 +138,14 @@ import { resolvePublicDisplayName } from './utils/publicIdentity';
 import {
   MANAGED_EXTERNAL_PROFILE_TYPES,
   MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH,
+  EXTERNAL_PROFILE_VIEW_PREFIX,
   PROFILE_TYPE_LABELS,
   buildManagedProfilesSettingsModel,
   getBrowserStorage,
   getManagedProfileId,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
+  getExternalProfileIdFromView,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfilePrefillDisplayName,
   getManagedProfileSwitcherActiveIndex,
@@ -1617,6 +1619,14 @@ export default function ArtesApp() {
         setQuickProfileTarget(resolvedTarget);
         return;
       }
+      if (resolvedTarget.kind === 'externalUnavailable') {
+        setQuickProfileTarget({
+          kind: 'external',
+          profileId: resolvedTarget.profileId,
+          ownerUid: resolvedTarget.ownerUid,
+        });
+        return;
+      }
       if (resolvedTarget.userId) {
         setQuickProfileTarget({ kind: 'personal', userId: resolvedTarget.userId });
         return;
@@ -2735,10 +2745,10 @@ export default function ArtesApp() {
             />
           )}
           
-          {!profileLoading && view.startsWith('externalProfile_') && (
+          {!profileLoading && view.startsWith(EXTERNAL_PROFILE_VIEW_PREFIX) && (
             <PublicExternalProfile
-              profileId={view.split('_')[1]}
-              seedProfile={postAuthorProfilesById[view.split('_')[1]]}
+              profileId={getExternalProfileIdFromView(view)}
+              seedProfile={postAuthorProfilesById[getExternalProfileIdFromView(view)]}
               currentUserId={user?.uid}
               posts={postsWithResolvedAuthors}
               onPostClick={handleOpenPost}
@@ -2921,21 +2931,9 @@ export default function ArtesApp() {
               const profileId = quickProfileTarget.profileId;
               setQuickProfileTarget(null);
               setSelectedPost(null);
-              setView(`externalProfile_${profileId}`);
-            }}
-            onFallbackFullProfile={() => {
-              const profileId = quickProfileTarget.ownerUid;
-              setQuickProfileTarget(null);
-              setSelectedPost(null);
-              setView(`profile_${profileId}`);
+              setView(`${EXTERNAL_PROFILE_VIEW_PREFIX}${profileId}`);
             }}
             currentUserId={user?.uid}
-            posts={posts}
-            allUsers={users}
-            currentProfile={profile}
-            triggerVisibility={galleryTriggerVisibility}
-            revealedSensitivePostsById={revealedSensitivePostsById}
-            onRevealSensitivePost={handleRevealSensitivePost}
           />
           ) : (
           <UserPreviewModal
@@ -10765,9 +10763,9 @@ function usePublicExternalProfile(profileId, seedProfile, currentUserId) {
   return profileState;
 }
 
-function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose, onFullProfile, onFallbackFullProfile, currentUserId, posts, allUsers, currentProfile, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
-  const { loading, profile: externalProfile, error } = usePublicExternalProfile(profileId, seedProfile, currentUserId);
-  const canFallbackToOwner = Boolean(ownerUid && error && error !== 'inactive');
+function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose, onFullProfile, currentUserId }) {
+  const { loading, profile: externalProfile } = usePublicExternalProfile(profileId, seedProfile, currentUserId);
+  const isOwnerViewing = Boolean(ownerUid && currentUserId && ownerUid === currentUserId);
 
   if (loading) {
     return (
@@ -10781,33 +10779,21 @@ function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose
   }
 
   if (!externalProfile) {
-    if (canFallbackToOwner) {
-      return (
-        <UserPreviewModal
-          userId={ownerUid}
-          onClose={onClose}
-          onFullProfile={onFallbackFullProfile || onFullProfile}
-          posts={posts}
-          allUsers={allUsers}
-          currentUserId={currentUserId}
-          currentProfile={currentProfile}
-          triggerVisibility={triggerVisibility}
-          revealedSensitivePostsById={revealedSensitivePostsById}
-          onRevealSensitivePost={onRevealSensitivePost}
-        />
-      );
-    }
     return (
       <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-2 md:p-6">
         <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl dark:bg-slate-900 md:rounded-3xl">
           <button onClick={onClose} className="ml-auto flex h-9 w-9 items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Sluiten"><X className="h-5 w-5" /></button>
           <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" />
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">Profiel niet beschikbaar</h2>
-          <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">Dit profiel is niet actief of kan niet publiek worden getoond.</p>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">Dit profiel is niet publiek beschikbaar.</p>
+          {isOwnerViewing ? (
+            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">Je bekijkt dit als eigenaar van dit profiel.</p>
+          ) : null}
         </div>
       </div>
     );
   }
+
 
   const displayName = getManagedProfileDisplayName(externalProfile);
   const typeLabel = getManagedProfileTypeLabel(externalProfile);

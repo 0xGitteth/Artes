@@ -49,6 +49,16 @@ assert.equal(personalProfileHasOrganizationHints({ role: 'Bedrijf' }), true, 'Du
 assert.equal(personalProfileHasOrganizationHints({ linkedCompanyName: 'Studio Luna' }), true, 'Existing linked company fields are recognized');
 assert.equal(personalProfileHasOrganizationHints({ linkedAgencyName: 'Nova Agency' }), true, 'Existing linked agency fields are recognized');
 assert.equal(personalProfileHasOrganizationHints({ roles: ['model'], linkedAgencyName: '' }), false, 'Empty organization fields do not trigger the explanation');
+assert.equal(getManagedProfileDisplayName({ email: 'profile@example.com' }), 'Naamloos profiel', 'Email-only profile does not use account identity as display fallback');
+assert.equal(getManagedProfileDisplayName({ name: '', username: '', email: 'profile@example.com' }), 'Naamloos profiel', 'Email is not returned when profile display fields are empty');
 assert.equal(getManagedProfileDisplayName({}), 'Naamloos profiel', 'Profiles without display copy receive a safe fallback');
+assert.equal(personalProfileHasOrganizationHints({ linkedCompanyStatus: 'none' }), false, 'Neutral linked company status does not trigger organization guidance');
+assert.equal(personalProfileHasOrganizationHints({ linkedAgencyStatus: 'unlinked' }), false, 'Neutral linked agency status does not trigger organization guidance');
+assert.equal(personalProfileHasOrganizationHints({ linkedCompanyStatus: 'rejected' }), false, 'Rejected linked company status does not trigger organization guidance');
+assert.equal(personalProfileHasOrganizationHints({ linkedAgencyStatus: 'unknown' }), false, 'Unknown linked agency status does not trigger organization guidance');
+assert.equal(personalProfileHasOrganizationHints({ linkedCompanyStatus: 'approved' }), true, 'Positive linked company status still triggers organization guidance');
+assert.equal(personalProfileHasOrganizationHints({ linkedAgencyStatus: 'verified' }), true, 'Positive linked agency status still triggers organization guidance');
+assert.equal(personalProfileHasOrganizationHints({ linkedCompanyId: 'company_123' }), true, 'Real linked company ids still trigger organization guidance');
+assert.equal(personalProfileHasOrganizationHints({ linkedAgencyId: 'none' }), false, 'Neutral linked agency id does not trigger organization guidance');
 
 console.log('PASS managedProfilesSettings.logic.test');

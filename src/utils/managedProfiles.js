@@ -20,7 +20,6 @@ export const getManagedProfileDisplayName = (profile = {}) => {
     profile?.displayName
     || profile?.name
     || profile?.username
-    || profile?.email
     || '',
   ).trim();
 
@@ -28,19 +27,25 @@ export const getManagedProfileDisplayName = (profile = {}) => {
 };
 
 const ORGANIZATION_ROLE_HINTS = new Set(['agency', 'company', 'bedrijf']);
-const ORGANIZATION_FIELD_HINTS = [
-  'linkedCompanyId',
+const ORGANIZATION_NAME_HINT_FIELDS = [
   'linkedCompanyName',
-  'linkedCompanyStatus',
-  'linkedAgencyId',
   'linkedAgencyName',
-  'linkedAgencyStatus',
-  'companyId',
   'companyName',
-  'agencyId',
   'agencyName',
   'businessName',
 ];
+const ORGANIZATION_ID_HINT_FIELDS = [
+  'linkedCompanyId',
+  'linkedAgencyId',
+  'companyId',
+  'agencyId',
+];
+const ORGANIZATION_STATUS_HINT_FIELDS = [
+  'linkedCompanyStatus',
+  'linkedAgencyStatus',
+];
+const POSITIVE_ORGANIZATION_STATUSES = new Set(['linked', 'approved', 'active', 'verified']);
+const NEUTRAL_ORGANIZATION_HINT_VALUES = new Set(['none', 'unlinked', 'rejected', 'empty', 'unknown', 'null', 'undefined']);
 
 const collectRoleHints = (value) => {
   if (!value) return [];
@@ -59,10 +64,18 @@ export const personalProfileHasOrganizationHints = (profile = {}) => {
     .flatMap((entry) => collectRoleHints(entry));
   if (roleHints.some((role) => ORGANIZATION_ROLE_HINTS.has(role))) return true;
 
-  return ORGANIZATION_FIELD_HINTS.some((field) => {
-    const value = profile[field];
-    return value !== undefined && value !== null && String(value).trim() !== '';
+  const hasNameHint = ORGANIZATION_NAME_HINT_FIELDS.some((field) => normalizeId(profile[field]));
+  if (hasNameHint) return true;
+
+  const hasIdHint = ORGANIZATION_ID_HINT_FIELDS.some((field) => {
+    const value = normalizeId(profile[field]).toLowerCase();
+    return Boolean(value) && !NEUTRAL_ORGANIZATION_HINT_VALUES.has(value);
   });
+  if (hasIdHint) return true;
+
+  return ORGANIZATION_STATUS_HINT_FIELDS.some((field) => (
+    POSITIVE_ORGANIZATION_STATUSES.has(normalizeId(profile[field]).toLowerCase())
+  ));
 };
 
 export const buildManagedProfilesSettingsModel = (managedProfiles = []) => {

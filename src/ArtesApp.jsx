@@ -145,6 +145,7 @@ import {
   deriveManagedProfiles,
   getManagedProfileDisplayName,
   getManagedProfilePrefillDisplayName,
+  resolvePostAuthorDisplayNameFromProfiles,
   getManagedProfileTypeLabel,
   normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
@@ -978,6 +979,7 @@ export default function ArtesApp() {
 
   // Data
   const [posts, setPosts] = useState([]);
+  const [postAuthorProfilesById, setPostAuthorProfilesById] = useState({});
   const [users, setUsers] = useState([]);
   const [managedExternalProfiles, setManagedExternalProfiles] = useState([]);
   const [managedExternalProfilesLoaded, setManagedExternalProfilesLoaded] = useState(false);
@@ -1547,6 +1549,49 @@ export default function ArtesApp() {
      );
      return () => { if (typeof unsubPosts === 'function') unsubPosts(); if (typeof unsubUsers === 'function') unsubUsers(); };
   }, [authReady, user, logListenerStart]);
+
+  useEffect(() => {
+    const externalAuthorProfileIds = Array.from(new Set((posts || [])
+      .map((post) => String(post?.authorProfileId || '').trim())
+      .filter((profileId) => {
+        if (!profileId) return false;
+        const matchingPost = posts.find((post) => String(post?.authorProfileId || '').trim() === profileId);
+        const ownerUid = String(matchingPost?.authorId || matchingPost?.authorUid || matchingPost?.authorOwnerUid || '').trim();
+        return Boolean(ownerUid && profileId !== ownerUid);
+      })));
+
+    if (!externalAuthorProfileIds.length || !canAccessFirestore({ authReady, user })) {
+      setPostAuthorProfilesById({});
+      return;
+    }
+
+    let active = true;
+    const db = getFirebaseDbInstance();
+    Promise.all(externalAuthorProfileIds.map(async (profileId) => {
+      try {
+        const profileSnap = await getDoc(doc(db, 'profiles', profileId));
+        if (!profileSnap.exists()) return null;
+        return { id: profileSnap.id, profileId: profileSnap.id, ...profileSnap.data() };
+      } catch (error) {
+        console.warn('[post-author-profiles] load failed', profileId, error?.code || error?.message || error);
+        return null;
+      }
+    })).then((profiles) => {
+      if (!active) return;
+      setPostAuthorProfilesById(Object.fromEntries(profiles.filter(Boolean).map((profile) => [profile.profileId, profile])));
+    });
+
+    return () => { active = false; };
+  }, [authReady, posts, user]);
+
+  const postsWithResolvedAuthors = useMemo(() => (posts || []).map((post) => ({
+    ...post,
+    authorName: resolvePostAuthorDisplayNameFromProfiles({
+      post,
+      users,
+      profilesById: postAuthorProfilesById,
+    }),
+  })), [postAuthorProfilesById, posts, users]);
 
   useEffect(() => {
     let active = true;
@@ -2319,14 +2364,14 @@ export default function ArtesApp() {
   const galleryTriggerVisibility = profile?.preferences?.triggerVisibility || normalizeTriggerPreferences();
   const galleryPosts = useMemo(() => {
     if (!authUser?.uid) return [];
-    return posts
+    return postsWithResolvedAuthors
       .filter((post) => getPostContentPreference(post, galleryTriggerVisibility) !== 'hideFeed')
       .filter((post) => {
         const authorId = post?.authorId;
         if (!authorId) return false;
         return authorId === authUser.uid || followingIds.has(authorId);
       });
-  }, [authUser?.uid, followingIds, galleryTriggerVisibility, posts]);
+  }, [authUser?.uid, followingIds, galleryTriggerVisibility, postsWithResolvedAuthors]);
 
   const handleRevealSensitivePost = useCallback((postId) => {
     setRevealedSensitivePostsById((prev) => ({ ...prev, [postId]: true }));
@@ -2545,7 +2590,7 @@ export default function ArtesApp() {
           {!profileLoading && view === 'discover' && (
             <Discover
               users={users}
-              posts={posts}
+              posts={postsWithResolvedAuthors}
               profile={profile}
               currentUserId={authUser?.uid}
               onUserClick={setQuickProfileId}
@@ -2595,7 +2640,7 @@ export default function ArtesApp() {
           {!profileLoading && view === 'challenge_timeline' && (
             <ChallengeDetail
               setView={setView}
-              posts={posts.filter(p => p.isChallenge)}
+              posts={postsWithResolvedAuthors.filter(p => p.isChallenge)}
               onPostClick={handleOpenPost}
               challenge={challengeConfig}
               triggerVisibility={galleryTriggerVisibility}
@@ -2630,7 +2675,7 @@ export default function ArtesApp() {
             <ImmersiveProfile 
               profile={profile} 
               isOwn={true} 
-              posts={getProfileVisiblePosts(posts, user?.uid, profile?.contributorId)}
+              posts={getProfileVisiblePosts(postsWithResolvedAuthors, user?.uid, profile?.contributorId)}
               allPostsForMoodboards={posts}
               currentUserId={authUser?.uid}
               onOpenSettings={() => setShowEditProfile(true)}
@@ -2647,7 +2692,7 @@ export default function ArtesApp() {
           {!profileLoading && view.startsWith('profile_') && (
             <FetchedProfile 
                userId={view.split('_')[1]} 
-               posts={posts}
+               posts={postsWithResolvedAuthors}
                onPostClick={handleOpenPost}
                allUsers={users}
                setView={setView}
@@ -2684,6 +2729,7 @@ export default function ArtesApp() {
             functionsBase={functionsBase}
             moderationApiBase={moderationApiBase}
             resumeUploadId={uploadContext.resumeUploadId}
+            activeProfile={activeProfile}
           />
         )}
         {showSettingsModal && (
@@ -7122,6 +7168,7 @@ function UploadModal({
   functionsBase = '',
   moderationApiBase = '',
   resumeUploadId = null,
+  activeProfile = null,
 }) {
   const makerSelfRoles = getSelfMakerRoles(profile.roles);
   const defaultRole = makerSelfRoles[0] || profile.roles?.[0] || 'model';
@@ -8503,9 +8550,9 @@ function UploadModal({
                   sizeBytes: imageMeta.sizeBytes,
                 },
               } : {}),
-              authorProfileId: profile.profileId || profile.uid || user.uid,
-              authorOwnerUid: profile.ownerUid || user.uid,
-              authorName: profile.displayName,
+              authorProfileId: getManagedProfileId(activeProfile) || user.uid,
+              authorOwnerUid: user.uid,
+              authorName: getManagedProfileDisplayName(activeProfile) || profile.displayName,
               authorRole: uploaderRole,
               styles: selectedStyles,
               makerTags,
@@ -8542,9 +8589,9 @@ function UploadModal({
         description: desc,
         imageUrl: image,
         authorId: user.uid,
-        authorProfileId: profile.profileId || profile.uid || user.uid,
-        authorOwnerUid: profile.ownerUid || user.uid,
-        authorName: profile.displayName,
+        authorProfileId: getManagedProfileId(activeProfile) || user.uid,
+        authorOwnerUid: user.uid,
+        authorName: getManagedProfileDisplayName(activeProfile) || profile.displayName,
         authorRole: uploaderRole,
         styles: selectedStyles,
         sensitive: triggerFlag,

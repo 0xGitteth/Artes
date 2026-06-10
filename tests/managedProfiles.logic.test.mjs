@@ -5,9 +5,12 @@ import {
   createManagedExternalProfileId,
   deriveManagedProfiles,
   getBrowserStorage,
+  buildPostAuthorFields,
   normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
   resolveActiveProfile,
+  resolvePostAuthorDisplayNameFromProfiles,
+  resolvePostAuthorProfile,
   shouldDelayActiveProfilePersistence,
   validateManagedExternalProfileDraft,
   writeStoredActiveProfileId,
@@ -425,5 +428,85 @@ assert.deepEqual(
   'Multiple profiles of the same type remain allowed and are not collapsed by type',
 );
 
+
+const personalAuthorProfile = resolvePostAuthorProfile({
+  authUid: 'owner_user',
+  requestedProfileId: 'owner_user',
+});
+assert.deepEqual(
+  personalAuthorProfile,
+  { profileId: 'owner_user', ownerUid: 'owner_user', isPersonal: true },
+  'Personal author profile resolves to auth uid',
+);
+
+const externalAuthorProfile = resolvePostAuthorProfile({
+  authUid: 'owner_user',
+  requestedProfileId: 'studio_profile',
+  profileDoc: {
+    id: 'studio_profile',
+    profileId: 'studio_profile',
+    ownerUid: 'owner_user',
+    status: 'active',
+    type: 'company',
+    displayName: 'Studio Profile',
+  },
+});
+assert.equal(externalAuthorProfile.profileId, 'studio_profile', 'Valid external author profile resolves to profile id');
+assert.equal(externalAuthorProfile.ownerUid, 'owner_user', 'Valid external author profile keeps auth uid as owner');
+assert.throws(
+  () => resolvePostAuthorProfile({
+    authUid: 'owner_user',
+    requestedProfileId: 'spoofed_profile',
+    profileDoc: { id: 'spoofed_profile', ownerUid: 'other_user', status: 'active', type: 'agency' },
+  }),
+  /alleen publiceren namens een profiel dat je beheert/,
+  'External author profile from another owner is rejected',
+);
+assert.throws(
+  () => resolvePostAuthorProfile({
+    authUid: 'owner_user',
+    requestedProfileId: 'inactive_profile',
+    profileDoc: { id: 'inactive_profile', ownerUid: 'owner_user', status: 'inactive', type: 'collective' },
+  }),
+  /niet beschikbaar/,
+  'Inactive external author profile is rejected',
+);
+assert.deepEqual(
+  buildPostAuthorFields({ authUid: 'owner_user', resolvedProfileId: 'agency_profile' }),
+  {
+    authorId: 'owner_user',
+    authorUid: 'owner_user',
+    authorOwnerUid: 'owner_user',
+    authorProfileId: 'agency_profile',
+  },
+  'Post author payload keeps ownership on auth uid and writes resolved active profile id',
+);
+assert.equal(
+  resolvePostAuthorDisplayNameFromProfiles({
+    post: { authorId: 'owner_user', authorProfileId: 'agency_profile', authorName: 'Legacy Name' },
+    users: [{ uid: 'owner_user', displayName: 'Owner Name' }],
+    profilesById: { agency_profile: { displayName: 'Agency Profile' } },
+  }),
+  'Agency Profile',
+  'Post display name uses external profile displayName when available',
+);
+assert.equal(
+  resolvePostAuthorDisplayNameFromProfiles({
+    post: { authorId: 'owner_user', authorName: 'Legacy Name' },
+    users: [{ uid: 'owner_user', displayName: 'Owner Name' }],
+    profilesById: {},
+  }),
+  'Owner Name',
+  'Legacy post without authorProfileId uses existing public user fallback',
+);
+assert.equal(
+  resolvePostAuthorDisplayNameFromProfiles({
+    post: { authorId: 'owner_user', authorProfileId: 'missing_profile', authorName: 'Legacy Name' },
+    users: [],
+    profilesById: {},
+  }),
+  'Legacy Name',
+  'Post display does not crash and falls back when external profile info is missing',
+);
 
 console.log('PASS managedProfiles.logic.test');

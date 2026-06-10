@@ -897,18 +897,43 @@ service cloud.firestore {
       allow read, create, update, delete: if false;
     }
 
+
+    function isValidPostAuthorProfileId(profileId) {
+      return profileId == request.auth.uid
+        || (
+          profileId is string
+          && exists(/databases/$(database)/documents/profiles/$(profileId))
+          && get(/databases/$(database)/documents/profiles/$(profileId)).data.ownerUid == request.auth.uid
+          && get(/databases/$(database)/documents/profiles/$(profileId)).data.status == 'active'
+          && isManagedExternalProfileType(get(/databases/$(database)/documents/profiles/$(profileId)).data.type)
+        );
+    }
+
+    function hasValidPostAuthorIdentityOnCreate() {
+      return request.resource.data.authorId == request.auth.uid
+        && (!('authorUid' in request.resource.data) || request.resource.data.authorUid == request.auth.uid)
+        && (!('authorOwnerUid' in request.resource.data) || request.resource.data.authorOwnerUid == request.auth.uid)
+        && (!('authorProfileId' in request.resource.data) || isValidPostAuthorProfileId(request.resource.data.authorProfileId));
+    }
+
+    function keepsPostAuthorIdentityOnUpdate() {
+      return request.resource.data.authorId == resource.data.authorId
+        && resource.data.authorId == request.auth.uid
+        && (!('authorUid' in resource.data) || request.resource.data.authorUid == resource.data.authorUid)
+        && (!('authorOwnerUid' in resource.data) || request.resource.data.authorOwnerUid == resource.data.authorOwnerUid)
+        && (!('authorProfileId' in resource.data) || request.resource.data.authorProfileId == resource.data.authorProfileId)
+        && (!('authorUid' in request.resource.data) || request.resource.data.authorUid == request.auth.uid)
+        && (!('authorOwnerUid' in request.resource.data) || request.resource.data.authorOwnerUid == request.auth.uid)
+        && (!('authorProfileId' in request.resource.data) || request.resource.data.authorProfileId == request.auth.uid || ('authorProfileId' in resource.data));
+    }
+
     match /posts/{postId} {
       allow read: if true;
       allow create: if isVerifiedOrDev()
-        && request.resource.data.authorId == request.auth.uid
-        && (!('authorProfileId' in request.resource.data) || request.resource.data.authorProfileId == request.auth.uid)
-        && (!('authorOwnerUid' in request.resource.data) || request.resource.data.authorOwnerUid == request.auth.uid)
+        && hasValidPostAuthorIdentityOnCreate()
         && isPostModerationPublishAllowed(request.resource.data);
       allow update: if isVerifiedOrDev()
-        && request.resource.data.authorId == resource.data.authorId
-        && resource.data.authorId == request.auth.uid
-        && (!('authorProfileId' in request.resource.data) || request.resource.data.authorProfileId == request.auth.uid)
-        && (!('authorOwnerUid' in request.resource.data) || request.resource.data.authorOwnerUid == request.auth.uid)
+        && keepsPostAuthorIdentityOnUpdate()
         && (
           (
             isLegacyPostWithoutModerationProof(resource.data)

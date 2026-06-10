@@ -8,9 +8,12 @@ export const pickPreferredDisplayName = (...candidates) => {
 
 export const resolvePostAuthorDisplayName = ({ post, users = [] }) => {
   const authorId = post?.authorId;
+  const authorProfileId = String(post?.authorProfileId || '').trim();
+  const usesExternalProfile = Boolean(authorProfileId && authorId && authorProfileId !== authorId);
   const publicName = Array.isArray(users)
     ? users.find((entry) => entry?.uid === authorId)?.displayName
     : '';
-  return pickPreferredDisplayName(publicName, post?.authorName, 'Onbekend');
+  return usesExternalProfile
+    ? pickPreferredDisplayName(post?.authorName, publicName, 'Onbekend')
+    : pickPreferredDisplayName(publicName, post?.authorName, 'Onbekend');
 };
-

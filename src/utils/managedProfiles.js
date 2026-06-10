@@ -300,6 +300,72 @@ export const getBrowserStorage = (storageGetter) => {
   }
 };
 
+
+export const resolvePostAuthorProfile = ({ authUid, requestedProfileId, profileDoc } = {}) => {
+  const ownerUid = normalizeId(authUid);
+  if (!ownerUid) throw new Error('Je moet ingelogd zijn om te publiceren.');
+
+  const requestedId = normalizeId(requestedProfileId);
+  if (!requestedId || requestedId === ownerUid) {
+    return {
+      profileId: ownerUid,
+      ownerUid,
+      isPersonal: true,
+    };
+  }
+
+  const externalProfile = profileDoc && typeof profileDoc === 'object' ? profileDoc : null;
+  const externalProfileId = normalizeId(externalProfile?.profileId || externalProfile?.id || requestedId);
+  const externalOwnerUid = normalizeId(externalProfile?.ownerUid);
+  const externalStatus = normalizeId(externalProfile?.status);
+  const externalType = normalizeId(externalProfile?.type || externalProfile?.kind);
+
+  if (externalProfileId !== requestedId) {
+    throw new Error('Het gekozen actieve profiel is ongeldig. Kies opnieuw via Mijn profielen.');
+  }
+  if (externalOwnerUid !== ownerUid) {
+    throw new Error('Je kunt alleen publiceren namens een profiel dat je beheert.');
+  }
+  if (externalStatus !== ACTIVE_PROFILE_STATUS) {
+    throw new Error('Dit actieve profiel is niet beschikbaar om mee te publiceren.');
+  }
+  if (!EXTERNAL_PROFILE_TYPES.has(externalType)) {
+    throw new Error('Dit profieltype kan niet worden gebruikt om te publiceren.');
+  }
+
+  return {
+    profileId: requestedId,
+    ownerUid,
+    isPersonal: false,
+    type: externalType,
+    displayName: String(externalProfile.displayName || '').trim(),
+  };
+};
+
+export const buildPostAuthorFields = ({ authUid, resolvedProfileId } = {}) => {
+  const ownerUid = normalizeId(authUid);
+  const profileId = normalizeId(resolvedProfileId) || ownerUid;
+  if (!ownerUid) throw new Error('Je moet ingelogd zijn om te publiceren.');
+
+  return {
+    authorId: ownerUid,
+    authorUid: ownerUid,
+    authorOwnerUid: ownerUid,
+    authorProfileId: profileId,
+  };
+};
+
+export const resolvePostAuthorDisplayNameFromProfiles = ({ post, users = [], profilesById = {} } = {}) => {
+  const authorProfileId = normalizeId(post?.authorProfileId);
+  const authorId = normalizeId(post?.authorId || post?.authorUid || post?.authorOwnerUid);
+  const externalProfile = authorProfileId && authorProfileId !== authorId ? profilesById?.[authorProfileId] : null;
+  const externalName = externalProfile?.displayName;
+  const publicName = Array.isArray(users)
+    ? users.find((entry) => entry?.uid === authorId)?.displayName
+    : '';
+  return getManagedProfileDisplayName({ displayName: externalName || publicName || post?.authorName || 'Onbekend' });
+};
+
 export const readStoredActiveProfileId = (storage) => {
   try {
     if (!storage || typeof storage.getItem !== 'function') return null;

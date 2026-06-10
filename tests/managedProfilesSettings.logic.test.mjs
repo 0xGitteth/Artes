@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   buildManagedProfilesSettingsModel,
   getManagedProfileDisplayName,
+  getManagedProfilePrefillDisplayName,
   getManagedProfileTypeLabel,
   personalProfileHasOrganizationHints,
 } from '../src/utils/managedProfiles.js';
@@ -60,5 +61,10 @@ assert.equal(personalProfileHasOrganizationHints({ linkedCompanyStatus: 'approve
 assert.equal(personalProfileHasOrganizationHints({ linkedAgencyStatus: 'verified' }), true, 'Positive linked agency status still triggers organization guidance');
 assert.equal(personalProfileHasOrganizationHints({ linkedCompanyId: 'company_123' }), true, 'Real linked company ids still trigger organization guidance');
 assert.equal(personalProfileHasOrganizationHints({ linkedAgencyId: 'none' }), false, 'Neutral linked agency id does not trigger organization guidance');
+
+
+assert.equal(getManagedProfilePrefillDisplayName({ linkedCompanyName: '  Studio Hint  ' }, 'company'), 'Studio Hint', 'Company create flow can prefill from an existing safe company hint');
+assert.equal(getManagedProfilePrefillDisplayName({ linkedAgencyName: '  Agency Hint  ' }, 'agency'), 'Agency Hint', 'Agency create flow can prefill from an existing safe agency hint');
+assert.equal(getManagedProfilePrefillDisplayName({ linkedCompanyName: 'Studio Hint' }, 'collective'), 'Studio Hint', 'Collective create flow may reuse a generic organization name hint without migrating data');
 
 console.log('PASS managedProfilesSettings.logic.test');

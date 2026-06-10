@@ -69,6 +69,7 @@ import {
   subscribeToUserMoodboards,
   subscribeToMoodboardItems,
   loadManagedExternalProfiles,
+  createManagedExternalProfile,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { signInWithCustomToken } from 'firebase/auth';
@@ -135,11 +136,15 @@ import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } 
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
 import { resolvePublicDisplayName } from './utils/publicIdentity';
 import {
+  MANAGED_EXTERNAL_PROFILE_TYPES,
+  PROFILE_TYPE_LABELS,
   buildManagedProfilesSettingsModel,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
+  getManagedProfilePrefillDisplayName,
   getManagedProfileTypeLabel,
   resolveActiveProfile,
+  validateManagedExternalProfileDraft,
 } from './utils/managedProfiles';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
 import {
@@ -1486,6 +1491,17 @@ export default function ArtesApp() {
     return () => { active = false; };
   }, [authReady, user, handleListenerError]);
 
+  const handleCreateManagedExternalProfile = useCallback(async ({ type, displayName }) => {
+    const createdProfile = await createManagedExternalProfile({ type, displayName });
+    setManagedExternalProfiles((currentProfiles) => {
+      const withoutDuplicate = (currentProfiles || []).filter((profile) => (
+        profile?.profileId !== createdProfile.profileId && profile?.id !== createdProfile.profileId
+      ));
+      return [...withoutDuplicate, createdProfile];
+    });
+    return createdProfile;
+  }, []);
+
   useEffect(() => {
      if (!canAccessFirestore({ authReady, user })) return;
      logListenerStart('Posts listener (ArtesApp)');
@@ -2663,6 +2679,7 @@ export default function ArtesApp() {
             onLogout={handleSettingsLogout}
             showModerationDot={hasNewModerationWork}
             managedProfiles={managedProfiles}
+            onCreateManagedProfile={handleCreateManagedExternalProfile}
           />
         )}
         {showEditProfile && (
@@ -12356,8 +12373,63 @@ function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabe
   );
 }
 
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [] }) { 
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [], onCreateManagedProfile }) { 
     const { personalProfile, externalProfiles, hasExternalProfiles, hasPersonalOrganizationHints } = buildManagedProfilesSettingsModel(managedProfiles);
+    const [createFlowOpen, setCreateFlowOpen] = useState(false);
+    const [createType, setCreateType] = useState('company');
+    const [createDisplayName, setCreateDisplayName] = useState('');
+    const [createError, setCreateError] = useState('');
+    const [createSuccess, setCreateSuccess] = useState('');
+    const [createPending, setCreatePending] = useState(false);
+
+    const openCreateFlow = () => {
+      const prefillName = getManagedProfilePrefillDisplayName(personalProfile, createType);
+      setCreateDisplayName((currentValue) => currentValue || prefillName);
+      setCreateError('');
+      setCreateSuccess('');
+      setCreateFlowOpen(true);
+    };
+
+    const handleCreateTypeChange = (nextType) => {
+      setCreateType(nextType);
+      setCreateError('');
+      setCreateSuccess('');
+      if (!createDisplayName.trim()) {
+        setCreateDisplayName(getManagedProfilePrefillDisplayName(personalProfile, nextType));
+      }
+    };
+
+    const handleCreateSubmit = async (event) => {
+      event.preventDefault();
+      if (createPending) return;
+      setCreateError('');
+      setCreateSuccess('');
+      const validation = validateManagedExternalProfileDraft({ type: createType, displayName: createDisplayName });
+      if (!validation.ok) {
+        setCreateDisplayName(validation.displayName);
+        setCreateError(validation.error);
+        return;
+      }
+      if (typeof onCreateManagedProfile !== 'function') {
+        setCreateError('Profiel aanmaken is nu niet beschikbaar. Probeer het later opnieuw.');
+        return;
+      }
+
+      setCreatePending(true);
+      try {
+        const createdProfile = await onCreateManagedProfile({
+          type: validation.type,
+          displayName: validation.displayName,
+        });
+        setCreateDisplayName('');
+        setCreateFlowOpen(false);
+        setCreateSuccess(`${getManagedProfileDisplayName(createdProfile)} is toegevoegd aan Mijn profielen.`);
+      } catch (error) {
+        setCreateError(error?.message || 'Opslaan mislukt. Probeer het opnieuw.');
+      } finally {
+        setCreatePending(false);
+      }
+    };
 
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
@@ -12425,17 +12497,89 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                           </p>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        disabled
-                        className="mt-1 flex w-full cursor-not-allowed items-center justify-between rounded-lg border border-dashed border-slate-300 bg-white/60 p-3 text-left text-sm font-semibold text-slate-400 dark:border-slate-700 dark:bg-slate-900/30 dark:text-slate-500"
-                      >
-                        <span>Nieuw profiel toevoegen</span>
-                        <span className="flex items-center gap-1 text-xs font-medium">
-                          Nog niet beschikbaar
-                          <Plus className="h-4 w-4" />
-                        </span>
-                      </button>
+                      {createSuccess && (
+                        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
+                          {createSuccess}
+                        </p>
+                      )}
+                      {createFlowOpen && (
+                        <form onSubmit={handleCreateSubmit} className="space-y-3 rounded-xl border border-blue-100 bg-white p-3 shadow-sm dark:border-blue-900/60 dark:bg-slate-900">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-bold text-slate-900 dark:text-white">Nieuw profiel toevoegen</p>
+                              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-300">Kies wat je wilt beheren als. Je kunt later nog meer profielen van hetzelfde type toevoegen.</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => { setCreateFlowOpen(false); setCreateError(''); }}
+                              disabled={createPending}
+                              className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                              aria-label="Sluit profiel toevoegen"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            {MANAGED_EXTERNAL_PROFILE_TYPES.map((profileType) => (
+                              <button
+                                key={profileType}
+                                type="button"
+                                onClick={() => handleCreateTypeChange(profileType)}
+                                disabled={createPending}
+                                className={`rounded-lg border px-3 py-2 text-left text-xs font-bold transition disabled:opacity-60 ${createType === profileType ? 'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}
+                              >
+                                {PROFILE_TYPE_LABELS[profileType]}
+                              </button>
+                            ))}
+                          </div>
+                          <label className="block space-y-1.5">
+                            <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Naam profiel</span>
+                            <input
+                              type="text"
+                              value={createDisplayName}
+                              onChange={(event) => { setCreateDisplayName(event.target.value); setCreateError(''); }}
+                              disabled={createPending}
+                              maxLength={140}
+                              placeholder="Bijvoorbeeld Studio Luna"
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
+                            />
+                          </label>
+                          {createError && (
+                            <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs font-semibold text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-100">{createError}</p>
+                          )}
+                          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                            <button
+                              type="button"
+                              onClick={() => { setCreateFlowOpen(false); setCreateError(''); }}
+                              disabled={createPending}
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                            >
+                              Annuleren
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={createPending}
+                              className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-70 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                            >
+                              {createPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                              Opslaan
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                      {!createFlowOpen && (
+                        <button
+                          type="button"
+                          onClick={openCreateFlow}
+                          className="mt-1 flex w-full items-center justify-between rounded-lg border border-dashed border-blue-200 bg-white p-3 text-left text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-50 dark:border-blue-900/70 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/30"
+                        >
+                          <span>Nieuw profiel toevoegen</span>
+                          <span className="flex items-center gap-1 text-xs font-medium">
+                            Beheren als
+                            <Plus className="h-4 w-4" />
+                          </span>
+                        </button>
+                      )}
                     </section>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Weergave</h4>
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between gap-2 md:p-3 md:gap-3">

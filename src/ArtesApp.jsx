@@ -140,12 +140,15 @@ import {
   MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH,
   PROFILE_TYPE_LABELS,
   buildManagedProfilesSettingsModel,
+  getManagedProfileId,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
   getManagedProfilePrefillDisplayName,
   getManagedProfileTypeLabel,
+  readStoredActiveProfileId,
   resolveActiveProfile,
   validateManagedExternalProfileDraft,
+  writeStoredActiveProfileId,
 } from './utils/managedProfiles';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
 import {
@@ -854,7 +857,9 @@ export default function ArtesApp() {
   const [pendingApprovedReminderAction, setPendingApprovedReminderAction] = useState('');
   const [acknowledgedApprovedUploadIds, setAcknowledgedApprovedUploadIds] = useState(() => new Set());
   const [claimInviteToken, setClaimInviteToken] = useState(null);
-  const [requestedActiveProfileId, setRequestedActiveProfileId] = useState(null);
+  const [requestedActiveProfileId, setRequestedActiveProfileId] = useState(() => (
+    typeof window === 'undefined' ? null : readStoredActiveProfileId(window.localStorage)
+  ));
   const ensuredSupportThreadUidRef = useRef(null);
   const authReadyRef = useRef(false);
   const authUserRef = useRef(null);
@@ -992,15 +997,26 @@ export default function ArtesApp() {
   const [followingLoaded, setFollowingLoaded] = useState(false);
   const [revealedSensitivePostsById, setRevealedSensitivePostsById] = useState({});
   useEffect(() => {
-    const fallbackProfileId = activeProfile?.profileId || null;
+    const fallbackProfileId = getManagedProfileId(activeProfile) || null;
     setRequestedActiveProfileId((currentProfileId) => {
       if (!fallbackProfileId) return null;
       const currentProfileStillManaged = managedProfiles.some((candidate) => (
-        candidate?.profileId === currentProfileId || candidate?.id === currentProfileId
+        getManagedProfileId(candidate) === currentProfileId
       ));
       return currentProfileStillManaged ? currentProfileId : fallbackProfileId;
     });
-  }, [activeProfile?.profileId, managedProfiles]);
+  }, [activeProfile, managedProfiles]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    writeStoredActiveProfileId(window.localStorage, getManagedProfileId(activeProfile));
+  }, [activeProfile]);
+
+  const handleSelectActiveProfile = useCallback((nextProfile) => {
+    const nextProfileId = getManagedProfileId(nextProfile);
+    if (!nextProfileId) return;
+    setRequestedActiveProfileId(nextProfileId);
+  }, []);
 
   const moderationApiBase = useMemo(() => {
     const explicitBase = import.meta.env.VITE_MODERATION_API_BASE;
@@ -2680,6 +2696,8 @@ export default function ArtesApp() {
             onLogout={handleSettingsLogout}
             showModerationDot={hasNewModerationWork}
             managedProfiles={managedProfiles}
+            activeProfile={activeProfile}
+            onSelectActiveProfile={handleSelectActiveProfile}
             onCreateManagedProfile={handleCreateManagedExternalProfile}
           />
         )}
@@ -12374,8 +12392,8 @@ function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabe
   );
 }
 
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [], onCreateManagedProfile }) { 
-    const { personalProfile, externalProfiles, hasExternalProfiles, hasPersonalOrganizationHints } = buildManagedProfilesSettingsModel(managedProfiles);
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [], activeProfile = null, onSelectActiveProfile, onCreateManagedProfile }) {
+    const { personalProfile, externalProfiles, hasExternalProfiles, hasPersonalOrganizationHints } = buildManagedProfilesSettingsModel(managedProfiles, activeProfile);
     const [createFlowOpen, setCreateFlowOpen] = useState(false);
     const [createType, setCreateType] = useState('company');
     const [createDisplayName, setCreateDisplayName] = useState('');
@@ -12432,6 +12450,27 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
       }
     };
 
+    const renderProfileSelectionAction = (managedProfile) => {
+      const selection = managedProfile?.settingsAction || {};
+      if (selection.isActive) {
+        return (
+          <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-100 dark:ring-emerald-800/70">
+            Actief
+          </span>
+        );
+      }
+
+      return (
+        <button
+          type="button"
+          onClick={() => onSelectActiveProfile?.(managedProfile)}
+          className="shrink-0 rounded-full border border-blue-200 px-3 py-1.5 text-xs font-bold text-blue-700 transition hover:border-blue-300 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-200 dark:hover:bg-blue-950/40"
+        >
+          Beheren als
+        </button>
+      );
+    };
+
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
             <div className="bg-white dark:bg-slate-900 w-[min(20rem,calc(100vw-1rem))] h-[calc(100dvh-1rem)] m-2 md:m-0 md:h-full p-3 flex flex-col gap-3 text-slate-900 dark:text-slate-100 md:w-80 md:p-6 md:gap-6 rounded-2xl md:rounded-none overflow-y-auto no-scrollbar">
@@ -12453,16 +12492,24 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     </button>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Mijn profielen</h4>
                     <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-700 dark:bg-slate-800/70 md:rounded-2xl md:p-3">
+                      {activeProfile && (
+                        <div className="rounded-lg border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
+                          Actief profiel: {getManagedProfileDisplayName(activeProfile)}
+                        </div>
+                      )}
                       {personalProfile && (
                         <div className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70">
-                          <div className="flex items-start gap-3">
-                            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-200">
-                              <User className="h-4 w-4" />
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(personalProfile)}</p>
-                              <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(personalProfile)}</p>
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-200">
+                                <User className="h-4 w-4" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(personalProfile)}</p>
+                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(personalProfile)}</p>
+                              </div>
                             </div>
+                            <div className="flex justify-end">{renderProfileSelectionAction(personalProfile)}</div>
                           </div>
                         </div>
                       )}
@@ -12480,14 +12527,17 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                                 key={externalProfile.profileId || externalProfile.id}
                                 className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70"
                               >
-                                <div className="flex items-start gap-3">
-                                  <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                                    <Building2 className="h-4 w-4" />
-                                  </span>
-                                  <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(externalProfile)}</p>
-                                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                  <div className="flex min-w-0 items-start gap-3">
+                                    <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                                      <Building2 className="h-4 w-4" />
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(externalProfile)}</p>
+                                      <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>
+                                    </div>
                                   </div>
+                                  <div className="flex justify-end">{renderProfileSelectionAction(externalProfile)}</div>
                                 </div>
                               </div>
                             ))}

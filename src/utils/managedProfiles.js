@@ -6,6 +6,7 @@ const ACTIVE_PROFILE_STATUS = 'active';
 
 export const MANAGED_EXTERNAL_PROFILE_TYPES = ['company', 'agency', 'collective'];
 export const MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH = 120;
+export const ACTIVE_PROFILE_STORAGE_KEY = 'artes.activeProfileId';
 
 export const validateManagedExternalProfileDraft = ({ type, displayName } = {}) => {
   const normalizedType = normalizeId(type);
@@ -139,14 +140,39 @@ export const personalProfileHasOrganizationHints = (profile = {}) => {
   ));
 };
 
-export const buildManagedProfilesSettingsModel = (managedProfiles = []) => {
+export const getManagedProfileId = (profile = {}) => normalizeId(profile?.profileId || profile?.id || profile?.uid);
+
+export const isManagedProfileActive = (profile = {}, activeProfile = {}) => {
+  const profileId = getManagedProfileId(profile);
+  const activeProfileId = getManagedProfileId(activeProfile);
+  return Boolean(profileId && activeProfileId && profileId === activeProfileId);
+};
+
+export const getManagedProfileSettingsAction = (profile = {}, activeProfile = {}) => {
+  const isActive = isManagedProfileActive(profile, activeProfile);
+  return {
+    isActive,
+    statusLabel: isActive ? 'Actief' : '',
+    actionLabel: isActive ? '' : 'Beheren als',
+  };
+};
+
+export const buildManagedProfilesSettingsModel = (managedProfiles = [], activeProfile = null) => {
   const profiles = Array.isArray(managedProfiles) ? managedProfiles.filter(Boolean) : [];
   const personalProfile = profiles.find((candidate) => candidate?.isPersonal) || null;
   const externalProfiles = profiles.filter((candidate) => !candidate?.isPersonal);
 
+  const decorateProfile = (profile) => {
+    if (!profile) return null;
+    return {
+      ...profile,
+      settingsAction: getManagedProfileSettingsAction(profile, activeProfile),
+    };
+  };
+
   return {
-    personalProfile,
-    externalProfiles,
+    personalProfile: decorateProfile(personalProfile),
+    externalProfiles: externalProfiles.map(decorateProfile),
     hasExternalProfiles: externalProfiles.length > 0,
     hasPersonalOrganizationHints: personalProfileHasOrganizationHints(personalProfile),
   };
@@ -260,4 +286,20 @@ export const resolveActiveProfile = ({ managedProfiles = [], activeProfileId = n
   }
 
   return profiles.find((candidate) => candidate?.isPersonal) || profiles[0];
+};
+
+
+export const readStoredActiveProfileId = (storage) => {
+  if (!storage || typeof storage.getItem !== 'function') return null;
+  return normalizeId(storage.getItem(ACTIVE_PROFILE_STORAGE_KEY)) || null;
+};
+
+export const writeStoredActiveProfileId = (storage, activeProfileId) => {
+  if (!storage || typeof storage.setItem !== 'function') return;
+  const normalizedActiveProfileId = normalizeId(activeProfileId);
+  if (!normalizedActiveProfileId) {
+    if (typeof storage.removeItem === 'function') storage.removeItem(ACTIVE_PROFILE_STORAGE_KEY);
+    return;
+  }
+  storage.setItem(ACTIVE_PROFILE_STORAGE_KEY, normalizedActiveProfileId);
 };

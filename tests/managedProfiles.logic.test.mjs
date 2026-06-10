@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import {
+  ACTIVE_PROFILE_STORAGE_KEY,
   buildManagedExternalProfileCreatePayload,
   createManagedExternalProfileId,
   deriveManagedProfiles,
+  readStoredActiveProfileId,
   resolveActiveProfile,
   validateManagedExternalProfileDraft,
+  writeStoredActiveProfileId,
 } from '../src/utils/managedProfiles.js';
 
 const managedProfiles = deriveManagedProfiles({
@@ -34,6 +37,60 @@ const activeProfile = resolveActiveProfile({
 });
 
 assert.equal(activeProfile?.profileId, 'user_123', 'Unknown activeProfileId should fall back to the personal profile');
+
+
+const ownerManagedProfiles = deriveManagedProfiles({
+  authUser: { uid: 'owner_multi' },
+  profile: { uid: 'owner_multi', displayName: 'Owner Multi' },
+  managedExternalProfiles: [
+    { id: 'company_multi_1', type: 'company', displayName: 'Company One', ownerUid: 'owner_multi', status: 'active' },
+    { id: 'agency_multi_1', type: 'agency', displayName: 'Agency One', ownerUid: 'owner_multi', status: 'active' },
+    { id: 'collective_multi_1', type: 'collective', displayName: 'Collective One', ownerUid: 'owner_multi', status: 'active' },
+  ],
+});
+assert.equal(
+  resolveActiveProfile({ managedProfiles: ownerManagedProfiles, personalProfileId: 'owner_multi' })?.profileId,
+  'owner_multi',
+  'Missing activeProfileId falls back to the personal profile',
+);
+assert.equal(
+  resolveActiveProfile({ managedProfiles: ownerManagedProfiles, activeProfileId: 'agency_multi_1', personalProfileId: 'owner_multi' })?.profileId,
+  'agency_multi_1',
+  'Valid external activeProfileId selects that external profile',
+);
+assert.equal(
+  resolveActiveProfile({ managedProfiles: ownerManagedProfiles, activeProfileId: 'stale_external', personalProfileId: 'owner_multi' })?.profileId,
+  'owner_multi',
+  'Stale activeProfileId falls back to the personal profile',
+);
+assert.equal(
+  resolveActiveProfile({ managedProfiles: ownerManagedProfiles, activeProfileId: 'unmanaged_profile', personalProfileId: 'owner_multi' })?.profileId,
+  'owner_multi',
+  'activeProfileId is ignored when the profile is not present in managedProfiles',
+);
+assert.deepEqual(
+  ['company_multi_1', 'agency_multi_1', 'collective_multi_1'].map((profileId) => (
+    resolveActiveProfile({ managedProfiles: ownerManagedProfiles, activeProfileId: profileId, personalProfileId: 'owner_multi' })?.profileId
+  )),
+  ['company_multi_1', 'agency_multi_1', 'collective_multi_1'],
+  'Multiple external profiles remain individually selectable as active profiles',
+);
+
+const storageWrites = new Map();
+const fakeStorage = {
+  getItem: (key) => storageWrites.get(key) || null,
+  setItem: (key, value) => storageWrites.set(key, value),
+  removeItem: (key) => storageWrites.delete(key),
+};
+writeStoredActiveProfileId(fakeStorage, 'agency_multi_1');
+assert.deepEqual(
+  Array.from(storageWrites.keys()),
+  [ACTIVE_PROFILE_STORAGE_KEY],
+  'localStorage persistence stores only the activeProfileId key',
+);
+assert.equal(readStoredActiveProfileId(fakeStorage), 'agency_multi_1', 'Stored activeProfileId can be read back');
+writeStoredActiveProfileId(fakeStorage, '');
+assert.equal(storageWrites.has(ACTIVE_PROFILE_STORAGE_KEY), false, 'Empty activeProfileId clears the stored value');
 
 const uidlessPrivateOnlyProfiles = deriveManagedProfiles({
   authUser: { uid: 'user_B' },

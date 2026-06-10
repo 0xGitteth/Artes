@@ -3,6 +3,81 @@ const normalizeId = (value) => String(value || '').trim();
 const EXTERNAL_PROFILE_TYPES = new Set(['company', 'agency', 'collective']);
 const ACTIVE_PROFILE_STATUS = 'active';
 
+export const PROFILE_TYPE_LABELS = {
+  personal: 'Persoonlijk profiel',
+  company: 'Bedrijfsprofiel',
+  agency: 'Agency',
+  collective: 'Collectief',
+};
+
+export const getManagedProfileTypeLabel = (profile = {}) => {
+  const kind = normalizeId(profile?.kind || profile?.type || (profile?.isPersonal ? 'personal' : ''));
+  return PROFILE_TYPE_LABELS[kind] || PROFILE_TYPE_LABELS.personal;
+};
+
+export const getManagedProfileDisplayName = (profile = {}) => {
+  const displayName = String(
+    profile?.displayName
+    || profile?.name
+    || profile?.username
+    || profile?.email
+    || '',
+  ).trim();
+
+  return displayName || 'Naamloos profiel';
+};
+
+const ORGANIZATION_ROLE_HINTS = new Set(['agency', 'company', 'bedrijf']);
+const ORGANIZATION_FIELD_HINTS = [
+  'linkedCompanyId',
+  'linkedCompanyName',
+  'linkedCompanyStatus',
+  'linkedAgencyId',
+  'linkedAgencyName',
+  'linkedAgencyStatus',
+  'companyId',
+  'companyName',
+  'agencyId',
+  'agencyName',
+  'businessName',
+];
+
+const collectRoleHints = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap((entry) => collectRoleHints(entry));
+  if (typeof value === 'object') {
+    return [value.id, value.value, value.name, value.label, value.role]
+      .flatMap((entry) => collectRoleHints(entry));
+  }
+  return [String(value).trim().toLowerCase()].filter(Boolean);
+};
+
+export const personalProfileHasOrganizationHints = (profile = {}) => {
+  if (!profile || typeof profile !== 'object') return false;
+
+  const roleHints = [profile.role, profile.roles, profile.primaryRole, profile.profileRole]
+    .flatMap((entry) => collectRoleHints(entry));
+  if (roleHints.some((role) => ORGANIZATION_ROLE_HINTS.has(role))) return true;
+
+  return ORGANIZATION_FIELD_HINTS.some((field) => {
+    const value = profile[field];
+    return value !== undefined && value !== null && String(value).trim() !== '';
+  });
+};
+
+export const buildManagedProfilesSettingsModel = (managedProfiles = []) => {
+  const profiles = Array.isArray(managedProfiles) ? managedProfiles.filter(Boolean) : [];
+  const personalProfile = profiles.find((candidate) => candidate?.isPersonal) || null;
+  const externalProfiles = profiles.filter((candidate) => !candidate?.isPersonal);
+
+  return {
+    personalProfile,
+    externalProfiles,
+    hasExternalProfiles: externalProfiles.length > 0,
+    hasPersonalOrganizationHints: personalProfileHasOrganizationHints(personalProfile),
+  };
+};
+
 const profileMatchesAuthUser = (candidate, authUid) => {
   if (!candidate || typeof candidate !== 'object') return false;
   const candidateUid = normalizeId(candidate.uid);

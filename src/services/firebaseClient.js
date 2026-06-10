@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { canAccessFirestore, devLog } from '../utils/firestoreGate';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
+import { buildPostAuthorFields, resolvePostAuthorProfile } from '../utils/managedProfiles';
 import {
   getFirestore,
   collection,
@@ -201,6 +202,26 @@ export const updateProfile = async (uid, payload) => {
 export const publishPost = async (post) => {
   if (!auth.currentUser) throw new Error('Not signed in');
 
+  const authUid = auth.currentUser.uid;
+  const requestedAuthorProfileId = post?.authorProfileId;
+  let profileDoc = null;
+  if (requestedAuthorProfileId && requestedAuthorProfileId !== authUid) {
+    const profileSnap = await getDoc(doc(db, 'profiles', requestedAuthorProfileId));
+    if (!profileSnap.exists()) {
+      throw new Error('Het gekozen actieve profiel bestaat niet of is niet beschikbaar.');
+    }
+    profileDoc = { id: profileSnap.id, profileId: profileSnap.id, ...profileSnap.data() };
+  }
+  const resolvedAuthorProfile = resolvePostAuthorProfile({
+    authUid,
+    requestedProfileId: requestedAuthorProfileId,
+    profileDoc,
+  });
+  const authorFields = buildPostAuthorFields({
+    authUid,
+    resolvedProfileId: resolvedAuthorProfile.profileId,
+  });
+
   const normalizedException = normalizeConsentException(post.consentException || post.uploadConsent?.exception || {});
   const normalizedCredits = Array.isArray(post.credits)
     ? post.credits.map((credit) => sanitizePostCreditForWrite(normalizeConsentCredit(credit, { exception: normalizedException })))
@@ -220,13 +241,11 @@ export const publishPost = async (post) => {
   const isCodexActor = auth.currentUser.uid === 'codex-dev-user';
   return addDoc(collection(db, 'posts'), {
     ...post,
+    ...authorFields,
     credits: normalizedCredits,
     uploadConsent,
     consentException: normalizedException,
     contributorIds,
-    authorProfileId: auth.currentUser.uid,
-    authorOwnerUid: auth.currentUser.uid,
-    authorUid: auth.currentUser.uid,
     ...(isCodexActor ? { testActor: 'codex' } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

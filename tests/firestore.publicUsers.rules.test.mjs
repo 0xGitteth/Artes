@@ -1265,7 +1265,22 @@ async function run() {
 
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
       ...basePost,
+      authorUid: ownerUid,
       authorProfileId: ownerUid,
+      authorOwnerUid: ownerUid,
+    }));
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'profile_identity_external_ok'), {
+      ...basePost,
+      authorUid: ownerUid,
+      authorProfileId: 'active_agency_profile',
+      authorOwnerUid: ownerUid,
+    }));
+
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'profile_identity_inactive_profile'), {
+      ...basePost,
+      authorUid: ownerUid,
+      authorProfileId: 'private_agency_profile',
       authorOwnerUid: ownerUid,
     }));
 

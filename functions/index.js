@@ -50,6 +50,42 @@ const likelihoodScores = {
   VERY_LIKELY: 0.9,
 };
 
+
+const MANAGED_EXTERNAL_PROFILE_TYPES = new Set(['company', 'agency', 'collective']);
+
+const resolveAuthorProfileForUid = async (userId, requestedProfileId) => {
+  const ownerUid = String(userId || '').trim();
+  const profileId = String(requestedProfileId || '').trim() || ownerUid;
+  if (!ownerUid || profileId === ownerUid) {
+    return { profileId: ownerUid, ownerUid, isPersonal: true };
+  }
+
+  const profileSnap = await db.collection('profiles').doc(profileId).get();
+  if (!profileSnap.exists) {
+    const error = new Error('Het gekozen actieve profiel bestaat niet of is niet beschikbaar.');
+    error.status = 400;
+    throw error;
+  }
+  const profile = profileSnap.data() || {};
+  if (profile.ownerUid !== ownerUid) {
+    const error = new Error('Je kunt alleen publiceren namens een profiel dat je beheert.');
+    error.status = 403;
+    throw error;
+  }
+  if (profile.status !== 'active' || !MANAGED_EXTERNAL_PROFILE_TYPES.has(profile.type)) {
+    const error = new Error('Dit actieve profiel is niet beschikbaar om mee te publiceren.');
+    error.status = 400;
+    throw error;
+  }
+  return {
+    profileId,
+    ownerUid,
+    isPersonal: false,
+    displayName: String(profile.displayName || '').trim(),
+    type: profile.type,
+  };
+};
+
 const dataUrlPattern = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/;
 
 const needlesKeywords = ['needle', 'syringe', 'injection', 'injections', 'hypodermic', 'vaccination'];
@@ -2736,14 +2772,17 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
     const postDraftInput = body?.postDraft && typeof body.postDraft === 'object'
       ? body.postDraft
       : null;
+    const postDraftAuthorProfile = postDraftInput
+      ? await resolveAuthorProfileForUid(decoded.uid, postDraftInput.authorProfileId)
+      : null;
     const postDraft = postDraftInput
       ? {
           title: String(postDraftInput.title || '').trim(),
           description: String(postDraftInput.description || postDraftInput.caption || '').trim(),
           imageUrl: String(postDraftInput.imageUrl || '').trim(),
-          authorProfileId: decoded.uid,
+          authorProfileId: postDraftAuthorProfile.profileId,
           authorOwnerUid: decoded.uid,
-          authorName: String(postDraftInput.authorName || '').trim(),
+          authorName: String(postDraftInput.authorName || postDraftAuthorProfile?.displayName || '').trim(),
           authorRole: String(postDraftInput.authorRole || '').trim(),
           styles: Array.isArray(postDraftInput.styles)
             ? postDraftInput.styles.filter(Boolean)
@@ -3741,7 +3780,9 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
         : Array.isArray(postDraft?.contributors)
           ? postDraft.contributors.filter(Boolean)
           : [];
-      const normalizedAuthorName = String(postDraft?.authorName || upload?.authorName || '').trim();
+      const requestedAuthorProfileId = postDraft?.authorProfileId || upload?.postDraft?.authorProfileId || upload?.authorProfileId || userId;
+      const resolvedAuthorProfile = await resolveAuthorProfileForUid(userId, requestedAuthorProfileId);
+      const normalizedAuthorName = String(postDraft?.authorName || resolvedAuthorProfile.displayName || upload?.authorName || '').trim();
       const normalizedAuthorRole = String(postDraft?.authorRole || upload?.authorRole || '').trim();
       const normalizedIsChallenge = Boolean(postDraft?.isChallenge || upload?.isChallenge);
 
@@ -3780,7 +3821,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             imageUrl: normalizedImageUrl,
             authorId: userId,
             authorUid: userId,
-            authorProfileId: userId,
+            authorProfileId: resolvedAuthorProfile.profileId,
             authorOwnerUid: userId,
             authorName: normalizedAuthorName || null,
             authorRole: normalizedAuthorRole || null,

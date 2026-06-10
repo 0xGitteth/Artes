@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   buildManagedProfilesSettingsModel,
   getManagedProfileDisplayName,
+  getManagedProfileSettingsAction,
   getManagedProfilePrefillDisplayName,
   getManagedProfileTypeLabel,
   personalProfileHasOrganizationHints,
@@ -66,5 +67,23 @@ assert.equal(personalProfileHasOrganizationHints({ linkedAgencyId: 'none' }), fa
 assert.equal(getManagedProfilePrefillDisplayName({ linkedCompanyName: '  Studio Hint  ' }, 'company'), 'Studio Hint', 'Company create flow can prefill from an existing safe company hint');
 assert.equal(getManagedProfilePrefillDisplayName({ linkedAgencyName: '  Agency Hint  ' }, 'agency'), 'Agency Hint', 'Agency create flow can prefill from an existing safe agency hint');
 assert.equal(getManagedProfilePrefillDisplayName({ linkedCompanyName: 'Studio Hint' }, 'collective'), 'Studio Hint', 'Collective create flow may reuse a generic organization name hint without migrating data');
+
+
+const activeExternalProfile = settingsWithMultipleExternal.externalProfiles[1];
+const settingsWithActiveExternal = buildManagedProfilesSettingsModel([
+  personalProfile,
+  { profileId: 'studio_luna', displayName: 'Studio Luna', type: 'company', kind: 'company', isPersonal: false },
+  activeExternalProfile,
+], activeExternalProfile);
+assert.equal(settingsWithActiveExternal.personalProfile.settingsAction.isActive, false, 'Personal profile is not marked active when an external profile is active');
+assert.equal(settingsWithActiveExternal.personalProfile.settingsAction.actionLabel, 'Beheren als', 'Inactive personal profile can be chosen with Beheren als');
+assert.equal(settingsWithActiveExternal.externalProfiles[1].settingsAction.isActive, true, 'Active external profile is marked active in settings helper');
+assert.equal(settingsWithActiveExternal.externalProfiles[1].settingsAction.statusLabel, 'Actief', 'Active profile shows Actief status');
+assert.equal(settingsWithActiveExternal.externalProfiles[1].settingsAction.actionLabel, '', 'Active profile does not show the Beheren als action');
+assert.deepEqual(
+  getManagedProfileSettingsAction(personalProfile, personalProfile),
+  { isActive: true, statusLabel: 'Actief', actionLabel: '' },
+  'Settings action helper returns Actief for the active personal profile',
+);
 
 console.log('PASS managedProfilesSettings.logic.test');

@@ -144,9 +144,14 @@ import {
   getManagedProfileId,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
+  getManagedProfileHeaderSwipeDirection,
   getManagedProfilePrefillDisplayName,
-  resolvePostAuthorDisplayNameFromProfiles,
+  getManagedProfileSwitcherActiveIndex,
+  getManagedProfileSwitcherProfiles,
   getManagedProfileTypeLabel,
+  getNextManagedProfileForSwipe,
+  getPreviousManagedProfileForSwipe,
+  resolvePostAuthorDisplayNameFromProfiles,
   normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
   resolveActiveProfile,
@@ -2683,6 +2688,9 @@ export default function ArtesApp() {
               allUsers={users}
               onLinkedProfileClick={(uid) => setView(`profile_${uid}`)}
               onChallengeClick={() => setView('challenge_timeline')}
+              managedProfiles={managedProfiles}
+              activeProfile={activeProfile}
+              onSelectActiveProfile={handleSelectActiveProfile}
               triggerVisibility={profile?.preferences?.triggerVisibility || normalizeTriggerPreferences()}
               revealedSensitivePostsById={revealedSensitivePostsById}
               onRevealSensitivePost={handleRevealSensitivePost}
@@ -4912,7 +4920,7 @@ function MoodboardsSection({ uid, posts, onPostClick, triggerVisibility, reveale
   );
 }
 
-function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, triggerVisibility, currentUserId = null, isFan = false, fanBusy = false, fanError = '', onToggleFan = null, revealedSensitivePostsById, onRevealSensitivePost }) {
+function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, managedProfiles = [], activeProfile = null, onSelectActiveProfile = null, triggerVisibility, currentUserId = null, isFan = false, fanBusy = false, fanError = '', onToggleFan = null, revealedSensitivePostsById, onRevealSensitivePost }) {
   const normalizedProfile = useMemo(() => (profile ? normalizeProfileData(profile) : null), [profile]);
   const profileUserId = normalizedProfile?.uid || profile?.uid || null;
   const seededFanCounts = useMemo(() => seedCountsFromProfile(profile, normalizedProfile), [profile, normalizedProfile]);
@@ -4948,6 +4956,68 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
   const fansCount = Number(fanCounts?.fansCount ?? normalizedProfile?.fansCount ?? 0);
   const fanOfCount = Number(fanCounts?.fanOfCount ?? normalizedProfile?.fanOfCount ?? 0);
   const canFanUser = Boolean(!isOwn && currentUserId && profileUserId && currentUserId !== profileUserId);
+  const [activeProfileSwitchStatus, setActiveProfileSwitchStatus] = useState('');
+  const profileHeaderTouchStartRef = useRef(null);
+  const switcherProfiles = useMemo(() => getManagedProfileSwitcherProfiles(managedProfiles), [managedProfiles]);
+  const activeSwitcherIndex = useMemo(
+    () => getManagedProfileSwitcherActiveIndex({ managedProfiles: switcherProfiles, activeProfile }),
+    [activeProfile, switcherProfiles],
+  );
+  const activeSwitcherProfile = activeSwitcherIndex >= 0 ? switcherProfiles[activeSwitcherIndex] : activeProfile;
+  const showManagedProfileSwitcher = Boolean(
+    isOwn
+    && currentUserId
+    && profileUserId
+    && currentUserId === profileUserId
+    && switcherProfiles.length > 1
+    && typeof onSelectActiveProfile === 'function'
+  );
+
+  useEffect(() => {
+    if (!activeProfileSwitchStatus) return undefined;
+    const timeoutId = window.setTimeout(() => setActiveProfileSwitchStatus(''), 1800);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeProfileSwitchStatus]);
+
+  const handleHeaderSelectActiveProfile = useCallback((nextProfile, showStatus = true) => {
+    const nextProfileId = getManagedProfileId(nextProfile);
+    if (!nextProfileId || typeof onSelectActiveProfile !== 'function') return;
+    onSelectActiveProfile(nextProfile);
+    if (showStatus) {
+      setActiveProfileSwitchStatus(`Actief profiel: ${getManagedProfileDisplayName(nextProfile)}`);
+    }
+  }, [onSelectActiveProfile]);
+
+  const handleProfileHeaderTouchStart = useCallback((event) => {
+    if (!showManagedProfileSwitcher) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    const startedOnInteractiveElement = Boolean(event.target?.closest?.('button, a, input, select, textarea, [role=button], [data-profile-switcher-interactive="true"]'));
+    profileHeaderTouchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      startedOnInteractiveElement,
+    };
+  }, [showManagedProfileSwitcher]);
+
+  const handleProfileHeaderTouchEnd = useCallback((event) => {
+    const start = profileHeaderTouchStartRef.current;
+    profileHeaderTouchStartRef.current = null;
+    if (!showManagedProfileSwitcher || !start || start.startedOnInteractiveElement) return;
+    const touch = event.changedTouches?.[0];
+    if (!touch) return;
+
+    const direction = getManagedProfileHeaderSwipeDirection({
+      deltaX: touch.clientX - start.x,
+      deltaY: touch.clientY - start.y,
+    });
+    if (!direction) return;
+
+    const nextProfile = direction === 'next'
+      ? getNextManagedProfileForSwipe({ managedProfiles: switcherProfiles, activeProfile })
+      : getPreviousManagedProfileForSwipe({ managedProfiles: switcherProfiles, activeProfile });
+    handleHeaderSelectActiveProfile(nextProfile);
+  }, [activeProfile, handleHeaderSelectActiveProfile, showManagedProfileSwitcher, switcherProfiles]);
   const visiblePosts = useMemo(
     () => posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
     [posts, triggerVisibility],
@@ -5086,7 +5156,11 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
            
            <div className="absolute inset-x-0 bottom-0 z-20 px-5 pb-6 text-center">
               <div className="mx-auto flex max-h-[min(370px,calc(100dvh-5rem))] w-full max-w-4xl flex-col items-center overflow-hidden md:max-h-[440px]">
-                <div className="w-full shrink-0">
+                <div
+                  className={`w-full shrink-0 ${showManagedProfileSwitcher ? '[touch-action:pan-y]' : ''}`}
+                  onTouchStart={handleProfileHeaderTouchStart}
+                  onTouchEnd={handleProfileHeaderTouchEnd}
+                >
                   <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{normalizedProfile.displayName}</h1>
                   <div className="no-scrollbar -mx-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-1">
                      {roles.map(r => (
@@ -5095,6 +5169,38 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                        </span>
                      ))}
                   </div>
+                  {showManagedProfileSwitcher && activeSwitcherProfile ? (
+                    <div className="mx-auto mt-4 flex max-w-full flex-col items-center gap-2 rounded-3xl border border-white/60 bg-white/75 px-4 py-3 text-blue-950 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-slate-950/55 dark:text-white sm:max-w-md">
+                      <div className="min-w-0 text-center">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700/70 dark:text-blue-200/80">Actief profiel</p>
+                        <p className="mt-1 truncate text-sm font-extrabold md:text-base">
+                          Beheren als {getManagedProfileDisplayName(activeSwitcherProfile)}
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(activeSwitcherProfile)}</p>
+                      </div>
+                      <div className="flex items-center justify-center gap-2" aria-label="Mijn profielen" role="tablist">
+                        {switcherProfiles.map((switcherProfile, index) => {
+                          const switcherProfileId = getManagedProfileId(switcherProfile);
+                          const isSwitcherProfileActive = index === activeSwitcherIndex;
+                          return (
+                            <button
+                              key={switcherProfileId}
+                              type="button"
+                              role="tab"
+                              aria-selected={isSwitcherProfileActive}
+                              aria-label={`Beheren als ${getManagedProfileDisplayName(switcherProfile)}`}
+                              title={`Beheren als ${getManagedProfileDisplayName(switcherProfile)}`}
+                              onClick={() => handleHeaderSelectActiveProfile(switcherProfile)}
+                              className={`h-2.5 rounded-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-950 ${isSwitcherProfileActive ? 'w-7 bg-blue-600 shadow-sm dark:bg-blue-300' : 'w-2.5 bg-blue-200 hover:bg-blue-300 dark:bg-white/35 dark:hover:bg-white/55'}`}
+                            />
+                          );
+                        })}
+                      </div>
+                      {activeProfileSwitchStatus ? (
+                        <p className="text-xs font-semibold text-blue-700 dark:text-blue-200" aria-live="polite">{activeProfileSwitchStatus}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="mt-4 flex min-h-0 w-full flex-col items-center gap-4 overflow-hidden px-1">
                   {showBio && (

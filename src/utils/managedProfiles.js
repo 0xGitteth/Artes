@@ -340,12 +340,12 @@ export const normalizeRequestedActiveProfileId = ({
   requestedActiveProfileId = null,
   managedExternalProfilesLoaded = true,
 } = {}) => {
-  const fallbackProfileId = getManagedProfileId(activeProfile) || null;
-  if (!fallbackProfileId) return null;
   const requestedId = normalizeId(requestedActiveProfileId);
+  const fallbackProfileId = getManagedProfileId(activeProfile) || null;
   const profiles = Array.isArray(managedProfiles) ? managedProfiles.filter(Boolean) : [];
   const requestedProfileStillManaged = profiles.some((candidate) => getManagedProfileId(candidate) === requestedId);
   if (requestedProfileStillManaged) return requestedId;
   if (requestedId && !managedExternalProfilesLoaded) return requestedId;
+  if (!fallbackProfileId) return null;
   return fallbackProfileId;
 };

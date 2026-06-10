@@ -113,6 +113,36 @@ assert.equal(
   'Stored external activeProfileId survives while external profiles are still loading',
 );
 assert.equal(
+  normalizeRequestedActiveProfileId({
+    managedProfiles: personalOnlyWhileExternalProfilesLoad,
+    activeProfile: null,
+    requestedActiveProfileId: 'agency_multi_1',
+    managedExternalProfilesLoaded: false,
+  }),
+  'agency_multi_1',
+  'requestedActiveProfileId is preserved while activeProfile is null and external profiles are still loading',
+);
+assert.equal(
+  normalizeRequestedActiveProfileId({
+    managedProfiles: [],
+    activeProfile: null,
+    requestedActiveProfileId: 'agency_multi_1',
+    managedExternalProfilesLoaded: false,
+  }),
+  'agency_multi_1',
+  'requestedActiveProfileId is preserved while managedProfiles is empty and external profiles are still loading',
+);
+assert.equal(
+  normalizeRequestedActiveProfileId({
+    managedProfiles: [],
+    activeProfile: null,
+    requestedActiveProfileId: '',
+    managedExternalProfilesLoaded: false,
+  }),
+  null,
+  'No requested id and no activeProfile still returns null',
+);
+assert.equal(
   shouldDelayActiveProfilePersistence({
     managedProfiles: personalOnlyWhileExternalProfilesLoad,
     requestedActiveProfileId: 'agency_multi_1',
@@ -125,6 +155,16 @@ assert.equal(
   resolveActiveProfile({ managedProfiles: ownerManagedProfiles, activeProfileId: 'agency_multi_1', personalProfileId: 'owner_multi' })?.profileId,
   'agency_multi_1',
   'Stored external activeProfileId becomes active once external profiles load',
+);
+assert.equal(
+  normalizeRequestedActiveProfileId({
+    managedProfiles: ownerManagedProfiles,
+    activeProfile: resolveActiveProfile({ managedProfiles: ownerManagedProfiles, activeProfileId: 'agency_multi_1', personalProfileId: 'owner_multi' }),
+    requestedActiveProfileId: 'agency_multi_1',
+    managedExternalProfilesLoaded: true,
+  }),
+  'agency_multi_1',
+  'Valid requestedActiveProfileId still wins when present in managedProfiles',
 );
 assert.equal(
   normalizeRequestedActiveProfileId({

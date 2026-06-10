@@ -92,6 +92,18 @@ export const isPublicManagedExternalProfileVisible = ({ profile = {} } = {}) => 
   return normalizeId(profile.status || ACTIVE_PROFILE_STATUS) === ACTIVE_PROFILE_STATUS;
 };
 
+
+export const resolvePublicExternalProfileLoadState = ({ profileId = '', profile = null, error = '' } = {}) => {
+  const normalizedProfileId = normalizeId(profileId);
+  if (!normalizedProfileId) return { loading: false, profile: null, error: error || 'missing-id' };
+  if (!profile || typeof profile !== 'object') return { loading: false, profile: null, error: error || 'missing' };
+  const nextProfile = { id: normalizedProfileId, profileId: normalizedProfileId, ...profile };
+  if (!isPublicManagedExternalProfileVisible({ profile: nextProfile })) {
+    return { loading: false, profile: null, error: error || 'inactive' };
+  }
+  return { loading: false, profile: nextProfile, error: '' };
+};
+
 export const getPostOwnerUid = (post = {}) => normalizeId(post?.authorOwnerUid || post?.authorUid || post?.authorId);
 
 export const isExternalAuthorProfilePost = (post = {}) => {

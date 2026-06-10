@@ -18,6 +18,7 @@ import {
   resolveActiveProfile,
   resolveAuthorQuickProfileTarget,
   resolvePostAuthorDisplayNameFromProfiles,
+  resolvePublicExternalProfileLoadState,
   isPublicManagedExternalProfileVisible,
   resolvePostAuthorProfile,
   shouldDelayActiveProfilePersistence,
@@ -679,6 +680,29 @@ assert.equal(
   isPublicManagedExternalProfileVisible({ profile: { type: 'company', ownerUid: 'owner_user', status: 'inactive' }, viewerUid: 'owner_user' }),
   false,
   'Inactive external profile is unavailable even when the owner is viewing the public surface',
+);
+
+
+const activeSeedProfile = { profileId: 'company_profile', ownerUid: 'owner_user', type: 'company', status: 'active', displayName: 'Seed Studio' };
+assert.deepEqual(
+  resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: { ...activeSeedProfile, displayName: 'Fresh Studio' } }),
+  { loading: false, profile: { id: 'company_profile', ...activeSeedProfile, displayName: 'Fresh Studio' }, error: '' },
+  'Successful active refresh keeps showing the external profile',
+);
+assert.deepEqual(
+  resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: null, error: 'load-failed' }),
+  { loading: false, profile: null, error: 'load-failed' },
+  'Load failed refresh clears any stale seed profile for visitors',
+);
+assert.deepEqual(
+  resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: null, error: 'missing' }),
+  { loading: false, profile: null, error: 'missing' },
+  'Missing refresh clears any stale seed profile',
+);
+assert.deepEqual(
+  resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: { ...activeSeedProfile, status: 'inactive' }, error: 'inactive' }),
+  { loading: false, profile: null, error: 'inactive' },
+  'Inactive refresh clears any stale seed profile',
 );
 
 console.log('PASS managedProfiles.logic.test');

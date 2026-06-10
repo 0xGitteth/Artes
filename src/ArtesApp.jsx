@@ -154,6 +154,7 @@ import {
   getNextManagedProfileForSwipe,
   isPublicManagedExternalProfileVisible,
   resolveAuthorQuickProfileTarget,
+  resolvePublicExternalProfileLoadState,
   getPreviousManagedProfileForSwipe,
   resolvePostAuthorDisplayNameFromProfiles,
   normalizeRequestedActiveProfileId,
@@ -10732,7 +10733,10 @@ function usePublicExternalProfile(profileId, seedProfile, currentUserId) {
 
     const seedIsVisible = seedProfile && isPublicManagedExternalProfileVisible({ profile: seedProfile, viewerUid: currentUserId });
     if (seedIsVisible) {
-      setProfileState({ loading: false, profile: { id: normalizedProfileId, profileId: normalizedProfileId, ...seedProfile }, error: '' });
+      setProfileState(resolvePublicExternalProfileLoadState({
+        profileId: normalizedProfileId,
+        profile: seedProfile,
+      }));
     }
 
     const db = getFirebaseDbInstance();
@@ -10740,21 +10744,23 @@ function usePublicExternalProfile(profileId, seedProfile, currentUserId) {
       .then((snap) => {
         if (!active) return;
         if (!snap.exists()) {
-          setProfileState({ loading: false, profile: null, error: 'missing' });
+          setProfileState(resolvePublicExternalProfileLoadState({ profileId: normalizedProfileId, profile: null, error: 'missing' }));
           return;
         }
-        const nextProfile = { id: snap.id, profileId: snap.id, ...snap.data() };
-        if (!isPublicManagedExternalProfileVisible({ profile: nextProfile, viewerUid: currentUserId })) {
-          setProfileState({ loading: false, profile: null, error: 'inactive' });
-          return;
-        }
-        setProfileState({ loading: false, profile: nextProfile, error: '' });
+        setProfileState(resolvePublicExternalProfileLoadState({
+          profileId: snap.id,
+          profile: snap.data(),
+          error: 'inactive',
+        }));
       })
       .catch((error) => {
         console.warn('[external-profile] load failed', normalizedProfileId, error?.code || error?.message || error);
         if (!active) return;
-        if (seedIsVisible) return;
-        setProfileState({ loading: false, profile: null, error: 'load-failed' });
+        setProfileState(resolvePublicExternalProfileLoadState({
+          profileId: normalizedProfileId,
+          profile: null,
+          error: 'load-failed',
+        }));
       });
 
     return () => { active = false; };

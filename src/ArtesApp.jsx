@@ -5178,18 +5178,21 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                         </p>
                         <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(activeSwitcherProfile)}</p>
                       </div>
-                      <div className="flex items-center justify-center gap-2" aria-label="Mijn profielen" role="tablist">
+                      <div className="flex items-center justify-center gap-2" aria-label="Profiel kiezen">
                         {switcherProfiles.map((switcherProfile, index) => {
                           const switcherProfileId = getManagedProfileId(switcherProfile);
+                          const switcherProfileName = getManagedProfileDisplayName(switcherProfile);
                           const isSwitcherProfileActive = index === activeSwitcherIndex;
+                          const switcherProfileActionLabel = isSwitcherProfileActive
+                            ? `Actief profiel: ${switcherProfileName}`
+                            : `Beheren als ${switcherProfileName}`;
                           return (
                             <button
                               key={switcherProfileId}
                               type="button"
-                              role="tab"
-                              aria-selected={isSwitcherProfileActive}
-                              aria-label={`Beheren als ${getManagedProfileDisplayName(switcherProfile)}`}
-                              title={`Beheren als ${getManagedProfileDisplayName(switcherProfile)}`}
+                              aria-pressed={isSwitcherProfileActive}
+                              aria-label={switcherProfileActionLabel}
+                              title={switcherProfileActionLabel}
                               onClick={() => handleHeaderSelectActiveProfile(switcherProfile)}
                               className={`h-2.5 rounded-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-950 ${isSwitcherProfileActive ? 'w-7 bg-blue-600 shadow-sm dark:bg-blue-300' : 'w-2.5 bg-blue-200 hover:bg-blue-300 dark:bg-white/35 dark:hover:bg-white/55'}`}
                             />

@@ -5156,11 +5156,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
            
            <div className="absolute inset-x-0 bottom-0 z-20 px-5 pb-6 text-center">
               <div className="mx-auto flex max-h-[min(370px,calc(100dvh-5rem))] w-full max-w-4xl flex-col items-center overflow-hidden md:max-h-[440px]">
-                <div
-                  className={`w-full shrink-0 ${showManagedProfileSwitcher ? '[touch-action:pan-y]' : ''}`}
-                  onTouchStart={handleProfileHeaderTouchStart}
-                  onTouchEnd={handleProfileHeaderTouchEnd}
-                >
+                <div className="w-full shrink-0">
                   <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{normalizedProfile.displayName}</h1>
                   <div className="no-scrollbar -mx-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-1">
                      {roles.map(r => (
@@ -5170,7 +5166,11 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                      ))}
                   </div>
                   {showManagedProfileSwitcher && activeSwitcherProfile ? (
-                    <div className="mx-auto mt-4 flex max-w-full flex-col items-center gap-2 rounded-3xl border border-white/60 bg-white/75 px-4 py-3 text-blue-950 shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-slate-950/55 dark:text-white sm:max-w-md">
+                    <div
+                      className="mx-auto mt-4 flex max-w-full flex-col items-center gap-2 rounded-3xl border border-white/60 bg-white/75 px-4 py-3 text-blue-950 shadow-sm backdrop-blur-md [touch-action:pan-y] dark:border-white/15 dark:bg-slate-950/55 dark:text-white sm:max-w-md"
+                      onTouchStart={handleProfileHeaderTouchStart}
+                      onTouchEnd={handleProfileHeaderTouchEnd}
+                    >
                       <div className="min-w-0 text-center">
                         <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700/70 dark:text-blue-200/80">Actief profiel</p>
                         <p className="mt-1 truncate text-sm font-extrabold md:text-base">

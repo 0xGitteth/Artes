@@ -189,8 +189,9 @@ export const getManagedProfileDisplayName = (profile = {}) => {
     || profile?.username
     || '',
   ).trim();
+  const fallbackLabel = String(profile?.fallbackLabel || '').trim();
 
-  return displayName || 'Naamloos profiel';
+  return displayName || fallbackLabel || 'Naamloos profiel';
 };
 
 const ORGANIZATION_ROLE_HINTS = new Set(['agency', 'company', 'bedrijf', 'collective', 'collectief']);
@@ -369,6 +370,50 @@ export const isManagedProfileActive = (profile = {}, activeProfile = {}) => {
 };
 
 
+
+
+export const MANAGED_PROFILE_SETUP_STATUS_LABEL = 'Nog niet openbaar';
+
+const MANAGED_PROFILE_SETUP_ROLE_ONLY_COPY = {
+  company: 'Je hebt eerder Bedrijf/Studio als rol gekozen. Stel dit profiel in om het apart te beheren en ermee te publiceren.',
+  agency: 'Je hebt eerder Agency als rol gekozen. Stel dit profiel in om het apart te beheren en ermee te publiceren.',
+  collective: 'Je hebt eerder Collectief als rol gekozen. Stel dit profiel in om het apart te beheren en ermee te publiceren.',
+};
+
+const MANAGED_PROFILE_SETUP_ACTION_LABELS = {
+  company: 'Bedrijfsprofiel instellen',
+  agency: 'Agency instellen',
+  collective: 'Collectief instellen',
+};
+
+export const getManagedProfileSetupStatusLabel = () => MANAGED_PROFILE_SETUP_STATUS_LABEL;
+
+export const getManagedProfileSetupDescription = (profile = {}) => {
+  const type = normalizeId(profile?.type || profile?.kind);
+  const hasDisplayName = Boolean(String(profile?.displayName || '').trim());
+  if (hasDisplayName) {
+    return 'Dit profiel is klaargezet op basis van je bestaande gegevens. Stel het in om het apart te beheren en ermee te publiceren.';
+  }
+  return MANAGED_PROFILE_SETUP_ROLE_ONLY_COPY[type]
+    || 'Stel dit profiel in om het apart te beheren en ermee te publiceren.';
+};
+
+export const getManagedProfileSetupActionLabel = (profile = {}) => {
+  const type = normalizeId(profile?.type || profile?.kind);
+  return MANAGED_PROFILE_SETUP_ACTION_LABELS[type] || 'Profiel instellen';
+};
+
+export const shouldShowManagedProfileSetupProfile = ({ profile = {}, currentUserId = '', ownerUid = '' } = {}) => {
+  if (!isManagedProfileSetupRequired(profile)) return false;
+  const viewerUid = normalizeId(currentUserId);
+  const setupOwnerUid = normalizeId(profile?.ownerUid || ownerUid);
+  return Boolean(viewerUid && setupOwnerUid && viewerUid === setupOwnerUid);
+};
+
+export const getOwnerVisibleManagedProfileSetupProfiles = ({ setupProfiles = [], currentUserId = '', ownerUid = '' } = {}) => {
+  const profiles = Array.isArray(setupProfiles) ? setupProfiles.filter(Boolean) : [];
+  return profiles.filter((profile) => shouldShowManagedProfileSetupProfile({ profile, currentUserId, ownerUid }));
+};
 
 export const getManagedProfileSwitcherProfiles = (managedProfiles = []) => (
   Array.isArray(managedProfiles) ? managedProfiles.filter((profile) => getManagedProfileId(profile)) : []

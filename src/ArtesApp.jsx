@@ -155,6 +155,11 @@ import {
   getExternalProfileIdFromView,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfilePrefillDisplayName,
+  getManagedProfileSetupActionLabel,
+  getManagedProfileSetupDescription,
+  getManagedProfileSetupStatusLabel,
+  getOwnerVisibleManagedProfileSetupProfiles,
+  isManagedProfileSetupRequired,
   getManagedProfileSwitcherActiveIndex,
   getManagedProfileSwitcherProfiles,
   getManagedProfileTypeLabel,
@@ -856,6 +861,7 @@ export default function ArtesApp() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadContext, setUploadContext] = useState({ isChallenge: false });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [pendingManagedProfileSetup, setPendingManagedProfileSetup] = useState(null);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [quickProfileTarget, setQuickProfileTarget] = useState(null);
   const [selectedPost, setSelectedPost] = useState(null);
@@ -2564,7 +2570,10 @@ export default function ArtesApp() {
           <NavBar 
              view={view} 
              setView={setView} 
-             onOpenSettings={() => setShowSettingsModal(true)}
+             onOpenSettings={() => {
+               setPendingManagedProfileSetup(null);
+               setShowSettingsModal(true);
+             }}
              showModerationDot={hasNewModerationWork}
           />
         )}
@@ -2761,6 +2770,11 @@ export default function ArtesApp() {
               allPostsForMoodboards={posts}
               currentUserId={authUser?.uid}
               onOpenSettings={() => setShowEditProfile(true)}
+              onOpenManagedProfileSetup={(setupProfile) => {
+                setPendingManagedProfileSetup(setupProfile || null);
+                setShowEditProfile(false);
+                setShowSettingsModal(true);
+              }}
               onPostClick={handleOpenPost}
               allUsers={users}
               onLinkedProfileClick={(uid) => setView(`profile_${uid}`)}
@@ -2832,19 +2846,25 @@ export default function ArtesApp() {
         )}
         {showSettingsModal && (
           <SettingsModal
-            onClose={() => setShowSettingsModal(false)}
+            onClose={() => {
+              setShowSettingsModal(false);
+              setPendingManagedProfileSetup(null);
+            }}
             moderatorAccess={moderatorAccess}
             onOpenModeration={openModerationPortal}
             onOpenSupport={() => {
               setShowSettingsModal(false);
+              setPendingManagedProfileSetup(null);
               setView('support');
             }}
             onOpenAppShortcutInfo={() => {
               setShowSettingsModal(false);
+              setPendingManagedProfileSetup(null);
               setAppShortcutInfoMode('settings');
             }}
             onOpenVouchRequests={() => {
               setShowSettingsModal(false);
+              setPendingManagedProfileSetup(null);
               setView('vouch');
             }}
             darkMode={darkMode}
@@ -2856,6 +2876,7 @@ export default function ArtesApp() {
             onSelectActiveProfile={handleSelectActiveProfile}
             onCreateManagedProfile={handleCreateManagedExternalProfile}
             onUpdateManagedProfile={handleUpdateManagedExternalProfile}
+            initialSetupProfile={pendingManagedProfileSetup}
           />
         )}
         {showEditProfile && (
@@ -5027,7 +5048,30 @@ function MoodboardsSection({ uid, posts, onPostClick, triggerVisibility, reveale
   );
 }
 
-function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts, onOpenSettings, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, managedProfiles = [], activeProfile = null, onSelectActiveProfile = null, triggerVisibility, currentUserId = null, isFan = false, fanBusy = false, fanError = '', onToggleFan = null, revealedSensitivePostsById, onRevealSensitivePost }) {
+
+function SetupProfileOverlay({ profile = {}, onOpenSetupProfile }) {
+  return (
+    <div className="mx-auto mt-4 max-w-md rounded-3xl border border-blue-200/80 bg-white/90 p-4 text-left text-blue-950 shadow-xl shadow-blue-950/10 backdrop-blur-md dark:border-blue-300/20 dark:bg-slate-950/85 dark:text-white">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/70 dark:text-amber-100 dark:ring-amber-700/60">
+          {getManagedProfileSetupStatusLabel(profile)}
+        </span>
+        <span className="text-xs font-bold text-blue-700 dark:text-blue-200">{getManagedProfileTypeLabel(profile)}</span>
+      </div>
+      <p className="mt-2 text-base font-extrabold text-slate-950 dark:text-white">{getManagedProfileDisplayName(profile)}</p>
+      <p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{getManagedProfileSetupDescription(profile)}</p>
+      <button
+        type="button"
+        onClick={onOpenSetupProfile}
+        className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 dark:bg-blue-400 dark:text-blue-950 dark:hover:bg-blue-300 sm:w-auto"
+      >
+        {getManagedProfileSetupActionLabel(profile)}
+      </button>
+    </div>
+  );
+}
+
+function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts, onOpenSettings, onOpenManagedProfileSetup = null, onPostClick, allUsers = [], onLinkedProfileClick, onChallengeClick, managedProfiles = [], activeProfile = null, onSelectActiveProfile = null, triggerVisibility, currentUserId = null, isFan = false, fanBusy = false, fanError = '', onToggleFan = null, revealedSensitivePostsById, onRevealSensitivePost }) {
   const normalizedProfile = useMemo(() => (profile ? normalizeProfileData(profile) : null), [profile]);
   const profileUserId = normalizedProfile?.uid || profile?.uid || null;
   const seededFanCounts = useMemo(() => seedCountsFromProfile(profile, normalizedProfile), [profile, normalizedProfile]);
@@ -5063,14 +5107,33 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
   const fansCount = Number(fanCounts?.fansCount ?? normalizedProfile?.fansCount ?? 0);
   const fanOfCount = Number(fanCounts?.fanOfCount ?? normalizedProfile?.fanOfCount ?? 0);
   const canFanUser = Boolean(!isOwn && currentUserId && profileUserId && currentUserId !== profileUserId);
+  const roles = normalizedProfile?.roles || [];
+  const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
   const [activeProfileSwitchStatus, setActiveProfileSwitchStatus] = useState('');
+  const [selectedSetupProfileId, setSelectedSetupProfileId] = useState('');
   const profileHeaderTouchStartRef = useRef(null);
-  const switcherProfiles = useMemo(() => getManagedProfileSwitcherProfiles(managedProfiles), [managedProfiles]);
-  const activeSwitcherIndex = useMemo(
-    () => getManagedProfileSwitcherActiveIndex({ managedProfiles: switcherProfiles, activeProfile }),
-    [activeProfile, switcherProfiles],
+  const ownerSetupProfiles = useMemo(() => {
+    const settingsModel = buildManagedProfilesSettingsModel(managedProfiles, activeProfile);
+    return getOwnerVisibleManagedProfileSetupProfiles({
+      setupProfiles: settingsModel.setupProfiles,
+      currentUserId,
+      ownerUid: profileUserId,
+    });
+  }, [activeProfile, currentUserId, managedProfiles, profileUserId]);
+  const switcherProfiles = useMemo(
+    () => [...getManagedProfileSwitcherProfiles(managedProfiles), ...ownerSetupProfiles],
+    [managedProfiles, ownerSetupProfiles],
   );
-  const activeSwitcherProfile = activeSwitcherIndex >= 0 ? switcherProfiles[activeSwitcherIndex] : activeProfile;
+  const selectedSetupProfile = useMemo(() => (
+    ownerSetupProfiles.find((candidate) => getManagedProfileId(candidate) === selectedSetupProfileId) || null
+  ), [ownerSetupProfiles, selectedSetupProfileId]);
+  const switcherActiveProfile = selectedSetupProfile || activeProfile;
+  const activeSwitcherIndex = useMemo(
+    () => getManagedProfileSwitcherActiveIndex({ managedProfiles: switcherProfiles, activeProfile: switcherActiveProfile }),
+    [switcherActiveProfile, switcherProfiles],
+  );
+  const activeSwitcherProfile = activeSwitcherIndex >= 0 ? switcherProfiles[activeSwitcherIndex] : switcherActiveProfile;
+  const activeSwitcherProfileIsSetup = isManagedProfileSetupRequired(activeSwitcherProfile);
   const showManagedProfileSwitcher = Boolean(
     isOwn
     && currentUserId
@@ -5079,6 +5142,10 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
     && switcherProfiles.length > 1
     && typeof onSelectActiveProfile === 'function'
   );
+  const headerDisplayName = activeSwitcherProfileIsSetup
+    ? getManagedProfileDisplayName(activeSwitcherProfile)
+    : (normalizedProfile?.displayName || '');
+  const headerRoleLabels = activeSwitcherProfileIsSetup ? [getManagedProfileTypeLabel(activeSwitcherProfile)] : roles.map(roleLabel);
 
   useEffect(() => {
     if (!activeProfileSwitchStatus) return undefined;
@@ -5089,9 +5156,14 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
   const handleHeaderSelectActiveProfile = useCallback((nextProfile, showStatus = true) => {
     const nextProfileId = getManagedProfileId(nextProfile);
     if (!nextProfileId || typeof onSelectActiveProfile !== 'function') return;
-    onSelectActiveProfile(nextProfile);
+    if (isManagedProfileSetupRequired(nextProfile)) {
+      setSelectedSetupProfileId(nextProfileId);
+    } else {
+      setSelectedSetupProfileId('');
+      onSelectActiveProfile(nextProfile);
+    }
     if (showStatus) {
-      setActiveProfileSwitchStatus(`Actief profiel: ${getManagedProfileDisplayName(nextProfile)}`);
+      setActiveProfileSwitchStatus(`${isManagedProfileSetupRequired(nextProfile) ? 'Klaargezet profiel' : 'Actief profiel'}: ${getManagedProfileDisplayName(nextProfile)}`);
     }
   }, [onSelectActiveProfile]);
 
@@ -5121,10 +5193,10 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
     if (!direction) return;
 
     const nextProfile = direction === 'next'
-      ? getNextManagedProfileForSwipe({ managedProfiles: switcherProfiles, activeProfile })
-      : getPreviousManagedProfileForSwipe({ managedProfiles: switcherProfiles, activeProfile });
+      ? getNextManagedProfileForSwipe({ managedProfiles: switcherProfiles, activeProfile: switcherActiveProfile })
+      : getPreviousManagedProfileForSwipe({ managedProfiles: switcherProfiles, activeProfile: switcherActiveProfile });
     handleHeaderSelectActiveProfile(nextProfile);
-  }, [activeProfile, handleHeaderSelectActiveProfile, showManagedProfileSwitcher, switcherProfiles]);
+  }, [handleHeaderSelectActiveProfile, showManagedProfileSwitcher, switcherActiveProfile, switcherProfiles]);
   const visiblePosts = useMemo(
     () => posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
     [posts, triggerVisibility],
@@ -5224,7 +5296,6 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
     }
   }, [organizationProfileTab]);
   if (!normalizedProfile) return null;
-  const roles = normalizedProfile.roles;
   const themes = normalizedProfile.themes;
   const bio = normalizedProfile.bio;
   const showBio = Boolean(bio && bio !== 'Nog geen bio toegevoegd.');
@@ -5236,7 +5307,6 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
   const headerImage = normalizedProfile.headerImage || normalizedProfile.avatar;
   const hasAgency = Boolean(agencyName);
   const hasCompany = Boolean(companyName);
-  const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
   return (
      <div className="min-h-screen bg-white dark:bg-slate-900 pb-20">
         <div className="relative min-h-[430px] w-full overflow-hidden bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:min-h-[520px]">
@@ -5264,11 +5334,11 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
            <div className="absolute inset-x-0 bottom-0 z-20 px-5 pb-6 text-center">
               <div className="mx-auto flex max-h-[min(370px,calc(100dvh-5rem))] w-full max-w-4xl flex-col items-center overflow-hidden md:max-h-[440px]">
                 <div className="w-full shrink-0">
-                  <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{normalizedProfile.displayName}</h1>
+                  <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{headerDisplayName}</h1>
                   <div className="no-scrollbar -mx-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-1">
-                     {roles.map(r => (
-                       <span key={r} className="shrink-0 whitespace-nowrap text-xs font-bold uppercase tracking-widest text-blue-900 dark:text-white bg-white/80 dark:bg-white/10 px-3 py-1 rounded-full backdrop-blur border border-blue-200/60 dark:border-white/20 shadow-sm">
-                         {roleLabel(r)}
+                     {headerRoleLabels.map((label) => (
+                       <span key={label} className="shrink-0 whitespace-nowrap text-xs font-bold uppercase tracking-widest text-blue-900 dark:text-white bg-white/80 dark:bg-white/10 px-3 py-1 rounded-full backdrop-blur border border-blue-200/60 dark:border-white/20 shadow-sm">
+                         {label}
                        </span>
                      ))}
                   </div>
@@ -5279,9 +5349,9 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                       onTouchEnd={handleProfileHeaderTouchEnd}
                     >
                       <div className="min-w-0 text-center">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700/70 dark:text-blue-200/80">Actief profiel</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700/70 dark:text-blue-200/80">{activeSwitcherProfileIsSetup ? 'Klaargezet profiel' : 'Actief profiel'}</p>
                         <p className="mt-1 truncate text-sm font-extrabold md:text-base">
-                          Beheren als {getManagedProfileDisplayName(activeSwitcherProfile)}
+                          {activeSwitcherProfileIsSetup ? getManagedProfileDisplayName(activeSwitcherProfile) : `Beheren als ${getManagedProfileDisplayName(activeSwitcherProfile)}`}
                         </p>
                         <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(activeSwitcherProfile)}</p>
                       </div>
@@ -5311,8 +5381,11 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                       ) : null}
                     </div>
                   ) : null}
+                  {activeSwitcherProfileIsSetup ? (
+                    <SetupProfileOverlay profile={activeSwitcherProfile} onOpenSetupProfile={() => onOpenManagedProfileSetup?.(activeSwitcherProfile)} />
+                  ) : null}
                 </div>
-                <div className="mt-4 flex min-h-0 w-full flex-col items-center gap-4 overflow-hidden px-1">
+                <div className={`mt-4 flex min-h-0 w-full flex-col items-center gap-4 overflow-hidden px-1 ${activeSwitcherProfileIsSetup ? 'opacity-70 blur-[1px]' : ''}`}>
                   {showBio && (
                     <div className="no-scrollbar max-h-28 w-full max-w-xl overflow-y-auto pr-1 md:max-h-36">
                       <p className="text-base leading-relaxed text-slate-700 dark:text-slate-200 md:text-lg">{bio}</p>
@@ -12872,8 +12945,8 @@ function ManagedProfileAvatar({ profile = {}, sizeClass = 'h-10 w-10', className
   );
 }
 
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [], activeProfile = null, onSelectActiveProfile, onCreateManagedProfile, onUpdateManagedProfile }) {
-    const { personalProfile, externalProfiles, hasExternalProfiles, hasPersonalOrganizationHints } = buildManagedProfilesSettingsModel(managedProfiles, activeProfile);
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [], activeProfile = null, onSelectActiveProfile, onCreateManagedProfile, onUpdateManagedProfile, initialSetupProfile = null }) {
+    const { personalProfile, externalProfiles, setupProfiles, hasExternalProfiles, hasPersonalOrganizationHints } = buildManagedProfilesSettingsModel(managedProfiles, activeProfile);
     const [createFlowOpen, setCreateFlowOpen] = useState(false);
     const [createType, setCreateType] = useState('company');
     const [createDisplayName, setCreateDisplayName] = useState('');
@@ -12896,6 +12969,20 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
       setCreateSuccess('');
       setCreateFlowOpen(true);
     };
+
+    const openSetupProfileCreateFlow = useCallback((setupProfile) => {
+      const setupType = setupProfile?.type || setupProfile?.kind || 'company';
+      setCreateType(setupType);
+      setCreateDisplayName(String(setupProfile?.displayName || '').trim());
+      setCreateError('');
+      setCreateSuccess('');
+      setCreateFlowOpen(true);
+    }, []);
+
+    useEffect(() => {
+      if (!initialSetupProfile) return;
+      openSetupProfileCreateFlow(initialSetupProfile);
+    }, [initialSetupProfile, openSetupProfileCreateFlow]);
 
     const handleCreateTypeChange = (nextType) => {
       setCreateType(nextType);
@@ -13071,6 +13158,9 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     </button>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Mijn profielen</h4>
                     <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-700 dark:bg-slate-800/70 md:rounded-2xl md:p-3">
+                      <p className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-relaxed text-slate-500 ring-1 ring-slate-100 dark:bg-slate-900/50 dark:text-slate-300 dark:ring-slate-700/70">
+                        Algemene voorkeuren gelden voor je hele account. De gegevens onder Mijn profielen gelden voor het geselecteerde profiel.
+                      </p>
                       {activeProfile && (
                         <div className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
                           <ManagedProfileAvatar profile={activeProfile} sizeClass="h-7 w-7" />
@@ -13096,6 +13186,40 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                       {hasPersonalOrganizationHints && (
                         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
                           Je persoonlijke profiel bevat organisatie-informatie. Binnen Artes worden persoonlijke profielen en Bedrijfsprofielen, Agencies en Collectieven apart beheerd. Je persoonlijke Profiel blijft bestaan.
+                        </div>
+                      )}
+                      {setupProfiles.length > 0 && (
+                        <div className="space-y-2 pt-1">
+                          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Klaargezette profielen</p>
+                          {setupProfiles.map((setupProfile) => (
+                            <div
+                              key={setupProfile.profileId || setupProfile.id}
+                              className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/25"
+                            >
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="flex min-w-0 items-start gap-3">
+                                  <ManagedProfileAvatar profile={setupProfile} sizeClass="mt-0.5 h-10 w-10" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(setupProfile)}</p>
+                                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200 dark:bg-slate-950/60 dark:text-amber-100 dark:ring-amber-800/70">
+                                        {getManagedProfileSetupStatusLabel(setupProfile)}
+                                      </span>
+                                    </div>
+                                    <p className="mt-0.5 text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(setupProfile)}</p>
+                                    <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{getManagedProfileSetupDescription(setupProfile)}</p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => openSetupProfileCreateFlow(setupProfile)}
+                                  className="shrink-0 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-blue-700 dark:bg-blue-400 dark:text-blue-950 dark:hover:bg-blue-300"
+                                >
+                                  {getManagedProfileSetupActionLabel(setupProfile)}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
                       <div className="space-y-2 pt-1">

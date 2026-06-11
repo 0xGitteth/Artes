@@ -423,8 +423,21 @@ async function run() {
       bio: '',
       updatedAt: serverTimestamp(),
     }));
+    await assertSucceeds(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      avatar: 'https://firebasestorage.googleapis.com/v0/b/demo/o/managedProfiles%2Fowner_uid%2Fowner_company_profile%2Favatar%2Favatar.jpg',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(otherDb, 'profiles', 'owner_company_profile'), {
+      avatar: 'https://example.test/hijack.jpg',
+      updatedAt: serverTimestamp(),
+    }));
     await assertFails(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
       bio: 'x'.repeat(501),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      ownerUid: otherUid,
+      avatar: 'https://example.test/spoof.jpg',
       updatedAt: serverTimestamp(),
     }));
     await assertFails(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {

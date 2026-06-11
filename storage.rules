@@ -21,6 +21,18 @@ service firebase.storage {
         && request.resource.size <= 350 * 1024;
     }
 
+
+    function isManagedProfileOwner(ownerUid, profileId) {
+      return request.auth != null
+        && request.auth.uid == ownerUid
+        && firestore.exists(/databases/(default)/documents/profiles/$(profileId))
+        && firestore.get(/databases/(default)/documents/profiles/$(profileId)).data.ownerUid == ownerUid;
+    }
+    function isActiveManagedProfile(profileId) {
+      return firestore.exists(/databases/(default)/documents/profiles/$(profileId))
+        && firestore.get(/databases/(default)/documents/profiles/$(profileId)).data.status == 'active';
+    }
+
     match /uploads/{userId}/{allPaths=**} {
       allow read: if isModerator() || (request.auth != null && request.auth.uid == userId);
       allow write: if isVerifiedUser() && request.auth.uid == userId;
@@ -34,6 +46,14 @@ service firebase.storage {
     match /profileImages/{userId}/{fileName} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if isVerifiedUser() && request.auth.uid == userId && isValidProfileImageUpload(fileName);
+    }
+
+    match /managedProfiles/{ownerUid}/{profileId}/avatar/{fileName} {
+      allow read: if isActiveManagedProfile(profileId) || isManagedProfileOwner(ownerUid, profileId);
+      allow write: if isVerifiedUser()
+        && isManagedProfileOwner(ownerUid, profileId)
+        && fileName == 'avatar.jpg'
+        && isValidProfileImageUpload(fileName);
     }
 
     match /{allPaths=**} {

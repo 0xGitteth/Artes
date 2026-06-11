@@ -45,16 +45,22 @@ export const validateManagedExternalProfileEditDraft = ({ profile = {}, displayN
   return validateManagedExternalProfileDraft({ type, displayName, bio });
 };
 
-export const buildManagedExternalProfileUpdatePayload = ({ profile = {}, displayName, bio = '', timestamp } = {}) => {
+export const buildManagedExternalProfileUpdatePayload = ({ profile = {}, displayName, bio = '', avatar, timestamp } = {}) => {
   if (!isExternalManagedProfile(profile)) throw new Error('Dit profiel kan niet worden bewerkt.');
   const validation = validateManagedExternalProfileEditDraft({ profile, displayName, bio });
   if (!validation.ok) throw new Error(validation.error);
 
-  return {
+  const payload = {
     displayName: validation.displayName,
     bio: validation.bio,
     updatedAt: timestamp,
   };
+
+  if (avatar !== undefined) {
+    payload.avatar = String(avatar || '').trim();
+  }
+
+  return payload;
 };
 
 export const buildManagedExternalProfileCreatePayload = ({ authUid, type, displayName, timestamp } = {}) => {
@@ -161,6 +167,15 @@ export const getManagedProfileTypeLabel = (profile = {}) => {
 };
 
 export const getManagedProfileBio = (profile = {}) => String(profile?.bio || '').trim();
+
+export const getManagedProfileAvatar = (profile = {}) => String(profile?.avatar || '').trim();
+
+export const getManagedProfileInitials = (profile = {}) => {
+  const displayName = getManagedProfileDisplayName(profile);
+  const words = displayName.split(/\s+/).filter(Boolean);
+  const initials = words.slice(0, 2).map((word) => word[0]?.toUpperCase() || '').join('');
+  return initials || 'P';
+};
 
 export const getManagedProfileDisplayName = (profile = {}) => {
   const displayName = String(
@@ -358,6 +373,7 @@ export const normalizeManagedExternalProfile = (candidate, authUid) => {
     kind: type,
     displayName,
     bio: getManagedProfileBio(candidate),
+    avatar: getManagedProfileAvatar(candidate),
     ownerUid,
     status: ACTIVE_PROFILE_STATUS,
     isPersonal: false,

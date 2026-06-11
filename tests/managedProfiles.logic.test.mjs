@@ -10,6 +10,8 @@ import {
   getExternalProfileIdFromView,
   buildPostAuthorFields,
   getManagedProfileBio,
+  getManagedProfileAvatar,
+  getManagedProfileInitials,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfileSwitcherActiveIndex,
   getNextManagedProfileForSwipe,
@@ -77,9 +79,9 @@ assert.equal(
   'Managed external profile edit validation rejects a too long bio',
 );
 assert.deepEqual(
-  buildManagedExternalProfileUpdatePayload({ profile: editValidationProfile, displayName: '  Updated Company  ', bio: '  Nieuwe omschrijving  ', timestamp: 'ts' }),
-  { displayName: 'Updated Company', bio: 'Nieuwe omschrijving', updatedAt: 'ts' },
-  'Managed external profile update payload only writes editable fields and updatedAt',
+  buildManagedExternalProfileUpdatePayload({ profile: editValidationProfile, displayName: '  Updated Company  ', bio: '  Nieuwe omschrijving  ', avatar: ' https://cdn.example/avatar.jpg ', timestamp: 'ts' }),
+  { displayName: 'Updated Company', bio: 'Nieuwe omschrijving', avatar: 'https://cdn.example/avatar.jpg', updatedAt: 'ts' },
+  'Managed external profile update payload writes editable fields, avatar and updatedAt',
 );
 assert.throws(
   () => buildManagedExternalProfileUpdatePayload({ profile: { ...editValidationProfile, type: 'personal' }, displayName: 'Personal', bio: '', timestamp: 'ts' }),
@@ -88,6 +90,9 @@ assert.throws(
 );
 assert.equal(getManagedProfileBio({ bio: '  Bio tekst  ' }), 'Bio tekst', 'Bio helper trims profile bio for quick and full external profile rendering');
 assert.equal(getManagedProfileBio({ displayName: 'Legacy profile' }), '', 'Old external profiles without bio still resolve to an empty bio');
+assert.equal(getManagedProfileAvatar({ avatar: '  https://cdn.example/avatar.jpg  ' }), 'https://cdn.example/avatar.jpg', 'Avatar helper trims managed profile avatar URLs for quick and full rendering');
+assert.equal(getManagedProfileAvatar({ displayName: 'Legacy profile' }), '', 'Old external profiles without avatar still resolve to an empty avatar');
+assert.equal(getManagedProfileInitials({ displayName: 'Studio Luna' }), 'SL', 'Avatar fallback uses profile initials when no image exists');
 
 const activeProfile = resolveActiveProfile({
   managedProfiles,
@@ -102,11 +107,12 @@ const ownerManagedProfiles = deriveManagedProfiles({
   authUser: { uid: 'owner_multi' },
   profile: { uid: 'owner_multi', displayName: 'Owner Multi' },
   managedExternalProfiles: [
-    { id: 'company_multi_1', type: 'company', displayName: 'Company One', ownerUid: 'owner_multi', status: 'active' },
+    { id: 'company_multi_1', type: 'company', displayName: 'Company One', ownerUid: 'owner_multi', status: 'active', avatar: 'https://cdn.example/company.jpg' },
     { id: 'agency_multi_1', type: 'agency', displayName: 'Agency One', ownerUid: 'owner_multi', status: 'active' },
     { id: 'collective_multi_1', type: 'collective', displayName: 'Collective One', ownerUid: 'owner_multi', status: 'active' },
   ],
 });
+assert.equal(ownerManagedProfiles[1].avatar, 'https://cdn.example/company.jpg', 'Managed external profile normalization keeps the avatar field');
 assert.equal(
   resolveActiveProfile({ managedProfiles: ownerManagedProfiles, personalProfileId: 'owner_multi' })?.profileId,
   'owner_multi',
@@ -728,8 +734,8 @@ assert.equal(
 
 const activeSeedProfile = { profileId: 'company_profile', ownerUid: 'owner_user', type: 'company', status: 'active', displayName: 'Seed Studio' };
 assert.deepEqual(
-  resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: { ...activeSeedProfile, displayName: 'Fresh Studio' } }),
-  { loading: false, profile: { id: 'company_profile', ...activeSeedProfile, displayName: 'Fresh Studio' }, error: '' },
+  resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: { ...activeSeedProfile, displayName: 'Fresh Studio', avatar: 'https://cdn.example/fresh.jpg' } }),
+  { loading: false, profile: { id: 'company_profile', ...activeSeedProfile, displayName: 'Fresh Studio', avatar: 'https://cdn.example/fresh.jpg' }, error: '' },
   'Successful active refresh keeps showing the external profile',
 );
 assert.deepEqual(

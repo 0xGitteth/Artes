@@ -4,6 +4,7 @@ import {
   getManagedProfileDisplayName,
   getManagedProfileSettingsAction,
   getManagedProfileBio,
+  getManagedProfileAvatar,
   getManagedProfilePrefillDisplayName,
   getManagedProfileTypeLabel,
   personalProfileHasOrganizationHints,
@@ -28,13 +29,14 @@ assert.equal(getManagedProfileDisplayName(personalProfile), 'Gitte', 'Display na
 
 const settingsWithMultipleExternal = buildManagedProfilesSettingsModel([
   personalProfile,
-  { profileId: 'studio_luna', displayName: 'Studio Luna', type: 'company', kind: 'company', isPersonal: false },
+  { profileId: 'studio_luna', displayName: 'Studio Luna', type: 'company', kind: 'company', isPersonal: false, avatar: 'https://cdn.example/studio.jpg' },
   { profileId: 'nova_agency', displayName: 'Nova Agency', type: 'agency', kind: 'agency', isPersonal: false },
   { profileId: 'project_x', displayName: 'Project X', type: 'collective', kind: 'collective', isPersonal: false },
   { profileId: 'second_studio', displayName: 'Tweede Studio', type: 'company', kind: 'company', isPersonal: false },
 ]);
 
 assert.equal(settingsWithMultipleExternal.externalProfiles.length, 4, 'Settings model keeps all external profiles as a list');
+assert.equal(getManagedProfileAvatar(settingsWithMultipleExternal.externalProfiles[0]), 'https://cdn.example/studio.jpg', 'Settings model exposes managed external profile avatar for Mijn profielen');
 assert.deepEqual(
   settingsWithMultipleExternal.externalProfiles.map((profile) => profile.profileId),
   ['studio_luna', 'nova_agency', 'project_x', 'second_studio'],
@@ -87,6 +89,11 @@ assert.deepEqual(
   'Settings action helper returns Actief for the active personal profile',
 );
 
+assert.equal(
+  getManagedProfileAvatar({ profileId: 'studio_luna', type: 'company', avatar: '  https://cdn.example/updated.jpg  ' }),
+  'https://cdn.example/updated.jpg',
+  'Settings model can surface the managed external profile avatar immediately after edits',
+);
 assert.equal(
   getManagedProfileBio({ profileId: 'studio_luna', type: 'company', bio: '  Studio voor campagnebeeld  ' }),
   'Studio voor campagnebeeld',

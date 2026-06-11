@@ -280,7 +280,7 @@ export const createManagedExternalProfile = async ({ type, displayName }) => {
 };
 
 
-export const updateManagedExternalProfile = async ({ profile, profileId, displayName, bio }) => {
+export const updateManagedExternalProfile = async ({ profile, profileId, displayName, bio, avatar, avatarBlob }) => {
   const authUser = await waitForAuthReady();
   if (!authUser?.uid) {
     throw new Error('Je moet ingelogd zijn om een profiel te bewerken.');
@@ -294,11 +294,17 @@ export const updateManagedExternalProfile = async ({ profile, profileId, display
     throw new Error('Je kunt alleen profielen bewerken die je zelf beheert.');
   }
 
+  const uploadedAvatar = avatarBlob instanceof Blob
+    ? await uploadManagedProfileAvatarBlob({ ownerUid: authUser.uid, profileId: normalizedProfileId, blob: avatarBlob })
+    : null;
+  const resolvedAvatar = uploadedAvatar || (avatar !== undefined ? avatar : profile?.avatar);
+
   const now = serverTimestamp();
   const payload = buildManagedExternalProfileUpdatePayload({
     profile,
     displayName,
     bio,
+    avatar: resolvedAvatar,
     timestamp: now,
   });
 
@@ -310,6 +316,7 @@ export const updateManagedExternalProfile = async ({ profile, profileId, display
     profileId: normalizedProfileId,
     displayName: payload.displayName,
     bio: payload.bio,
+    avatar: payload.avatar || '',
     updatedAt: payload.updatedAt,
   };
 };
@@ -793,6 +800,17 @@ const uploadProfileImageBlob = async (uid, blob, targetName) => {
     throw new Error('Profielfoto is te groot na verwerken. Kies een kleinere uitsnede en probeer opnieuw.');
   }
   const storageRef = ref(getFirebaseStorage(), `profileImages/${uid}/${targetName}`);
+  await uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg', cacheControl: 'public,max-age=3600' });
+  return getDownloadURL(storageRef);
+};
+
+
+const uploadManagedProfileAvatarBlob = async ({ ownerUid, profileId, blob }) => {
+  if (!(blob instanceof Blob)) return null;
+  if (blob.size > MAX_PROFILE_IMAGE_UPLOAD_BYTES) {
+    throw new Error('Profielfoto is te groot na verwerken. Kies een kleinere uitsnede en probeer opnieuw.');
+  }
+  const storageRef = ref(getFirebaseStorage(), `managedProfiles/${ownerUid}/${profileId}/avatar/avatar.jpg`);
   await uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg', cacheControl: 'public,max-age=3600' });
   return getDownloadURL(storageRef);
 };

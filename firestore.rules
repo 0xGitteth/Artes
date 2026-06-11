@@ -269,6 +269,7 @@ service cloud.firestore {
           'type',
           'displayName',
           'bio',
+          'avatar',
           'ownerUid',
           'status',
           'createdAt',
@@ -279,6 +280,7 @@ service cloud.firestore {
         && request.resource.data.displayName.size() > 0
         && request.resource.data.displayName.size() <= 120
         && (!('bio' in request.resource.data) || (request.resource.data.bio is string && request.resource.data.bio.size() <= 500))
+        && (!('avatar' in request.resource.data) || request.resource.data.avatar is string)
         && request.resource.data.ownerUid is string
         && request.resource.data.ownerUid.size() > 0
         && request.resource.data.status == 'active'
@@ -305,7 +307,7 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.type == resource.data.type
         && request.resource.data.status == resource.data.status
-        && changed.hasOnly(['displayName', 'bio', 'updatedAt'])
+        && changed.hasOnly(['displayName', 'bio', 'avatar', 'updatedAt'])
         && request.resource.data.updatedAt == request.time;
     }
 

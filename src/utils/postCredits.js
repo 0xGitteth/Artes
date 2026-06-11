@@ -125,16 +125,19 @@ export const getPostCreditRows = (post = {}) => {
     return [...fallbackAuthorCredit, ...credits].map((credit, index) => {
       const { roleLabel, secondaryLabel } = getCreditDisplayLabels(credit);
       const explicitCreditName = String(credit.name || credit.displayName || '').trim();
+      const creditIsAuthor = isAuthorCredit(credit);
+      const shouldUseExternalAuthorDisplay = hasExternalAuthorProfile && creditIsAuthor;
+      const creditDisplayName = getCreditName(credit, roleLabel);
 
       return {
         key: `${credit.uid || credit.userId || credit.profileId || credit.contributorId || credit.name || credit.displayName || normalizeRoleValue(credit.role) || 'credit'}-${index}`,
         role: normalizeRoleValue(credit.role, 'maker'),
         roleLabel,
         secondaryLabel,
-        name: getCreditName(credit, roleLabel),
+        name: shouldUseExternalAuthorDisplay ? (post.authorName || creditDisplayName) : creditDisplayName,
         uid: credit.uid || credit.userId || credit.profileId || null,
-        publicProfileId: credit.publicProfileId || credit.authorProfileId || (hasExternalAuthorProfile && isAuthorCredit(credit) ? authorProfileId : null),
-        ownerUid: credit.ownerUid || credit.authorOwnerUid || (hasExternalAuthorProfile && isAuthorCredit(credit) ? authorOwnerUid : null) || credit.uid || credit.userId || null,
+        publicProfileId: credit.publicProfileId || credit.authorProfileId || (shouldUseExternalAuthorDisplay ? authorProfileId : null),
+        ownerUid: credit.ownerUid || credit.authorOwnerUid || (shouldUseExternalAuthorDisplay ? authorOwnerUid : null) || credit.uid || credit.userId || null,
         contributorId: isAnonymousContributorCredit(credit) ? null : (credit.contributorId || null),
         isAnonymous: isAnonymousContributorCredit(credit),
         canOpenShadowByName: !credit.isLegacyAuthorFallback && Boolean(explicitCreditName),

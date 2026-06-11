@@ -7,6 +7,10 @@ import {
   getManagedProfileBio,
   getManagedProfileAvatar,
   getManagedProfilePrefillDisplayName,
+  getManagedProfileSetupActionLabel,
+  getManagedProfileSetupDescription,
+  getManagedProfileSetupStatusLabel,
+  getOwnerVisibleManagedProfileSetupProfiles,
   getManagedProfileTypeLabel,
   personalProfileHasOrganizationHints,
 } from '../src/utils/managedProfiles.js';
@@ -84,6 +88,50 @@ assert.equal(settingsWithLegacyCompanySetup.setupProfiles[0].source, 'legacyOrga
 assert.equal(settingsWithLegacyCompanySetup.setupProfiles[0].profileId, 'legacy_company_user_1', 'Settings model setup profile uses a temporary legacy id');
 assert.equal(settingsWithLegacyCompanySetup.externalProfiles.length, 0, 'Settings model keeps setup profiles separate from real externalProfiles');
 assert.equal(settingsWithLegacyCompanySetup.hasExternalProfiles, false, 'Settings model does not count setup profiles as real external profiles');
+
+assert.equal(getManagedProfileDisplayName(settingsWithLegacyCompanySetup.setupProfiles[0]), 'Studio Legacy', 'Setup profile with displayName uses displayName as its provisional name');
+assert.equal(getManagedProfileSetupStatusLabel(settingsWithLegacyCompanySetup.setupProfiles[0]), 'Nog niet openbaar', 'Setup profile exposes the non-public status badge copy');
+assert.equal(
+  getManagedProfileSetupDescription(settingsWithLegacyCompanySetup.setupProfiles[0]),
+  'Dit profiel is klaargezet op basis van je bestaande gegevens. Stel het in om het apart te beheren en ermee te publiceren.',
+  'Setup profile with company name receives the general existing-data overlay copy',
+);
+assert.equal(getManagedProfileSetupActionLabel(settingsWithLegacyCompanySetup.setupProfiles[0]), 'Bedrijfsprofiel instellen', 'Company setup profile receives the company setup action label');
+
+const roleOnlyCompanySetup = buildManagedProfilesSettingsModel([{ ...personalProfile, roles: ['company'], displayName: 'Personal Name' }]).setupProfiles[0];
+assert.equal(getManagedProfileDisplayName(roleOnlyCompanySetup), 'Bedrijfsprofiel', 'Setup profile without displayName uses fallbackLabel instead of the personal displayName');
+assert.equal(
+  getManagedProfileSetupDescription(roleOnlyCompanySetup),
+  'Je hebt eerder Bedrijf/Studio als rol gekozen. Stel dit profiel in om het apart te beheren en ermee te publiceren.',
+  'Role-only company setup profile receives Bedrijf/Studio copy',
+);
+const roleOnlyAgencySetup = buildManagedProfilesSettingsModel([{ ...personalProfile, roles: ['agency'], displayName: 'Personal Name' }]).setupProfiles[0];
+assert.equal(getManagedProfileDisplayName(roleOnlyAgencySetup), 'Agency', 'Role-only agency setup profile uses the agency fallbackLabel');
+assert.equal(
+  getManagedProfileSetupDescription(roleOnlyAgencySetup),
+  'Je hebt eerder Agency als rol gekozen. Stel dit profiel in om het apart te beheren en ermee te publiceren.',
+  'Role-only agency setup profile receives Agency copy',
+);
+assert.equal(getManagedProfileSetupActionLabel(roleOnlyAgencySetup), 'Agency instellen', 'Agency setup profile receives the agency action label');
+const roleOnlyCollectiveSetup = buildManagedProfilesSettingsModel([{ ...personalProfile, roles: ['collective'], displayName: 'Personal Name' }]).setupProfiles[0];
+assert.equal(getManagedProfileDisplayName(roleOnlyCollectiveSetup), 'Collectief', 'Role-only collective setup profile uses the collective fallbackLabel');
+assert.equal(
+  getManagedProfileSetupDescription(roleOnlyCollectiveSetup),
+  'Je hebt eerder Collectief als rol gekozen. Stel dit profiel in om het apart te beheren en ermee te publiceren.',
+  'Role-only collective setup profile receives Collectief copy',
+);
+assert.equal(getManagedProfileSetupActionLabel(roleOnlyCollectiveSetup), 'Collectief instellen', 'Collective setup profile receives the collective action label');
+assert.deepEqual(
+  getOwnerVisibleManagedProfileSetupProfiles({ setupProfiles: [roleOnlyCompanySetup], currentUserId: 'user_1', ownerUid: 'user_1' }).map((profile) => profile.profileId),
+  ['legacy_company_user_1'],
+  'Setup profile is visible to the owner',
+);
+assert.deepEqual(
+  getOwnerVisibleManagedProfileSetupProfiles({ setupProfiles: [roleOnlyCompanySetup], currentUserId: 'visitor_1', ownerUid: 'user_1' }),
+  [],
+  'Setup profile is hidden from visitors',
+);
+
 
 const settingsWithExistingCompany = buildManagedProfilesSettingsModel([
   { ...personalProfile, roles: ['company'], companyName: 'Studio Legacy' },

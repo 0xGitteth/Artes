@@ -798,6 +798,17 @@ assert.deepEqual(
   'Inactive refresh clears any stale seed profile',
 );
 
+const setupProfileForPublicRoute = buildLegacyOrganizationSetupProfiles({
+  personalProfile: { uid: 'user_123', roles: ['company'] },
+  managedProfiles: [],
+})[0];
+assert.equal(isManagedProfileSetupRequired(setupProfileForPublicRoute), true, 'Legacy setup profile remains marked setupRequired');
+assert.deepEqual(
+  resolvePublicExternalProfileLoadState({ profileId: setupProfileForPublicRoute.profileId, profile: setupProfileForPublicRoute }),
+  { loading: false, profile: null, error: 'inactive' },
+  'Setup profiles do not open as public external profile routes',
+);
+
 
 const legacySetupFor = (personalProfile, managedProfiles = []) => buildLegacyOrganizationSetupProfiles({
   personalProfile: { uid: 'legacy_user', ...personalProfile },

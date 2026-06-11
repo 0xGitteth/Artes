@@ -145,6 +145,8 @@ import {
   buildManagedProfilesSettingsModel,
   getBrowserStorage,
   getManagedProfileId,
+  buildManagedProfileSetupCreateDraft,
+  findManagedExternalProfileByType,
   buildManagedExternalProfileUpdateRequest,
   mergeManagedExternalProfileUpdate,
   deriveManagedProfiles,
@@ -1546,7 +1548,16 @@ export default function ArtesApp() {
     return () => { active = false; };
   }, [authReady, user, handleListenerError]);
 
-  const handleCreateManagedExternalProfile = useCallback(async ({ type, displayName }) => {
+  const handleCreateManagedExternalProfile = useCallback(async ({ type, displayName, setupProfile = null } = {}) => {
+    if (setupProfile) {
+      const existingProfile = findManagedExternalProfileByType(managedExternalProfiles, type);
+      if (existingProfile) {
+        setPendingManagedProfileSetup(null);
+        setRequestedActiveProfileId(getManagedProfileId(existingProfile));
+        return existingProfile;
+      }
+    }
+
     const createdProfile = await createManagedExternalProfile({ type, displayName });
     setManagedExternalProfiles((currentProfiles) => {
       const withoutDuplicate = (currentProfiles || []).filter((profile) => (
@@ -1554,8 +1565,12 @@ export default function ArtesApp() {
       ));
       return [...withoutDuplicate, createdProfile];
     });
+    if (setupProfile) {
+      setPendingManagedProfileSetup(null);
+      setRequestedActiveProfileId(createdProfile.profileId);
+    }
     return createdProfile;
-  }, []);
+  }, [managedExternalProfiles]);
 
 
   const handleUpdateManagedExternalProfile = useCallback(async ({ profile: managedProfile, displayName, bio, avatar, avatarBlob }) => {
@@ -12953,6 +12968,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
     const [createError, setCreateError] = useState('');
     const [createSuccess, setCreateSuccess] = useState('');
     const [createPending, setCreatePending] = useState(false);
+    const [createSetupProfile, setCreateSetupProfile] = useState(null);
     const [editingProfileId, setEditingProfileId] = useState('');
     const [editDisplayName, setEditDisplayName] = useState('');
     const [editBio, setEditBio] = useState('');
@@ -12964,6 +12980,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
 
     const openCreateFlow = () => {
       const prefillName = getManagedProfilePrefillDisplayName(personalProfile, createType);
+      setCreateSetupProfile(null);
       setCreateDisplayName((currentValue) => currentValue || prefillName);
       setCreateError('');
       setCreateSuccess('');
@@ -12971,9 +12988,10 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
     };
 
     const openSetupProfileCreateFlow = useCallback((setupProfile) => {
-      const setupType = setupProfile?.type || setupProfile?.kind || 'company';
-      setCreateType(setupType);
-      setCreateDisplayName(String(setupProfile?.displayName || '').trim());
+      const setupDraft = buildManagedProfileSetupCreateDraft(setupProfile);
+      setCreateSetupProfile(setupProfile || null);
+      setCreateType(setupDraft.type);
+      setCreateDisplayName(setupDraft.displayName);
       setCreateError('');
       setCreateSuccess('');
       setCreateFlowOpen(true);
@@ -12985,6 +13003,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
     }, [initialSetupProfile, openSetupProfileCreateFlow]);
 
     const handleCreateTypeChange = (nextType) => {
+      setCreateSetupProfile(null);
       setCreateType(nextType);
       setCreateError('');
       setCreateSuccess('');
@@ -13001,7 +13020,16 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
       const validation = validateManagedExternalProfileDraft({ type: createType, displayName: createDisplayName });
       if (!validation.ok) {
         setCreateDisplayName(validation.displayName);
-        setCreateError(validation.error);
+        setCreateError(validation.error === 'Vul een naam in voor dit profiel.' ? 'Vul eerst een naam in voor dit profiel.' : validation.error);
+        return;
+      }
+      const existingProfile = createSetupProfile ? findManagedExternalProfileByType(externalProfiles, validation.type) : null;
+      if (existingProfile) {
+        setCreateSetupProfile(null);
+        setCreateDisplayName('');
+        setCreateFlowOpen(false);
+        onSelectActiveProfile?.(existingProfile);
+        setCreateSuccess(`${getManagedProfileDisplayName(existingProfile)} bestaat al en staat bij je beheerde profielen.`);
         return;
       }
       if (typeof onCreateManagedProfile !== 'function') {
@@ -13014,9 +13042,12 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
         const createdProfile = await onCreateManagedProfile({
           type: validation.type,
           displayName: validation.displayName,
+          setupProfile: createSetupProfile,
         });
+        setCreateSetupProfile(null);
         setCreateDisplayName('');
         setCreateFlowOpen(false);
+        onSelectActiveProfile?.(createdProfile);
         setCreateSuccess(`${getManagedProfileDisplayName(createdProfile)} is toegevoegd aan Mijn profielen.`);
       } catch (error) {
         setCreateError(error?.message || 'Opslaan mislukt. Probeer het opnieuw.');
@@ -13371,12 +13402,12 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                         <form onSubmit={handleCreateSubmit} className="space-y-3 rounded-xl border border-blue-100 bg-white p-3 shadow-sm dark:border-blue-900/60 dark:bg-slate-900">
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <p className="text-sm font-bold text-slate-900 dark:text-white">Nieuw profiel toevoegen</p>
-                              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-300">Kies wat je wilt beheren als. Je kunt later nog meer profielen van hetzelfde type toevoegen.</p>
+                              <p className="text-sm font-bold text-slate-900 dark:text-white">{createSetupProfile ? `${PROFILE_TYPE_LABELS[createType] || 'Profiel'} instellen` : 'Nieuw profiel toevoegen'}</p>
+                              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-300">{createSetupProfile ? 'Controleer de vooringevulde gegevens en vul een naam in om dit klaargezette profiel op te slaan.' : 'Kies wat je wilt beheren als. Je kunt later nog meer profielen van hetzelfde type toevoegen.'}</p>
                             </div>
                             <button
                               type="button"
-                              onClick={() => { setCreateFlowOpen(false); setCreateError(''); }}
+                              onClick={() => { setCreateFlowOpen(false); setCreateError(''); setCreateSetupProfile(null); }}
                               disabled={createPending}
                               className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100"
                               aria-label="Sluit profiel toevoegen"
@@ -13415,7 +13446,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                             <button
                               type="button"
-                              onClick={() => { setCreateFlowOpen(false); setCreateError(''); }}
+                              onClick={() => { setCreateFlowOpen(false); setCreateError(''); setCreateSetupProfile(null); }}
                               disabled={createPending}
                               className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                             >

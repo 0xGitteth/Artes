@@ -6,6 +6,7 @@ import {
   buildManagedExternalProfileCreatePayload,
   buildManagedExternalProfileUpdatePayload,
   buildManagedExternalProfileUpdateRequest,
+  buildManagedProfileSetupCreateDraft,
   createManagedExternalProfileId,
   deriveManagedProfiles,
   getBrowserStorage,
@@ -17,6 +18,7 @@ import {
   getManagedProfileAvatar,
   getManagedProfileInitials,
   getManagedProfileHeaderSwipeDirection,
+  findManagedExternalProfileByType,
   getManagedProfileSwitcherActiveIndex,
   getNextManagedProfileForSwipe,
   hasManagedExternalProfileOfType,
@@ -567,6 +569,7 @@ assert.equal('managerUids' in createPayload, false, 'Create payload never writes
 assert.equal('email' in createPayload, false, 'Create payload never writes email');
 assert.equal('legalName' in createPayload, false, 'Create payload never writes legalName');
 assert.equal('private' in createPayload, false, 'Create payload never writes private nested data');
+assert.equal('didit' in createPayload, false, 'Create payload never writes Didit data');
 
 assert.equal(validateManagedExternalProfileDraft({ type: 'agency', displayName: '' }).ok, false, 'Empty displayName is rejected');
 assert.equal(validateManagedExternalProfileDraft({ type: 'agency', displayName: '   ' }).ok, false, 'Whitespace-only displayName is rejected');
@@ -852,6 +855,24 @@ assert.equal(roleOnlyAgencySetup[0].fallbackLabel, 'Agency', 'role only agency u
 const roleOnlyCollectiveSetup = legacySetupFor({ role: 'collective' });
 assert.equal(roleOnlyCollectiveSetup[0].displayName, '', 'role only collective without a name keeps displayName empty');
 assert.equal(roleOnlyCollectiveSetup[0].fallbackLabel, 'Collectief', 'role only collective uses Collectief as fallbackLabel');
+assert.equal(buildManagedProfileSetupCreateDraft(roleOnlyCompanySetup[0]).displayName, '', 'role only company setup submit draft requires the user to type a displayName');
+assert.equal(buildManagedProfileSetupCreateDraft(roleOnlyAgencySetup[0]).displayName, '', 'role only agency setup submit draft requires the user to type a displayName');
+assert.equal(buildManagedProfileSetupCreateDraft(roleOnlyCollectiveSetup[0]).displayName, '', 'role only collective setup submit draft requires the user to type a displayName');
+assert.deepEqual(
+  buildManagedProfileSetupCreateDraft(legacySetupFor({ linkedCompanyName: '  Setup Studio  ' })[0]),
+  { type: 'company', displayName: 'Setup Studio', fallbackLabel: 'Bedrijfsprofiel', setupProfile: legacySetupFor({ linkedCompanyName: '  Setup Studio  ' })[0] },
+  'setup profile with existing company displayName pre-fills the real create draft',
+);
+assert.equal(
+  findManagedExternalProfileByType([{ profileId: 'real_agency', type: 'agency', displayName: 'Real Agency', ownerUid: 'owner_user', status: 'active' }], 'agency')?.profileId,
+  'real_agency',
+  'duplicate setup create guard finds an existing real external profile of the same type',
+);
+assert.equal(
+  findManagedExternalProfileByType([{ ...roleOnlyAgencySetup[0], ownerUid: 'owner_user' }], 'agency'),
+  null,
+  'duplicate setup create guard ignores setup profiles so setup placeholders do not count as saved profiles',
+);
 
 assert.deepEqual(legacySetupTypesFor({ role: 'company' }), ['company'], 'user with role company gets setup company when no real company exists');
 assert.deepEqual(legacySetupTypesFor({ role: 'bedrijf' }), ['company'], 'user with role bedrijf gets setup company when no real company exists');

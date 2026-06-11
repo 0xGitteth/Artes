@@ -2,9 +2,12 @@ const normalizeId = (value) => String(value || '').trim();
 
 const EXTERNAL_PROFILE_TYPES = new Set(['company', 'agency', 'collective']);
 const ACTIVE_PROFILE_STATUS = 'active';
+const LEGACY_ORGANIZATION_SETUP_SOURCE = 'legacyOrganization';
 
 
 export const MANAGED_EXTERNAL_PROFILE_TYPES = ['company', 'agency', 'collective'];
+export const LEGACY_ORGANIZATION_PROFILE_TYPES = ['company', 'agency', 'collective'];
+export const LEGACY_ORGANIZATION_SETUP_PROFILE_SOURCE = LEGACY_ORGANIZATION_SETUP_SOURCE;
 export const MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH = 120;
 export const MAX_MANAGED_PROFILE_BIO_LENGTH = 500;
 export const ACTIVE_PROFILE_STORAGE_KEY = 'artes.activeProfileId';
@@ -98,7 +101,9 @@ export const getManagedProfilePrefillDisplayName = (profile = {}, type = 'compan
   const normalizedType = normalizeId(type);
   const fields = normalizedType === 'agency'
     ? ['linkedAgencyName', 'agencyName', 'businessName']
-    : ['linkedCompanyName', 'companyName', 'businessName'];
+    : normalizedType === 'collective'
+      ? ['collectiveName', 'collectiefName', 'businessName']
+      : ['linkedCompanyName', 'companyName', 'businessName'];
   const value = fields.map((field) => String(profile[field] || '').trim()).find(Boolean) || '';
   return value.slice(0, MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH);
 };
@@ -188,13 +193,20 @@ export const getManagedProfileDisplayName = (profile = {}) => {
   return displayName || 'Naamloos profiel';
 };
 
-const ORGANIZATION_ROLE_HINTS = new Set(['agency', 'company', 'bedrijf']);
+const ORGANIZATION_ROLE_HINTS = new Set(['agency', 'company', 'bedrijf', 'collective', 'collectief']);
+const ORGANIZATION_TYPE_ROLE_HINTS = {
+  company: ['company', 'bedrijf'],
+  agency: ['agency'],
+  collective: ['collective', 'collectief'],
+};
 const ORGANIZATION_NAME_HINT_FIELDS = [
   'linkedCompanyName',
   'linkedAgencyName',
   'companyName',
   'agencyName',
   'businessName',
+  'collectiveName',
+  'collectiefName',
 ];
 const ORGANIZATION_ID_HINT_FIELDS = [
   'linkedCompanyId',
@@ -206,6 +218,21 @@ const ORGANIZATION_STATUS_HINT_FIELDS = [
   'linkedCompanyStatus',
   'linkedAgencyStatus',
 ];
+const ORGANIZATION_TYPE_NAME_HINT_FIELDS = {
+  company: ['linkedCompanyName', 'companyName'],
+  agency: ['linkedAgencyName', 'agencyName'],
+  collective: ['collectiveName', 'collectiefName'],
+};
+const ORGANIZATION_TYPE_ID_HINT_FIELDS = {
+  company: ['linkedCompanyId', 'companyId'],
+  agency: ['linkedAgencyId', 'agencyId'],
+  collective: [],
+};
+const ORGANIZATION_TYPE_STATUS_HINT_FIELDS = {
+  company: ['linkedCompanyStatus'],
+  agency: ['linkedAgencyStatus'],
+  collective: [],
+};
 const POSITIVE_ORGANIZATION_STATUSES = new Set(['linked', 'approved', 'active', 'verified']);
 const NEUTRAL_ORGANIZATION_HINT_VALUES = new Set(['none', 'unlinked', 'rejected', 'empty', 'unknown', 'null', 'undefined']);
 
@@ -219,12 +246,105 @@ const collectRoleHints = (value) => {
   return [String(value).trim().toLowerCase()].filter(Boolean);
 };
 
+
+const roleHintMatches = (roleHint, expectedHint) => {
+  const role = String(roleHint || '').trim().toLowerCase();
+  const expected = String(expectedHint || '').trim().toLowerCase();
+  if (!role || !expected) return false;
+  if (role === expected) return true;
+  const tokens = role.split(/[^a-z0-9]+/i).filter(Boolean);
+  return tokens.includes(expected);
+};
+
+const roleHintsContain = (roleHints, expectedHints = []) => (
+  roleHints.some((roleHint) => expectedHints.some((expectedHint) => roleHintMatches(roleHint, expectedHint)))
+);
+
+const collectProfileRoleHints = (profile = {}) => (
+  [profile?.role, profile?.roles, profile?.primaryRole, profile?.profileRole]
+    .flatMap((entry) => collectRoleHints(entry))
+);
+
+const hasFilledField = (profile = {}, fields = []) => fields.some((field) => normalizeId(profile?.[field]));
+
+const hasPositiveIdField = (profile = {}, fields = []) => fields.some((field) => {
+  const value = normalizeId(profile?.[field]).toLowerCase();
+  return Boolean(value) && !NEUTRAL_ORGANIZATION_HINT_VALUES.has(value);
+});
+
+const hasPositiveStatusField = (profile = {}, fields = []) => fields.some((field) => (
+  POSITIVE_ORGANIZATION_STATUSES.has(normalizeId(profile?.[field]).toLowerCase())
+));
+
+const legacyOrganizationTypeHasHint = ({ profile = {}, roleHints = [], type = '' } = {}) => {
+  const normalizedType = normalizeId(type);
+  if (!EXTERNAL_PROFILE_TYPES.has(normalizedType)) return false;
+  if (roleHintsContain(roleHints, ORGANIZATION_TYPE_ROLE_HINTS[normalizedType])) return true;
+  if (hasFilledField(profile, ORGANIZATION_TYPE_NAME_HINT_FIELDS[normalizedType])) return true;
+  if (hasPositiveIdField(profile, ORGANIZATION_TYPE_ID_HINT_FIELDS[normalizedType])) return true;
+  if (hasPositiveStatusField(profile, ORGANIZATION_TYPE_STATUS_HINT_FIELDS[normalizedType])) return true;
+  return false;
+};
+
+export const collectLegacyOrganizationProfileHints = (profile = {}) => {
+  if (!profile || typeof profile !== 'object') return [];
+  const roleHints = collectProfileRoleHints(profile);
+  return LEGACY_ORGANIZATION_PROFILE_TYPES.filter((type) => (
+    legacyOrganizationTypeHasHint({ profile, roleHints, type })
+  ));
+};
+
+export const getLegacyOrganizationPrefillDisplayName = (profile = {}, type = 'company') => (
+  getManagedProfilePrefillDisplayName(profile, type)
+);
+
+export const hasManagedExternalProfileOfType = (managedProfiles = [], type = '') => {
+  const normalizedType = normalizeId(type);
+  if (!EXTERNAL_PROFILE_TYPES.has(normalizedType)) return false;
+  const profiles = Array.isArray(managedProfiles) ? managedProfiles : [];
+  return profiles.some((profile) => {
+    if (!profile || typeof profile !== 'object') return false;
+    if (profile.isSetupProfile || profile.setupRequired || profile.source === LEGACY_ORGANIZATION_SETUP_SOURCE) return false;
+    return isExternalManagedProfile(profile) && normalizeId(profile.type || profile.kind) === normalizedType;
+  });
+};
+
+export const isManagedProfileSetupRequired = (profile = {}) => Boolean(
+  profile?.isSetupProfile === true
+  && profile?.setupRequired === true
+  && profile?.source === LEGACY_ORGANIZATION_SETUP_SOURCE,
+);
+
+export const buildLegacyOrganizationSetupProfiles = ({ personalProfile = null, managedProfiles = [] } = {}) => {
+  if (!personalProfile || typeof personalProfile !== 'object') return [];
+  const ownerUid = normalizeId(personalProfile.uid || personalProfile.ownerUid || personalProfile.profileId || personalProfile.id);
+  if (!ownerUid) return [];
+
+  return collectLegacyOrganizationProfileHints(personalProfile).reduce((setupProfiles, type) => {
+    if (hasManagedExternalProfileOfType(managedProfiles, type)) return setupProfiles;
+    setupProfiles.push({
+      isSetupProfile: true,
+      setupRequired: true,
+      source: LEGACY_ORGANIZATION_SETUP_SOURCE,
+      type,
+      kind: type,
+      profileId: `legacy_${type}_${ownerUid}`,
+      id: `legacy_${type}_${ownerUid}`,
+      ownerUid,
+      status: 'setup',
+      displayName: getLegacyOrganizationPrefillDisplayName(personalProfile, type),
+      fallbackLabel: PROFILE_TYPE_LABELS[type],
+      isPersonal: false,
+    });
+    return setupProfiles;
+  }, []);
+};
+
 export const personalProfileHasOrganizationHints = (profile = {}) => {
   if (!profile || typeof profile !== 'object') return false;
 
-  const roleHints = [profile.role, profile.roles, profile.primaryRole, profile.profileRole]
-    .flatMap((entry) => collectRoleHints(entry));
-  if (roleHints.some((role) => ORGANIZATION_ROLE_HINTS.has(role))) return true;
+  const roleHints = collectProfileRoleHints(profile);
+  if (roleHintsContain(roleHints, Array.from(ORGANIZATION_ROLE_HINTS))) return true;
 
   const hasNameHint = ORGANIZATION_NAME_HINT_FIELDS.some((field) => normalizeId(profile[field]));
   if (hasNameHint) return true;
@@ -318,7 +438,8 @@ export const getManagedProfileSettingsAction = (profile = {}, activeProfile = {}
 export const buildManagedProfilesSettingsModel = (managedProfiles = [], activeProfile = null) => {
   const profiles = Array.isArray(managedProfiles) ? managedProfiles.filter(Boolean) : [];
   const personalProfile = profiles.find((candidate) => candidate?.isPersonal) || null;
-  const externalProfiles = profiles.filter((candidate) => !candidate?.isPersonal);
+  const externalProfiles = profiles.filter((candidate) => !candidate?.isPersonal && !isManagedProfileSetupRequired(candidate));
+  const setupProfiles = buildLegacyOrganizationSetupProfiles({ personalProfile, managedProfiles: externalProfiles });
 
   const decorateProfile = (profile) => {
     if (!profile) return null;
@@ -331,6 +452,7 @@ export const buildManagedProfilesSettingsModel = (managedProfiles = [], activePr
   return {
     personalProfile: decorateProfile(personalProfile),
     externalProfiles: externalProfiles.map(decorateProfile),
+    setupProfiles: setupProfiles.map(decorateProfile),
     hasExternalProfiles: externalProfiles.length > 0,
     hasPersonalOrganizationHints: personalProfileHasOrganizationHints(personalProfile),
   };

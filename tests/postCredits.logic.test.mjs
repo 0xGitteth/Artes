@@ -91,6 +91,42 @@ assert.equal(anonymousMaker.length, 1, 'anonymous maker credit renders one row')
 assert.equal(anonymousMaker[0].roleLabel, 'Fotograaf');
 assert.equal(anonymousMaker[0].name, 'Anonieme fotograaf');
 
+
+const externalManagedSelfCredit = getPostCreditRows({
+  authorId: 'owner_user',
+  authorUid: 'owner_user',
+  authorOwnerUid: 'owner_user',
+  authorProfileId: 'studio_profile',
+  authorName: 'Studio Profile',
+  authorRole: 'company',
+  credits: [
+    { role: 'photographer', name: 'Owner Personal', uid: 'owner_user', isSelf: true },
+    { role: 'model', name: 'Contributor Model', uid: 'model_user' },
+  ],
+});
+assert.equal(externalManagedSelfCredit[0].name, 'Studio Profile', 'external managed self author credit shows post.authorName');
+assert.equal(externalManagedSelfCredit[0].publicProfileId, 'studio_profile', 'external managed self author credit keeps authorProfileId as click target');
+assert.equal(externalManagedSelfCredit[0].ownerUid, 'owner_user', 'external managed self author credit keeps owner uid');
+assert.equal(externalManagedSelfCredit[1].name, 'Contributor Model', 'external post contributor credit keeps contributor name');
+assert.equal(externalManagedSelfCredit[1].publicProfileId, null, 'external post contributor credit does not inherit authorProfileId');
+
+const externalManagedSelfCreditWithoutAuthorName = getPostCreditRows({
+  authorId: 'owner_user',
+  authorOwnerUid: 'owner_user',
+  authorProfileId: 'studio_profile',
+  credits: [{ role: 'photographer', name: 'Owner Personal', uid: 'owner_user', isSelf: true }],
+});
+assert.equal(externalManagedSelfCreditWithoutAuthorName[0].name, 'Owner Personal', 'external managed self author credit falls back to credit name when post.authorName is missing');
+
+const personalManagedSelfCredit = getPostCreditRows({
+  authorId: 'owner_user',
+  authorOwnerUid: 'owner_user',
+  authorProfileId: 'owner_user',
+  authorName: 'Personal Author',
+  credits: [{ role: 'photographer', name: 'Owner Personal', uid: 'owner_user', isSelf: true }],
+});
+assert.equal(personalManagedSelfCredit[0].name, 'Owner Personal', 'personal self author credit keeps original credit name');
+
 const legacyFallback = getPostCreditRows({ authorId: 'legacy_author', authorName: 'Legacy Name', authorRole: 'photographer' });
 assert.equal(legacyFallback.length, 1, 'legacy post without structured credits renders fallback row');
 assert.equal(legacyFallback[0].roleLabel, 'Fotograaf');

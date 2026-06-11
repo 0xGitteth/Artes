@@ -138,18 +138,23 @@ import { resolvePublicDisplayName } from './utils/publicIdentity';
 import {
   MANAGED_EXTERNAL_PROFILE_TYPES,
   MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH,
+  EXTERNAL_PROFILE_VIEW_PREFIX,
   PROFILE_TYPE_LABELS,
   buildManagedProfilesSettingsModel,
   getBrowserStorage,
   getManagedProfileId,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
+  getExternalProfileIdFromView,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfilePrefillDisplayName,
   getManagedProfileSwitcherActiveIndex,
   getManagedProfileSwitcherProfiles,
   getManagedProfileTypeLabel,
   getNextManagedProfileForSwipe,
+  isPublicManagedExternalProfileVisible,
+  resolveAuthorQuickProfileTarget,
+  resolvePublicExternalProfileLoadState,
   getPreviousManagedProfileForSwipe,
   resolvePostAuthorDisplayNameFromProfiles,
   normalizeRequestedActiveProfileId,
@@ -844,7 +849,7 @@ export default function ArtesApp() {
   const [uploadContext, setUploadContext] = useState({ isChallenge: false });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
-  const [quickProfileId, setQuickProfileId] = useState(null);
+  const [quickProfileTarget, setQuickProfileTarget] = useState(null);
   const [selectedPost, setSelectedPost] = useState(null);
   const [moodboardSavePost, setMoodboardSavePost] = useState(null);
   const [shadowProfile, setShadowProfile] = useState(null);
@@ -1588,6 +1593,50 @@ export default function ArtesApp() {
 
     return () => { active = false; };
   }, [authReady, posts, user]);
+
+
+  const handleOpenQuickProfile = useCallback((target, meta = {}) => {
+    if (target && typeof target === 'object') {
+      setQuickProfileTarget(target);
+      return;
+    }
+
+    const publicProfileId = String(meta?.publicProfileId || '').trim();
+    const ownerUid = String(meta?.ownerUid || target || '').trim();
+    const post = meta?.post || null;
+    if (publicProfileId && ownerUid && publicProfileId !== ownerUid) {
+      const cachedExternalProfile = postAuthorProfilesById?.[publicProfileId] || null;
+      if (!cachedExternalProfile) {
+        setQuickProfileTarget({ kind: 'external', profileId: publicProfileId, ownerUid });
+        return;
+      }
+
+      const resolvedTarget = resolveAuthorQuickProfileTarget({
+        post: post || { authorProfileId: publicProfileId, authorOwnerUid: ownerUid },
+        profilesById: postAuthorProfilesById,
+        viewerUid: user?.uid,
+      });
+      if (resolvedTarget.kind === 'external') {
+        setQuickProfileTarget(resolvedTarget);
+        return;
+      }
+      if (resolvedTarget.kind === 'externalUnavailable') {
+        setQuickProfileTarget({
+          kind: 'external',
+          profileId: resolvedTarget.profileId,
+          ownerUid: resolvedTarget.ownerUid,
+        });
+        return;
+      }
+      if (resolvedTarget.userId) {
+        setQuickProfileTarget({ kind: 'personal', userId: resolvedTarget.userId });
+        return;
+      }
+    }
+
+    const userId = String(target || '').trim();
+    if (userId) setQuickProfileTarget({ kind: 'personal', userId });
+  }, [postAuthorProfilesById, user?.uid]);
 
   const postsWithResolvedAuthors = useMemo(() => (posts || []).map((post) => ({
     ...post,
@@ -2554,7 +2603,7 @@ export default function ArtesApp() {
             <Gallery 
               posts={galleryPosts} 
               users={users}
-              onUserClick={setQuickProfileId}
+              onUserClick={handleOpenQuickProfile}
               onShadowClick={setShadowProfile}
               onPostClick={handleOpenPost}
               onChallengeClick={() => setView('challenge_timeline')}
@@ -2598,7 +2647,7 @@ export default function ArtesApp() {
               posts={postsWithResolvedAuthors}
               profile={profile}
               currentUserId={authUser?.uid}
-              onUserClick={setQuickProfileId}
+              onUserClick={handleOpenQuickProfile}
               onPostClick={handleOpenPost}
               setView={setView}
               revealedSensitivePostsById={revealedSensitivePostsById}
@@ -2697,6 +2746,19 @@ export default function ArtesApp() {
             />
           )}
           
+          {!profileLoading && view.startsWith(EXTERNAL_PROFILE_VIEW_PREFIX) && (
+            <PublicExternalProfile
+              profileId={getExternalProfileIdFromView(view)}
+              seedProfile={postAuthorProfilesById[getExternalProfileIdFromView(view)]}
+              currentUserId={user?.uid}
+              posts={postsWithResolvedAuthors}
+              onPostClick={handleOpenPost}
+              triggerVisibility={profile?.preferences?.triggerVisibility || normalizeTriggerPreferences()}
+              revealedSensitivePostsById={revealedSensitivePostsById}
+              onRevealSensitivePost={handleRevealSensitivePost}
+            />
+          )}
+
           {!profileLoading && view.startsWith('profile_') && (
             <FetchedProfile 
                userId={view.split('_')[1]} 
@@ -2774,7 +2836,7 @@ export default function ArtesApp() {
             user={user}
             posts={posts}
             users={users}
-            onOpenQuickProfile={() => setQuickProfileId(user?.uid || null)}
+            onOpenQuickProfile={() => handleOpenQuickProfile(user?.uid || null)}
             onProfileUpdated={(nextProfile) => {
               setProfile(nextProfile);
               setUsers((prev) => (Array.isArray(prev)
@@ -2859,13 +2921,28 @@ export default function ArtesApp() {
           </div>
         )}
         
-        {quickProfileId && (
-          <UserPreviewModal
-            userId={quickProfileId}
-            onClose={() => setQuickProfileId(null)}
+        {quickProfileTarget && (
+          quickProfileTarget.kind === 'external' ? (
+          <ExternalProfilePreviewModal
+            profileId={quickProfileTarget.profileId}
+            seedProfile={quickProfileTarget.profile}
+            ownerUid={quickProfileTarget.ownerUid}
+            onClose={() => setQuickProfileTarget(null)}
             onFullProfile={() => {
-              const profileId = quickProfileId;
-              setQuickProfileId(null);
+              const profileId = quickProfileTarget.profileId;
+              setQuickProfileTarget(null);
+              setSelectedPost(null);
+              setView(`${EXTERNAL_PROFILE_VIEW_PREFIX}${profileId}`);
+            }}
+            currentUserId={user?.uid}
+          />
+          ) : (
+          <UserPreviewModal
+            userId={quickProfileTarget.userId}
+            onClose={() => setQuickProfileTarget(null)}
+            onFullProfile={() => {
+              const profileId = quickProfileTarget.userId;
+              setQuickProfileTarget(null);
               setSelectedPost(null);
               setView(`profile_${profileId}`);
             }}
@@ -2877,6 +2954,7 @@ export default function ArtesApp() {
             revealedSensitivePostsById={revealedSensitivePostsById}
             onRevealSensitivePost={handleRevealSensitivePost}
           />
+          )
         )}
         {selectedPost && (
           <PhotoDetailModal
@@ -2887,7 +2965,7 @@ export default function ArtesApp() {
             currentPublicProfile={currentPublicProfile}
             moderationApiBase={moderationApiBase}
             onChallengeClick={() => setView('challenge_timeline')}
-            onUserClick={setQuickProfileId}
+            onUserClick={handleOpenQuickProfile}
             onShadowClick={setShadowProfile}
             contentPreference={getPostContentPreference(selectedPost, galleryTriggerVisibility)}
             shouldCover={shouldCoverPost(selectedPost, galleryTriggerVisibility, revealedSensitivePostsById)}
@@ -10628,6 +10706,185 @@ function FetchedProfile({ userId, posts, onPostClick, allUsers, setView, current
   if (!fetchedUser) return <div>Loading...</div>;
   return <ImmersiveProfile profile={fetchedUser} isOwn={false} posts={getProfileVisiblePosts(posts, userId, fetchedUser?.contributorId)} allPostsForMoodboards={posts} onPostClick={onPostClick} allUsers={allUsers} onLinkedProfileClick={(uid) => setView(`profile_${uid}`)} onChallengeClick={() => setView('challenge_timeline')} triggerVisibility={triggerVisibility} currentUserId={currentUserId} isFan={isFan} fanBusy={fanBusy} fanError={fanError} onToggleFan={onToggleFan} revealedSensitivePostsById={revealedSensitivePostsById} onRevealSensitivePost={onRevealSensitivePost} />;
 }
+
+function ExternalProfileUnavailable({ title = 'Profiel niet beschikbaar', message = 'Dit profiel kan niet publiek worden getoond.' }) {
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-10">
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" />
+        <h1 className="text-xl font-bold text-slate-900 dark:text-white">{title}</h1>
+        <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">{message}</p>
+      </div>
+    </div>
+  );
+}
+
+function usePublicExternalProfile(profileId, seedProfile, currentUserId) {
+  const [profileState, setProfileState] = useState(() => ({ loading: !seedProfile, profile: seedProfile || null, error: '' }));
+
+  useEffect(() => {
+    let active = true;
+    const normalizedProfileId = String(profileId || '').trim();
+    setProfileState({ loading: !seedProfile, profile: seedProfile || null, error: '' });
+    if (!normalizedProfileId) {
+      setProfileState({ loading: false, profile: null, error: 'missing-id' });
+      return () => { active = false; };
+    }
+
+    const seedIsVisible = seedProfile && isPublicManagedExternalProfileVisible({ profile: seedProfile, viewerUid: currentUserId });
+    if (seedIsVisible) {
+      setProfileState(resolvePublicExternalProfileLoadState({
+        profileId: normalizedProfileId,
+        profile: seedProfile,
+      }));
+    }
+
+    const db = getFirebaseDbInstance();
+    getDoc(doc(db, 'profiles', normalizedProfileId))
+      .then((snap) => {
+        if (!active) return;
+        if (!snap.exists()) {
+          setProfileState(resolvePublicExternalProfileLoadState({ profileId: normalizedProfileId, profile: null, error: 'missing' }));
+          return;
+        }
+        setProfileState(resolvePublicExternalProfileLoadState({
+          profileId: snap.id,
+          profile: snap.data(),
+          error: 'inactive',
+        }));
+      })
+      .catch((error) => {
+        console.warn('[external-profile] load failed', normalizedProfileId, error?.code || error?.message || error);
+        if (!active) return;
+        setProfileState(resolvePublicExternalProfileLoadState({
+          profileId: normalizedProfileId,
+          profile: null,
+          error: 'load-failed',
+        }));
+      });
+
+    return () => { active = false; };
+  }, [currentUserId, profileId, seedProfile]);
+
+  return profileState;
+}
+
+function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose, onFullProfile, currentUserId }) {
+  const { loading, profile: externalProfile } = usePublicExternalProfile(profileId, seedProfile, currentUserId);
+  const isOwnerViewing = Boolean(ownerUid && currentUserId && ownerUid === currentUserId);
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-2 md:p-6">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl dark:bg-slate-900 md:rounded-3xl">
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+          <p className="text-slate-600 dark:text-slate-300">Profiel laden...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!externalProfile) {
+    return (
+      <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-2 md:p-6">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl dark:bg-slate-900 md:rounded-3xl">
+          <button onClick={onClose} className="ml-auto flex h-9 w-9 items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Sluiten"><X className="h-5 w-5" /></button>
+          <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" />
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Profiel niet beschikbaar</h2>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">Dit profiel is niet publiek beschikbaar.</p>
+          {isOwnerViewing ? (
+            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">Je bekijkt dit als eigenaar van dit profiel.</p>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+
+  const displayName = getManagedProfileDisplayName(externalProfile);
+  const typeLabel = getManagedProfileTypeLabel(externalProfile);
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-2 md:p-6">
+      <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl dark:bg-slate-900 md:rounded-[28px]">
+        <div className="relative shrink-0 bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-950 p-6 text-white md:p-8">
+          <button onClick={onClose} className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/40 backdrop-blur hover:bg-black/60" aria-label="Sluiten"><X className="h-5 w-5" /></button>
+          <span className="mb-4 inline-flex rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur">{typeLabel}</span>
+          <h2 className="break-words text-3xl font-bold leading-tight md:text-4xl">{displayName}</h2>
+        </div>
+        <div className="space-y-5 overflow-y-auto p-5 md:p-8">
+          {externalProfile.bio ? (
+            <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-200">{externalProfile.bio}</p>
+          ) : (
+            <div className="rounded-2xl bg-slate-50 p-5 text-center text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
+              Dit profiel heeft nog geen bio, content of extra informatie om te tonen.
+            </div>
+          )}
+          <Button onClick={onFullProfile} className="w-full">
+            Bekijk volledig profiel <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PublicExternalProfile({ profileId, seedProfile, currentUserId, posts = [], onPostClick, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
+  const { loading, profile: externalProfile, error } = usePublicExternalProfile(profileId, seedProfile, currentUserId);
+  const visiblePosts = useMemo(() => (posts || [])
+    .filter((post) => String(post?.authorProfileId || '').trim() === String(profileId || '').trim())
+    .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'), [posts, profileId, triggerVisibility]);
+
+  if (loading) return <div className="mx-auto max-w-2xl px-4 py-10 text-sm text-slate-500 dark:text-slate-300">Profiel laden...</div>;
+  if (!externalProfile) {
+    return <ExternalProfileUnavailable message={error === 'inactive' ? 'Dit profiel is niet actief en wordt niet publiek getoond.' : 'Dit profiel ontbreekt of kon niet veilig worden geladen.'} />;
+  }
+
+  const displayName = getManagedProfileDisplayName(externalProfile);
+  const typeLabel = getManagedProfileTypeLabel(externalProfile);
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8 md:px-6">
+      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div className="bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-950 p-8 text-white md:p-12">
+          <span className="mb-4 inline-flex rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur">{typeLabel}</span>
+          <h1 className="break-words text-4xl font-black leading-tight md:text-6xl">{displayName}</h1>
+        </div>
+        <div className="space-y-8 p-5 md:p-8">
+          {externalProfile.bio ? (
+            <p className="max-w-3xl text-sm leading-relaxed text-slate-700 dark:text-slate-200 md:text-base">{externalProfile.bio}</p>
+          ) : (
+            <div className="rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
+              Dit profiel heeft nog geen bio, content of extra informatie om te tonen.
+            </div>
+          )}
+          <div>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Profiel</p>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Publicaties</h2>
+              </div>
+              <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{visiblePosts.length} totaal</span>
+            </div>
+            {visiblePosts.length ? (
+              <AdaptivePhotoGrid
+                posts={visiblePosts}
+                onPostClick={onPostClick}
+                getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
+                renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
+              />
+            ) : (
+              <div className="rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
+                Er zijn nog geen publicaties voor dit profiel.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, currentUserId, currentProfile, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
   const targetSeedProfile = useMemo(
     () => resolveProfileFromCollections({ userId, allUsers, currentUserId, currentProfile }),

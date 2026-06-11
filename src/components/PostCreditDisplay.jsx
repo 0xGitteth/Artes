@@ -23,7 +23,7 @@ export default function PostCreditDisplay({
       {rows.map((row) => {
         const canOpenUser = Boolean(
           !row.isAnonymous
-            && row.uid
+            && (row.uid || row.publicProfileId)
             && onUserClick,
         );
         const canOpenShadow = Boolean(
@@ -41,7 +41,12 @@ export default function PostCreditDisplay({
             className={`${itemClassName} ${isClickable ? '' : 'cursor-default'}`}
             onClick={isClickable ? () => {
               if (canOpenUser) {
-                onUserClick(row.uid);
+                onUserClick(row.uid || row.publicProfileId, {
+                  publicProfileId: row.publicProfileId || null,
+                  ownerUid: row.ownerUid || row.uid || null,
+                  row,
+                  post,
+                });
                 return;
               }
               onShadowClick({

@@ -93,19 +93,31 @@ const getCreditDisplayLabels = (credit = {}) => {
 
 export const getPostCreditRows = (post = {}) => {
   const credits = Array.isArray(post.credits) ? post.credits.filter(hasStructuredCredit) : [];
+  const authorOwnerUid = String(post.authorOwnerUid || post.authorUid || post.authorId || '').trim();
+  const authorProfileId = String(post.authorProfileId || '').trim();
+  const hasExternalAuthorProfile = Boolean(authorOwnerUid && authorProfileId && authorProfileId !== authorOwnerUid);
+  const isAuthorCredit = (credit = {}) => {
+    const creditUid = String(credit.uid || credit.userId || '').trim();
+    const creditName = String(credit.name || credit.displayName || '').trim();
+    const authorName = String(post.authorName || '').trim();
+    return Boolean(
+      credit?.isSelf
+        || (authorOwnerUid && creditUid === authorOwnerUid)
+        || (post.authorId && creditUid === String(post.authorId).trim())
+        || (authorName && creditName === authorName),
+    );
+  };
 
   if (credits.length > 0) {
-    const hasAuthorCredit = credits.some((credit) => Boolean(
-      credit?.isSelf
-        || (post.authorId && credit?.uid === post.authorId)
-        || (post.authorName && credit?.name === post.authorName),
-    ));
+    const hasAuthorCredit = credits.some(isAuthorCredit);
 
     const fallbackAuthorCredit = !hasAuthorCredit && (post.authorName || post.authorId)
       ? [{
         role: normalizeRoleValue(post.authorRole, 'maker'),
         name: post.authorName || 'Onbekend',
-        uid: post.authorId || null,
+        uid: authorOwnerUid || post.authorId || null,
+        publicProfileId: hasExternalAuthorProfile ? authorProfileId : null,
+        ownerUid: authorOwnerUid || post.authorId || null,
         isLegacyAuthorFallback: true,
       }]
       : [];
@@ -113,14 +125,19 @@ export const getPostCreditRows = (post = {}) => {
     return [...fallbackAuthorCredit, ...credits].map((credit, index) => {
       const { roleLabel, secondaryLabel } = getCreditDisplayLabels(credit);
       const explicitCreditName = String(credit.name || credit.displayName || '').trim();
+      const creditIsAuthor = isAuthorCredit(credit);
+      const shouldUseExternalAuthorDisplay = hasExternalAuthorProfile && creditIsAuthor;
+      const creditDisplayName = getCreditName(credit, roleLabel);
 
       return {
         key: `${credit.uid || credit.userId || credit.profileId || credit.contributorId || credit.name || credit.displayName || normalizeRoleValue(credit.role) || 'credit'}-${index}`,
         role: normalizeRoleValue(credit.role, 'maker'),
         roleLabel,
         secondaryLabel,
-        name: getCreditName(credit, roleLabel),
+        name: shouldUseExternalAuthorDisplay ? (post.authorName || creditDisplayName) : creditDisplayName,
         uid: credit.uid || credit.userId || credit.profileId || null,
+        publicProfileId: credit.publicProfileId || credit.authorProfileId || (shouldUseExternalAuthorDisplay ? authorProfileId : null),
+        ownerUid: credit.ownerUid || credit.authorOwnerUid || (shouldUseExternalAuthorDisplay ? authorOwnerUid : null) || credit.uid || credit.userId || null,
         contributorId: isAnonymousContributorCredit(credit) ? null : (credit.contributorId || null),
         isAnonymous: isAnonymousContributorCredit(credit),
         canOpenShadowByName: !credit.isLegacyAuthorFallback && Boolean(explicitCreditName),
@@ -140,7 +157,9 @@ export const getPostCreditRows = (post = {}) => {
       roleLabel: getRoleLabel(fallbackRole),
       secondaryLabel: fallbackSecondaryLabel,
       name: post.authorName || 'Onbekend',
-      uid: post.authorId || null,
+      uid: authorOwnerUid || post.authorId || null,
+      publicProfileId: hasExternalAuthorProfile ? authorProfileId : null,
+      ownerUid: authorOwnerUid || post.authorId || null,
       contributorId: null,
       isAnonymous: false,
       canOpenShadowByName: false,

@@ -4388,7 +4388,7 @@ function Gallery({ posts, users, onUserClick, profile, onChallengeClick, onPostC
       {showTimelineEmptyState ? (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-center md:rounded-3xl md:p-6">
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
-            Je volgt nog niemand of er zijn nog geen posts van makers die je volgt.
+            Nog geen publicaties om te tonen. Volg makers of kijk later opnieuw wanneer er meer werk is geplaatst.
           </p>
           <Button variant="secondary" onClick={onOpenDiscover}>
             Ontdek makers
@@ -5550,8 +5550,8 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                  renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
                  itemClassName="rounded-sm"
                />
-               {eligiblePortfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen posts.</p>}
-               {showPortfolioTabs && portfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Geen posts binnen deze rol.</p>}
+               {eligiblePortfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen publicaties. Zodra hier werk wordt geplaatst, verschijnt het op dit profiel.</p>}
+               {showPortfolioTabs && portfolioPosts.length === 0 && <p className="text-center text-slate-500 py-10">Nog geen publicaties binnen deze rol.</p>}
              </>
            )}
         </div>
@@ -10840,7 +10840,7 @@ function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose
             <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-200">{profileBio}</p>
           ) : (
             <div className="rounded-2xl bg-slate-50 p-5 text-center text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
-              Dit profiel heeft nog geen bio, content of extra informatie om te tonen.
+              Nog geen omschrijving toegevoegd.
             </div>
           )}
           <Button onClick={onFullProfile} className="w-full">
@@ -10879,7 +10879,7 @@ function PublicExternalProfile({ profileId, seedProfile, currentUserId, posts = 
             <p className="max-w-3xl text-sm leading-relaxed text-slate-700 dark:text-slate-200 md:text-base">{profileBio}</p>
           ) : (
             <div className="rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
-              Dit profiel heeft nog geen bio, content of extra informatie om te tonen.
+              Nog geen omschrijving toegevoegd.
             </div>
           )}
           <div>
@@ -10899,7 +10899,7 @@ function PublicExternalProfile({ profileId, seedProfile, currentUserId, posts = 
               />
             ) : (
               <div className="rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
-                Er zijn nog geen publicaties voor dit profiel.
+                Nog geen publicaties vanuit dit profiel.
               </div>
             )}
           </div>
@@ -11156,7 +11156,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
               />
             ) : (
               <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-300">
-                Nog geen posts om te tonen.
+                Nog geen publicaties om te tonen. Zodra hier werk wordt geplaatst, verschijnt het op dit profiel.
               </div>
             )}
           </div>
@@ -12984,6 +12984,18 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                   <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"><X/></button>
                 </div>
                 <div className="space-y-2.5 md:space-y-4">
+                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm leading-relaxed text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
+                      <p className="font-bold">Artes is nog in ontwikkeling</p>
+                      <p className="mt-1">Je test nu een vroege versie van Artes. Sommige onderdelen kunnen nog veranderen of tijdelijk niet helemaal goed werken.</p>
+                      <p className="mt-1">Loop je ergens tegenaan of mis je iets? Laat het weten via support.</p>
+                      <button
+                        type="button"
+                        onClick={onOpenSupport}
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700 underline-offset-2 hover:underline dark:text-blue-200"
+                      >
+                        Feedback geven via support <ArrowRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                     <h4 className="text-xs uppercase font-bold text-slate-400">Account</h4>
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Meldingen</span><Bell className="w-4 h-4"/></div>
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Privacy</span><Lock className="w-4 h-4"/></div>
@@ -13020,7 +13032,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                       )}
                       {hasPersonalOrganizationHints && (
                         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
-                          Je persoonlijke profiel bevat nu bedrijfs of agency informatie. Binnen Artes worden persoonlijke profielen en bedrijfsprofielen voortaan apart beheerd. Je persoonlijke account blijft bestaan. Daarnaast kun je straks één of meer bedrijfsprofielen, agencyprofielen of collectieven instellen die je met hetzelfde account beheert.
+                          Je persoonlijke profiel bevat organisatie-informatie. Binnen Artes worden persoonlijke profielen en Bedrijfsprofielen, Agencies en Collectieven apart beheerd. Je persoonlijke Profiel blijft bestaan.
                         </div>
                       )}
                       <div className="space-y-2 pt-1">
@@ -13046,7 +13058,9 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                                         <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>
                                         {externalBio ? (
                                           <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500 dark:text-slate-300">{externalBio}</p>
-                                        ) : null}
+                                        ) : (
+                                          <p className="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">Nog geen omschrijving toegevoegd.</p>
+                                        )}
                                       </div>
                                     </div>
                                     <div className="flex flex-wrap justify-end gap-2">
@@ -13119,8 +13133,8 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                             })}
                           </div>
                         ) : (
-                          <p className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-                            Je beheert nog geen bedrijfsprofielen, agencyprofielen of collectieven.
+                          <p className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-3 text-sm leading-relaxed text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+                            Je beheert nog geen Bedrijfsprofiel, Agency of Collectief.
                           </p>
                         )}
                       </div>

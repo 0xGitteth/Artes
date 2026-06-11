@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Mail, MessageCircle } from 'lucide-react';
+import { Copy, Info, Mail, MessageCircle } from 'lucide-react';
 
 export default function SupportLanding({ onOpenChat, canOpenChat }) {
   const [copyState, setCopyState] = useState('idle');
@@ -20,17 +20,27 @@ export default function SupportLanding({ onOpenChat, canOpenChat }) {
       <div className="space-y-2">
         <h1 className="text-3xl font-bold dark:text-white">Support</h1>
         <p className="text-slate-600 dark:text-slate-400">
-          Je kunt contact opnemen met Artes via chat of e-mail. We reageren binnen 3 werkdagen.
+          Je kunt contact opnemen met Artes via chat of e-mail. Feedback tijdens de testfase is welkom; we reageren binnen 3 werkdagen.
+        </p>
+      </div>
+
+      <div className="rounded-3xl border border-blue-100 bg-blue-50 p-6 text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
+        <div className="flex items-center gap-2">
+          <Info className="w-5 h-5 text-blue-600 dark:text-blue-300" />
+          <h2 className="text-xl font-semibold">Feedback tijdens de testfase</h2>
+        </div>
+        <p className="mt-3 text-sm leading-relaxed">
+          Artes is nog in ontwikkeling. Gebruik support gerust om feedback, bugs of onduidelijke dingen door te geven.
         </p>
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
         <div className="flex items-center gap-2">
           <MessageCircle className="w-5 h-5 text-blue-600" />
-          <h2 className="text-xl font-semibold dark:text-white">Chat met Artes Moderatie</h2>
+          <h2 className="text-xl font-semibold dark:text-white">Feedback en support</h2>
         </div>
         <p className="text-sm text-slate-600 dark:text-slate-400">
-          Om spam te voorkomen kun je maximaal 1 bericht sturen totdat wij reageren.
+          Deel je feedback, bug of vraag via de support chat. Om spam te voorkomen kun je maximaal 1 bericht sturen totdat wij reageren.
         </p>
         <button
           type="button"

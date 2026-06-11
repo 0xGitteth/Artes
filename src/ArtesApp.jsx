@@ -145,9 +145,13 @@ import {
   buildManagedProfilesSettingsModel,
   getBrowserStorage,
   getManagedProfileId,
+  buildManagedExternalProfileUpdateRequest,
+  mergeManagedExternalProfileUpdate,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
   getManagedProfileBio,
+  getManagedProfileAvatar,
+  getManagedProfileInitials,
   getExternalProfileIdFromView,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfilePrefillDisplayName,
@@ -1548,12 +1552,15 @@ export default function ArtesApp() {
   }, []);
 
 
-  const handleUpdateManagedExternalProfile = useCallback(async ({ profile: managedProfile, displayName, bio }) => {
-    const updatedProfile = await updateManagedExternalProfile({ profile: managedProfile, displayName, bio });
-    setManagedExternalProfiles((currentProfiles) => (currentProfiles || []).map((profile) => {
-      const profileId = getManagedProfileId(profile);
-      return profileId === updatedProfile.profileId ? { ...profile, ...updatedProfile } : profile;
+  const handleUpdateManagedExternalProfile = useCallback(async ({ profile: managedProfile, displayName, bio, avatar, avatarBlob }) => {
+    const updatedProfile = await updateManagedExternalProfile(buildManagedExternalProfileUpdateRequest({
+      profile: managedProfile,
+      displayName,
+      bio,
+      avatar,
+      avatarBlob,
     }));
+    setManagedExternalProfiles((currentProfiles) => mergeManagedExternalProfileUpdate(currentProfiles, updatedProfile));
     setPostAuthorProfilesById((currentProfilesById) => ({
       ...(currentProfilesById || {}),
       [updatedProfile.profileId]: {
@@ -10832,8 +10839,13 @@ function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose
       <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl dark:bg-slate-900 md:rounded-[28px]">
         <div className="relative shrink-0 bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-950 p-6 text-white md:p-8">
           <button onClick={onClose} className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/40 backdrop-blur hover:bg-black/60" aria-label="Sluiten"><X className="h-5 w-5" /></button>
-          <span className="mb-4 inline-flex rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur">{typeLabel}</span>
-          <h2 className="break-words text-3xl font-bold leading-tight md:text-4xl">{displayName}</h2>
+          <div className="mb-4 flex items-center gap-4 pr-10">
+            <ManagedProfileAvatar profile={externalProfile} sizeClass="h-16 w-16" className="ring-4 ring-white/25" />
+            <div className="min-w-0">
+              <span className="mb-2 inline-flex rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur">{typeLabel}</span>
+              <h2 className="break-words text-3xl font-bold leading-tight md:text-4xl">{displayName}</h2>
+            </div>
+          </div>
         </div>
         <div className="space-y-5 overflow-y-auto p-5 md:p-8">
           {profileBio ? (
@@ -10871,8 +10883,13 @@ function PublicExternalProfile({ profileId, seedProfile, currentUserId, posts = 
     <div className="mx-auto max-w-6xl px-4 py-8 md:px-6">
       <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <div className="bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-950 p-8 text-white md:p-12">
-          <span className="mb-4 inline-flex rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur">{typeLabel}</span>
-          <h1 className="break-words text-4xl font-black leading-tight md:text-6xl">{displayName}</h1>
+          <div className="flex flex-col gap-5 md:flex-row md:items-center">
+            <ManagedProfileAvatar profile={externalProfile} sizeClass="h-24 w-24 md:h-28 md:w-28" className="ring-4 ring-white/25" />
+            <div className="min-w-0">
+              <span className="mb-4 inline-flex rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-white backdrop-blur">{typeLabel}</span>
+              <h1 className="break-words text-4xl font-black leading-tight md:text-6xl">{displayName}</h1>
+            </div>
+          </div>
         </div>
         <div className="space-y-8 p-5 md:p-8">
           {profileBio ? (
@@ -12841,6 +12858,20 @@ function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabe
   );
 }
 
+
+function ManagedProfileAvatar({ profile = {}, sizeClass = 'h-10 w-10', className = '' }) {
+  const avatar = getManagedProfileAvatar(profile);
+  const displayName = getManagedProfileDisplayName(profile);
+  if (avatar) {
+    return <img src={avatar} alt={`${displayName} profielfoto`} className={`${sizeClass} rounded-full object-cover ${className}`} />;
+  }
+  return (
+    <span className={`${sizeClass} inline-flex shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-black text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700 ${className}`}>
+      {getManagedProfileInitials(profile)}
+    </span>
+  );
+}
+
 function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [], activeProfile = null, onSelectActiveProfile, onCreateManagedProfile, onUpdateManagedProfile }) {
     const { personalProfile, externalProfiles, hasExternalProfiles, hasPersonalOrganizationHints } = buildManagedProfilesSettingsModel(managedProfiles, activeProfile);
     const [createFlowOpen, setCreateFlowOpen] = useState(false);
@@ -12852,6 +12883,9 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
     const [editingProfileId, setEditingProfileId] = useState('');
     const [editDisplayName, setEditDisplayName] = useState('');
     const [editBio, setEditBio] = useState('');
+    const [editAvatar, setEditAvatar] = useState('');
+    const [editAvatarBlob, setEditAvatarBlob] = useState(null);
+    const [editCropSource, setEditCropSource] = useState('');
     const [editError, setEditError] = useState('');
     const [editPending, setEditPending] = useState(false);
 
@@ -12908,6 +12942,9 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
       setEditingProfileId(getManagedProfileId(managedProfile));
       setEditDisplayName(getManagedProfileDisplayName(managedProfile));
       setEditBio(getManagedProfileBio(managedProfile));
+      setEditAvatar(getManagedProfileAvatar(managedProfile));
+      setEditAvatarBlob(null);
+      setEditCropSource('');
       setEditError('');
       setCreateSuccess('');
     };
@@ -12917,6 +12954,9 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
       setEditingProfileId('');
       setEditDisplayName('');
       setEditBio('');
+      setEditAvatar('');
+      setEditAvatarBlob(null);
+      setEditCropSource('');
       setEditError('');
     };
 
@@ -12925,6 +12965,10 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
       if (editPending) return;
       setEditError('');
       setCreateSuccess('');
+      if (editCropSource) {
+        setEditError('Je hebt een nieuwe foto gekozen. Klik eerst op "Gebruik uitsnede" voordat je opslaat.');
+        return;
+      }
       const validation = validateManagedExternalProfileEditDraft({ profile: managedProfile, displayName: editDisplayName, bio: editBio });
       if (!validation.ok) {
         setEditDisplayName(validation.displayName);
@@ -12943,16 +12987,34 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
           profile: managedProfile,
           displayName: validation.displayName,
           bio: validation.bio,
+          avatar: editAvatar,
+          avatarBlob: editAvatarBlob,
         });
         setEditingProfileId('');
         setEditDisplayName('');
         setEditBio('');
+        setEditAvatar('');
+        setEditAvatarBlob(null);
+        setEditCropSource('');
         setCreateSuccess(`${getManagedProfileDisplayName(updatedProfile)} is bijgewerkt.`);
       } catch (error) {
         setEditError(error?.message || 'Opslaan mislukt. Probeer het opnieuw.');
       } finally {
         setEditPending(false);
       }
+    };
+
+
+    const handleEditAvatarFile = (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditCropSource(String(reader.result || ''));
+        setEditError('');
+      };
+      reader.readAsDataURL(file);
+      event.target.value = '';
     };
 
     const renderProfileSelectionAction = (managedProfile) => {
@@ -13010,8 +13072,9 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                     <h4 className="text-xs uppercase font-bold text-slate-400">Mijn profielen</h4>
                     <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-700 dark:bg-slate-800/70 md:rounded-2xl md:p-3">
                       {activeProfile && (
-                        <div className="rounded-lg border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
-                          Actief profiel: {getManagedProfileDisplayName(activeProfile)}
+                        <div className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
+                          <ManagedProfileAvatar profile={activeProfile} sizeClass="h-7 w-7" />
+                          <span>Actief profiel: {getManagedProfileDisplayName(activeProfile)}</span>
                         </div>
                       )}
                       {personalProfile && (
@@ -13050,9 +13113,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                                 >
                                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                     <div className="flex min-w-0 items-start gap-3">
-                                      <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                                        <Building2 className="h-4 w-4" />
-                                      </span>
+                                      <ManagedProfileAvatar profile={externalProfile} sizeClass="mt-0.5 h-10 w-10" />
                                       <div className="min-w-0 flex-1">
                                         <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(externalProfile)}</p>
                                         <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>
@@ -13080,6 +13141,45 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                                     <form onSubmit={(event) => handleEditSubmit(event, externalProfile)} className="mt-3 space-y-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/70 dark:bg-blue-950/20">
                                       <div className="rounded-lg bg-white/80 px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-100 dark:bg-slate-950/40 dark:text-slate-200 dark:ring-slate-800">
                                         Type: {getManagedProfileTypeLabel(externalProfile)}
+                                      </div>
+                                      <div className="space-y-2 rounded-lg bg-white/80 p-3 ring-1 ring-slate-100 dark:bg-slate-950/40 dark:ring-slate-800">
+                                        <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Profielfoto</span>
+                                        <div className="flex items-center gap-3">
+                                          <ManagedProfileAvatar profile={{ ...externalProfile, avatar: editAvatar }} sizeClass="h-14 w-14" />
+                                          <div className="flex flex-wrap gap-2">
+                                            <label className="cursor-pointer rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+                                              Foto uploaden
+                                              <input type="file" accept="image/*" className="sr-only" onChange={handleEditAvatarFile} disabled={editPending} />
+                                            </label>
+                                            {editAvatar && (
+                                              <button
+                                                type="button"
+                                                onClick={() => { setEditAvatar(''); setEditAvatarBlob(null); setEditCropSource(''); setEditError(''); }}
+                                                disabled={editPending}
+                                                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-500 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                              >
+                                                Verwijderen
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">Gebruik dezelfde uitsnede als bij je persoonlijke profielfoto. De foto wordt opgeslagen op dit beheerde profiel.</p>
+                                        {editCropSource && (
+                                          <ProfileImageCropper
+                                            source={editCropSource}
+                                            onCancel={() => setEditCropSource('')}
+                                            onApply={({ avatar, avatarBlob, error }) => {
+                                              if (error) {
+                                                setEditError(error);
+                                                return;
+                                              }
+                                              setEditAvatar(avatar);
+                                              setEditAvatarBlob(avatarBlob || null);
+                                              setEditCropSource('');
+                                              setEditError('');
+                                            }}
+                                          />
+                                        )}
                                       </div>
                                       <label className="block space-y-1.5">
                                         <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Naam</span>

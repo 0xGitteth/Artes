@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   ACTIVE_PROFILE_STORAGE_KEY,
   EXTERNAL_PROFILE_VIEW_PREFIX,
+  buildLegacyOrganizationSetupProfiles,
   buildManagedExternalProfileCreatePayload,
   buildManagedExternalProfileUpdatePayload,
   buildManagedExternalProfileUpdateRequest,
@@ -9,13 +10,17 @@ import {
   deriveManagedProfiles,
   getBrowserStorage,
   getExternalProfileIdFromView,
+  collectLegacyOrganizationProfileHints,
   buildPostAuthorFields,
+  getLegacyOrganizationPrefillDisplayName,
   getManagedProfileBio,
   getManagedProfileAvatar,
   getManagedProfileInitials,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfileSwitcherActiveIndex,
   getNextManagedProfileForSwipe,
+  hasManagedExternalProfileOfType,
+  isManagedProfileSetupRequired,
   getPreviousManagedProfileForSwipe,
   shouldShowManagedProfileHeaderSwitcher,
   normalizeRequestedActiveProfileId,
@@ -792,5 +797,78 @@ assert.deepEqual(
   { loading: false, profile: null, error: 'inactive' },
   'Inactive refresh clears any stale seed profile',
 );
+
+
+const legacySetupFor = (personalProfile, managedProfiles = []) => buildLegacyOrganizationSetupProfiles({
+  personalProfile: { uid: 'legacy_user', ...personalProfile },
+  managedProfiles,
+});
+const legacySetupTypesFor = (personalProfile, managedProfiles = []) => legacySetupFor(personalProfile, managedProfiles).map((profile) => profile.type);
+
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: 'company' }), ['company'], 'role company detection creates a company hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ roles: ['company'] }), ['company'], 'roles company detection creates a company hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: 'bedrijf' }), ['company'], 'role bedrijf detection maps to company');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: 'agency' }), ['agency'], 'role agency detection creates an agency hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: 'collective' }), ['collective'], 'role collective detection creates a collective hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: 'collectief' }), ['collective'], 'role collectief detection maps to collective');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: { id: 'company' } }), ['company'], 'role object with id detection is supported');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: { value: 'agency' } }), ['agency'], 'role object with value detection is supported');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: { role: 'collectief' } }), ['collective'], 'role object with role detection is supported');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ role: { label: 'Bedrijf/Studio' } }), ['company'], 'role object with label Bedrijf/Studio detection maps to company');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ linkedCompanyName: 'Studio Naam' }), ['company'], 'linkedCompanyName without a company role creates a company hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ linkedAgencyName: 'Agency Naam' }), ['agency'], 'linkedAgencyName without an agency role creates an agency hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ linkedCompanyId: 'company_123' }), ['company'], 'linkedCompanyId creates a company hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ linkedAgencyId: 'agency_123' }), ['agency'], 'linkedAgencyId creates an agency hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ linkedCompanyStatus: 'approved' }), ['company'], 'positive linkedCompanyStatus creates a company hint');
+assert.deepEqual(collectLegacyOrganizationProfileHints({ linkedAgencyStatus: 'verified' }), ['agency'], 'positive linkedAgencyStatus creates an agency hint');
+
+assert.equal(getLegacyOrganizationPrefillDisplayName({ linkedCompanyName: '  Linked Studio  ', companyName: 'Company Name' }, 'company'), 'Linked Studio', 'linkedCompanyName is the first company prefill');
+assert.equal(getLegacyOrganizationPrefillDisplayName({ companyName: '  Company Name  ' }, 'company'), 'Company Name', 'companyName is used as company prefill');
+assert.equal(getLegacyOrganizationPrefillDisplayName({ linkedAgencyName: '  Linked Agency  ', agencyName: 'Agency Name' }, 'agency'), 'Linked Agency', 'linkedAgencyName is the first agency prefill');
+assert.equal(getLegacyOrganizationPrefillDisplayName({ agencyName: '  Agency Name  ' }, 'agency'), 'Agency Name', 'agencyName is used as agency prefill');
+assert.equal(getLegacyOrganizationPrefillDisplayName({ collectiveName: '  Collective Name  ' }, 'collective'), 'Collective Name', 'collectiveName is used as collective prefill');
+assert.equal(getLegacyOrganizationPrefillDisplayName({ collectiefName: '  Collectief Naam  ' }, 'collective'), 'Collectief Naam', 'collectiefName is used as collective prefill');
+assert.equal(getLegacyOrganizationPrefillDisplayName({ role: 'company', businessName: '  Business Studio  ' }, 'company'), 'Business Studio', 'businessName is fallback prefill for company role setup');
+assert.equal(getLegacyOrganizationPrefillDisplayName({ role: 'agency', businessName: '  Business Agency  ' }, 'agency'), 'Business Agency', 'businessName is fallback prefill for agency role setup');
+assert.equal(getLegacyOrganizationPrefillDisplayName({ displayName: 'Personal Name', name: 'Legal Name' }, 'company'), '', 'personal display fields are not reused as organization prefill');
+
+const roleOnlyCompanySetup = legacySetupFor({ role: 'company' });
+assert.equal(roleOnlyCompanySetup[0].displayName, '', 'role only company without a name keeps displayName empty');
+assert.equal(roleOnlyCompanySetup[0].fallbackLabel, 'Bedrijfsprofiel', 'role only company uses Bedrijfsprofiel as fallbackLabel');
+const roleOnlyAgencySetup = legacySetupFor({ role: 'agency' });
+assert.equal(roleOnlyAgencySetup[0].displayName, '', 'role only agency without a name keeps displayName empty');
+assert.equal(roleOnlyAgencySetup[0].fallbackLabel, 'Agency', 'role only agency uses Agency as fallbackLabel');
+const roleOnlyCollectiveSetup = legacySetupFor({ role: 'collective' });
+assert.equal(roleOnlyCollectiveSetup[0].displayName, '', 'role only collective without a name keeps displayName empty');
+assert.equal(roleOnlyCollectiveSetup[0].fallbackLabel, 'Collectief', 'role only collective uses Collectief as fallbackLabel');
+
+assert.deepEqual(legacySetupTypesFor({ role: 'company' }), ['company'], 'user with role company gets setup company when no real company exists');
+assert.deepEqual(legacySetupTypesFor({ role: 'bedrijf' }), ['company'], 'user with role bedrijf gets setup company when no real company exists');
+assert.deepEqual(legacySetupTypesFor({ role: 'agency' }), ['agency'], 'user with role agency gets setup agency when no real agency exists');
+assert.deepEqual(legacySetupTypesFor({ role: 'collective' }), ['collective'], 'user with role collective gets setup collective when no real collective exists');
+assert.deepEqual(legacySetupTypesFor({ role: 'collectief' }), ['collective'], 'user with role collectief gets setup collective when no real collective exists');
+assert.equal(legacySetupFor({ linkedCompanyName: 'Studio Luna' })[0].displayName, 'Studio Luna', 'linkedCompanyName prefill is copied into setup company');
+assert.equal(legacySetupFor({ companyName: 'Company Luna' })[0].displayName, 'Company Luna', 'companyName prefill is copied into setup company');
+assert.equal(legacySetupFor({ linkedAgencyName: 'Nova Agency' })[0].displayName, 'Nova Agency', 'linkedAgencyName prefill is copied into setup agency');
+assert.equal(legacySetupFor({ agencyName: 'Agency Nova' })[0].displayName, 'Agency Nova', 'agencyName prefill is copied into setup agency');
+assert.equal(legacySetupFor({ collectiveName: 'Project Collective' })[0].displayName, 'Project Collective', 'collectiveName prefill is copied into setup collective');
+assert.equal(legacySetupFor({ collectiefName: 'Project Collectief' })[0].displayName, 'Project Collectief', 'collectiefName prefill is copied into setup collective');
+assert.equal(legacySetupFor({ role: 'company', businessName: 'Business Studio' })[0].displayName, 'Business Studio', 'businessName is fallback displayName for company role setup');
+assert.equal(legacySetupFor({ role: 'agency', businessName: 'Business Agency' })[0].displayName, 'Business Agency', 'businessName is fallback displayName for agency role setup');
+
+const existingCompanyProfile = { profileId: 'real_company', type: 'company', kind: 'company', displayName: 'Real Company', ownerUid: 'legacy_user', status: 'active', isPersonal: false };
+assert.equal(hasManagedExternalProfileOfType([existingCompanyProfile], 'company'), true, 'real external profile of the same type is detected');
+assert.equal(hasManagedExternalProfileOfType([{ ...existingCompanyProfile, isSetupProfile: true, setupRequired: true, source: 'legacyOrganization' }], 'company'), false, 'setup profile is not treated as a real external profile');
+assert.deepEqual(legacySetupFor({ role: 'company' }, [existingCompanyProfile]), [], 'no setup profile is created if a real external profile of the same type exists');
+assert.deepEqual(legacySetupTypesFor({ role: 'company', linkedCompanyName: 'Studio', companyName: 'Other Studio' }), ['company'], 'multiple signals for the same type create a maximum of one setup profile');
+
+const legacyCompanySetup = legacySetupFor({ role: 'company' })[0];
+assert.equal(legacyCompanySetup.setupRequired, true, 'setup profile has setupRequired true');
+assert.equal(legacyCompanySetup.isSetupProfile, true, 'setup profile has isSetupProfile true');
+assert.equal(legacyCompanySetup.source, 'legacyOrganization', 'setup profile source is legacyOrganization');
+assert.equal(legacyCompanySetup.profileId, 'legacy_company_legacy_user', 'setup profile uses temporary legacy profileId');
+assert.equal(legacyCompanySetup.status, 'setup', 'setup profile status is setup rather than active');
+assert.equal(isManagedProfileSetupRequired(legacyCompanySetup), true, 'setup required helper recognizes legacy setup profiles');
+assert.equal(hasManagedExternalProfileOfType([legacyCompanySetup], 'company'), false, 'setup profiles are not marked as real active external profiles');
 
 console.log('PASS managedProfiles.logic.test');

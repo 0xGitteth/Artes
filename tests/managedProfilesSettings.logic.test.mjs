@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  buildLegacyOrganizationSetupProfiles,
   buildManagedProfilesSettingsModel,
   getManagedProfileDisplayName,
   getManagedProfileSettingsAction,
@@ -69,8 +70,31 @@ assert.equal(personalProfileHasOrganizationHints({ linkedAgencyId: 'none' }), fa
 
 assert.equal(getManagedProfilePrefillDisplayName({ linkedCompanyName: '  Studio Hint  ' }, 'company'), 'Studio Hint', 'Company create flow can prefill from an existing safe company hint');
 assert.equal(getManagedProfilePrefillDisplayName({ linkedAgencyName: '  Agency Hint  ' }, 'agency'), 'Agency Hint', 'Agency create flow can prefill from an existing safe agency hint');
-assert.equal(getManagedProfilePrefillDisplayName({ linkedCompanyName: 'Studio Hint' }, 'collective'), 'Studio Hint', 'Collective create flow may reuse a generic organization name hint without migrating data');
+assert.equal(getManagedProfilePrefillDisplayName({ collectiefName: 'Collectief Hint' }, 'collective'), 'Collectief Hint', 'Collective create flow can prefill from an existing collective hint');
 
+
+
+const settingsWithLegacyCompanySetup = buildManagedProfilesSettingsModel([{ ...personalProfile, roles: ['company'], companyName: 'Studio Legacy' }]);
+assert.equal(settingsWithLegacyCompanySetup.setupProfiles.length, 1, 'Settings model returns setupProfiles for legacy organization hints');
+assert.equal(settingsWithLegacyCompanySetup.setupProfiles[0].type, 'company', 'Settings model setup profile keeps the legacy company type');
+assert.equal(settingsWithLegacyCompanySetup.setupProfiles[0].displayName, 'Studio Legacy', 'Settings model setup profile includes the company prefill name');
+assert.equal(settingsWithLegacyCompanySetup.setupProfiles[0].setupRequired, true, 'Settings model setup profile is marked setupRequired');
+assert.equal(settingsWithLegacyCompanySetup.setupProfiles[0].isSetupProfile, true, 'Settings model setup profile is marked isSetupProfile');
+assert.equal(settingsWithLegacyCompanySetup.setupProfiles[0].source, 'legacyOrganization', 'Settings model setup profile source is legacyOrganization');
+assert.equal(settingsWithLegacyCompanySetup.setupProfiles[0].profileId, 'legacy_company_user_1', 'Settings model setup profile uses a temporary legacy id');
+assert.equal(settingsWithLegacyCompanySetup.externalProfiles.length, 0, 'Settings model keeps setup profiles separate from real externalProfiles');
+assert.equal(settingsWithLegacyCompanySetup.hasExternalProfiles, false, 'Settings model does not count setup profiles as real external profiles');
+
+const settingsWithExistingCompany = buildManagedProfilesSettingsModel([
+  { ...personalProfile, roles: ['company'], companyName: 'Studio Legacy' },
+  { profileId: 'real_company', displayName: 'Real Company', type: 'company', kind: 'company', isPersonal: false },
+]);
+assert.deepEqual(settingsWithExistingCompany.setupProfiles, [], 'Settings model does not return setup profile when a real external profile of the same type exists');
+assert.deepEqual(
+  buildLegacyOrganizationSetupProfiles({ personalProfile: { ...personalProfile, roles: ['agency'], businessName: 'Business Agency' }, managedProfiles: [] }).map((profile) => profile.displayName),
+  ['Business Agency'],
+  'Settings helper import confirms businessName fallback is available for legacy agency setup',
+);
 
 const activeExternalProfile = settingsWithMultipleExternal.externalProfiles[1];
 const settingsWithActiveExternal = buildManagedProfilesSettingsModel([

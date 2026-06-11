@@ -4,6 +4,7 @@ import {
   EXTERNAL_PROFILE_VIEW_PREFIX,
   buildManagedExternalProfileCreatePayload,
   buildManagedExternalProfileUpdatePayload,
+  buildManagedExternalProfileUpdateRequest,
   createManagedExternalProfileId,
   deriveManagedProfiles,
   getBrowserStorage,
@@ -24,6 +25,7 @@ import {
   resolvePostAuthorDisplayNameFromProfiles,
   resolvePublicExternalProfileLoadState,
   isPublicManagedExternalProfileVisible,
+  mergeManagedExternalProfileUpdate,
   resolvePostAuthorProfile,
   shouldDelayActiveProfilePersistence,
   validateManagedExternalProfileDraft,
@@ -93,6 +95,43 @@ assert.equal(getManagedProfileBio({ displayName: 'Legacy profile' }), '', 'Old e
 assert.equal(getManagedProfileAvatar({ avatar: '  https://cdn.example/avatar.jpg  ' }), 'https://cdn.example/avatar.jpg', 'Avatar helper trims managed profile avatar URLs for quick and full rendering');
 assert.equal(getManagedProfileAvatar({ displayName: 'Legacy profile' }), '', 'Old external profiles without avatar still resolve to an empty avatar');
 assert.equal(getManagedProfileInitials({ displayName: 'Studio Luna' }), 'SL', 'Avatar fallback uses profile initials when no image exists');
+
+const updateAvatarBlob = new Blob(['avatar-bytes'], { type: 'image/jpeg' });
+const updateRequestWithBlob = buildManagedExternalProfileUpdateRequest({
+  profile: editValidationProfile,
+  displayName: 'Updated Company',
+  bio: 'Nieuwe omschrijving',
+  avatar: 'data:image/jpeg;base64,cropped-preview',
+  avatarBlob: updateAvatarBlob,
+});
+assert.equal(updateRequestWithBlob.profile, editValidationProfile, 'Parent update request keeps the managed profile reference');
+assert.equal(updateRequestWithBlob.displayName, 'Updated Company', 'Parent update request forwards displayName');
+assert.equal(updateRequestWithBlob.bio, 'Nieuwe omschrijving', 'Parent update request forwards bio');
+assert.equal(updateRequestWithBlob.avatar, 'data:image/jpeg;base64,cropped-preview', 'Parent update request forwards the selected avatar preview');
+assert.equal(updateRequestWithBlob.avatarBlob, updateAvatarBlob, 'Parent update request forwards avatarBlob for upload');
+assert.deepEqual(
+  buildManagedExternalProfileUpdateRequest({ profile: editValidationProfile, displayName: 'Updated Company', bio: 'Nieuwe omschrijving', avatar: '' }),
+  { profile: editValidationProfile, displayName: 'Updated Company', bio: 'Nieuwe omschrijving', avatar: '' },
+  'Parent update request forwards an empty avatar string so deletion can be persisted',
+);
+assert.deepEqual(
+  mergeManagedExternalProfileUpdate([
+    { profileId: 'company_edit', displayName: 'Old Company', bio: 'Old bio', avatar: 'https://cdn.example/old.jpg' },
+    { profileId: 'agency_other', displayName: 'Other Agency', bio: '', avatar: 'https://cdn.example/other.jpg' },
+  ], { profileId: 'company_edit', displayName: 'Updated Company', bio: 'Nieuwe omschrijving', avatar: 'https://cdn.example/new.jpg' }),
+  [
+    { profileId: 'company_edit', displayName: 'Updated Company', bio: 'Nieuwe omschrijving', avatar: 'https://cdn.example/new.jpg' },
+    { profileId: 'agency_other', displayName: 'Other Agency', bio: '', avatar: 'https://cdn.example/other.jpg' },
+  ],
+  'Managed profile state merge keeps displayName/bio working and applies avatar from updatedProfile',
+);
+assert.deepEqual(
+  mergeManagedExternalProfileUpdate([
+    { profileId: 'company_edit', displayName: 'Old Company', bio: 'Old bio', avatar: 'https://cdn.example/old.jpg' },
+  ], { profileId: 'company_edit', displayName: 'Updated Company', bio: 'Nieuwe omschrijving', avatar: '' }),
+  [{ profileId: 'company_edit', displayName: 'Updated Company', bio: 'Nieuwe omschrijving', avatar: '' }],
+  'Managed profile state merge applies an empty avatar from updatedProfile after deletion',
+);
 
 const activeProfile = resolveActiveProfile({
   managedProfiles,

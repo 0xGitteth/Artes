@@ -526,6 +526,22 @@ export const resolvePostAuthorDisplayNameFromProfiles = ({ post, users = [], pro
   return getManagedProfileDisplayName({ displayName: externalName || publicName || post?.authorName || 'Onbekend' });
 };
 
+
+export const buildManagedExternalProfileUpdateRequest = ({ profile, displayName, bio, avatar, avatarBlob } = {}) => {
+  const request = { profile, displayName, bio };
+  if (avatar !== undefined) request.avatar = avatar;
+  if (avatarBlob !== undefined) request.avatarBlob = avatarBlob;
+  return request;
+};
+
+export const mergeManagedExternalProfileUpdate = (managedProfiles = [], updatedProfile = {}) => {
+  const updatedProfileId = getManagedProfileId(updatedProfile);
+  if (!updatedProfileId || !Array.isArray(managedProfiles)) return Array.isArray(managedProfiles) ? managedProfiles : [];
+  return managedProfiles.map((profile) => (
+    getManagedProfileId(profile) === updatedProfileId ? { ...profile, ...updatedProfile } : profile
+  ));
+};
+
 export const readStoredActiveProfileId = (storage) => {
   try {
     if (!storage || typeof storage.getItem !== 'function') return null;

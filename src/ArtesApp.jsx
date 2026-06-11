@@ -145,6 +145,8 @@ import {
   buildManagedProfilesSettingsModel,
   getBrowserStorage,
   getManagedProfileId,
+  buildManagedExternalProfileUpdateRequest,
+  mergeManagedExternalProfileUpdate,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
   getManagedProfileBio,
@@ -1550,12 +1552,15 @@ export default function ArtesApp() {
   }, []);
 
 
-  const handleUpdateManagedExternalProfile = useCallback(async ({ profile: managedProfile, displayName, bio }) => {
-    const updatedProfile = await updateManagedExternalProfile({ profile: managedProfile, displayName, bio });
-    setManagedExternalProfiles((currentProfiles) => (currentProfiles || []).map((profile) => {
-      const profileId = getManagedProfileId(profile);
-      return profileId === updatedProfile.profileId ? { ...profile, ...updatedProfile } : profile;
+  const handleUpdateManagedExternalProfile = useCallback(async ({ profile: managedProfile, displayName, bio, avatar, avatarBlob }) => {
+    const updatedProfile = await updateManagedExternalProfile(buildManagedExternalProfileUpdateRequest({
+      profile: managedProfile,
+      displayName,
+      bio,
+      avatar,
+      avatarBlob,
     }));
+    setManagedExternalProfiles((currentProfiles) => mergeManagedExternalProfileUpdate(currentProfiles, updatedProfile));
     setPostAuthorProfilesById((currentProfilesById) => ({
       ...(currentProfilesById || {}),
       [updatedProfile.profileId]: {

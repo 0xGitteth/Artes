@@ -3,11 +3,13 @@ import {
   ACTIVE_PROFILE_STORAGE_KEY,
   EXTERNAL_PROFILE_VIEW_PREFIX,
   buildManagedExternalProfileCreatePayload,
+  buildManagedExternalProfileUpdatePayload,
   createManagedExternalProfileId,
   deriveManagedProfiles,
   getBrowserStorage,
   getExternalProfileIdFromView,
   buildPostAuthorFields,
+  getManagedProfileBio,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfileSwitcherActiveIndex,
   getNextManagedProfileForSwipe,
@@ -23,6 +25,7 @@ import {
   resolvePostAuthorProfile,
   shouldDelayActiveProfilePersistence,
   validateManagedExternalProfileDraft,
+  validateManagedExternalProfileEditDraft,
   writeStoredActiveProfileId,
 } from '../src/utils/managedProfiles.js';
 
@@ -45,6 +48,46 @@ assert.equal(managedProfiles[0].profileId, 'user_123', 'Personal profile keeps a
 assert.equal(managedProfiles[0].ownerUid, 'user_123', 'Personal profile keeps auth uid as ownerUid');
 assert.equal(managedProfiles[0].isPersonal, true, 'Personal managed profile is marked explicitly');
 assert.equal(managedProfiles[0].displayName, 'Existing Maker', 'Private profile data remains the preferred source for the owner');
+
+
+const editValidationProfile = { profileId: 'company_edit', ownerUid: 'owner_multi', type: 'company', status: 'active', displayName: 'Company Edit' };
+assert.deepEqual(
+  validateManagedExternalProfileEditDraft({ profile: editValidationProfile, displayName: '  Updated Company  ', bio: '  Korte omschrijving  ' }),
+  { ok: true, type: 'company', displayName: 'Updated Company', bio: 'Korte omschrijving', error: null },
+  'Managed external profile edit validation trims displayName and bio',
+);
+assert.equal(
+  validateManagedExternalProfileEditDraft({ profile: editValidationProfile, displayName: '   ', bio: '' }).ok,
+  false,
+  'Managed external profile edit validation rejects an empty displayName',
+);
+assert.equal(
+  validateManagedExternalProfileEditDraft({ profile: editValidationProfile, displayName: 'x'.repeat(121), bio: '' }).ok,
+  false,
+  'Managed external profile edit validation rejects a too long displayName',
+);
+assert.equal(
+  validateManagedExternalProfileEditDraft({ profile: editValidationProfile, displayName: 'Valid Name', bio: '' }).ok,
+  true,
+  'Managed external profile edit validation allows an empty bio',
+);
+assert.equal(
+  validateManagedExternalProfileEditDraft({ profile: editValidationProfile, displayName: 'Valid Name', bio: 'x'.repeat(501) }).ok,
+  false,
+  'Managed external profile edit validation rejects a too long bio',
+);
+assert.deepEqual(
+  buildManagedExternalProfileUpdatePayload({ profile: editValidationProfile, displayName: '  Updated Company  ', bio: '  Nieuwe omschrijving  ', timestamp: 'ts' }),
+  { displayName: 'Updated Company', bio: 'Nieuwe omschrijving', updatedAt: 'ts' },
+  'Managed external profile update payload only writes editable fields and updatedAt',
+);
+assert.throws(
+  () => buildManagedExternalProfileUpdatePayload({ profile: { ...editValidationProfile, type: 'personal' }, displayName: 'Personal', bio: '', timestamp: 'ts' }),
+  /niet worden bewerkt/,
+  'Personal managed profile cannot use the external profile update payload',
+);
+assert.equal(getManagedProfileBio({ bio: '  Bio tekst  ' }), 'Bio tekst', 'Bio helper trims profile bio for quick and full external profile rendering');
+assert.equal(getManagedProfileBio({ displayName: 'Legacy profile' }), '', 'Old external profiles without bio still resolve to an empty bio');
 
 const activeProfile = resolveActiveProfile({
   managedProfiles,

@@ -3,6 +3,7 @@ import {
   buildManagedProfilesSettingsModel,
   getManagedProfileDisplayName,
   getManagedProfileSettingsAction,
+  getManagedProfileBio,
   getManagedProfilePrefillDisplayName,
   getManagedProfileTypeLabel,
   personalProfileHasOrganizationHints,
@@ -84,6 +85,17 @@ assert.deepEqual(
   getManagedProfileSettingsAction(personalProfile, personalProfile),
   { isActive: true, statusLabel: 'Actief', actionLabel: '' },
   'Settings action helper returns Actief for the active personal profile',
+);
+
+assert.equal(
+  getManagedProfileBio({ profileId: 'studio_luna', type: 'company', bio: '  Studio voor campagnebeeld  ' }),
+  'Studio voor campagnebeeld',
+  'Settings model can surface the managed external profile bio immediately after edits',
+);
+assert.equal(
+  settingsWithMultipleExternal.externalProfiles.every((profile) => profile.isPersonal === false),
+  true,
+  'Personal managed profile remains separate from editable external profiles in settings',
 );
 
 console.log('PASS managedProfilesSettings.logic.test');

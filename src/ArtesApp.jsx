@@ -70,6 +70,7 @@ import {
   subscribeToMoodboardItems,
   loadManagedExternalProfiles,
   createManagedExternalProfile,
+  updateManagedExternalProfile,
 } from './firebase';
 import { httpsCallable } from 'firebase/functions';
 import { signInWithCustomToken } from 'firebase/auth';
@@ -138,6 +139,7 @@ import { resolvePublicDisplayName } from './utils/publicIdentity';
 import {
   MANAGED_EXTERNAL_PROFILE_TYPES,
   MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH,
+  MAX_MANAGED_PROFILE_BIO_LENGTH,
   EXTERNAL_PROFILE_VIEW_PREFIX,
   PROFILE_TYPE_LABELS,
   buildManagedProfilesSettingsModel,
@@ -145,6 +147,7 @@ import {
   getManagedProfileId,
   deriveManagedProfiles,
   getManagedProfileDisplayName,
+  getManagedProfileBio,
   getExternalProfileIdFromView,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfilePrefillDisplayName,
@@ -162,6 +165,7 @@ import {
   resolveActiveProfile,
   shouldDelayActiveProfilePersistence,
   validateManagedExternalProfileDraft,
+  validateManagedExternalProfileEditDraft,
   writeStoredActiveProfileId,
 } from './utils/managedProfiles';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
@@ -1543,6 +1547,23 @@ export default function ArtesApp() {
     return createdProfile;
   }, []);
 
+
+  const handleUpdateManagedExternalProfile = useCallback(async ({ profile: managedProfile, displayName, bio }) => {
+    const updatedProfile = await updateManagedExternalProfile({ profile: managedProfile, displayName, bio });
+    setManagedExternalProfiles((currentProfiles) => (currentProfiles || []).map((profile) => {
+      const profileId = getManagedProfileId(profile);
+      return profileId === updatedProfile.profileId ? { ...profile, ...updatedProfile } : profile;
+    }));
+    setPostAuthorProfilesById((currentProfilesById) => ({
+      ...(currentProfilesById || {}),
+      [updatedProfile.profileId]: {
+        ...(currentProfilesById?.[updatedProfile.profileId] || {}),
+        ...updatedProfile,
+      },
+    }));
+    return updatedProfile;
+  }, []);
+
   useEffect(() => {
      if (!canAccessFirestore({ authReady, user })) return;
      logListenerStart('Posts listener (ArtesApp)');
@@ -2827,6 +2848,7 @@ export default function ArtesApp() {
             activeProfile={activeProfile}
             onSelectActiveProfile={handleSelectActiveProfile}
             onCreateManagedProfile={handleCreateManagedExternalProfile}
+            onUpdateManagedProfile={handleUpdateManagedExternalProfile}
           />
         )}
         {showEditProfile && (
@@ -10803,6 +10825,7 @@ function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose
 
   const displayName = getManagedProfileDisplayName(externalProfile);
   const typeLabel = getManagedProfileTypeLabel(externalProfile);
+  const profileBio = getManagedProfileBio(externalProfile);
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-2 md:p-6">
@@ -10813,8 +10836,8 @@ function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose
           <h2 className="break-words text-3xl font-bold leading-tight md:text-4xl">{displayName}</h2>
         </div>
         <div className="space-y-5 overflow-y-auto p-5 md:p-8">
-          {externalProfile.bio ? (
-            <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-200">{externalProfile.bio}</p>
+          {profileBio ? (
+            <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-200">{profileBio}</p>
           ) : (
             <div className="rounded-2xl bg-slate-50 p-5 text-center text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
               Dit profiel heeft nog geen bio, content of extra informatie om te tonen.
@@ -10842,6 +10865,7 @@ function PublicExternalProfile({ profileId, seedProfile, currentUserId, posts = 
 
   const displayName = getManagedProfileDisplayName(externalProfile);
   const typeLabel = getManagedProfileTypeLabel(externalProfile);
+  const profileBio = getManagedProfileBio(externalProfile);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 md:px-6">
@@ -10851,8 +10875,8 @@ function PublicExternalProfile({ profileId, seedProfile, currentUserId, posts = 
           <h1 className="break-words text-4xl font-black leading-tight md:text-6xl">{displayName}</h1>
         </div>
         <div className="space-y-8 p-5 md:p-8">
-          {externalProfile.bio ? (
-            <p className="max-w-3xl text-sm leading-relaxed text-slate-700 dark:text-slate-200 md:text-base">{externalProfile.bio}</p>
+          {profileBio ? (
+            <p className="max-w-3xl text-sm leading-relaxed text-slate-700 dark:text-slate-200 md:text-base">{profileBio}</p>
           ) : (
             <div className="rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
               Dit profiel heeft nog geen bio, content of extra informatie om te tonen.
@@ -12817,7 +12841,7 @@ function AppShortcutInfoModal({ onClose, primaryLabel = 'Sluiten', secondaryLabe
   );
 }
 
-function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [], activeProfile = null, onSelectActiveProfile, onCreateManagedProfile }) {
+function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSupport, onOpenAppShortcutInfo, onOpenVouchRequests, darkMode, onToggleDark, onLogout, showModerationDot = false, managedProfiles = [], activeProfile = null, onSelectActiveProfile, onCreateManagedProfile, onUpdateManagedProfile }) {
     const { personalProfile, externalProfiles, hasExternalProfiles, hasPersonalOrganizationHints } = buildManagedProfilesSettingsModel(managedProfiles, activeProfile);
     const [createFlowOpen, setCreateFlowOpen] = useState(false);
     const [createType, setCreateType] = useState('company');
@@ -12825,6 +12849,11 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
     const [createError, setCreateError] = useState('');
     const [createSuccess, setCreateSuccess] = useState('');
     const [createPending, setCreatePending] = useState(false);
+    const [editingProfileId, setEditingProfileId] = useState('');
+    const [editDisplayName, setEditDisplayName] = useState('');
+    const [editBio, setEditBio] = useState('');
+    const [editError, setEditError] = useState('');
+    const [editPending, setEditPending] = useState(false);
 
     const openCreateFlow = () => {
       const prefillName = getManagedProfilePrefillDisplayName(personalProfile, createType);
@@ -12872,6 +12901,57 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
         setCreateError(error?.message || 'Opslaan mislukt. Probeer het opnieuw.');
       } finally {
         setCreatePending(false);
+      }
+    };
+
+    const openEditProfile = (managedProfile) => {
+      setEditingProfileId(getManagedProfileId(managedProfile));
+      setEditDisplayName(getManagedProfileDisplayName(managedProfile));
+      setEditBio(getManagedProfileBio(managedProfile));
+      setEditError('');
+      setCreateSuccess('');
+    };
+
+    const closeEditProfile = () => {
+      if (editPending) return;
+      setEditingProfileId('');
+      setEditDisplayName('');
+      setEditBio('');
+      setEditError('');
+    };
+
+    const handleEditSubmit = async (event, managedProfile) => {
+      event.preventDefault();
+      if (editPending) return;
+      setEditError('');
+      setCreateSuccess('');
+      const validation = validateManagedExternalProfileEditDraft({ profile: managedProfile, displayName: editDisplayName, bio: editBio });
+      if (!validation.ok) {
+        setEditDisplayName(validation.displayName);
+        setEditBio(validation.bio);
+        setEditError(validation.error);
+        return;
+      }
+      if (typeof onUpdateManagedProfile !== 'function') {
+        setEditError('Profiel bewerken is nu niet beschikbaar. Probeer het later opnieuw.');
+        return;
+      }
+
+      setEditPending(true);
+      try {
+        const updatedProfile = await onUpdateManagedProfile({
+          profile: managedProfile,
+          displayName: validation.displayName,
+          bio: validation.bio,
+        });
+        setEditingProfileId('');
+        setEditDisplayName('');
+        setEditBio('');
+        setCreateSuccess(`${getManagedProfileDisplayName(updatedProfile)} is bijgewerkt.`);
+      } catch (error) {
+        setEditError(error?.message || 'Opslaan mislukt. Probeer het opnieuw.');
+      } finally {
+        setEditPending(false);
       }
     };
 
@@ -12947,25 +13027,96 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
                         <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Beheerde profielen</p>
                         {hasExternalProfiles ? (
                           <div className="space-y-2">
-                            {externalProfiles.map((externalProfile) => (
-                              <div
-                                key={externalProfile.profileId || externalProfile.id}
-                                className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70"
-                              >
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                  <div className="flex min-w-0 items-start gap-3">
-                                    <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                                      <Building2 className="h-4 w-4" />
-                                    </span>
-                                    <div className="min-w-0 flex-1">
-                                      <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(externalProfile)}</p>
-                                      <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>
+                            {externalProfiles.map((externalProfile) => {
+                              const externalProfileId = getManagedProfileId(externalProfile);
+                              const isEditing = editingProfileId === externalProfileId;
+                              const externalBio = getManagedProfileBio(externalProfile);
+                              return (
+                                <div
+                                  key={externalProfile.profileId || externalProfile.id}
+                                  className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70"
+                                >
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="flex min-w-0 items-start gap-3">
+                                      <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                                        <Building2 className="h-4 w-4" />
+                                      </span>
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(externalProfile)}</p>
+                                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>
+                                        {externalBio ? (
+                                          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500 dark:text-slate-300">{externalBio}</p>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditProfile(externalProfile)}
+                                        disabled={editPending}
+                                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                      >
+                                        <Edit3 className="h-3.5 w-3.5" />
+                                        Bewerken
+                                      </button>
+                                      {renderProfileSelectionAction(externalProfile)}
                                     </div>
                                   </div>
-                                  <div className="flex justify-end">{renderProfileSelectionAction(externalProfile)}</div>
+                                  {isEditing && (
+                                    <form onSubmit={(event) => handleEditSubmit(event, externalProfile)} className="mt-3 space-y-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/70 dark:bg-blue-950/20">
+                                      <div className="rounded-lg bg-white/80 px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-100 dark:bg-slate-950/40 dark:text-slate-200 dark:ring-slate-800">
+                                        Type: {getManagedProfileTypeLabel(externalProfile)}
+                                      </div>
+                                      <label className="block space-y-1.5">
+                                        <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Naam</span>
+                                        <input
+                                          type="text"
+                                          value={editDisplayName}
+                                          onChange={(event) => { setEditDisplayName(event.target.value); setEditError(''); }}
+                                          disabled={editPending}
+                                          maxLength={MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH}
+                                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
+                                        />
+                                      </label>
+                                      <label className="block space-y-1.5">
+                                        <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Omschrijving</span>
+                                        <textarea
+                                          value={editBio}
+                                          onChange={(event) => { setEditBio(event.target.value); setEditError(''); }}
+                                          disabled={editPending}
+                                          maxLength={MAX_MANAGED_PROFILE_BIO_LENGTH}
+                                          rows={3}
+                                          placeholder="Korte omschrijving van dit profiel"
+                                          className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
+                                        />
+                                        <span className="block text-right text-[11px] font-semibold text-slate-400">{editBio.length}/{MAX_MANAGED_PROFILE_BIO_LENGTH}</span>
+                                      </label>
+                                      {editError && (
+                                        <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs font-semibold text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-100">{editError}</p>
+                                      )}
+                                      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={closeEditProfile}
+                                          disabled={editPending}
+                                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                        >
+                                          Annuleren
+                                        </button>
+                                        <button
+                                          type="submit"
+                                          disabled={editPending}
+                                          className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-70 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                                        >
+                                          {editPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                                          Opslaan
+                                        </button>
+                                      </div>
+                                    </form>
+                                  )}
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         ) : (
                           <p className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">

@@ -414,6 +414,23 @@ async function run() {
       displayName: 'Owner Company Profile Updated',
       updatedAt: serverTimestamp(),
     }));
+    await assertSucceeds(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      displayName: 'Owner Company Profile With Bio',
+      bio: 'Korte omschrijving voor publiek profiel',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      bio: '',
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      bio: 'x'.repeat(501),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
+      type: 'agency',
+      updatedAt: serverTimestamp(),
+    }));
     await assertFails(setDoc(doc(ownerDb, 'profiles', 'manager_uids_not_allowed_profile'), {
       type: 'agency',
       displayName: 'Manager Uids Not Allowed Profile',
@@ -430,6 +447,7 @@ async function run() {
     await assertSucceeds(setDoc(doc(ownerDb, 'profiles', 'owner_collective_profile'), {
       type: 'collective',
       displayName: 'Owner Collective Profile',
+      bio: 'Collectief omschrijving',
       ownerUid,
       status: 'active',
       createdAt: serverTimestamp(),

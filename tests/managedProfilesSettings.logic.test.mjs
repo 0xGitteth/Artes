@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   buildLegacyOrganizationSetupProfiles,
   buildManagedProfilesSettingsModel,
@@ -14,6 +15,53 @@ import {
   getManagedProfileTypeLabel,
   personalProfileHasOrganizationHints,
 } from '../src/utils/managedProfiles.js';
+
+
+const appSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 'utf8');
+assert.match(
+  appSource,
+  /function SetupProfileOverlay\(\{ profile = \{\}, onOpenSetupProfile \}\)[\s\S]*?onClick=\{onOpenSetupProfile\}/,
+  'Header setup overlay CTA uses the explicit setup handler instead of the generic profile edit handler',
+);
+assert.doesNotMatch(
+  appSource,
+  /function SetupProfileOverlay\(\{ profile = \{\}, onOpenSettings \}\)/,
+  'Header setup overlay no longer receives the personal profile edit onOpenSettings handler',
+);
+assert.match(
+  appSource,
+  /onOpenManagedProfileSetup=\{\(setupProfile\) => \{[\s\S]*?setPendingManagedProfileSetup\(setupProfile \|\| null\);[\s\S]*?setShowEditProfile\(false\);[\s\S]*?setShowSettingsModal\(true\);[\s\S]*?\}\}/,
+  'Own profile route wires header setup CTA to Settings while explicitly keeping the personal profile editor closed',
+);
+assert.match(
+  appSource,
+  /<SetupProfileOverlay profile=\{activeSwitcherProfile\} onOpenSetupProfile=\{\(\) => onOpenManagedProfileSetup\?\.\(activeSwitcherProfile\)\}/,
+  'Header setup CTA passes the selected setupProfile to the explicit setup handler',
+);
+assert.match(
+  appSource,
+  /initialSetupProfile=\{pendingManagedProfileSetup\}/,
+  'Settings modal receives the setup profile selected from the header CTA',
+);
+assert.match(
+  appSource,
+  /useEffect\(\(\) => \{[\s\S]*?if \(!initialSetupProfile\) return;[\s\S]*?openSetupProfileCreateFlow\(initialSetupProfile\);[\s\S]*?\}/,
+  'Settings modal starts the local setup create flow when opened from the header setup CTA',
+);
+assert.match(
+  appSource,
+  /const openSetupProfileCreateFlow = useCallback\(\(setupProfile\) => \{[\s\S]*?setCreateType\(setupType\);[\s\S]*?setCreateDisplayName\(String\(setupProfile\?\.displayName \|\| ''\)\.trim\(\)\);[\s\S]*?setCreateFlowOpen\(true\);/,
+  'Settings setup card and header-selected setup profile prefill type/displayName locally before any submit',
+);
+const headerSetupHandlerSource = appSource.match(
+  /onOpenManagedProfileSetup=\{\(setupProfile\) => \{[\s\S]*?setShowSettingsModal\(true\);[\s\S]*?\}\}/,
+)?.[0] || '';
+assert.ok(headerSetupHandlerSource, 'Header setup handler source is present for write-safety checks');
+assert.doesNotMatch(
+  headerSetupHandlerSource,
+  /onCreateManagedProfile|createManagedExternalProfile|setDoc|addDoc|uploadBytes/,
+  'Header setup CTA only opens Settings and does not call create/write helpers',
+);
 
 const personalProfile = {
   uid: 'user_1',

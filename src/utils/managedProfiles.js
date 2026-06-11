@@ -6,6 +6,7 @@ const ACTIVE_PROFILE_STATUS = 'active';
 
 export const MANAGED_EXTERNAL_PROFILE_TYPES = ['company', 'agency', 'collective'];
 export const MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH = 120;
+export const MAX_MANAGED_PROFILE_BIO_LENGTH = 500;
 export const ACTIVE_PROFILE_STORAGE_KEY = 'artes.activeProfileId';
 export const EXTERNAL_PROFILE_VIEW_PREFIX = 'externalProfile_';
 
@@ -17,21 +18,43 @@ export const getExternalProfileIdFromView = (view = '') => {
     : '';
 };
 
-export const validateManagedExternalProfileDraft = ({ type, displayName } = {}) => {
+export const validateManagedExternalProfileDraft = ({ type, displayName, bio = '' } = {}) => {
   const normalizedType = normalizeId(type);
   const normalizedDisplayName = String(displayName || '').trim();
+  const normalizedBio = String(bio || '').trim();
 
   if (!EXTERNAL_PROFILE_TYPES.has(normalizedType)) {
-    return { ok: false, error: 'Kies een profieltype.', type: normalizedType, displayName: normalizedDisplayName };
+    return { ok: false, error: 'Kies een profieltype.', type: normalizedType, displayName: normalizedDisplayName, bio: normalizedBio };
   }
   if (!normalizedDisplayName) {
-    return { ok: false, error: 'Vul een naam in voor dit profiel.', type: normalizedType, displayName: normalizedDisplayName };
+    return { ok: false, error: 'Vul een naam in voor dit profiel.', type: normalizedType, displayName: normalizedDisplayName, bio: normalizedBio };
   }
   if (normalizedDisplayName.length > MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH) {
-    return { ok: false, error: `Gebruik maximaal ${MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH} tekens.`, type: normalizedType, displayName: normalizedDisplayName };
+    return { ok: false, error: `Gebruik maximaal ${MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH} tekens.`, type: normalizedType, displayName: normalizedDisplayName, bio: normalizedBio };
+  }
+  if (normalizedBio.length > MAX_MANAGED_PROFILE_BIO_LENGTH) {
+    return { ok: false, error: `Gebruik maximaal ${MAX_MANAGED_PROFILE_BIO_LENGTH} tekens voor de omschrijving.`, type: normalizedType, displayName: normalizedDisplayName, bio: normalizedBio };
   }
 
-  return { ok: true, type: normalizedType, displayName: normalizedDisplayName, error: null };
+  return { ok: true, type: normalizedType, displayName: normalizedDisplayName, bio: normalizedBio, error: null };
+};
+
+export const validateManagedExternalProfileEditDraft = ({ profile = {}, displayName, bio = '' } = {}) => {
+  const normalizedProfile = profile && typeof profile === 'object' ? profile : {};
+  const type = normalizeId(normalizedProfile.type || normalizedProfile.kind);
+  return validateManagedExternalProfileDraft({ type, displayName, bio });
+};
+
+export const buildManagedExternalProfileUpdatePayload = ({ profile = {}, displayName, bio = '', timestamp } = {}) => {
+  if (!isExternalManagedProfile(profile)) throw new Error('Dit profiel kan niet worden bewerkt.');
+  const validation = validateManagedExternalProfileEditDraft({ profile, displayName, bio });
+  if (!validation.ok) throw new Error(validation.error);
+
+  return {
+    displayName: validation.displayName,
+    bio: validation.bio,
+    updatedAt: timestamp,
+  };
 };
 
 export const buildManagedExternalProfileCreatePayload = ({ authUid, type, displayName, timestamp } = {}) => {
@@ -136,6 +159,8 @@ export const getManagedProfileTypeLabel = (profile = {}) => {
   const kind = normalizeId(profile?.kind || profile?.type || (profile?.isPersonal ? 'personal' : ''));
   return PROFILE_TYPE_LABELS[kind] || PROFILE_TYPE_LABELS.personal;
 };
+
+export const getManagedProfileBio = (profile = {}) => String(profile?.bio || '').trim();
 
 export const getManagedProfileDisplayName = (profile = {}) => {
   const displayName = String(
@@ -332,6 +357,7 @@ export const normalizeManagedExternalProfile = (candidate, authUid) => {
     type,
     kind: type,
     displayName,
+    bio: getManagedProfileBio(candidate),
     ownerUid,
     status: ACTIVE_PROFILE_STATUS,
     isPersonal: false,

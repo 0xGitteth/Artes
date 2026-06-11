@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { getPostCreditRows } from '../src/utils/postCredits.js';
-import { getManagedProfileTypeLabel } from '../src/utils/managedProfiles.js';
+import { getManagedProfileBio, getManagedProfileTypeLabel } from '../src/utils/managedProfiles.js';
 
 const externalCompanyPost = {
   authorId: 'owner_user',
@@ -61,5 +61,7 @@ assert.equal(legacyAuthorRow.uid, 'owner_user', 'Legacy posts remain clickable v
 assert.equal(getManagedProfileTypeLabel({ type: 'company' }), 'Bedrijfsprofiel', 'Bedrijfsprofiel label is correct');
 assert.equal(getManagedProfileTypeLabel({ type: 'agency' }), 'Agency', 'Agency label is correct');
 assert.equal(getManagedProfileTypeLabel({ type: 'collective' }), 'Collectief', 'Collectief label is correct');
+assert.equal(getManagedProfileBio({ type: 'company', bio: 'Quick profile omschrijving' }), 'Quick profile omschrijving', 'External quick profile bio copy resolves from the managed profile');
+assert.equal(getManagedProfileBio({ type: 'agency' }), '', 'External quick profile keeps the empty state for old profiles without bio');
 
 console.log('PASS externalProfileClicks.logic.test');

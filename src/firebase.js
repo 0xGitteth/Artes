@@ -60,6 +60,7 @@ import {
 } from './utils/affiliationRequestCards';
 import {
   buildManagedExternalProfileCreatePayload,
+  buildManagedExternalProfileUpdatePayload,
   createManagedExternalProfileId,
   normalizeManagedExternalProfiles,
 } from './utils/managedProfiles';
@@ -275,6 +276,41 @@ export const createManagedExternalProfile = async ({ type, displayName }) => {
     id: profileId,
     profileId,
     ...payload,
+  };
+};
+
+
+export const updateManagedExternalProfile = async ({ profile, profileId, displayName, bio }) => {
+  const authUser = await waitForAuthReady();
+  if (!authUser?.uid) {
+    throw new Error('Je moet ingelogd zijn om een profiel te bewerken.');
+  }
+
+  const normalizedProfileId = String(profileId || profile?.profileId || profile?.id || '').trim();
+  if (!normalizedProfileId || normalizedProfileId === authUser.uid) {
+    throw new Error('Dit profiel kan niet worden bewerkt.');
+  }
+  if (String(profile?.ownerUid || '').trim() !== authUser.uid) {
+    throw new Error('Je kunt alleen profielen bewerken die je zelf beheert.');
+  }
+
+  const now = serverTimestamp();
+  const payload = buildManagedExternalProfileUpdatePayload({
+    profile,
+    displayName,
+    bio,
+    timestamp: now,
+  });
+
+  await updateDoc(doc(getFirebaseDb(), 'profiles', normalizedProfileId), payload);
+
+  return {
+    ...profile,
+    id: normalizedProfileId,
+    profileId: normalizedProfileId,
+    displayName: payload.displayName,
+    bio: payload.bio,
+    updatedAt: payload.updatedAt,
   };
 };
 

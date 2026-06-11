@@ -268,6 +268,7 @@ service cloud.firestore {
       return onlyKeys([
           'type',
           'displayName',
+          'bio',
           'ownerUid',
           'status',
           'createdAt',
@@ -277,6 +278,7 @@ service cloud.firestore {
         && request.resource.data.displayName is string
         && request.resource.data.displayName.size() > 0
         && request.resource.data.displayName.size() <= 120
+        && (!('bio' in request.resource.data) || (request.resource.data.bio is string && request.resource.data.bio.size() <= 500))
         && request.resource.data.ownerUid is string
         && request.resource.data.ownerUid.size() > 0
         && request.resource.data.status == 'active'
@@ -301,7 +303,9 @@ service cloud.firestore {
         && isValidManagedExternalProfileData()
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.createdAt == resource.data.createdAt
-        && changed.hasOnly(['type', 'displayName', 'status', 'updatedAt'])
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.status == resource.data.status
+        && changed.hasOnly(['displayName', 'bio', 'updatedAt'])
         && request.resource.data.updatedAt == request.time;
     }
 

@@ -13,6 +13,13 @@ import {
   getExternalProfileIdFromView,
   collectLegacyOrganizationProfileHints,
   buildPostAuthorFields,
+  assertCanPublishWithManagedProfile,
+  getSetupProfilePublishBlockCopy,
+  isLegacySetupProfileId,
+  isSetupManagedProfile,
+  shouldShowPostInDiscover,
+  shouldShowProfileInDiscover,
+  getPublicExternalProfileTarget,
   getLegacyOrganizationPrefillDisplayName,
   getManagedProfileBio,
   getManagedProfileAvatar,
@@ -25,6 +32,7 @@ import {
   isManagedProfileSetupRequired,
   getPreviousManagedProfileForSwipe,
   shouldShowManagedProfileHeaderSwitcher,
+  shouldShowManagedProfileSetupProfile,
   normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
   resolveActiveProfile,
@@ -808,7 +816,7 @@ const setupProfileForPublicRoute = buildLegacyOrganizationSetupProfiles({
 assert.equal(isManagedProfileSetupRequired(setupProfileForPublicRoute), true, 'Legacy setup profile remains marked setupRequired');
 assert.deepEqual(
   resolvePublicExternalProfileLoadState({ profileId: setupProfileForPublicRoute.profileId, profile: setupProfileForPublicRoute }),
-  { loading: false, profile: null, error: 'inactive' },
+  { loading: false, profile: null, error: 'setup-profile' },
   'Setup profiles do not open as public external profile routes',
 );
 
@@ -902,5 +910,53 @@ assert.equal(legacyCompanySetup.profileId, 'legacy_company_legacy_user', 'setup 
 assert.equal(legacyCompanySetup.status, 'setup', 'setup profile status is setup rather than active');
 assert.equal(isManagedProfileSetupRequired(legacyCompanySetup), true, 'setup required helper recognizes legacy setup profiles');
 assert.equal(hasManagedExternalProfileOfType([legacyCompanySetup], 'company'), false, 'setup profiles are not marked as real active external profiles');
+
+
+
+const setupCompanyProfile = {
+  profileId: 'legacy_company_owner_multi',
+  id: 'legacy_company_owner_multi',
+  ownerUid: 'owner_multi',
+  type: 'company',
+  status: 'setup',
+  source: 'legacyOrganization',
+  isSetupProfile: true,
+  setupRequired: true,
+};
+assert.equal(isSetupManagedProfile(setupCompanyProfile), true, 'full legacy organization setup profile is detected');
+assert.equal(isSetupManagedProfile({ profileId: 'real_company', type: 'company', status: 'active', ownerUid: 'owner_multi' }), false, 'active external managed profile is not treated as setup');
+assert.equal(isSetupManagedProfile({ profileId: 'legacy_company_owner_multi', type: 'company', status: 'active' }), true, 'legacy_ profileId defensively marks setup profile');
+assert.equal(isSetupManagedProfile({ profileId: 'company_setup_required', setupRequired: true }), true, 'setupRequired true blocks setup profile publishing');
+assert.equal(isSetupManagedProfile({ profileId: 'company_setup_flag', isSetupProfile: true }), true, 'isSetupProfile true blocks setup profile publishing');
+assert.equal(isSetupManagedProfile({ profileId: 'company_legacy_source', source: 'legacyOrganization' }), true, 'legacyOrganization source blocks setup profile publishing');
+assert.equal(isSetupManagedProfile({ profileId: 'company_setup_status', status: 'setup' }), true, 'setup status blocks setup profile publishing');
+assert.equal(isLegacySetupProfileId('legacy_company_owner_multi'), true, 'legacy_ ids are recognized as setup ids');
+assert.equal(assertCanPublishWithManagedProfile(setupCompanyProfile).ok, false, 'setup profile publish guard returns block status');
+assert.equal(assertCanPublishWithManagedProfile({ profileId: 'company_active', type: 'company', status: 'active', ownerUid: 'owner_multi' }).ok, true, 'active external managed profile can publish');
+assert.equal(assertCanPublishWithManagedProfile({ profileId: 'owner_multi', uid: 'owner_multi', isPersonal: true }).ok, true, 'personal profile can publish');
+const setupPublishCopy = getSetupProfilePublishBlockCopy(setupCompanyProfile);
+assert.equal(setupPublishCopy.title, 'Stel dit profiel eerst in', 'setup publish block title matches required copy');
+assert.match(setupPublishCopy.message, /Dit profiel is nog niet openbaar/, 'setup publish block message explains profile is not public');
+assert.equal(setupPublishCopy.ctaLabel, 'Profiel instellen', 'setup publish block CTA label matches required copy');
+
+assert.equal(shouldShowProfileInDiscover({ uid: 'viewer' }, 'viewer'), false, 'Discover hides profile with own uid');
+assert.equal(shouldShowProfileInDiscover({ ownerUid: 'viewer', profileId: 'company_own', type: 'company', status: 'active' }, 'viewer'), false, 'Discover hides own external profile by ownerUid');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'viewer', type: 'company', status: 'active' }, 'viewer'), false, 'Discover hides profile with own profileId');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'setup_required', setupRequired: true, type: 'company' }, 'viewer'), false, 'Discover hides setupRequired profile');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'setup_flag', isSetupProfile: true, type: 'company' }, 'viewer'), false, 'Discover hides isSetupProfile profile');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'legacy_source', source: 'legacyOrganization', type: 'company' }, 'viewer'), false, 'Discover hides legacyOrganization setup profile');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'inactive_company', ownerUid: 'other', type: 'company', status: 'inactive' }, 'viewer'), false, 'Discover hides inactive external profile');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'active_company', ownerUid: 'other', type: 'company', status: 'active', displayName: 'Other Studio' }, 'viewer'), true, 'Discover shows active external profile from another user');
+
+assert.equal(shouldShowPostInDiscover({ authorId: 'viewer', title: 'Own authorId' }, 'viewer'), false, 'Discover hides own post by authorId');
+assert.equal(shouldShowPostInDiscover({ authorUid: 'viewer', title: 'Own authorUid' }, 'viewer'), false, 'Discover hides own post by authorUid');
+assert.equal(shouldShowPostInDiscover({ authorOwnerUid: 'viewer', authorProfileId: 'company_own', title: 'Own company' }, 'viewer'), false, 'Discover hides own external post by authorOwnerUid');
+assert.equal(shouldShowPostInDiscover({ ownerUid: 'viewer', authorProfileId: 'agency_own', title: 'Own agency' }, 'viewer'), false, 'Discover hides own external post by ownerUid');
+assert.equal(shouldShowPostInDiscover({ authorProfileId: 'legacy_company_viewer', authorOwnerUid: 'other', title: 'Setup post' }, 'viewer'), false, 'Discover hides posts with legacy setup authorProfileId');
+assert.equal(shouldShowPostInDiscover({ authorId: 'other', authorOwnerUid: 'other', authorProfileId: 'company_other', title: 'Other company' }, 'viewer'), true, 'Discover shows external profile post from another user');
+
+assert.equal(getPublicExternalProfileTarget(setupCompanyProfile), null, 'legacy setup profile id is not a public external profile target');
+assert.equal(getPublicExternalProfileTarget({ profileId: 'active_company', ownerUid: 'other', type: 'company', status: 'active', displayName: 'Other Studio' }), 'active_company', 'active real external profile is a public target');
+assert.equal(shouldShowManagedProfileSetupProfile({ profile: setupCompanyProfile, currentUserId: 'owner_multi', ownerUid: 'owner_multi' }), true, 'owner-only setup profile remains locally visible');
 
 console.log('PASS managedProfiles.logic.test');

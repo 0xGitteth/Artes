@@ -1,5 +1,6 @@
 import { getCreditMakerFunction } from './uploadConsent.js';
 import { getRoleLabel, normalizeRoleValue } from './roles.js';
+import { isLegacySetupProfileId } from './managedProfiles.js';
 
 const SELF_PORTRAIT_ROLES = new Set(['model']);
 const OWN_WORK_ROLES = new Set(['mua', 'stylist', 'hair']);
@@ -95,7 +96,7 @@ export const getPostCreditRows = (post = {}) => {
   const credits = Array.isArray(post.credits) ? post.credits.filter(hasStructuredCredit) : [];
   const authorOwnerUid = String(post.authorOwnerUid || post.authorUid || post.authorId || '').trim();
   const authorProfileId = String(post.authorProfileId || '').trim();
-  const hasExternalAuthorProfile = Boolean(authorOwnerUid && authorProfileId && authorProfileId !== authorOwnerUid);
+  const hasExternalAuthorProfile = Boolean(authorOwnerUid && authorProfileId && authorProfileId !== authorOwnerUid && !isLegacySetupProfileId(authorProfileId));
   const isAuthorCredit = (credit = {}) => {
     const creditUid = String(credit.uid || credit.userId || '').trim();
     const creditName = String(credit.name || credit.displayName || '').trim();

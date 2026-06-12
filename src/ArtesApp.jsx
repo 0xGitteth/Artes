@@ -161,7 +161,13 @@ import {
   getManagedProfileSetupDescription,
   getManagedProfileSetupStatusLabel,
   getOwnerVisibleManagedProfileSetupProfiles,
+  getPublicExternalProfileTarget,
+  getSetupProfilePublishBlockCopy,
+  isLegacySetupProfileId,
   isManagedProfileSetupRequired,
+  assertCanPublishWithManagedProfile,
+  shouldShowPostInDiscover,
+  shouldShowProfileInDiscover,
   getManagedProfileSwitcherActiveIndex,
   getManagedProfileSwitcherProfiles,
   getManagedProfileTypeLabel,
@@ -1613,7 +1619,7 @@ export default function ArtesApp() {
     const externalAuthorProfileIds = Array.from(new Set((posts || [])
       .map((post) => String(post?.authorProfileId || '').trim())
       .filter((profileId) => {
-        if (!profileId) return false;
+        if (!profileId || isLegacySetupProfileId(profileId)) return false;
         const matchingPost = posts.find((post) => String(post?.authorProfileId || '').trim() === profileId);
         const ownerUid = String(matchingPost?.authorId || matchingPost?.authorUid || matchingPost?.authorOwnerUid || '').trim();
         return Boolean(ownerUid && profileId !== ownerUid);
@@ -1646,6 +1652,11 @@ export default function ArtesApp() {
 
   const handleOpenQuickProfile = useCallback((target, meta = {}) => {
     if (target && typeof target === 'object') {
+      if (target.kind === 'external') {
+        const profileId = String(target.profileId || '').trim();
+        const publicTarget = target.profile ? getPublicExternalProfileTarget(target.profile) : null;
+        if (isLegacySetupProfileId(profileId) || (target.profile && !publicTarget)) return;
+      }
       setQuickProfileTarget(target);
       return;
     }
@@ -1654,11 +1665,13 @@ export default function ArtesApp() {
     const ownerUid = String(meta?.ownerUid || target || '').trim();
     const post = meta?.post || null;
     if (publicProfileId && ownerUid && publicProfileId !== ownerUid) {
+      if (isLegacySetupProfileId(publicProfileId)) return;
       const cachedExternalProfile = postAuthorProfilesById?.[publicProfileId] || null;
       if (!cachedExternalProfile) {
         setQuickProfileTarget({ kind: 'external', profileId: publicProfileId, ownerUid });
         return;
       }
+      if (!getPublicExternalProfileTarget(cachedExternalProfile)) return;
 
       const resolvedTarget = resolveAuthorQuickProfileTarget({
         post: post || { authorProfileId: publicProfileId, authorOwnerUid: ownerUid },
@@ -2857,6 +2870,11 @@ export default function ArtesApp() {
             moderationApiBase={moderationApiBase}
             resumeUploadId={uploadContext.resumeUploadId}
             activeProfile={activeProfile}
+            onSetupProfilePublishBlocked={(setupProfile) => {
+              setShowUploadModal(false);
+              setPendingManagedProfileSetup(setupProfile || activeProfile || null);
+              setShowSettingsModal(true);
+            }}
           />
         )}
         {showSettingsModal && (
@@ -4550,12 +4568,14 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   );
 
   const visibleUsers = useMemo(
-    () => normalizedUsers.filter((u) => !currentUserId || u.uid !== currentUserId),
+    () => normalizedUsers.filter((u) => shouldShowProfileInDiscover(u, currentUserId)),
     [normalizedUsers, currentUserId]
   );
   const visiblePosts = useMemo(
-    () => posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
-    [posts, triggerVisibility]
+    () => posts
+      .filter((post) => shouldShowPostInDiscover(post, currentUserId))
+      .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
+    [posts, currentUserId, triggerVisibility]
   );
 
   const displayedThemes = showAllThemes ? THEMES : THEMES.slice(0, 5);
@@ -7473,6 +7493,7 @@ function UploadModal({
   moderationApiBase = '',
   resumeUploadId = null,
   activeProfile = null,
+  onSetupProfilePublishBlocked = null,
 }) {
   const makerSelfRoles = getSelfMakerRoles(profile.roles);
   const defaultRole = makerSelfRoles[0] || profile.roles?.[0] || 'model';
@@ -7546,6 +7567,7 @@ function UploadModal({
   const [errors, setErrors] = useState({});
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState('');
+  const [setupProfilePublishBlock, setSetupProfilePublishBlock] = useState(null);
   const moderationDebugEnabled = import.meta.env.DEV || import.meta.env.VITE_MODERATION_DEBUG === '1';
   const moderationTraceRef = useRef(null);
   const lastUiStateRef = useRef(null);
@@ -8651,6 +8673,23 @@ function UploadModal({
   };
 
   const handlePublish = async ({ applySuggestions = false } = {}) => {
+    const publishProfileCheck = assertCanPublishWithManagedProfile(activeProfile);
+    if (!publishProfileCheck.ok) {
+      const copy = publishProfileCheck.copy || getSetupProfilePublishBlockCopy(activeProfile);
+      setSetupProfilePublishBlock(copy);
+      setPublishError('');
+      setErrors((prev) => ({ ...prev, moderation: undefined }));
+      logModerationDebug('after-policy-gating', {
+        policyResult: 'blocked',
+        policyReason: 'setup-profile',
+        finalResult: 'blocked',
+        finalReason: 'setup-profile',
+        publishAllowed: false,
+      });
+      return;
+    }
+    setSetupProfilePublishBlock(null);
+
     const validationErrors = {};
     const normalizeTheme = (theme) => String(theme || '').trim().toLowerCase();
     const getMissingRequiredThemes = (themes = []) => {
@@ -8931,6 +8970,7 @@ function UploadModal({
       });
 
       setErrors({});
+      setSetupProfilePublishBlock(null);
       setImage(null);
       setImageMeta(null);
       setTitle('');
@@ -9710,6 +9750,19 @@ function UploadModal({
                          })}</div>
                          {errors.styles && <p className="mt-2 text-xs text-red-500">{errors.styles}</p>}
                       </div>
+                      {setupProfilePublishBlock && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+                          <p className="font-bold">{setupProfilePublishBlock.title}</p>
+                          <p className="mt-1 text-xs leading-relaxed">{setupProfilePublishBlock.message}</p>
+                          <button
+                            type="button"
+                            onClick={() => onSetupProfilePublishBlocked?.(activeProfile)}
+                            className="mt-3 rounded-full bg-amber-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-amber-700"
+                          >
+                            {setupProfilePublishBlock.ctaLabel}
+                          </button>
+                        </div>
+                      )}
                       {publishError && <p className="text-sm text-red-500 text-center">{publishError}</p>}
                       {showSuggestionUI && <p className="text-xs text-amber-700 dark:text-amber-300 text-center">Kies hoe je met de AI-suggesties wilt omgaan om te publiceren.</p>}
                       <Button onClick={handlePublish} className="w-full py-2 text-sm md:py-3 md:text-base" disabled={publishing || showSuggestionUI || outcome === 'forbidden'}>
@@ -10837,13 +10890,25 @@ function ExternalProfileUnavailable({ title = 'Profiel niet beschikbaar', messag
 }
 
 function usePublicExternalProfile(profileId, seedProfile, currentUserId) {
-  const [profileState, setProfileState] = useState(() => ({ loading: !seedProfile, profile: seedProfile || null, error: '' }));
+  const [profileState, setProfileState] = useState(() => resolvePublicExternalProfileLoadState({
+    profileId,
+    profile: seedProfile || null,
+    error: seedProfile ? '' : 'missing',
+  }));
 
   useEffect(() => {
     let active = true;
     const normalizedProfileId = String(profileId || '').trim();
-    setProfileState({ loading: !seedProfile, profile: seedProfile || null, error: '' });
-    if (!normalizedProfileId) {
+    setProfileState(resolvePublicExternalProfileLoadState({
+      profileId: normalizedProfileId,
+      profile: seedProfile || null,
+      error: seedProfile ? '' : 'missing',
+    }));
+    if (!normalizedProfileId || isLegacySetupProfileId(normalizedProfileId)) {
+      if (isLegacySetupProfileId(normalizedProfileId)) {
+        setProfileState(resolvePublicExternalProfileLoadState({ profileId: normalizedProfileId, profile: null, error: 'setup-profile' }));
+        return () => { active = false; };
+      }
       setProfileState({ loading: false, profile: null, error: 'missing-id' });
       return () => { active = false; };
     }

@@ -7,7 +7,7 @@ import {
 } from 'firebase/auth';
 import { canAccessFirestore, devLog } from '../utils/firestoreGate';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
-import { buildPostAuthorFields, resolvePostAuthorProfile } from '../utils/managedProfiles';
+import { buildPostAuthorFields, isLegacySetupProfileId, resolvePostAuthorProfile } from '../utils/managedProfiles';
 import {
   getFirestore,
   collection,
@@ -205,6 +205,9 @@ export const publishPost = async (post) => {
   const authUid = auth.currentUser.uid;
   const requestedAuthorProfileId = post?.authorProfileId;
   let profileDoc = null;
+  if (isLegacySetupProfileId(requestedAuthorProfileId)) {
+    throw new Error('Dit profiel is nog niet openbaar. Sla het eerst op voordat je ermee kunt publiceren.');
+  }
   if (requestedAuthorProfileId && requestedAuthorProfileId !== authUid) {
     const profileSnap = await getDoc(doc(db, 'profiles', requestedAuthorProfileId));
     if (!profileSnap.exists()) {

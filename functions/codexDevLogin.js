@@ -1,4 +1,5 @@
 const truthy = (value) => String(value || '').trim().toLowerCase() === 'true';
+const ALLOWED_ARTES_ENVS = new Set(['development', 'staging', 'preview', 'local']);
 
 export const resolveCodexDevProjectId = (env = process.env) => {
   if (env.GCLOUD_PROJECT) return env.GCLOUD_PROJECT;
@@ -12,7 +13,8 @@ export const resolveCodexDevProjectId = (env = process.env) => {
 };
 
 export const getCodexDevLoginDecision = (env = process.env) => {
-  if (truthy(env.CODEX_DEV_LOGIN_FORBIDDEN) || String(env.ARTES_ENV || '').trim().toLowerCase() === 'production') {
+  const artesEnv = String(env.ARTES_ENV || '').trim().toLowerCase();
+  if (truthy(env.CODEX_DEV_LOGIN_FORBIDDEN) || !ALLOWED_ARTES_ENVS.has(artesEnv)) {
     return { allowed: false, code: 'forbidden_environment' };
   }
 

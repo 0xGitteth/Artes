@@ -18,6 +18,14 @@ import {
 } from './services/firebaseClient';
 import useRecoveredImageMeta from './utils/useRecoveredImageMeta';
 import {
+  DIDIT_APPROVED_STATUSES,
+  DIDIT_REFRESHABLE_STATUSES,
+  DIDIT_REJECTED_STATUSES,
+  DIDIT_SUPPORT_STATUSES,
+  normalizeDiditStatus,
+  resolveEffectiveDiditState,
+} from './utils/diditStatus';
+import {
   ensureUserProfile,
   fetchUserProfile,
   handleAuthRedirectResult,
@@ -229,10 +237,6 @@ const getMakerFunctionLabel = (makerFunction) => ROLES.find((role) => role.id ==
   || makerFunction;
 
 const DIDIT_SUPPORT_EMAIL = 'admin@artes.app';
-const DIDIT_APPROVED_STATUSES = ['approved'];
-const DIDIT_REJECTED_STATUSES = ['declined'];
-
-const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().toLowerCase() || null;
 
 const getTimestampMs = (value) => {
   if (!value) return 0;
@@ -3549,7 +3553,13 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
 
           if (isRejected || (isApproved && isAdult === false)) {
             setDiditPending(false);
-            setDiditUiState(isApproved && isAdult === false ? 'underage' : 'rejected');
+            setDiditUiState(status === 'underage' || (isApproved && isAdult === false) ? 'underage' : 'rejected');
+            return;
+          }
+
+          if (status === 'age_unverified') {
+            setDiditPending(false);
+            setDiditUiState('age_unverified');
             return;
           }
 
@@ -3795,24 +3805,15 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const hasDiditStatus = Boolean(persistedDiditStatus);
     const hasRefreshableDiditSession = Boolean(diditSessionId || profile?.didit?.sessionId || profile?.idv?.sessionId);
     const hasDiditSession = hasDiditStatus || hasRefreshableDiditSession;
-    const isRejectedState = diditUiState === 'rejected' || diditUiState === 'underage';
     const canRefreshDidit = hasRefreshableDiditSession && profile?.ageVerified !== true;
     const diditVerificationUrl = profile?.didit?.verificationUrl || profile?.idv?.verificationUrl || null;
-    const showSupportActions = isRejectedState || diditUiState === 'error';
-    const effectiveDiditState = (() => {
-      if (profile?.ageVerified === true || persistedDiditStatus === 'approved') return 'approved';
-      if (diditUiState === 'in_review') return 'in_review';
-      if (diditUiState === 'rejected' || diditUiState === 'underage') return 'declined';
-      if (diditUiState === 'expired') return 'expired';
-      if (diditUiState === 'abandoned') return 'abandoned';
-      if (diditUiState === 'error') return 'error';
-      if (persistedDiditStatus && ['in_review', 'declined', 'expired', 'abandoned', 'error', 'started', 'in_progress', 'not_started'].includes(persistedDiditStatus)) {
-        if ((persistedDiditStatus === 'not_started' || persistedDiditStatus === 'started') && hasRefreshableDiditSession) return 'in_progress';
-        return persistedDiditStatus;
-      }
-      if (diditUiState === 'pending' || (hasRefreshableDiditSession && !persistedDiditStatus)) return 'in_progress';
-      return 'not_started';
-    })();
+    const effectiveDiditState = resolveEffectiveDiditState({
+      profileAgeVerified: profile?.ageVerified === true,
+      persistedDiditStatus,
+      diditUiState,
+      hasRefreshableDiditSession,
+    });
+    const showSupportActions = DIDIT_SUPPORT_STATUSES.includes(effectiveDiditState) || effectiveDiditState === 'declined' || effectiveDiditState === 'error';
     const canReopenInProgress = effectiveDiditState === 'in_progress' && Boolean(diditVerificationUrl);
 
 
@@ -4038,7 +4039,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                <p>{diditUiState === 'in_review' ? 'Je verificatie is ontvangen en wordt handmatig gecontroleerd. Dit kan even duren. Je hoeft niets opnieuw te doen. Kom later terug of gebruik Status opnieuw controleren.' : 'Je verificatie is gestart. Rond de stappen bij Didit af. Als je al klaar bent, kun je hieronder je status opnieuw controleren.'}</p>
              </div>
            )}
-           {(diditUiState === 'rejected' || diditUiState === 'underage') && (
+           {(['declined', 'underage'].includes(effectiveDiditState)) && (
              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
                <div className="flex gap-3">
                  <AlertTriangle className="text-red-500" />
@@ -4048,7 +4049,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                </div>
              </div>
            )}
-           {diditUiState === 'verified_missing_age' && (
+           {effectiveDiditState === 'age_unverified' && (
              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                Didit gaf &quot;verified&quot; terug, maar leeftijd kon nog niet worden vastgesteld. Probeer opnieuw te controleren.
              </div>
@@ -4071,11 +4072,11 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
            {diditUiState === 'no_session' && !hasDiditSession && (
              <p className="text-sm text-slate-600 dark:text-slate-300">Nog geen Didit sessie gevonden. Start de verificatie om verder te gaan.</p>
            )}
-           {hasDiditStatus && !hasRefreshableDiditSession && profile?.ageVerified !== true && (
+           {hasDiditStatus && !hasRefreshableDiditSession && profile?.ageVerified !== true && !DIDIT_SUPPORT_STATUSES.includes(effectiveDiditState) && (
              <p className="text-xs text-slate-500 dark:text-slate-400">Status beschikbaar, maar er is geen actieve sessie om te verversen. Start een nieuwe verificatie.</p>
            )}
            <div className="flex flex-col gap-3">
-             {['in_progress', 'in_review', 'expired', 'abandoned', 'error'].includes(effectiveDiditState) && canRefreshDidit && (
+             {DIDIT_REFRESHABLE_STATUSES.includes(effectiveDiditState) && canRefreshDidit && (
                <Button onClick={handleRefreshDiditStatus} className="w-full" disabled={diditPending || requiresEmailVerificationForIdv || allowDevSkipIdv}>
                  Status opnieuw controleren
                </Button>
@@ -4142,7 +4143,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                  Niet akkoord, verwijder mijn account
                </Button>
              )}
-             {(effectiveDiditState === 'declined' || effectiveDiditState === 'error') && (
+             {(['declined', 'underage', 'age_unverified', 'error'].includes(effectiveDiditState)) && (
                <Button variant="secondary" onClick={() => window.location.assign(`mailto:${DIDIT_SUPPORT_EMAIL}?subject=${encodeURIComponent('Vraag over afgewezen leeftijdsverificatie')}`)} className="w-full">
                  Mail support
                </Button>

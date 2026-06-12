@@ -17,9 +17,23 @@ test('Codex dev login is blocked when CODEX_DEV_LOGIN_ENABLED is missing', () =>
   );
 });
 
+test('Codex dev login is blocked when ARTES_ENV is missing', () => {
+  assert.deepEqual(
+    getCodexDevLoginDecision(envFor({ ARTES_ENV: undefined })),
+    { allowed: false, code: 'forbidden_environment' }
+  );
+});
+
 test('Codex dev login is blocked when ARTES_ENV is production', () => {
   assert.deepEqual(
     getCodexDevLoginDecision(envFor({ ARTES_ENV: 'production' })),
+    { allowed: false, code: 'forbidden_environment' }
+  );
+});
+
+test('Codex dev login is blocked when ARTES_ENV is unknown', () => {
+  assert.deepEqual(
+    getCodexDevLoginDecision(envFor({ ARTES_ENV: 'qa' })),
     { allowed: false, code: 'forbidden_environment' }
   );
 });

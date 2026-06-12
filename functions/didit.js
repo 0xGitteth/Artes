@@ -224,6 +224,28 @@ export const resolveDiditAdultDecision = (status, age) => {
   };
 };
 
+export const resolveDiditPersistenceDecision = ({ status, age, alreadyApproved = false } = {}) => {
+  const adultDecision = resolveDiditAdultDecision(status, age);
+  const { normalizedStatus, ageIsNumber, age: resolvedAge, isAdult } = adultDecision;
+  const isApprovedAdult = normalizedStatus === 'approved' && isAdult === true;
+  const candidateStatus = normalizedStatus === 'approved' && !isApprovedAdult
+    ? ageIsNumber && resolvedAge < 18
+      ? 'underage'
+      : 'age_unverified'
+    : normalizedStatus;
+  const updateMode = alreadyApproved && !isApprovedAdult ? 'diagnostics_only' : isApprovedAdult ? 'approve_adult' : 'sync_status';
+
+  return {
+    normalizedStatus,
+    persistedStatus: updateMode === 'diagnostics_only' ? null : candidateStatus,
+    candidateStatus,
+    isApprovedAdult,
+    isAdult: isAdult === true,
+    adultDecision,
+    updateMode,
+  };
+};
+
 const toSafeDiditErrorBody = (data) => {
   if (data == null) return null;
   if (typeof data === 'string') return data.slice(0, 2000);
@@ -290,13 +312,15 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
 
   const userRef = db.collection('users').doc(uid);
   const now = FieldValue.serverTimestamp();
-  const adultDecision = resolveDiditAdultDecision(status, age);
-  const { normalizedStatus, age: resolvedAge, ageIsNumber, assumeAdultOnVerified, isAdult } = adultDecision;
-  const isApprovedAdult = normalizedStatus === 'approved' && isAdult === true;
+  const existingUserSnapshot = await userRef.get();
+  const alreadyApproved = existingUserSnapshot.exists && existingUserSnapshot.get('ageVerified') === true;
+  const persistenceDecision = resolveDiditPersistenceDecision({ status, age, alreadyApproved });
+  const { normalizedStatus, persistedStatus, candidateStatus, isApprovedAdult, adultDecision, updateMode } = persistenceDecision;
+  const { age: resolvedAge, ageIsNumber, assumeAdultOnVerified, isAdult } = adultDecision;
   const normalizedReason = normalizeReason(reason);
 
   const diditPayload = {
-    status: normalizedStatus,
+    status: persistedStatus || candidateStatus,
     sessionId: sessionId || null,
     reason: normalizedReason,
     verificationUrl: verificationUrl || null,
@@ -315,11 +339,9 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     lastAssumeAdultOnVerified: assumeAdultOnVerified,
   };
 
-  const existingUserSnapshot = await userRef.get();
   const existingStepRaw = existingUserSnapshot.exists ? existingUserSnapshot.get('onboardingStep') : null;
   const existingStep = Number.isFinite(Number(existingStepRaw)) ? Number(existingStepRaw) : 0;
 
-  const alreadyApproved = existingUserSnapshot.exists && existingUserSnapshot.get('ageVerified') === true;
   if (isApprovedAdult) {
     const approvedStep = Math.max(existingStep, 3);
     await userRef.set(
@@ -346,6 +368,9 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
           lastMatchedSessionCount: Number.isFinite(Number(diagnostics.matchedSessionCount)) ? Number(diagnostics.matchedSessionCount) : null,
           lastMatchedApprovedCount: Number.isFinite(Number(diagnostics.matchedApprovedCount)) ? Number(diagnostics.matchedApprovedCount) : null,
           lastReferenceMatch: diagnostics.referenceMatch === true,
+          lastResolvedAge: ageIsNumber ? resolvedAge : null,
+          lastAgeIsNumber: ageIsNumber,
+          lastAssumeAdultOnVerified: assumeAdultOnVerified,
           lastSyncErrorCode: diagnostics.errorCode || null,
           lastSyncErrorSafeMessage: diagnostics.errorSafeMessage || null,
         },
@@ -376,7 +401,17 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     }
   }
 
-  return { status: normalizedStatus, isAdult };
+  const existingPersistedStatus = existingUserSnapshot.exists
+    ? existingUserSnapshot.get('didit.status') || existingUserSnapshot.get('idv.status') || null
+    : null;
+  return {
+    status: updateMode === 'diagnostics_only' ? existingPersistedStatus || 'approved' : persistedStatus,
+    normalizedStatus,
+    candidateStatus,
+    isAdult: isAdult === true,
+    adultDecision,
+    updateMode,
+  };
 };
 
 const reconcileDiditSessionsForUid = async (uid) => {

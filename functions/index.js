@@ -21,7 +21,7 @@ import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
-import { canIssueCodexDevToken } from './codexDevLogin.js';
+import { getCodexDevLoginDecision } from './codexDevLogin.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -216,29 +216,6 @@ const getAppIdFromEnv = () => {
   } catch (error) {
     return null;
   }
-};
-
-const resolveProjectId = () => {
-  if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
-  const firebaseConfig = process.env.FIREBASE_CONFIG;
-  if (!firebaseConfig) return null;
-  try {
-    const parsed = JSON.parse(firebaseConfig);
-    return parsed?.projectId || null;
-  } catch (error) {
-    return null;
-  }
-};
-
-const isCodexDevLoginEnabled = () => String(process.env.CODEX_DEV_LOGIN_ENABLED || '').toLowerCase() === 'true';
-
-const isProjectAllowedForCodexDevLogin = () => {
-  const raw = process.env.CODEX_DEV_ALLOWED_PROJECT_IDS || '';
-  if (!raw.trim()) return false;
-  const allowed = raw.split(',').map((v) => v.trim()).filter(Boolean);
-  if (!allowed.length) return false;
-  const projectId = resolveProjectId();
-  return Boolean(projectId && allowed.includes(projectId));
 };
 
 const codexDevUidDefault = 'codex-dev-user';
@@ -2215,18 +2192,9 @@ export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4
     return;
   }
 
-  if (!canIssueCodexDevToken()) {
-    res.status(403).json({ error: 'Codex dev login is disabled in production' });
-    return;
-  }
-
-  if (!isCodexDevLoginEnabled()) {
-    res.status(403).json({ error: 'Codex dev login is disabled' });
-    return;
-  }
-
-  if (!isProjectAllowedForCodexDevLogin()) {
-    res.status(403).json({ error: 'Codex dev login is not allowed for this project' });
+  const devLoginDecision = getCodexDevLoginDecision();
+  if (!devLoginDecision.allowed) {
+    res.status(403).json({ error: 'Codex dev login is unavailable', code: devLoginDecision.code });
     return;
   }
 

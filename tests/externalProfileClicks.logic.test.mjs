@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { getPostCreditRows } from '../src/utils/postCredits.js';
-import { getManagedProfileBio, getManagedProfileTypeLabel } from '../src/utils/managedProfiles.js';
+import { getManagedProfileBio, getManagedProfileTypeLabel, getPublicExternalProfileTarget, resolveAuthorQuickProfileTarget } from '../src/utils/managedProfiles.js';
 
 const externalCompanyPost = {
   authorId: 'owner_user',
@@ -58,10 +58,35 @@ const [legacyAuthorRow] = getPostCreditRows({ authorId: 'owner_user', authorName
 assert.equal(legacyAuthorRow.publicProfileId, null, 'Legacy posts without authorProfileId keep existing personal fallback');
 assert.equal(legacyAuthorRow.uid, 'owner_user', 'Legacy posts remain clickable via owner uid');
 
+const [legacySetupAuthorRow] = getPostCreditRows({
+  authorId: 'owner_user',
+  authorOwnerUid: 'owner_user',
+  authorProfileId: 'legacy_company_owner_user',
+  authorName: 'Setup Studio',
+});
+assert.equal(legacySetupAuthorRow.publicProfileId, null, 'Legacy setup authorProfileId does not become a public quick profile click target');
+assert.equal(legacySetupAuthorRow.uid, 'owner_user', 'Legacy setup author row falls back to owner uid');
+
 assert.equal(getManagedProfileTypeLabel({ type: 'company' }), 'Bedrijfsprofiel', 'Bedrijfsprofiel label is correct');
 assert.equal(getManagedProfileTypeLabel({ type: 'agency' }), 'Agency', 'Agency label is correct');
 assert.equal(getManagedProfileTypeLabel({ type: 'collective' }), 'Collectief', 'Collectief label is correct');
 assert.equal(getManagedProfileBio({ type: 'company', bio: 'Quick profile omschrijving' }), 'Quick profile omschrijving', 'External quick profile bio copy resolves from the managed profile');
 assert.equal(getManagedProfileBio({ type: 'agency' }), '', 'External quick profile keeps the empty state for old profiles without bio');
+
+assert.equal(
+  getPublicExternalProfileTarget({ profileId: 'legacy_company_owner_user', type: 'company', ownerUid: 'owner_user', status: 'setup', isSetupProfile: true, setupRequired: true, source: 'legacyOrganization' }),
+  null,
+  'Setup profile id legacy_ is not treated as a public external profile target',
+);
+assert.equal(
+  getPublicExternalProfileTarget({ profileId: 'company_profile', type: 'company', ownerUid: 'owner_user', status: 'active', displayName: 'Studio X' }),
+  'company_profile',
+  'Active real external profile remains a public external profile target',
+);
+assert.equal(
+  resolveAuthorQuickProfileTarget({ post: { authorOwnerUid: 'owner_user', authorProfileId: 'legacy_company_owner_user' }, profilesById: {}, viewerUid: 'visitor' }).reason,
+  'setup-profile',
+  'Setup profile id legacy_ does not open as quick profile for visitors',
+);
 
 console.log('PASS externalProfileClicks.logic.test');

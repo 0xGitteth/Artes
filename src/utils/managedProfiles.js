@@ -3,6 +3,8 @@ const normalizeId = (value) => String(value || '').trim();
 const EXTERNAL_PROFILE_TYPES = new Set(['company', 'agency', 'collective']);
 const ACTIVE_PROFILE_STATUS = 'active';
 const LEGACY_ORGANIZATION_SETUP_SOURCE = 'legacyOrganization';
+const SETUP_PROFILE_STATUS = 'setup';
+const LEGACY_SETUP_PROFILE_ID_PREFIX = 'legacy_';
 
 
 export const MANAGED_EXTERNAL_PROFILE_TYPES = ['company', 'agency', 'collective'];
@@ -12,6 +14,9 @@ export const MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH = 120;
 export const MAX_MANAGED_PROFILE_BIO_LENGTH = 500;
 export const ACTIVE_PROFILE_STORAGE_KEY = 'artes.activeProfileId';
 export const EXTERNAL_PROFILE_VIEW_PREFIX = 'externalProfile_';
+export const SETUP_PROFILE_PUBLISH_BLOCK_TITLE = 'Stel dit profiel eerst in';
+export const SETUP_PROFILE_PUBLISH_BLOCK_MESSAGE = 'Dit profiel is nog niet openbaar. Sla het eerst op voordat je ermee kunt publiceren.';
+export const SETUP_PROFILE_PUBLISH_BLOCK_CTA_LABEL = 'Profiel instellen';
 
 
 export const getExternalProfileIdFromView = (view = '') => {
@@ -120,22 +125,104 @@ export const isManagedExternalProfileType = (type) => EXTERNAL_PROFILE_TYPES.has
 
 export const isExternalManagedProfile = (profile = {}) => isManagedExternalProfileType(profile?.type || profile?.kind);
 
-export const isPublicManagedExternalProfileVisible = ({ profile = {} } = {}) => {
+export const isLegacySetupProfileId = (profileId = '') => normalizeId(profileId).startsWith(LEGACY_SETUP_PROFILE_ID_PREFIX);
+
+export const isSetupManagedProfile = (profile = {}) => {
   if (!profile || typeof profile !== 'object') return false;
+  const profileId = getManagedProfileId(profile);
+  return Boolean(
+    profile?.isSetupProfile === true
+    || profile?.setupRequired === true
+    || profile?.source === LEGACY_ORGANIZATION_SETUP_SOURCE
+    || normalizeId(profile?.status) === SETUP_PROFILE_STATUS
+    || isLegacySetupProfileId(profileId),
+  );
+};
+
+export const getSetupProfilePublishBlockCopy = () => ({
+  title: SETUP_PROFILE_PUBLISH_BLOCK_TITLE,
+  message: SETUP_PROFILE_PUBLISH_BLOCK_MESSAGE,
+  ctaLabel: SETUP_PROFILE_PUBLISH_BLOCK_CTA_LABEL,
+});
+
+export const assertCanPublishWithManagedProfile = (profile = {}) => {
+  if (isSetupManagedProfile(profile)) {
+    return { ok: false, reason: 'setup-profile', copy: getSetupProfilePublishBlockCopy(profile) };
+  }
+  return { ok: true, reason: '', copy: null };
+};
+
+export const isPublicRealManagedProfile = (profile = {}) => {
+  if (!profile || typeof profile !== 'object') return false;
+  if (isSetupManagedProfile(profile)) return false;
   if (!isExternalManagedProfile(profile)) return false;
   return normalizeId(profile.status || ACTIVE_PROFILE_STATUS) === ACTIVE_PROFILE_STATUS;
+};
+
+export const isPublicManagedExternalProfileVisible = ({ profile = {} } = {}) => isPublicRealManagedProfile(profile);
+
+export const isOwnDiscoverProfile = (profile = {}, currentUserId = '') => {
+  const viewerUid = normalizeId(currentUserId);
+  if (!viewerUid || !profile || typeof profile !== 'object') return false;
+  return [profile.uid, profile.id, profile.profileId, profile.ownerUid, profile.authorOwnerUid]
+    .some((value) => normalizeId(value) === viewerUid);
+};
+
+export const shouldShowProfileInDiscover = (profile = {}, currentUserId = '') => {
+  if (!profile || typeof profile !== 'object') return false;
+  if (isOwnDiscoverProfile(profile, currentUserId)) return false;
+  if (isSetupManagedProfile(profile)) return false;
+  const status = normalizeId(profile.status);
+  if (status && status !== ACTIVE_PROFILE_STATUS) return false;
+  return true;
+};
+
+export const isOwnDiscoverPost = (post = {}, currentUserId = '') => {
+  const viewerUid = normalizeId(currentUserId);
+  if (!viewerUid || !post || typeof post !== 'object') return false;
+  return [post.authorId, post.authorUid, post.authorOwnerUid, post.ownerUid, post.uid, post.profileId]
+    .some((value) => normalizeId(value) === viewerUid);
+};
+
+export const shouldShowPostInDiscover = (post = {}, currentUserId = '') => {
+  if (!post || typeof post !== 'object') return false;
+  if (isOwnDiscoverPost(post, currentUserId)) return false;
+  if (isLegacySetupProfileId(post.authorProfileId)) return false;
+  return true;
+};
+
+export const getPublicExternalProfileTarget = (profile = {}) => {
+  if (!profile || typeof profile !== 'object') return null;
+  const profileId = getManagedProfileId(profile);
+  if (!profileId || isLegacySetupProfileId(profileId) || isSetupManagedProfile(profile)) return null;
+  if (!isPublicManagedExternalProfileVisible({ profile: { ...profile, profileId, id: profileId } })) return null;
+  return profileId;
 };
 
 
 export const resolvePublicExternalProfileLoadState = ({ profileId = '', profile = null, error = '' } = {}) => {
   const normalizedProfileId = normalizeId(profileId);
   if (!normalizedProfileId) return { loading: false, profile: null, error: error || 'missing-id' };
+  if (isLegacySetupProfileId(normalizedProfileId)) return { loading: false, profile: null, error: error || 'setup-profile' };
   if (!profile || typeof profile !== 'object') return { loading: false, profile: null, error: error || 'missing' };
   const nextProfile = { id: normalizedProfileId, profileId: normalizedProfileId, ...profile };
+  if (isSetupManagedProfile(nextProfile)) {
+    return { loading: false, profile: null, error: error || 'setup-profile' };
+  }
   if (!isPublicManagedExternalProfileVisible({ profile: nextProfile })) {
     return { loading: false, profile: null, error: error || 'inactive' };
   }
   return { loading: false, profile: nextProfile, error: '' };
+};
+
+export const resolveInitialPublicExternalProfileLoadState = ({ profileId = '', seedProfile = null } = {}) => {
+  const normalizedProfileId = normalizeId(profileId);
+  if (!normalizedProfileId) return { loading: false, profile: null, error: 'missing-id' };
+  if (isLegacySetupProfileId(normalizedProfileId)) return { loading: false, profile: null, error: 'setup-profile' };
+  if (seedProfile && typeof seedProfile === 'object') {
+    return resolvePublicExternalProfileLoadState({ profileId: normalizedProfileId, profile: seedProfile });
+  }
+  return { loading: true, profile: null, error: '' };
 };
 
 export const getPostOwnerUid = (post = {}) => normalizeId(post?.authorOwnerUid || post?.authorUid || post?.authorId);
@@ -149,6 +236,16 @@ export const isExternalAuthorProfilePost = (post = {}) => {
 export const resolveAuthorQuickProfileTarget = ({ post = {}, profilesById = {}, viewerUid = '' } = {}) => {
   const ownerUid = getPostOwnerUid(post);
   const authorProfileId = normalizeId(post?.authorProfileId);
+  if (isLegacySetupProfileId(authorProfileId)) {
+    return {
+      kind: 'externalUnavailable',
+      profileId: authorProfileId,
+      ownerUid: ownerUid || null,
+      profile: null,
+      reason: 'setup-profile',
+    };
+  }
+
   if (!isExternalAuthorProfilePost(post)) {
     return { kind: 'personal', userId: ownerUid || normalizeId(post?.authorId), profileId: null, ownerUid: ownerUid || null };
   }
@@ -325,11 +422,7 @@ export const buildManagedProfileSetupCreateDraft = (setupProfile = {}) => {
   };
 };
 
-export const isManagedProfileSetupRequired = (profile = {}) => Boolean(
-  profile?.isSetupProfile === true
-  && profile?.setupRequired === true
-  && profile?.source === LEGACY_ORGANIZATION_SETUP_SOURCE,
-);
+export const isManagedProfileSetupRequired = (profile = {}) => isSetupManagedProfile(profile);
 
 export const buildLegacyOrganizationSetupProfiles = ({ personalProfile = null, managedProfiles = [] } = {}) => {
   if (!personalProfile || typeof personalProfile !== 'object') return [];

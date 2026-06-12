@@ -206,10 +206,23 @@ export const resolvePublicExternalProfileLoadState = ({ profileId = '', profile 
   if (isLegacySetupProfileId(normalizedProfileId)) return { loading: false, profile: null, error: error || 'setup-profile' };
   if (!profile || typeof profile !== 'object') return { loading: false, profile: null, error: error || 'missing' };
   const nextProfile = { id: normalizedProfileId, profileId: normalizedProfileId, ...profile };
+  if (isSetupManagedProfile(nextProfile)) {
+    return { loading: false, profile: null, error: error || 'setup-profile' };
+  }
   if (!isPublicManagedExternalProfileVisible({ profile: nextProfile })) {
     return { loading: false, profile: null, error: error || 'inactive' };
   }
   return { loading: false, profile: nextProfile, error: '' };
+};
+
+export const resolveInitialPublicExternalProfileLoadState = ({ profileId = '', seedProfile = null } = {}) => {
+  const normalizedProfileId = normalizeId(profileId);
+  if (!normalizedProfileId) return { loading: false, profile: null, error: 'missing-id' };
+  if (isLegacySetupProfileId(normalizedProfileId)) return { loading: false, profile: null, error: 'setup-profile' };
+  if (seedProfile && typeof seedProfile === 'object') {
+    return resolvePublicExternalProfileLoadState({ profileId: normalizedProfileId, profile: seedProfile });
+  }
+  return { loading: true, profile: null, error: '' };
 };
 
 export const getPostOwnerUid = (post = {}) => normalizeId(post?.authorOwnerUid || post?.authorUid || post?.authorId);

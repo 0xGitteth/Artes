@@ -174,6 +174,7 @@ import {
   getNextManagedProfileForSwipe,
   isPublicManagedExternalProfileVisible,
   resolveAuthorQuickProfileTarget,
+  resolveInitialPublicExternalProfileLoadState,
   resolvePublicExternalProfileLoadState,
   getPreviousManagedProfileForSwipe,
   resolvePostAuthorDisplayNameFromProfiles,
@@ -10890,26 +10891,20 @@ function ExternalProfileUnavailable({ title = 'Profiel niet beschikbaar', messag
 }
 
 function usePublicExternalProfile(profileId, seedProfile, currentUserId) {
-  const [profileState, setProfileState] = useState(() => resolvePublicExternalProfileLoadState({
+  const [profileState, setProfileState] = useState(() => resolveInitialPublicExternalProfileLoadState({
     profileId,
-    profile: seedProfile || null,
-    error: seedProfile ? '' : 'missing',
+    seedProfile,
   }));
 
   useEffect(() => {
     let active = true;
     const normalizedProfileId = String(profileId || '').trim();
-    setProfileState(resolvePublicExternalProfileLoadState({
+    const initialState = resolveInitialPublicExternalProfileLoadState({
       profileId: normalizedProfileId,
-      profile: seedProfile || null,
-      error: seedProfile ? '' : 'missing',
-    }));
-    if (!normalizedProfileId || isLegacySetupProfileId(normalizedProfileId)) {
-      if (isLegacySetupProfileId(normalizedProfileId)) {
-        setProfileState(resolvePublicExternalProfileLoadState({ profileId: normalizedProfileId, profile: null, error: 'setup-profile' }));
-        return () => { active = false; };
-      }
-      setProfileState({ loading: false, profile: null, error: 'missing-id' });
+      seedProfile,
+    });
+    setProfileState(initialState);
+    if (!normalizedProfileId || initialState.error === 'setup-profile') {
       return () => { active = false; };
     }
 

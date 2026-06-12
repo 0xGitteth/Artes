@@ -38,6 +38,7 @@ import {
   resolveActiveProfile,
   resolveAuthorQuickProfileTarget,
   resolvePostAuthorDisplayNameFromProfiles,
+  resolveInitialPublicExternalProfileLoadState,
   resolvePublicExternalProfileLoadState,
   isPublicManagedExternalProfileVisible,
   mergeManagedExternalProfileUpdate,
@@ -788,6 +789,39 @@ assert.equal(
 
 
 const activeSeedProfile = { profileId: 'company_profile', ownerUid: 'owner_user', type: 'company', status: 'active', displayName: 'Seed Studio' };
+
+assert.deepEqual(
+  resolveInitialPublicExternalProfileLoadState({ profileId: 'company_profile', seedProfile: null }),
+  { loading: true, profile: null, error: '' },
+  'Normal external profile route without seed starts in loading state before Firestore resolves',
+);
+assert.deepEqual(
+  resolveInitialPublicExternalProfileLoadState({ profileId: 'legacy_company_owner_user', seedProfile: null }),
+  { loading: false, profile: null, error: 'setup-profile' },
+  'Legacy setup profile route is blocked immediately without Firestore loading',
+);
+assert.deepEqual(
+  resolveInitialPublicExternalProfileLoadState({ profileId: '', seedProfile: null }),
+  { loading: false, profile: null, error: 'missing-id' },
+  'Empty external profile route returns missing-id immediately',
+);
+
+assert.deepEqual(
+  resolveInitialPublicExternalProfileLoadState({ profileId: 'company_profile', seedProfile: { ...activeSeedProfile, displayName: 'Seed Studio' } }),
+  { loading: false, profile: { id: 'company_profile', ...activeSeedProfile, displayName: 'Seed Studio' }, error: '' },
+  'Active seed profile renders immediately without loading',
+);
+assert.deepEqual(
+  resolveInitialPublicExternalProfileLoadState({ profileId: 'company_profile', seedProfile: { ...activeSeedProfile, status: 'inactive' } }),
+  { loading: false, profile: null, error: 'inactive' },
+  'Inactive seed profile is unavailable immediately',
+);
+assert.deepEqual(
+  resolveInitialPublicExternalProfileLoadState({ profileId: 'company_profile', seedProfile: { ...activeSeedProfile, isSetupProfile: true, setupRequired: true, source: 'legacyOrganization', status: 'setup' } }),
+  { loading: false, profile: null, error: 'setup-profile' },
+  'Setup seed profile is unavailable immediately with setup-profile error',
+);
+
 assert.deepEqual(
   resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: { ...activeSeedProfile, displayName: 'Fresh Studio', avatar: 'https://cdn.example/fresh.jpg' } }),
   { loading: false, profile: { id: 'company_profile', ...activeSeedProfile, displayName: 'Fresh Studio', avatar: 'https://cdn.example/fresh.jpg' }, error: '' },
@@ -801,7 +835,7 @@ assert.deepEqual(
 assert.deepEqual(
   resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: null, error: 'missing' }),
   { loading: false, profile: null, error: 'missing' },
-  'Missing refresh clears any stale seed profile',
+  'Missing refresh clears any stale seed profile after Firestore getDoc resolves',
 );
 assert.deepEqual(
   resolvePublicExternalProfileLoadState({ profileId: 'company_profile', profile: { ...activeSeedProfile, status: 'inactive' }, error: 'inactive' }),

@@ -299,15 +299,30 @@ export const getLegacyOrganizationPrefillDisplayName = (profile = {}, type = 'co
   getManagedProfilePrefillDisplayName(profile, type)
 );
 
-export const hasManagedExternalProfileOfType = (managedProfiles = [], type = '') => {
+export const findManagedExternalProfileByType = (managedProfiles = [], type = '') => {
   const normalizedType = normalizeId(type);
-  if (!EXTERNAL_PROFILE_TYPES.has(normalizedType)) return false;
+  if (!EXTERNAL_PROFILE_TYPES.has(normalizedType)) return null;
   const profiles = Array.isArray(managedProfiles) ? managedProfiles : [];
-  return profiles.some((profile) => {
+  return profiles.find((profile) => {
     if (!profile || typeof profile !== 'object') return false;
     if (profile.isSetupProfile || profile.setupRequired || profile.source === LEGACY_ORGANIZATION_SETUP_SOURCE) return false;
     return isExternalManagedProfile(profile) && normalizeId(profile.type || profile.kind) === normalizedType;
-  });
+  }) || null;
+};
+
+export const hasManagedExternalProfileOfType = (managedProfiles = [], type = '') => Boolean(
+  findManagedExternalProfileByType(managedProfiles, type),
+);
+
+export const buildManagedProfileSetupCreateDraft = (setupProfile = {}) => {
+  const setupType = normalizeId(setupProfile?.type || setupProfile?.kind || 'company');
+  const type = EXTERNAL_PROFILE_TYPES.has(setupType) ? setupType : 'company';
+  return {
+    type,
+    displayName: String(setupProfile?.displayName || '').trim().slice(0, MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH),
+    fallbackLabel: String(setupProfile?.fallbackLabel || PROFILE_TYPE_LABELS[type] || '').trim(),
+    setupProfile,
+  };
 };
 
 export const isManagedProfileSetupRequired = (profile = {}) => Boolean(

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildLegacyOrganizationSetupProfiles,
+  buildManagedProfileSetupCreateDraft,
   buildManagedProfilesSettingsModel,
+  findManagedExternalProfileByType,
   getManagedProfileDisplayName,
   getManagedProfileSettingsAction,
   getManagedProfileBio,
@@ -50,7 +52,7 @@ assert.match(
 );
 assert.match(
   appSource,
-  /const openSetupProfileCreateFlow = useCallback\(\(setupProfile\) => \{[\s\S]*?setCreateType\(setupType\);[\s\S]*?setCreateDisplayName\(String\(setupProfile\?\.displayName \|\| ''\)\.trim\(\)\);[\s\S]*?setCreateFlowOpen\(true\);/,
+  /const openSetupProfileCreateFlow = useCallback\(\(setupProfile\) => \{[\s\S]*?buildManagedProfileSetupCreateDraft\(setupProfile\);[\s\S]*?setCreateType\(setupDraft\.type\);[\s\S]*?setCreateDisplayName\(setupDraft\.displayName\);[\s\S]*?setCreateFlowOpen\(true\);/,
   'Settings setup card and header-selected setup profile prefill type/displayName locally before any submit',
 );
 const headerSetupHandlerSource = appSource.match(
@@ -169,11 +171,74 @@ assert.equal(
   'Role-only collective setup profile receives Collectief copy',
 );
 assert.equal(getManagedProfileSetupActionLabel(roleOnlyCollectiveSetup), 'Collectief instellen', 'Collective setup profile receives the collective action label');
+
+assert.deepEqual(
+  buildManagedProfileSetupCreateDraft({ type: 'company', displayName: '  Studio Prefill  ', fallbackLabel: 'Bedrijfsprofiel' }),
+  { type: 'company', displayName: 'Studio Prefill', fallbackLabel: 'Bedrijfsprofiel', setupProfile: { type: 'company', displayName: '  Studio Prefill  ', fallbackLabel: 'Bedrijfsprofiel' } },
+  'Setup draft trims the setup displayName prefill before submit',
+);
+assert.equal(
+  buildManagedProfileSetupCreateDraft(roleOnlyCompanySetup).displayName,
+  '',
+  'Role-only company setup draft keeps displayName empty so the personal displayName is not used as a company name',
+);
+assert.equal(
+  buildManagedProfileSetupCreateDraft(roleOnlyAgencySetup).displayName,
+  '',
+  'Role-only agency setup draft keeps displayName empty until the user fills it',
+);
+assert.equal(
+  buildManagedProfileSetupCreateDraft(roleOnlyCollectiveSetup).displayName,
+  '',
+  'Role-only collective setup draft keeps displayName empty until the user fills it',
+);
+assert.equal(
+  findManagedExternalProfileByType(settingsWithMultipleExternal.externalProfiles, 'company')?.profileId,
+  'studio_luna',
+  'Duplicate setup create guard can find an existing real external company profile',
+);
+assert.equal(
+  findManagedExternalProfileByType([roleOnlyCompanySetup], 'company'),
+  null,
+  'Duplicate setup create guard ignores temporary setup profiles',
+);
+assert.match(
+  appSource,
+  /createSetupProfile \? findManagedExternalProfileByType\(externalProfiles, validation\.type\) : null/,
+  'Settings create submit checks existing real external profiles before saving a setup profile',
+);
+assert.match(
+  appSource,
+  /if \(createPending\) return;/,
+  'Settings create submit exits early while saving to prevent double submit',
+);
+assert.match(
+  appSource,
+  /setupProfile: createSetupProfile/,
+  'Settings create submit passes the pending setup profile only when the user consciously saves',
+);
+assert.match(
+  appSource,
+  /setPendingManagedProfileSetup\(null\);[\s\S]*?setRequestedActiveProfileId\(createdProfile\.profileId\)/,
+  'Successful setup create clears pending setup state and selects the new real managed profile',
+);
+assert.match(
+  appSource,
+  /setCreateError\(error\?\.message \|\| 'Opslaan mislukt\. Probeer het opnieuw\.'\)/,
+  'Failed setup create keeps setup state open and shows the existing error style',
+);
+assert.doesNotMatch(
+  headerSetupHandlerSource,
+  /onCreateManagedProfile|createManagedExternalProfile|setDoc|addDoc|uploadBytes/,
+  'Opening settings from the header setup CTA still does not write to Firestore',
+);
+
 assert.deepEqual(
   getOwnerVisibleManagedProfileSetupProfiles({ setupProfiles: [roleOnlyCompanySetup], currentUserId: 'user_1', ownerUid: 'user_1' }).map((profile) => profile.profileId),
   ['legacy_company_user_1'],
   'Setup profile is visible to the owner',
 );
+
 assert.deepEqual(
   getOwnerVisibleManagedProfileSetupProfiles({ setupProfiles: [roleOnlyCompanySetup], currentUserId: 'visitor_1', ownerUid: 'user_1' }),
   [],

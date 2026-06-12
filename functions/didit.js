@@ -207,16 +207,17 @@ const resolveDiditSessionId = (payload) => {
   return session?.id || session?.session_id || payload?.sessionId || payload?.session_id || null;
 };
 
-const isApprovedStatus = (status) => ['approved', 'verified', 'completed', 'success'].includes(status);
-const isRejectedStatus = (status) => ['rejected', 'declined', 'failed', 'denied'].includes(status);
-
-const resolveDiditAdultDecision = (status, age) => {
+export const resolveDiditAdultDecision = (status, age) => {
   const normalizedStatus = normalizeStatus(status);
-  const ageIsNumber = Number.isFinite(age);
-  const assumeAdultOnVerified = isApprovedStatus(normalizedStatus) && DIDIT_ASSUME_ADULT_ON_VERIFIED;
-  const isAdult = ageIsNumber ? age >= 18 : assumeAdultOnVerified ? true : null;
+  const hasAge = age != null && String(age).trim() !== '';
+  const resolvedAge = hasAge ? Number(age) : null;
+  const ageIsNumber = Number.isFinite(resolvedAge);
+  const isApproved = normalizedStatus === 'approved';
+  const assumeAdultOnVerified = isApproved && !ageIsNumber && DIDIT_ASSUME_ADULT_ON_VERIFIED;
+  const isAdult = isApproved && (ageIsNumber ? resolvedAge >= 18 : assumeAdultOnVerified) ? true : null;
   return {
     normalizedStatus,
+    age: ageIsNumber ? resolvedAge : null,
     ageIsNumber,
     assumeAdultOnVerified,
     isAdult,
@@ -289,9 +290,9 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
 
   const userRef = db.collection('users').doc(uid);
   const now = FieldValue.serverTimestamp();
-  const normalizedStatus = String(status || 'error').trim().toLowerCase();
-  const isApproved = normalizedStatus === 'approved';
-  const isAdult = isApproved ? true : null;
+  const adultDecision = resolveDiditAdultDecision(status, age);
+  const { normalizedStatus, age: resolvedAge, ageIsNumber, assumeAdultOnVerified, isAdult } = adultDecision;
+  const isApprovedAdult = normalizedStatus === 'approved' && isAdult === true;
   const normalizedReason = normalizeReason(reason);
 
   const diditPayload = {
@@ -309,6 +310,9 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     lastMatchedSessionCount: Number.isFinite(Number(diagnostics.matchedSessionCount)) ? Number(diagnostics.matchedSessionCount) : null,
     lastMatchedApprovedCount: Number.isFinite(Number(diagnostics.matchedApprovedCount)) ? Number(diagnostics.matchedApprovedCount) : null,
     lastReferenceMatch: diagnostics.referenceMatch === true,
+    lastResolvedAge: ageIsNumber ? resolvedAge : null,
+    lastAgeIsNumber: ageIsNumber,
+    lastAssumeAdultOnVerified: assumeAdultOnVerified,
   };
 
   const existingUserSnapshot = await userRef.get();
@@ -316,7 +320,7 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
   const existingStep = Number.isFinite(Number(existingStepRaw)) ? Number(existingStepRaw) : 0;
 
   const alreadyApproved = existingUserSnapshot.exists && existingUserSnapshot.get('ageVerified') === true;
-  if (isApproved) {
+  if (isApprovedAdult) {
     const approvedStep = Math.max(existingStep, 3);
     await userRef.set(
       {
@@ -358,7 +362,7 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     );
   }
 
-  if (isApproved) {
+  if (isApprovedAdult) {
     try {
       await admin.auth().setCustomUserClaims(uid, {
         idvVerified: true,

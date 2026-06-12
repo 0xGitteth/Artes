@@ -26,3 +26,5 @@ dist-ssr
 .tmp/
 tmp/cleanup-exports/
 **/serviceAccountKey.json
+
+functions/.env*

@@ -21,6 +21,7 @@ import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
+import { canIssueCodexDevToken } from './codexDevLogin.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -2211,6 +2212,11 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
 export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  if (!canIssueCodexDevToken()) {
+    res.status(403).json({ error: 'Codex dev login is disabled in production' });
     return;
   }
 

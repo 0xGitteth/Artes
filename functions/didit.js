@@ -19,6 +19,8 @@ const db = getFirestore();
 const DIDIT_API_BASE = process.env.DIDIT_API_BASE_URL || 'https://verification.didit.me/v2';
 const DIDIT_ASSUME_ADULT_ON_VERIFIED = String(process.env.DIDIT_ASSUME_ADULT_ON_VERIFIED || '').trim().toLowerCase() === 'true';
 const DIDIT_ONBOARDING_STEP = 2;
+const UNDERAGE_POST_OWNER_FIELDS = ['authorId', 'authorUid', 'authorOwnerUid', 'ownerUid', 'userId', 'uploaderUid', 'createdByUid'];
+const UNDERAGE_BATCH_LIMIT = 450;
 
 const getDiditHeaders = () => {
   const apiKey = process.env.DIDIT_API_KEY;
@@ -54,6 +56,37 @@ export const createUnderagePublicProfilePatch = (now = FieldValue.serverTimestam
   deactivatedAt: now,
   updatedAt: now,
 });
+
+export const createUnderagePostPatch = (now = FieldValue.serverTimestamp()) => ({
+  hidden: true,
+  visibility: 'private',
+  status: 'inactive',
+  deactivatedReason: 'underage',
+  deactivatedAt: now,
+  updatedAt: now,
+});
+
+const commitUnderagePostBatches = async (postRefs, now) => {
+  for (let index = 0; index < postRefs.length; index += UNDERAGE_BATCH_LIMIT) {
+    const batch = db.batch();
+    postRefs.slice(index, index + UNDERAGE_BATCH_LIMIT).forEach((postRef) => {
+      batch.set(postRef, createUnderagePostPatch(now), { merge: true });
+    });
+    await batch.commit();
+  }
+};
+
+const hidePublicPostsForUnderageUser = async (uid, now) => {
+  const postRefsByPath = new Map();
+  await Promise.all(UNDERAGE_POST_OWNER_FIELDS.map(async (field) => {
+    const snapshot = await db.collection('posts').where(field, '==', uid).get();
+    snapshot.docs.forEach((postDoc) => {
+      postRefsByPath.set(postDoc.ref.path, postDoc.ref);
+    });
+  }));
+  await commitUnderagePostBatches([...postRefsByPath.values()], now);
+  return postRefsByPath.size;
+};
 
 const calculateAgeFromDob = (dobValue) => {
   if (!dobValue) return null;
@@ -485,6 +518,7 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     if (publicUserSnapshot.exists) {
       await publicUserRef.set(createUnderagePublicProfilePatch(now), { merge: true });
     }
+    await hidePublicPostsForUnderageUser(uid, now);
   } else if (alreadyApproved) {
     await userRef.set(
       {

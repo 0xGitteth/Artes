@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createUnderagePublicProfilePatch, parseDiditAge, resolveDiditAge, resolveDiditPersistenceDecision } from '../didit.js';
+import { createUnderagePostPatch, createUnderagePublicProfilePatch, parseDiditAge, resolveDiditAge, resolveDiditPersistenceDecision } from '../didit.js';
 
 test('Didit age parser treats null, undefined, blank, and non numeric values as missing', () => {
   assert.equal(parseDiditAge(null), null);
@@ -81,6 +81,22 @@ test('Underage public profile patch hides profile without leaking Didit details'
   assert.equal(patch.updatedAt, marker);
   assert.equal('didit' in patch, false);
   assert.equal('idv' in patch, false);
+});
+
+
+test('Underage post patch hides owned posts without leaking Didit details', () => {
+  const marker = { serverTimestamp: true };
+  const patch = createUnderagePostPatch(marker);
+
+  assert.equal(patch.hidden, true);
+  assert.equal(patch.status, 'inactive');
+  assert.equal(patch.visibility, 'private');
+  assert.equal(patch.deactivatedReason, 'underage');
+  assert.equal(patch.updatedAt, marker);
+  assert.equal('didit' in patch, false);
+  assert.equal('idv' in patch, false);
+  assert.equal('age' in patch, false);
+  assert.equal('sessionId' in patch, false);
 });
 
 test('Didit approved with age null persists age_unverified, not underage or approved', () => {

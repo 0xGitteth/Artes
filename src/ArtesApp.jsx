@@ -195,6 +195,7 @@ import {
   writeStoredActiveProfileId,
 } from './utils/managedProfiles';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
+import { shouldBlockMainAppForAgeState } from './utils/ageGate';
 import {
   CONSENT_EXCEPTION_REASONS,
   CONTRIBUTOR_CONSENT_STATUSES,
@@ -1322,7 +1323,8 @@ export default function ArtesApp() {
           onboardingComplete: normalized?.onboardingComplete ?? null,
         });
         setProfile(normalized);
-        const onboardingComplete = hasCompletedOnboarding(profileData);
+        const ageBlocked = shouldBlockMainAppForAgeState({ profile: normalized, uid: u.uid });
+        const onboardingComplete = hasCompletedOnboarding(profileData) && !ageBlocked;
         const baseView = onboardingComplete ? 'gallery' : 'onboarding';
         const path = window.location.pathname || '/';
         const claimToken = getClaimTokenFromPath(path);
@@ -2027,9 +2029,20 @@ export default function ArtesApp() {
           onboardingComplete: normalized?.onboardingComplete === true,
         });
         setProfile(normalized);
+        if (shouldBlockMainAppForAgeState({ profile: normalized, uid: authUser.uid })) {
+          setSelectedPost(null);
+          setMoodboardSavePost(null);
+          setQuickProfileTarget(null);
+          setShadowProfile(null);
+          setShowSettingsModal(false);
+          setPendingManagedProfileSetup(null);
+          if (viewRef.current !== 'onboarding' && viewRef.current !== 'claim' && viewRef.current !== 'claimEmail') {
+            setViewWithReason('onboarding', 'profile-listener:age-gate-blocked');
+          }
+        }
         if (waitForAuthoritativeProfileRef.current) {
           waitForAuthoritativeProfileRef.current = false;
-          const onboardingComplete = hasCompletedOnboarding(normalized);
+          const onboardingComplete = hasCompletedOnboarding(normalized) && !shouldBlockMainAppForAgeState({ profile: normalized, uid: authUser.uid });
           const path = window.location.pathname || '/';
           const claimToken = getClaimTokenFromPath(path);
           setClaimInviteToken(claimToken);

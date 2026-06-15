@@ -18,6 +18,7 @@ const db = getFirestore();
  */
 const DIDIT_API_BASE = process.env.DIDIT_API_BASE_URL || 'https://verification.didit.me/v2';
 const DIDIT_ASSUME_ADULT_ON_VERIFIED = String(process.env.DIDIT_ASSUME_ADULT_ON_VERIFIED || '').trim().toLowerCase() === 'true';
+const DIDIT_ONBOARDING_STEP = 2;
 
 const getDiditHeaders = () => {
   const apiKey = process.env.DIDIT_API_KEY;
@@ -239,10 +240,11 @@ export const resolveDiditPersistenceDecision = ({ status, age, alreadyApproved =
       ? 'underage'
       : 'age_unverified'
     : normalizedStatus;
+  const isConfirmedUnderage = normalizedStatus === 'approved' && ageIsNumber && resolvedAge < 18;
   const updateMode = alreadyApproved && !isApprovedAdult
-    ? candidateStatus === 'age_unverified'
-      ? 'diagnostics_only'
-      : 'downgrade_underage'
+    ? isConfirmedUnderage
+      ? 'downgrade_underage'
+      : 'diagnostics_only'
     : isApprovedAdult
       ? 'approve_adult'
       : 'sync_status';
@@ -256,6 +258,8 @@ export const resolveDiditPersistenceDecision = ({ status, age, alreadyApproved =
     adultDecision,
     updateMode,
     shouldClearAdultVerification: updateMode === 'downgrade_underage',
+    shouldResetOnboarding: updateMode === 'downgrade_underage',
+    onboardingStep: updateMode === 'downgrade_underage' ? DIDIT_ONBOARDING_STEP : null,
   };
 };
 
@@ -328,7 +332,7 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
   const existingUserSnapshot = await userRef.get();
   const alreadyApproved = existingUserSnapshot.exists && existingUserSnapshot.get('ageVerified') === true;
   const persistenceDecision = resolveDiditPersistenceDecision({ status, age, alreadyApproved });
-  const { normalizedStatus, persistedStatus, candidateStatus, isApprovedAdult, adultDecision, updateMode, shouldClearAdultVerification } = persistenceDecision;
+  const { normalizedStatus, persistedStatus, candidateStatus, isApprovedAdult, adultDecision, updateMode, shouldClearAdultVerification, shouldResetOnboarding, onboardingStep } = persistenceDecision;
   const { age: resolvedAge, ageIsNumber, assumeAdultOnVerified, isAdult } = adultDecision;
   const normalizedReason = normalizeReason(reason);
 
@@ -374,6 +378,8 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
       {
         ageVerified: false,
         isAdult: false,
+        onboardingComplete: false,
+        onboardingStep: DIDIT_ONBOARDING_STEP,
         didit: diditPayload,
         idv: diditPayload,
         ageVerificationSource: 'didit',
@@ -440,6 +446,8 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     adultDecision,
     updateMode,
     shouldClearAdultVerification,
+    shouldResetOnboarding,
+    onboardingStep,
   };
 };
 

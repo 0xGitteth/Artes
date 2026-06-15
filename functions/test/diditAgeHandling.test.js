@@ -82,6 +82,7 @@ test('Existing approved adult user with missing age stays diagnostics_only and d
   assert.equal(result.isApprovedAdult, false);
   assert.equal(result.updateMode, 'diagnostics_only');
   assert.equal(result.shouldClearAdultVerification, false);
+  assert.equal(result.shouldResetOnboarding, false);
 });
 
 test('Existing approved adult user with non numeric age stays diagnostics_only and does not downgrade', () => {
@@ -91,9 +92,36 @@ test('Existing approved adult user with non numeric age stays diagnostics_only a
   assert.equal(result.candidateStatus, 'age_unverified');
   assert.equal(result.updateMode, 'diagnostics_only');
   assert.equal(result.shouldClearAdultVerification, false);
+  assert.equal(result.shouldResetOnboarding, false);
 });
 
-test('Existing approved adult user with age 17 persists underage and clears adult flags/custom claims', () => {
+for (const status of ['started', 'in_progress', 'expired']) {
+  test(`Existing approved adult user with status ${status} stays diagnostics_only and does not clear adult flags or claims`, () => {
+    const result = resolveDiditPersistenceDecision({ status, alreadyApproved: true });
+
+    assert.equal(result.normalizedStatus, status);
+    assert.equal(result.persistedStatus, null);
+    assert.equal(result.candidateStatus, status);
+    assert.equal(result.updateMode, 'diagnostics_only');
+    assert.equal(result.shouldClearAdultVerification, false);
+    assert.equal(result.shouldResetOnboarding, false);
+  });
+}
+
+for (const status of ['declined', 'rejected']) {
+  test(`Existing approved adult user with status ${status} stays diagnostics_only and does not clear adult flags or claims`, () => {
+    const result = resolveDiditPersistenceDecision({ status, alreadyApproved: true });
+
+    assert.equal(result.normalizedStatus, status);
+    assert.equal(result.persistedStatus, null);
+    assert.equal(result.candidateStatus, status);
+    assert.equal(result.updateMode, 'diagnostics_only');
+    assert.equal(result.shouldClearAdultVerification, false);
+    assert.equal(result.shouldResetOnboarding, false);
+  });
+}
+
+test('Existing approved adult user with approved age 17 downgrades underage and resets adult verification/onboarding', () => {
   const result = resolveDiditPersistenceDecision({ status: 'approved', age: 17, alreadyApproved: true });
 
   assert.equal(result.normalizedStatus, 'approved');
@@ -103,6 +131,8 @@ test('Existing approved adult user with age 17 persists underage and clears adul
   assert.equal(result.isApprovedAdult, false);
   assert.equal(result.updateMode, 'downgrade_underage');
   assert.equal(result.shouldClearAdultVerification, true);
+  assert.equal(result.shouldResetOnboarding, true);
+  assert.equal(result.onboardingStep, 2);
 });
 
 test('Existing approved adult user with age 18 remains approved adult', () => {
@@ -115,4 +145,19 @@ test('Existing approved adult user with age 18 remains approved adult', () => {
   assert.equal(result.isApprovedAdult, true);
   assert.equal(result.updateMode, 'approve_adult');
   assert.equal(result.shouldClearAdultVerification, false);
+  assert.equal(result.shouldResetOnboarding, false);
 });
+
+for (const status of ['declined', 'rejected']) {
+  test(`Not already approved user with status ${status} syncs status without adult approval`, () => {
+    const result = resolveDiditPersistenceDecision({ status, alreadyApproved: false });
+
+    assert.equal(result.normalizedStatus, status);
+    assert.equal(result.persistedStatus, status);
+    assert.equal(result.candidateStatus, status);
+    assert.equal(result.isAdult, false);
+    assert.equal(result.isApprovedAdult, false);
+    assert.equal(result.updateMode, 'sync_status');
+    assert.equal(result.shouldClearAdultVerification, false);
+  });
+}

@@ -57,6 +57,13 @@ const calculateAgeFromDob = (dobValue) => {
   return age;
 };
 
+export const parseDiditAge = (value) => {
+  if (value == null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const resolveDiditAge = (session) => {
   const directAge = [
     session?.age,
@@ -66,7 +73,7 @@ const resolveDiditAge = (session) => {
     session?.verification?.age,
     session?.data?.age,
   ]
-    .map((value) => Number(value))
+    .map((value) => parseDiditAge(value))
     .find((value) => Number.isFinite(value));
   if (Number.isFinite(directAge)) return directAge;
 
@@ -209,8 +216,7 @@ const resolveDiditSessionId = (payload) => {
 
 export const resolveDiditAdultDecision = (status, age) => {
   const normalizedStatus = normalizeStatus(status);
-  const hasAge = age != null && String(age).trim() !== '';
-  const resolvedAge = hasAge ? Number(age) : null;
+  const resolvedAge = parseDiditAge(age);
   const ageIsNumber = Number.isFinite(resolvedAge);
   const isApproved = normalizedStatus === 'approved';
   const assumeAdultOnVerified = isApproved && !ageIsNumber && DIDIT_ASSUME_ADULT_ON_VERIFIED;
@@ -233,7 +239,13 @@ export const resolveDiditPersistenceDecision = ({ status, age, alreadyApproved =
       ? 'underage'
       : 'age_unverified'
     : normalizedStatus;
-  const updateMode = alreadyApproved && !isApprovedAdult ? 'diagnostics_only' : isApprovedAdult ? 'approve_adult' : 'sync_status';
+  const updateMode = alreadyApproved && !isApprovedAdult
+    ? candidateStatus === 'age_unverified'
+      ? 'diagnostics_only'
+      : 'downgrade_underage'
+    : isApprovedAdult
+      ? 'approve_adult'
+      : 'sync_status';
 
   return {
     normalizedStatus,
@@ -243,6 +255,7 @@ export const resolveDiditPersistenceDecision = ({ status, age, alreadyApproved =
     isAdult: isAdult === true,
     adultDecision,
     updateMode,
+    shouldClearAdultVerification: updateMode === 'downgrade_underage',
   };
 };
 
@@ -315,7 +328,7 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
   const existingUserSnapshot = await userRef.get();
   const alreadyApproved = existingUserSnapshot.exists && existingUserSnapshot.get('ageVerified') === true;
   const persistenceDecision = resolveDiditPersistenceDecision({ status, age, alreadyApproved });
-  const { normalizedStatus, persistedStatus, candidateStatus, isApprovedAdult, adultDecision, updateMode } = persistenceDecision;
+  const { normalizedStatus, persistedStatus, candidateStatus, isApprovedAdult, adultDecision, updateMode, shouldClearAdultVerification } = persistenceDecision;
   const { age: resolvedAge, ageIsNumber, assumeAdultOnVerified, isAdult } = adultDecision;
   const normalizedReason = normalizeReason(reason);
 
@@ -356,6 +369,17 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
       },
       { merge: true }
     );
+  } else if (shouldClearAdultVerification) {
+    await userRef.set(
+      {
+        ageVerified: false,
+        isAdult: false,
+        didit: diditPayload,
+        idv: diditPayload,
+        ageVerificationSource: 'didit',
+      },
+      { merge: true }
+    );
   } else if (alreadyApproved) {
     await userRef.set(
       {
@@ -387,14 +411,18 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     );
   }
 
-  if (isApprovedAdult) {
+  if (isApprovedAdult || shouldClearAdultVerification) {
     try {
+      const existingClaims = shouldClearAdultVerification
+        ? (await admin.auth().getUser(uid)).customClaims || {}
+        : {};
       await admin.auth().setCustomUserClaims(uid, {
-        idvVerified: true,
-        isAdult: isAdult === true,
+        ...existingClaims,
+        idvVerified: isApprovedAdult,
+        isAdult: isApprovedAdult && isAdult === true,
       });
     } catch (error) {
-      logger.warn('Failed to set custom claims for Didit status', {
+      logger.warn('Failed to update custom claims for Didit status', {
         uid,
         error: error?.message,
       });
@@ -411,6 +439,7 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     isAdult: isAdult === true,
     adultDecision,
     updateMode,
+    shouldClearAdultVerification,
   };
 };
 

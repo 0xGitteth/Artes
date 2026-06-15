@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { getFirebaseDbInstance } from '../firebase';
 import { canAccessFirestore } from '../utils/firestoreGate';
+import { isPublicProfileVisible } from '../utils/managedProfiles';
 
 const normalizeQuery = (value) => value.trim().toLowerCase();
 const getUserVisibleName = (user) => user?.displayName || user?.username || 'Gebruiker';
@@ -95,10 +96,12 @@ export default function SearchWithAutocomplete({
           if (merged.has(docSnap.id)) return;
           merged.set(docSnap.id, { uid: docSnap.id, matchType: 'display', ...docSnap.data() });
         });
-        const sorted = Array.from(merged.values()).sort((a, b) => {
-          if (a.matchType === b.matchType) return 0;
-          return a.matchType === 'username' ? -1 : 1;
-        });
+        const sorted = Array.from(merged.values())
+          .filter(isPublicProfileVisible)
+          .sort((a, b) => {
+            if (a.matchType === b.matchType) return 0;
+            return a.matchType === 'username' ? -1 : 1;
+          });
         if (active) setResults(sorted);
       } catch (error) {
         if (active) setResults([]);

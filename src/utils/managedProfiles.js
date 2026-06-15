@@ -161,6 +161,26 @@ export const isPublicRealManagedProfile = (profile = {}) => {
 
 export const isPublicManagedExternalProfileVisible = ({ profile = {} } = {}) => isPublicRealManagedProfile(profile);
 
+export const isPublicProfileVisible = (profile = {}) => {
+  if (!profile || typeof profile !== 'object') return false;
+  if (profile.hidden === true) return false;
+  const status = normalizeId(profile.status);
+  if (status === 'inactive') return false;
+  const visibility = normalizeId(profile.visibility);
+  const publicVisibility = normalizeId(profile.publicVisibility);
+  if (visibility === 'private' || publicVisibility === 'private') return false;
+  return true;
+};
+
+export const isPublicPostVisible = (post = {}) => {
+  if (!post || typeof post !== 'object') return false;
+  if (post.hidden === true) return false;
+  if (normalizeId(post.status) === 'inactive') return false;
+  if (normalizeId(post.visibility) === 'private') return false;
+  if (normalizeId(post.deactivatedReason) === 'underage') return false;
+  return true;
+};
+
 export const isOwnDiscoverProfile = (profile = {}, currentUserId = '') => {
   const viewerUid = normalizeId(currentUserId);
   if (!viewerUid || !profile || typeof profile !== 'object') return false;
@@ -170,6 +190,7 @@ export const isOwnDiscoverProfile = (profile = {}, currentUserId = '') => {
 
 export const shouldShowProfileInDiscover = (profile = {}, currentUserId = '') => {
   if (!profile || typeof profile !== 'object') return false;
+  if (!isPublicProfileVisible(profile)) return false;
   if (isOwnDiscoverProfile(profile, currentUserId)) return false;
   if (isSetupManagedProfile(profile)) return false;
   const status = normalizeId(profile.status);
@@ -186,6 +207,7 @@ export const isOwnDiscoverPost = (post = {}, currentUserId = '') => {
 
 export const shouldShowPostInDiscover = (post = {}, currentUserId = '') => {
   if (!post || typeof post !== 'object') return false;
+  if (!isPublicPostVisible(post)) return false;
   if (isOwnDiscoverPost(post, currentUserId)) return false;
   if (isLegacySetupProfileId(post.authorProfileId)) return false;
   return true;

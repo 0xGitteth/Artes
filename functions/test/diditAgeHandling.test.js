@@ -79,6 +79,11 @@ test('Underage public profile patch hides profile without leaking Didit details'
   assert.equal(patch.publicVisibility, 'private');
   assert.equal(patch.deactivatedReason, 'underage');
   assert.equal(patch.updatedAt, marker);
+  assert.deepEqual(patch.roles, []);
+  assert.deepEqual(patch.themes, []);
+  assert.deepEqual(patch.quickProfilePostIds, []);
+  assert.equal('displayName' in patch, true);
+  assert.equal('photoURL' in patch, true);
   assert.equal('didit' in patch, false);
   assert.equal('idv' in patch, false);
 });
@@ -93,6 +98,10 @@ test('Underage post patch hides owned posts without leaking Didit details', () =
   assert.equal(patch.visibility, 'private');
   assert.equal(patch.deactivatedReason, 'underage');
   assert.equal(patch.updatedAt, marker);
+  assert.deepEqual(patch.credits, []);
+  assert.deepEqual(patch.styles, []);
+  assert.equal('title' in patch, true);
+  assert.equal('imageUrl' in patch, true);
   assert.equal('didit' in patch, false);
   assert.equal('idv' in patch, false);
   assert.equal('age' in patch, false);

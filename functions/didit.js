@@ -55,6 +55,16 @@ export const createUnderagePublicProfilePatch = (now = FieldValue.serverTimestam
   deactivatedReason: 'underage',
   deactivatedAt: now,
   updatedAt: now,
+  username: FieldValue.delete(),
+  displayName: FieldValue.delete(),
+  displayNameLower: FieldValue.delete(),
+  photoURL: FieldValue.delete(),
+  avatar: FieldValue.delete(),
+  bio: FieldValue.delete(),
+  headerImage: FieldValue.delete(),
+  roles: [],
+  themes: [],
+  quickProfilePostIds: [],
 });
 
 // Recovery policy: public profiles/posts hidden for a confirmed-underage downgrade are
@@ -66,6 +76,18 @@ export const createUnderagePostPatch = (now = FieldValue.serverTimestamp()) => (
   deactivatedReason: 'underage',
   deactivatedAt: now,
   updatedAt: now,
+  title: FieldValue.delete(),
+  description: FieldValue.delete(),
+  imageUrl: FieldValue.delete(),
+  imageRef: FieldValue.delete(),
+  storagePath: FieldValue.delete(),
+  authorName: FieldValue.delete(),
+  authorRole: FieldValue.delete(),
+  credits: [],
+  styles: [],
+  makerTags: [],
+  appliedTriggers: [],
+  triggers: [],
 });
 
 const commitUnderagePostBatches = async (postRefs, now) => {

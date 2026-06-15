@@ -45,6 +45,16 @@ const normalizeReason = (reason) => {
   }
 };
 
+export const createUnderagePublicProfilePatch = (now = FieldValue.serverTimestamp()) => ({
+  hidden: true,
+  status: 'inactive',
+  visibility: 'private',
+  publicVisibility: 'private',
+  deactivatedReason: 'underage',
+  deactivatedAt: now,
+  updatedAt: now,
+});
+
 const calculateAgeFromDob = (dobValue) => {
   if (!dobValue) return null;
   const date = new Date(dobValue);
@@ -65,30 +75,114 @@ export const parseDiditAge = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const resolveDiditAge = (session) => {
-  const directAge = [
+const firstFiniteAge = (values) => values
+  .map((value) => parseDiditAge(value))
+  .find((value) => Number.isFinite(value));
+
+const firstCalculatedDobAge = (values) => values
+  .map((value) => calculateAgeFromDob(value))
+  .find((value) => Number.isFinite(value));
+
+const arrayItems = (...values) => values.flatMap((value) => (Array.isArray(value) ? value : []));
+
+export const resolveDiditAge = (session, payload = session) => {
+  const directAge = firstFiniteAge([
     session?.age,
     session?.subject?.age,
     session?.person?.age,
     session?.result?.age,
     session?.verification?.age,
     session?.data?.age,
-  ]
-    .map((value) => parseDiditAge(value))
-    .find((value) => Number.isFinite(value));
+    payload?.age,
+    payload?.subject?.age,
+    payload?.person?.age,
+    payload?.result?.age,
+    payload?.verification?.age,
+    payload?.data?.age,
+  ]);
   if (Number.isFinite(directAge)) return directAge;
 
-  const dob =
-    session?.dateOfBirth ||
-    session?.date_of_birth ||
-    session?.document?.dateOfBirth ||
-    session?.document?.date_of_birth ||
-    session?.person?.dateOfBirth ||
-    session?.person?.date_of_birth ||
-    session?.data?.dateOfBirth ||
-    session?.data?.date_of_birth;
+  const directDobAge = firstCalculatedDobAge([
+    session?.dateOfBirth,
+    session?.date_of_birth,
+    session?.document?.dateOfBirth,
+    session?.document?.date_of_birth,
+    session?.person?.dateOfBirth,
+    session?.person?.date_of_birth,
+    session?.data?.dateOfBirth,
+    session?.data?.date_of_birth,
+    payload?.dateOfBirth,
+    payload?.date_of_birth,
+    payload?.document?.dateOfBirth,
+    payload?.document?.date_of_birth,
+    payload?.person?.dateOfBirth,
+    payload?.person?.date_of_birth,
+    payload?.data?.dateOfBirth,
+    payload?.data?.date_of_birth,
+  ]);
+  if (Number.isFinite(directDobAge)) return directDobAge;
 
-  return calculateAgeFromDob(dob);
+  const featureItems = arrayItems(
+    session?.id_verifications,
+    session?.idVerifications,
+    session?.verification?.id_verifications,
+    session?.verification?.idVerifications,
+    session?.data?.id_verifications,
+    session?.data?.idVerifications,
+    session?.features,
+    session?.checks,
+    session?.documents,
+    session?.verification?.features,
+    session?.verification?.checks,
+    session?.verification?.documents,
+    session?.result?.features,
+    session?.result?.checks,
+    session?.result?.documents,
+    session?.data?.features,
+    session?.data?.checks,
+    session?.data?.documents,
+    payload?.id_verifications,
+    payload?.idVerifications,
+    payload?.verification?.id_verifications,
+    payload?.verification?.idVerifications,
+    payload?.data?.id_verifications,
+    payload?.data?.idVerifications,
+    payload?.features,
+    payload?.checks,
+    payload?.documents,
+    payload?.verification?.features,
+    payload?.verification?.checks,
+    payload?.verification?.documents,
+    payload?.result?.features,
+    payload?.result?.checks,
+    payload?.result?.documents,
+    payload?.data?.features,
+    payload?.data?.checks,
+    payload?.data?.documents,
+  );
+
+  const featureAge = firstFiniteAge(featureItems.flatMap((item) => [
+    item?.age,
+    item?.subject?.age,
+    item?.person?.age,
+    item?.result?.age,
+    item?.document?.age,
+    item?.data?.age,
+  ]));
+  if (Number.isFinite(featureAge)) return featureAge;
+
+  return firstCalculatedDobAge(featureItems.flatMap((item) => [
+    item?.dateOfBirth,
+    item?.date_of_birth,
+    item?.subject?.dateOfBirth,
+    item?.subject?.date_of_birth,
+    item?.person?.dateOfBirth,
+    item?.person?.date_of_birth,
+    item?.document?.dateOfBirth,
+    item?.document?.date_of_birth,
+    item?.data?.dateOfBirth,
+    item?.data?.date_of_birth,
+  ])) ?? null;
 };
 
 const resolveDiditReference = (payload) =>
@@ -312,7 +406,7 @@ const fetchDiditDecisionForSession = async (sessionId) => {
   return {
     sessionId,
     status: normalized.status,
-    age: resolveDiditAge(session),
+    age: resolveDiditAge(session, data),
     reason: resolveDiditReason(data),
     reference,
     rawStatusPath: normalized.rawStatusPath,
@@ -374,6 +468,8 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
       { merge: true }
     );
   } else if (shouldClearAdultVerification) {
+    const publicUserRef = db.collection('publicUsers').doc(uid);
+    const publicUserSnapshot = await publicUserRef.get();
     await userRef.set(
       {
         ageVerified: false,
@@ -386,6 +482,9 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
       },
       { merge: true }
     );
+    if (publicUserSnapshot.exists) {
+      await publicUserRef.set(createUnderagePublicProfilePatch(now), { merge: true });
+    }
   } else if (alreadyApproved) {
     await userRef.set(
       {
@@ -814,7 +913,7 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
   const status = normalized.status;
   const reason = resolveDiditReason(payload);
   const session = resolveDiditSession(payload);
-  const age = resolveDiditAge(session);
+  const age = resolveDiditAge(session, payload);
 
   logger.info('Didit webhook received', {
     hasReference: Boolean(reference),

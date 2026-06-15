@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseDiditAge, resolveDiditPersistenceDecision } from '../didit.js';
+import { createUnderagePublicProfilePatch, parseDiditAge, resolveDiditAge, resolveDiditPersistenceDecision } from '../didit.js';
 
 test('Didit age parser treats null, undefined, blank, and non numeric values as missing', () => {
   assert.equal(parseDiditAge(null), null);
@@ -13,6 +13,74 @@ test('Didit age parser treats null, undefined, blank, and non numeric values as 
 test('Didit age parser keeps explicit numeric zero', () => {
   assert.equal(parseDiditAge(0), 0);
   assert.equal(parseDiditAge('0'), 0);
+});
+
+test('Didit feature id_verifications age 18 resolves approved adult', () => {
+  const age = resolveDiditAge({ id_verifications: [{ age: 18 }] });
+  const result = resolveDiditPersistenceDecision({ status: 'approved', age });
+
+  assert.equal(age, 18);
+  assert.equal(result.persistedStatus, 'approved');
+  assert.equal(result.isApprovedAdult, true);
+});
+
+test('Didit feature id_verifications age 17 resolves underage', () => {
+  const age = resolveDiditAge({ id_verifications: [{ age: 17 }] });
+  const result = resolveDiditPersistenceDecision({ status: 'approved', age });
+
+  assert.equal(age, 17);
+  assert.equal(result.persistedStatus, 'underage');
+  assert.equal(result.isApprovedAdult, false);
+});
+
+test('Didit feature id_verifications adult date_of_birth resolves approved adult', () => {
+  const age = resolveDiditAge({ id_verifications: [{ date_of_birth: '2000-01-01' }] });
+  const result = resolveDiditPersistenceDecision({ status: 'approved', age });
+
+  assert.equal(age >= 18, true);
+  assert.equal(result.persistedStatus, 'approved');
+  assert.equal(result.isApprovedAdult, true);
+});
+
+test('Didit feature id_verifications underage date_of_birth resolves underage', () => {
+  const age = resolveDiditAge({ id_verifications: [{ date_of_birth: '2010-01-01' }] });
+  const result = resolveDiditPersistenceDecision({ status: 'approved', age });
+
+  assert.equal(age < 18, true);
+  assert.equal(result.persistedStatus, 'underage');
+  assert.equal(result.isApprovedAdult, false);
+});
+
+test('Didit feature null and blank ages remain age_unverified', () => {
+  const age = resolveDiditAge({ id_verifications: [{ age: null }, { age: '   ' }] });
+  const result = resolveDiditPersistenceDecision({ status: 'approved', age });
+
+  assert.equal(age, null);
+  assert.equal(result.persistedStatus, 'age_unverified');
+  assert.equal(result.isApprovedAdult, false);
+});
+
+test('Didit payload-level id_verifications age is scanned when session object differs', () => {
+  const age = resolveDiditAge({}, { id_verifications: [{ age: 18 }] });
+  const result = resolveDiditPersistenceDecision({ status: 'approved', age });
+
+  assert.equal(age, 18);
+  assert.equal(result.persistedStatus, 'approved');
+  assert.equal(result.isApprovedAdult, true);
+});
+
+test('Underage public profile patch hides profile without leaking Didit details', () => {
+  const marker = { serverTimestamp: true };
+  const patch = createUnderagePublicProfilePatch(marker);
+
+  assert.equal(patch.hidden, true);
+  assert.equal(patch.status, 'inactive');
+  assert.equal(patch.visibility, 'private');
+  assert.equal(patch.publicVisibility, 'private');
+  assert.equal(patch.deactivatedReason, 'underage');
+  assert.equal(patch.updatedAt, marker);
+  assert.equal('didit' in patch, false);
+  assert.equal('idv' in patch, false);
 });
 
 test('Didit approved with age null persists age_unverified, not underage or approved', () => {

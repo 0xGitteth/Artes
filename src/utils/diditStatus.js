@@ -1,7 +1,7 @@
 export const DIDIT_APPROVED_STATUSES = ['approved'];
 export const DIDIT_REJECTED_STATUSES = ['declined', 'underage'];
 export const DIDIT_SUPPORT_STATUSES = ['underage', 'age_unverified'];
-export const DIDIT_REFRESHABLE_STATUSES = ['in_progress', 'in_review', 'expired', 'abandoned', 'error'];
+export const DIDIT_REFRESHABLE_STATUSES = ['in_progress', 'in_review', 'expired', 'abandoned', 'error', 'age_unverified'];
 
 export const normalizeDiditStatus = (statusValue) => String(statusValue || '').trim().toLowerCase() || null;
 

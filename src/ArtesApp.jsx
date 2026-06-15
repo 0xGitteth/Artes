@@ -3827,6 +3827,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const diditVerificationUrl = profile?.didit?.verificationUrl || profile?.idv?.verificationUrl || null;
     const effectiveDiditState = resolveEffectiveDiditState({
       profileAgeVerified: profile?.ageVerified === true,
+      profileIsAdult: profile?.isAdult === true,
       persistedDiditStatus,
       diditUiState,
       hasRefreshableDiditSession,

@@ -15,8 +15,10 @@ test('persisted underage and age_unverified are not treated as approved', () => 
   assert.notEqual(resolveEffectiveDiditState({ persistedDiditStatus: 'age_unverified' }), 'approved');
 });
 
-test('profile ageVerified true is the local shortcut to approved adult access', () => {
-  assert.equal(resolveEffectiveDiditState({ profileAgeVerified: true, persistedDiditStatus: 'age_unverified' }), 'approved');
+test('profile ageVerified and isAdult true are both required for approved adult access', () => {
+  assert.notEqual(resolveEffectiveDiditState({ profileAgeVerified: true, profileIsAdult: false, persistedDiditStatus: 'age_unverified' }), 'approved');
+  assert.notEqual(resolveEffectiveDiditState({ profileAgeVerified: true, persistedDiditStatus: 'age_unverified' }), 'approved');
+  assert.equal(resolveEffectiveDiditState({ profileAgeVerified: true, profileIsAdult: true, persistedDiditStatus: 'age_unverified' }), 'approved');
   assert.equal(resolveEffectiveDiditState({ profileAgeVerified: false, persistedDiditStatus: 'approved' }), 'not_started');
 });
 

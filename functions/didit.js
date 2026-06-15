@@ -21,6 +21,7 @@ const DIDIT_ASSUME_ADULT_ON_VERIFIED = String(process.env.DIDIT_ASSUME_ADULT_ON_
 const DIDIT_ONBOARDING_STEP = 2;
 const UNDERAGE_POST_OWNER_FIELDS = ['authorId', 'authorUid', 'authorOwnerUid', 'ownerUid', 'userId', 'uploaderUid', 'createdByUid'];
 const UNDERAGE_BATCH_LIMIT = 450;
+const UNDERAGE_PROFILE_BATCH_LIMIT = 450;
 
 const getDiditHeaders = () => {
   const apiKey = process.env.DIDIT_API_KEY;
@@ -90,6 +91,15 @@ export const createUnderagePostPatch = (now = FieldValue.serverTimestamp()) => (
   triggers: [],
 });
 
+export const createUnderageManagedProfilePatch = (now = FieldValue.serverTimestamp()) => ({
+  status: 'inactive',
+  hidden: true,
+  visibility: 'private',
+  deactivatedReason: 'underage',
+  deactivatedAt: now,
+  updatedAt: now,
+});
+
 const commitUnderagePostBatches = async (postRefs, now) => {
   for (let index = 0; index < postRefs.length; index += UNDERAGE_BATCH_LIMIT) {
     const batch = db.batch();
@@ -110,6 +120,19 @@ const hidePublicPostsForUnderageUser = async (uid, now) => {
   }));
   await commitUnderagePostBatches([...postRefsByPath.values()], now);
   return postRefsByPath.size;
+};
+
+const hideManagedProfilesForUnderageUser = async (uid, now) => {
+  const snapshot = await db.collection('profiles').where('ownerUid', '==', uid).get();
+  const profileRefs = snapshot.docs.map((profileDoc) => profileDoc.ref);
+  for (let index = 0; index < profileRefs.length; index += UNDERAGE_PROFILE_BATCH_LIMIT) {
+    const batch = db.batch();
+    profileRefs.slice(index, index + UNDERAGE_PROFILE_BATCH_LIMIT).forEach((profileRef) => {
+      batch.set(profileRef, createUnderageManagedProfilePatch(now), { merge: true });
+    });
+    await batch.commit();
+  }
+  return profileRefs.length;
 };
 
 const calculateAgeFromDob = (dobValue) => {
@@ -481,7 +504,9 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
   const userRef = db.collection('users').doc(uid);
   const now = FieldValue.serverTimestamp();
   const existingUserSnapshot = await userRef.get();
-  const alreadyApproved = existingUserSnapshot.exists && existingUserSnapshot.get('ageVerified') === true;
+  const alreadyApproved = existingUserSnapshot.exists
+    && existingUserSnapshot.get('ageVerified') === true
+    && existingUserSnapshot.get('isAdult') === true;
   const persistenceDecision = resolveDiditPersistenceDecision({ status, age, alreadyApproved });
   const { normalizedStatus, persistedStatus, candidateStatus, isApprovedAdult, adultDecision, updateMode, shouldClearAdultVerification, shouldResetOnboarding, onboardingStep } = persistenceDecision;
   const { age: resolvedAge, ageIsNumber, assumeAdultOnVerified, isAdult } = adultDecision;
@@ -543,6 +568,7 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
       await publicUserRef.set(createUnderagePublicProfilePatch(now), { merge: true });
     }
     await hidePublicPostsForUnderageUser(uid, now);
+    await hideManagedProfilesForUnderageUser(uid, now);
   } else if (alreadyApproved) {
     await userRef.set(
       {
@@ -644,13 +670,13 @@ export const createDiditSession = onCall(
       });
     }
     const existingUser = await db.collection('users').doc(request.auth.uid).get();
-    if (existingUser.exists && existingUser.get('ageVerified') === true) {
+    if (existingUser.exists && existingUser.get('ageVerified') === true && existingUser.get('isAdult') === true) {
       return { status: 'approved', ageVerified: true, sessionId: existingUser.get('didit.sessionId') || null, verificationUrl: null };
     }
     const reconciled = await reconcileDiditSessionsForUid(request.auth.uid);
     const bestReconciled = selectBestCandidate(reconciled.sessions || []);
     if (bestReconciled?.status === 'approved') {
-      await applyDiditStatusToUser({
+      const appliedStatus = await applyDiditStatusToUser({
         uid: request.auth.uid,
         sessionId: bestReconciled.sessionId,
         status: 'approved',
@@ -665,7 +691,9 @@ export const createDiditSession = onCall(
           referenceMatch: true,
         },
       });
-      return { status: 'approved', ageVerified: true, sessionId: bestReconciled.sessionId, verificationUrl: null };
+      if (appliedStatus.ageVerified === true && appliedStatus.isAdult === true) {
+        return { status: 'approved', ageVerified: true, isAdult: true, sessionId: bestReconciled.sessionId, verificationUrl: null };
+      }
     }
 
     const appBaseOrigin = normalizeOrigin(appBaseUrl);

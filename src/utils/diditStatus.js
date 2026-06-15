@@ -7,13 +7,14 @@ export const normalizeDiditStatus = (statusValue) => String(statusValue || '').t
 
 export const resolveEffectiveDiditState = ({
   profileAgeVerified = false,
+  profileIsAdult = false,
   persistedDiditStatus = null,
   diditUiState = null,
   hasRefreshableDiditSession = false,
 } = {}) => {
   const persistedStatus = normalizeDiditStatus(persistedDiditStatus);
 
-  if (profileAgeVerified === true) return 'approved';
+  if (profileAgeVerified === true && profileIsAdult === true) return 'approved';
   if (diditUiState === 'in_review') return 'in_review';
   if (diditUiState === 'rejected') return 'declined';
   if (diditUiState === 'underage') return 'underage';

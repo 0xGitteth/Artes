@@ -1004,13 +1004,13 @@ service cloud.firestore {
       match /topics/{topicId} {
         match /comments/{commentId} {
           allow read: if true;
-          allow create: if isSignedIn()
+          allow create: if isVerifiedAdultOrDev()
             && request.resource.data.authorId == request.auth.uid;
-          allow update: if isSignedIn()
+          allow update: if isVerifiedAdultOrDev()
             && request.auth.uid == resource.data.authorId
             && request.resource.data.authorId == resource.data.authorId
             && request.resource.data.diff(resource.data).changedKeys().hasOnly(['text', 'updatedAt']);
-          allow delete: if isSignedIn() && request.auth.uid == resource.data.authorId;
+          allow delete: if isVerifiedAdultOrDev() && request.auth.uid == resource.data.authorId;
         }
       }
     }

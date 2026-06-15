@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createUnderagePostPatch, createUnderagePublicProfilePatch, parseDiditAge, resolveDiditAge, resolveDiditPersistenceDecision } from '../didit.js';
+import { createUnderageManagedProfilePatch, createUnderagePostPatch, createUnderagePublicProfilePatch, parseDiditAge, resolveDiditAge, resolveDiditPersistenceDecision } from '../didit.js';
 
 test('Didit age parser treats null, undefined, blank, and non numeric values as missing', () => {
   assert.equal(parseDiditAge(null), null);
@@ -102,6 +102,22 @@ test('Underage post patch hides owned posts without leaking Didit details', () =
   assert.deepEqual(patch.styles, []);
   assert.equal('title' in patch, true);
   assert.equal('imageUrl' in patch, true);
+  assert.equal('didit' in patch, false);
+  assert.equal('idv' in patch, false);
+  assert.equal('age' in patch, false);
+  assert.equal('sessionId' in patch, false);
+});
+
+test('Underage managed profile patch inactivates profiles without leaking Didit details', () => {
+  const marker = { serverTimestamp: true };
+  const patch = createUnderageManagedProfilePatch(marker);
+
+  assert.equal(patch.status, 'inactive');
+  assert.equal(patch.hidden, true);
+  assert.equal(patch.visibility, 'private');
+  assert.equal(patch.deactivatedReason, 'underage');
+  assert.equal(patch.deactivatedAt, marker);
+  assert.equal(patch.updatedAt, marker);
   assert.equal('didit' in patch, false);
   assert.equal('idv' in patch, false);
   assert.equal('age' in patch, false);

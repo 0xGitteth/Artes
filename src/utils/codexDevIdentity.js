@@ -1,7 +1,7 @@
 const CODEX_DEV_UID_DEFAULT = 'codex-dev-user';
 
 export const getExpectedCodexDevUid = () => {
-  const configured = String(import.meta.env.VITE_CODEX_DEV_UID || '').trim();
+  const configured = String(import.meta.env?.VITE_CODEX_DEV_UID || '').trim();
   return configured || CODEX_DEV_UID_DEFAULT;
 };
 

@@ -18,10 +18,17 @@ import {
 
 const PROJECT_ID = 'artes-rules-test';
 
-const authedContext = (env, uid, token = {}) => env.authenticatedContext(uid, {
-  email: `${uid}@example.com`,
-  ...token,
-});
+const authedContext = (env, uid, token = {}) => {
+  const adultDefaults = token.email_verified === true && token.__adultDefaults !== false
+    ? { idvVerified: true, isAdult: true }
+    : {};
+  const { __adultDefaults, ...safeToken } = token;
+  return env.authenticatedContext(uid, {
+    email: `${uid}@example.com`,
+    ...adultDefaults,
+    ...safeToken,
+  });
+};
 
 async function run() {
   const rules = await fs.readFile('firestore.rules', 'utf8');
@@ -73,6 +80,10 @@ async function run() {
       await setDoc(doc(db, 'users', ownerUid), {
         uid: ownerUid,
         displayName: 'Owner One',
+        ageVerified: true,
+        isAdult: true,
+        didit: { status: 'approved' },
+        idv: { status: 'approved' },
       });
       await setDoc(doc(db, 'users', 'agency_owner'), {
         uid: 'agency_owner',
@@ -359,7 +370,12 @@ async function run() {
 
     const publicDb = testEnv.unauthenticatedContext().firestore();
     const ownerDb = authedContext(testEnv, ownerUid, { email_verified: true }).firestore();
+    const ownerEmailFalseAdultDb = authedContext(testEnv, ownerUid, { email_verified: false, idvVerified: true, isAdult: true }).firestore();
+    const ownerEmailOnlyDb = authedContext(testEnv, ownerUid, { email_verified: true, __adultDefaults: false }).firestore();
+    const ownerIdvFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: false, isAdult: true }).firestore();
+    const ownerAdultFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: true, isAdult: false }).firestore();
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
+    const codexDevDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, email_verified: false }).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
     const moderatorDb = authedContext(testEnv, 'mod_1', { email_verified: true, email: 'mod_1@example.com' }).firestore();
     const agencyOwnerDb = authedContext(testEnv, 'agency_owner', { email_verified: true }).firestore();
@@ -1229,6 +1245,15 @@ async function run() {
     );
 
     await assertFails(
+      setDoc(doc(ownerUnverifiedDb, 'communities', communityId, 'topics', topicId, 'comments', 'non_adult'), {
+        text: 'Non adult comment',
+        authorId: ownerUid,
+        authorName: 'Owner One',
+        createdAt: serverTimestamp(),
+      }),
+    );
+
+    await assertFails(
       setDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', 'spoofed'), {
         text: 'Spoofed author',
         authorId: otherUid,
@@ -1255,6 +1280,46 @@ async function run() {
         authorName: 'Tampered Name',
       }),
     );
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid), {
+        uid: ownerUid,
+        displayName: 'Owner One',
+        ageVerified: false,
+        isAdult: false,
+        didit: { status: 'underage' },
+        idv: { status: 'underage' },
+      });
+    });
+
+    await assertFails(
+      setDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', 'stale_claims'), {
+        text: 'Stale claims comment',
+        authorId: ownerUid,
+        authorName: 'Owner One',
+        createdAt: serverTimestamp(),
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId), {
+        text: 'Stale claims update denied',
+        updatedAt: serverTimestamp(),
+      }),
+    );
+
+    await assertFails(deleteDoc(doc(ownerDb, 'communities', communityId, 'topics', topicId, 'comments', commentId)));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid), {
+        uid: ownerUid,
+        displayName: 'Owner One',
+        ageVerified: true,
+        isAdult: true,
+        didit: { status: 'approved' },
+        idv: { status: 'approved' },
+      });
+    });
 
     await assertFails(deleteDoc(doc(otherDb, 'communities', communityId, 'topics', topicId, 'comments', commentId)));
 
@@ -1293,6 +1358,136 @@ async function run() {
     };
 
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), basePost));
+
+    await assertFails(setDoc(doc(ownerEmailFalseAdultDb, 'posts', 'adult_gate_email_false_denied'), {
+      ...basePost,
+      title: 'Email false adult claims denied',
+    }));
+    await assertFails(setDoc(doc(ownerEmailOnlyDb, 'posts', 'adult_gate_email_only_denied'), {
+      ...basePost,
+      title: 'Email only denied',
+    }));
+    await assertFails(setDoc(doc(ownerIdvFalseDb, 'posts', 'adult_gate_idv_false_denied'), {
+      ...basePost,
+      title: 'IDV false denied',
+    }));
+    await assertFails(setDoc(doc(ownerAdultFalseDb, 'posts', 'adult_gate_adult_false_denied'), {
+      ...basePost,
+      title: 'Adult false denied',
+    }));
+    await assertSucceeds(setDoc(doc(codexDevDb, 'posts', 'adult_gate_codex_dev_allowed'), {
+      ...basePost,
+      authorId: 'codex-dev-user',
+      title: 'Codex dev allowed',
+      credits: [{ uid: 'codex-dev-user', role: 'photographer', name: 'Codex', isSelf: true, consentStatus: 'accepted' }],
+    }));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid), {
+        uid: ownerUid,
+        displayName: 'Owner One',
+        ageVerified: false,
+        isAdult: true,
+        didit: { status: 'approved' },
+        idv: { status: 'approved' },
+      });
+    });
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'adult_gate_user_age_false_denied'), {
+      ...basePost,
+      title: 'User doc age false denied',
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), { title: 'User doc age false update denied' }));
+    await assertFails(deleteDoc(doc(ownerDb, 'posts', 'safe_correction_ok')));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid), {
+        uid: ownerUid,
+        displayName: 'Owner One',
+        ageVerified: true,
+        isAdult: false,
+        didit: { status: 'approved' },
+        idv: { status: 'approved' },
+      });
+    });
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'adult_gate_user_adult_false_denied'), {
+      ...basePost,
+      title: 'User doc adult false denied',
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), { title: 'User doc adult false update denied' }));
+    await assertFails(deleteDoc(doc(ownerDb, 'posts', 'safe_correction_ok')));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid), {
+        uid: ownerUid,
+        displayName: 'Owner One',
+        ageVerified: true,
+        isAdult: true,
+        didit: { status: 'underage' },
+        idv: { status: 'approved' },
+      });
+    });
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'adult_gate_user_didit_underage_denied'), {
+      ...basePost,
+      title: 'User doc Didit underage denied',
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), { title: 'User doc Didit underage update denied' }));
+    await assertFails(deleteDoc(doc(ownerDb, 'posts', 'safe_correction_ok')));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid), {
+        uid: ownerUid,
+        displayName: 'Owner One',
+        ageVerified: false,
+        isAdult: false,
+        didit: { status: 'underage' },
+        idv: { status: 'underage' },
+      });
+    });
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'adult_gate_stale_claims_denied'), {
+      ...basePost,
+      title: 'Stale claims denied after downgrade',
+    }));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid), {
+        uid: ownerUid,
+        displayName: 'Owner One',
+        ageVerified: true,
+        isAdult: true,
+        didit: { status: 'approved' },
+        idv: { status: 'approved' },
+      });
+    });
+
+    await assertFails(setDoc(doc(ownerUnverifiedDb, 'posts', 'safe_correction_ok', 'comments', 'non_adult_comment_denied'), {
+      authorId: ownerUid,
+      text: 'Non adult comment denied',
+      createdAt: Timestamp.now(),
+    }));
+    await assertFails(setDoc(doc(ownerAdultFalseDb, 'posts', 'safe_correction_ok', 'comments', 'adult_false_comment_denied'), {
+      authorId: ownerUid,
+      text: 'Adult false comment denied',
+      createdAt: Timestamp.now(),
+    }));
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok', 'comments', 'adult_comment_ok'), {
+      authorId: ownerUid,
+      text: 'Adult comment ok',
+      createdAt: Timestamp.now(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok', 'comments', 'comment_impersonation_denied'), {
+      authorId: otherUid,
+      text: 'Impersonation denied',
+      createdAt: Timestamp.now(),
+    }));
+    await assertFails(setDoc(doc(ownerUnverifiedDb, 'posts', 'safe_correction_ok', 'likes', ownerUid), {
+      createdAt: Timestamp.now(),
+    }));
+    await assertFails(setDoc(doc(ownerAdultFalseDb, 'posts', 'safe_correction_ok', 'likes', ownerUid), {
+      createdAt: Timestamp.now(),
+    }));
+    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok', 'likes', ownerUid), {
+      createdAt: Timestamp.now(),
+    }));
 
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
       ...basePost,
@@ -1455,6 +1650,18 @@ async function run() {
       ],
       uploadConsent: { ...baseConsent, hasMaker: true, makerCreditIndex: 1 },
     }));
+    await assertFails(updateDoc(doc(ownerEmailFalseAdultDb, 'posts', 'safe_correction_ok'), {
+      title: 'Email false update denied',
+    }));
+    await assertFails(updateDoc(doc(ownerIdvFalseDb, 'posts', 'safe_correction_ok'), {
+      title: 'IDV false update denied',
+    }));
+    await assertFails(updateDoc(doc(ownerAdultFalseDb, 'posts', 'safe_correction_ok'), {
+      title: 'Adult false update denied',
+    }));
+    await assertFails(deleteDoc(doc(ownerEmailFalseAdultDb, 'posts', 'safe_correction_ok')));
+    await assertFails(deleteDoc(doc(ownerIdvFalseDb, 'posts', 'safe_correction_ok')));
+    await assertFails(deleteDoc(doc(ownerAdultFalseDb, 'posts', 'safe_correction_ok')));
 
     await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
       title: 'Profile identity update ok',

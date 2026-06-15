@@ -980,6 +980,9 @@ assert.equal(shouldShowProfileInDiscover({ profileId: 'setup_required', setupReq
 assert.equal(shouldShowProfileInDiscover({ profileId: 'setup_flag', isSetupProfile: true, type: 'company' }, 'viewer'), false, 'Discover hides isSetupProfile profile');
 assert.equal(shouldShowProfileInDiscover({ profileId: 'legacy_source', source: 'legacyOrganization', type: 'company' }, 'viewer'), false, 'Discover hides legacyOrganization setup profile');
 assert.equal(shouldShowProfileInDiscover({ profileId: 'inactive_company', ownerUid: 'other', type: 'company', status: 'inactive' }, 'viewer'), false, 'Discover hides inactive external profile');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'hidden_user', ownerUid: 'other', hidden: true, displayName: 'Hidden User' }, 'viewer'), false, 'Discover hides hidden public users');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'private_user', ownerUid: 'other', visibility: 'private', displayName: 'Private User' }, 'viewer'), false, 'Discover hides private visibility public users');
+assert.equal(shouldShowProfileInDiscover({ profileId: 'private_public_user', ownerUid: 'other', publicVisibility: 'private', displayName: 'Private Public User' }, 'viewer'), false, 'Discover hides private publicVisibility public users');
 assert.equal(shouldShowProfileInDiscover({ profileId: 'active_company', ownerUid: 'other', type: 'company', status: 'active', displayName: 'Other Studio' }, 'viewer'), true, 'Discover shows active external profile from another user');
 
 assert.equal(shouldShowPostInDiscover({ authorId: 'viewer', title: 'Own authorId' }, 'viewer'), false, 'Discover hides own post by authorId');
@@ -987,6 +990,10 @@ assert.equal(shouldShowPostInDiscover({ authorUid: 'viewer', title: 'Own authorU
 assert.equal(shouldShowPostInDiscover({ authorOwnerUid: 'viewer', authorProfileId: 'company_own', title: 'Own company' }, 'viewer'), false, 'Discover hides own external post by authorOwnerUid');
 assert.equal(shouldShowPostInDiscover({ ownerUid: 'viewer', authorProfileId: 'agency_own', title: 'Own agency' }, 'viewer'), false, 'Discover hides own external post by ownerUid');
 assert.equal(shouldShowPostInDiscover({ authorProfileId: 'legacy_company_viewer', authorOwnerUid: 'other', title: 'Setup post' }, 'viewer'), false, 'Discover hides posts with legacy setup authorProfileId');
+assert.equal(shouldShowPostInDiscover({ authorId: 'other', hidden: true, title: 'Hidden post' }, 'viewer'), false, 'Discover hides hidden posts');
+assert.equal(shouldShowPostInDiscover({ authorId: 'other', status: 'inactive', title: 'Inactive post' }, 'viewer'), false, 'Discover hides inactive posts');
+assert.equal(shouldShowPostInDiscover({ authorId: 'other', visibility: 'private', title: 'Private post' }, 'viewer'), false, 'Discover hides private posts');
+assert.equal(shouldShowPostInDiscover({ authorId: 'other', deactivatedReason: 'underage', title: 'Underage deactivated post' }, 'viewer'), false, 'Discover hides underage deactivated posts');
 assert.equal(shouldShowPostInDiscover({ authorId: 'other', authorOwnerUid: 'other', authorProfileId: 'company_other', title: 'Other company' }, 'viewer'), true, 'Discover shows external profile post from another user');
 
 assert.equal(getPublicExternalProfileTarget(setupCompanyProfile), null, 'legacy setup profile id is not a public external profile target');

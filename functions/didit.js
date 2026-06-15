@@ -18,6 +18,10 @@ const db = getFirestore();
  */
 const DIDIT_API_BASE = process.env.DIDIT_API_BASE_URL || 'https://verification.didit.me/v2';
 const DIDIT_ASSUME_ADULT_ON_VERIFIED = String(process.env.DIDIT_ASSUME_ADULT_ON_VERIFIED || '').trim().toLowerCase() === 'true';
+const DIDIT_ONBOARDING_STEP = 2;
+const UNDERAGE_POST_OWNER_FIELDS = ['authorId', 'authorUid', 'authorOwnerUid', 'ownerUid', 'userId', 'uploaderUid', 'createdByUid'];
+const UNDERAGE_BATCH_LIMIT = 450;
+const UNDERAGE_PROFILE_BATCH_LIMIT = 450;
 
 const getDiditHeaders = () => {
   const apiKey = process.env.DIDIT_API_KEY;
@@ -44,6 +48,93 @@ const normalizeReason = (reason) => {
   }
 };
 
+export const createUnderagePublicProfilePatch = (now = FieldValue.serverTimestamp()) => ({
+  hidden: true,
+  status: 'inactive',
+  visibility: 'private',
+  publicVisibility: 'private',
+  deactivatedReason: 'underage',
+  deactivatedAt: now,
+  updatedAt: now,
+  username: FieldValue.delete(),
+  displayName: FieldValue.delete(),
+  displayNameLower: FieldValue.delete(),
+  photoURL: FieldValue.delete(),
+  avatar: FieldValue.delete(),
+  bio: FieldValue.delete(),
+  headerImage: FieldValue.delete(),
+  roles: [],
+  themes: [],
+  quickProfilePostIds: [],
+});
+
+// Recovery policy: public profiles/posts hidden for a confirmed-underage downgrade are
+// not automatically restored after a later adult approval; require admin/manual review.
+export const createUnderagePostPatch = (now = FieldValue.serverTimestamp()) => ({
+  hidden: true,
+  visibility: 'private',
+  status: 'inactive',
+  deactivatedReason: 'underage',
+  deactivatedAt: now,
+  updatedAt: now,
+  title: FieldValue.delete(),
+  description: FieldValue.delete(),
+  imageUrl: FieldValue.delete(),
+  imageRef: FieldValue.delete(),
+  storagePath: FieldValue.delete(),
+  authorName: FieldValue.delete(),
+  authorRole: FieldValue.delete(),
+  credits: [],
+  styles: [],
+  makerTags: [],
+  appliedTriggers: [],
+  triggers: [],
+});
+
+export const createUnderageManagedProfilePatch = (now = FieldValue.serverTimestamp()) => ({
+  status: 'inactive',
+  hidden: true,
+  visibility: 'private',
+  deactivatedReason: 'underage',
+  deactivatedAt: now,
+  updatedAt: now,
+});
+
+const commitUnderagePostBatches = async (postRefs, now) => {
+  for (let index = 0; index < postRefs.length; index += UNDERAGE_BATCH_LIMIT) {
+    const batch = db.batch();
+    postRefs.slice(index, index + UNDERAGE_BATCH_LIMIT).forEach((postRef) => {
+      batch.set(postRef, createUnderagePostPatch(now), { merge: true });
+    });
+    await batch.commit();
+  }
+};
+
+const hidePublicPostsForUnderageUser = async (uid, now) => {
+  const postRefsByPath = new Map();
+  await Promise.all(UNDERAGE_POST_OWNER_FIELDS.map(async (field) => {
+    const snapshot = await db.collection('posts').where(field, '==', uid).get();
+    snapshot.docs.forEach((postDoc) => {
+      postRefsByPath.set(postDoc.ref.path, postDoc.ref);
+    });
+  }));
+  await commitUnderagePostBatches([...postRefsByPath.values()], now);
+  return postRefsByPath.size;
+};
+
+const hideManagedProfilesForUnderageUser = async (uid, now) => {
+  const snapshot = await db.collection('profiles').where('ownerUid', '==', uid).get();
+  const profileRefs = snapshot.docs.map((profileDoc) => profileDoc.ref);
+  for (let index = 0; index < profileRefs.length; index += UNDERAGE_PROFILE_BATCH_LIMIT) {
+    const batch = db.batch();
+    profileRefs.slice(index, index + UNDERAGE_PROFILE_BATCH_LIMIT).forEach((profileRef) => {
+      batch.set(profileRef, createUnderageManagedProfilePatch(now), { merge: true });
+    });
+    await batch.commit();
+  }
+  return profileRefs.length;
+};
+
 const calculateAgeFromDob = (dobValue) => {
   if (!dobValue) return null;
   const date = new Date(dobValue);
@@ -57,30 +148,121 @@ const calculateAgeFromDob = (dobValue) => {
   return age;
 };
 
-const resolveDiditAge = (session) => {
-  const directAge = [
+export const parseDiditAge = (value) => {
+  if (value == null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const firstFiniteAge = (values) => values
+  .map((value) => parseDiditAge(value))
+  .find((value) => Number.isFinite(value));
+
+const firstCalculatedDobAge = (values) => values
+  .map((value) => calculateAgeFromDob(value))
+  .find((value) => Number.isFinite(value));
+
+const arrayItems = (...values) => values.flatMap((value) => (Array.isArray(value) ? value : []));
+
+export const resolveDiditAge = (session, payload = session) => {
+  const directAge = firstFiniteAge([
     session?.age,
     session?.subject?.age,
     session?.person?.age,
     session?.result?.age,
     session?.verification?.age,
     session?.data?.age,
-  ]
-    .map((value) => Number(value))
-    .find((value) => Number.isFinite(value));
+    payload?.age,
+    payload?.subject?.age,
+    payload?.person?.age,
+    payload?.result?.age,
+    payload?.verification?.age,
+    payload?.data?.age,
+  ]);
   if (Number.isFinite(directAge)) return directAge;
 
-  const dob =
-    session?.dateOfBirth ||
-    session?.date_of_birth ||
-    session?.document?.dateOfBirth ||
-    session?.document?.date_of_birth ||
-    session?.person?.dateOfBirth ||
-    session?.person?.date_of_birth ||
-    session?.data?.dateOfBirth ||
-    session?.data?.date_of_birth;
+  const directDobAge = firstCalculatedDobAge([
+    session?.dateOfBirth,
+    session?.date_of_birth,
+    session?.document?.dateOfBirth,
+    session?.document?.date_of_birth,
+    session?.person?.dateOfBirth,
+    session?.person?.date_of_birth,
+    session?.data?.dateOfBirth,
+    session?.data?.date_of_birth,
+    payload?.dateOfBirth,
+    payload?.date_of_birth,
+    payload?.document?.dateOfBirth,
+    payload?.document?.date_of_birth,
+    payload?.person?.dateOfBirth,
+    payload?.person?.date_of_birth,
+    payload?.data?.dateOfBirth,
+    payload?.data?.date_of_birth,
+  ]);
+  if (Number.isFinite(directDobAge)) return directDobAge;
 
-  return calculateAgeFromDob(dob);
+  const featureItems = arrayItems(
+    session?.id_verifications,
+    session?.idVerifications,
+    session?.verification?.id_verifications,
+    session?.verification?.idVerifications,
+    session?.data?.id_verifications,
+    session?.data?.idVerifications,
+    session?.features,
+    session?.checks,
+    session?.documents,
+    session?.verification?.features,
+    session?.verification?.checks,
+    session?.verification?.documents,
+    session?.result?.features,
+    session?.result?.checks,
+    session?.result?.documents,
+    session?.data?.features,
+    session?.data?.checks,
+    session?.data?.documents,
+    payload?.id_verifications,
+    payload?.idVerifications,
+    payload?.verification?.id_verifications,
+    payload?.verification?.idVerifications,
+    payload?.data?.id_verifications,
+    payload?.data?.idVerifications,
+    payload?.features,
+    payload?.checks,
+    payload?.documents,
+    payload?.verification?.features,
+    payload?.verification?.checks,
+    payload?.verification?.documents,
+    payload?.result?.features,
+    payload?.result?.checks,
+    payload?.result?.documents,
+    payload?.data?.features,
+    payload?.data?.checks,
+    payload?.data?.documents,
+  );
+
+  const featureAge = firstFiniteAge(featureItems.flatMap((item) => [
+    item?.age,
+    item?.subject?.age,
+    item?.person?.age,
+    item?.result?.age,
+    item?.document?.age,
+    item?.data?.age,
+  ]));
+  if (Number.isFinite(featureAge)) return featureAge;
+
+  return firstCalculatedDobAge(featureItems.flatMap((item) => [
+    item?.dateOfBirth,
+    item?.date_of_birth,
+    item?.subject?.dateOfBirth,
+    item?.subject?.date_of_birth,
+    item?.person?.dateOfBirth,
+    item?.person?.date_of_birth,
+    item?.document?.dateOfBirth,
+    item?.document?.date_of_birth,
+    item?.data?.dateOfBirth,
+    item?.data?.date_of_birth,
+  ])) ?? null;
 };
 
 const resolveDiditReference = (payload) =>
@@ -207,19 +389,51 @@ const resolveDiditSessionId = (payload) => {
   return session?.id || session?.session_id || payload?.sessionId || payload?.session_id || null;
 };
 
-const isApprovedStatus = (status) => ['approved', 'verified', 'completed', 'success'].includes(status);
-const isRejectedStatus = (status) => ['rejected', 'declined', 'failed', 'denied'].includes(status);
-
-const resolveDiditAdultDecision = (status, age) => {
+export const resolveDiditAdultDecision = (status, age) => {
   const normalizedStatus = normalizeStatus(status);
-  const ageIsNumber = Number.isFinite(age);
-  const assumeAdultOnVerified = isApprovedStatus(normalizedStatus) && DIDIT_ASSUME_ADULT_ON_VERIFIED;
-  const isAdult = ageIsNumber ? age >= 18 : assumeAdultOnVerified ? true : null;
+  const resolvedAge = parseDiditAge(age);
+  const ageIsNumber = Number.isFinite(resolvedAge);
+  const isApproved = normalizedStatus === 'approved';
+  const assumeAdultOnVerified = isApproved && !ageIsNumber && DIDIT_ASSUME_ADULT_ON_VERIFIED;
+  const isAdult = isApproved && (ageIsNumber ? resolvedAge >= 18 : assumeAdultOnVerified) ? true : null;
   return {
     normalizedStatus,
+    age: ageIsNumber ? resolvedAge : null,
     ageIsNumber,
     assumeAdultOnVerified,
     isAdult,
+  };
+};
+
+export const resolveDiditPersistenceDecision = ({ status, age, alreadyApproved = false } = {}) => {
+  const adultDecision = resolveDiditAdultDecision(status, age);
+  const { normalizedStatus, ageIsNumber, age: resolvedAge, isAdult } = adultDecision;
+  const isApprovedAdult = normalizedStatus === 'approved' && isAdult === true;
+  const candidateStatus = normalizedStatus === 'approved' && !isApprovedAdult
+    ? ageIsNumber && resolvedAge < 18
+      ? 'underage'
+      : 'age_unverified'
+    : normalizedStatus;
+  const isConfirmedUnderage = normalizedStatus === 'approved' && ageIsNumber && resolvedAge < 18;
+  const updateMode = alreadyApproved && !isApprovedAdult
+    ? isConfirmedUnderage
+      ? 'downgrade_underage'
+      : 'diagnostics_only'
+    : isApprovedAdult
+      ? 'approve_adult'
+      : 'sync_status';
+
+  return {
+    normalizedStatus,
+    persistedStatus: updateMode === 'diagnostics_only' ? null : candidateStatus,
+    candidateStatus,
+    isApprovedAdult,
+    isAdult: isAdult === true,
+    adultDecision,
+    updateMode,
+    shouldClearAdultVerification: updateMode === 'downgrade_underage',
+    shouldResetOnboarding: updateMode === 'downgrade_underage',
+    onboardingStep: updateMode === 'downgrade_underage' ? DIDIT_ONBOARDING_STEP : null,
   };
 };
 
@@ -272,7 +486,7 @@ const fetchDiditDecisionForSession = async (sessionId) => {
   return {
     sessionId,
     status: normalized.status,
-    age: resolveDiditAge(session),
+    age: resolveDiditAge(session, data),
     reason: resolveDiditReason(data),
     reference,
     rawStatusPath: normalized.rawStatusPath,
@@ -289,13 +503,17 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
 
   const userRef = db.collection('users').doc(uid);
   const now = FieldValue.serverTimestamp();
-  const normalizedStatus = String(status || 'error').trim().toLowerCase();
-  const isApproved = normalizedStatus === 'approved';
-  const isAdult = isApproved ? true : null;
+  const existingUserSnapshot = await userRef.get();
+  const alreadyApproved = existingUserSnapshot.exists
+    && existingUserSnapshot.get('ageVerified') === true
+    && existingUserSnapshot.get('isAdult') === true;
+  const persistenceDecision = resolveDiditPersistenceDecision({ status, age, alreadyApproved });
+  const { normalizedStatus, persistedStatus, candidateStatus, isApprovedAdult, adultDecision, updateMode, shouldClearAdultVerification, shouldResetOnboarding, onboardingStep } = persistenceDecision;
+  const { age: resolvedAge, ageIsNumber, assumeAdultOnVerified, isAdult } = adultDecision;
   const normalizedReason = normalizeReason(reason);
 
   const diditPayload = {
-    status: normalizedStatus,
+    status: persistedStatus || candidateStatus,
     sessionId: sessionId || null,
     reason: normalizedReason,
     verificationUrl: verificationUrl || null,
@@ -309,14 +527,15 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     lastMatchedSessionCount: Number.isFinite(Number(diagnostics.matchedSessionCount)) ? Number(diagnostics.matchedSessionCount) : null,
     lastMatchedApprovedCount: Number.isFinite(Number(diagnostics.matchedApprovedCount)) ? Number(diagnostics.matchedApprovedCount) : null,
     lastReferenceMatch: diagnostics.referenceMatch === true,
+    lastResolvedAge: ageIsNumber ? resolvedAge : null,
+    lastAgeIsNumber: ageIsNumber,
+    lastAssumeAdultOnVerified: assumeAdultOnVerified,
   };
 
-  const existingUserSnapshot = await userRef.get();
   const existingStepRaw = existingUserSnapshot.exists ? existingUserSnapshot.get('onboardingStep') : null;
   const existingStep = Number.isFinite(Number(existingStepRaw)) ? Number(existingStepRaw) : 0;
 
-  const alreadyApproved = existingUserSnapshot.exists && existingUserSnapshot.get('ageVerified') === true;
-  if (isApproved) {
+  if (isApprovedAdult) {
     const approvedStep = Math.max(existingStep, 3);
     await userRef.set(
       {
@@ -330,6 +549,26 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
       },
       { merge: true }
     );
+  } else if (shouldClearAdultVerification) {
+    const publicUserRef = db.collection('publicUsers').doc(uid);
+    const publicUserSnapshot = await publicUserRef.get();
+    await userRef.set(
+      {
+        ageVerified: false,
+        isAdult: false,
+        onboardingComplete: false,
+        onboardingStep: DIDIT_ONBOARDING_STEP,
+        didit: diditPayload,
+        idv: diditPayload,
+        ageVerificationSource: 'didit',
+      },
+      { merge: true }
+    );
+    if (publicUserSnapshot.exists) {
+      await publicUserRef.set(createUnderagePublicProfilePatch(now), { merge: true });
+    }
+    await hidePublicPostsForUnderageUser(uid, now);
+    await hideManagedProfilesForUnderageUser(uid, now);
   } else if (alreadyApproved) {
     await userRef.set(
       {
@@ -342,6 +581,9 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
           lastMatchedSessionCount: Number.isFinite(Number(diagnostics.matchedSessionCount)) ? Number(diagnostics.matchedSessionCount) : null,
           lastMatchedApprovedCount: Number.isFinite(Number(diagnostics.matchedApprovedCount)) ? Number(diagnostics.matchedApprovedCount) : null,
           lastReferenceMatch: diagnostics.referenceMatch === true,
+          lastResolvedAge: ageIsNumber ? resolvedAge : null,
+          lastAgeIsNumber: ageIsNumber,
+          lastAssumeAdultOnVerified: assumeAdultOnVerified,
           lastSyncErrorCode: diagnostics.errorCode || null,
           lastSyncErrorSafeMessage: diagnostics.errorSafeMessage || null,
         },
@@ -358,21 +600,38 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
     );
   }
 
-  if (isApproved) {
+  if (isApprovedAdult || shouldClearAdultVerification) {
     try {
+      const existingClaims = shouldClearAdultVerification
+        ? (await admin.auth().getUser(uid)).customClaims || {}
+        : {};
       await admin.auth().setCustomUserClaims(uid, {
-        idvVerified: true,
-        isAdult: isAdult === true,
+        ...existingClaims,
+        idvVerified: isApprovedAdult,
+        isAdult: isApprovedAdult && isAdult === true,
       });
     } catch (error) {
-      logger.warn('Failed to set custom claims for Didit status', {
+      logger.warn('Failed to update custom claims for Didit status', {
         uid,
         error: error?.message,
       });
     }
   }
 
-  return { status: normalizedStatus, isAdult };
+  const existingPersistedStatus = existingUserSnapshot.exists
+    ? existingUserSnapshot.get('didit.status') || existingUserSnapshot.get('idv.status') || null
+    : null;
+  return {
+    status: updateMode === 'diagnostics_only' ? existingPersistedStatus || 'approved' : persistedStatus,
+    normalizedStatus,
+    candidateStatus,
+    isAdult: isAdult === true,
+    adultDecision,
+    updateMode,
+    shouldClearAdultVerification,
+    shouldResetOnboarding,
+    onboardingStep,
+  };
 };
 
 const reconcileDiditSessionsForUid = async (uid) => {
@@ -411,13 +670,13 @@ export const createDiditSession = onCall(
       });
     }
     const existingUser = await db.collection('users').doc(request.auth.uid).get();
-    if (existingUser.exists && existingUser.get('ageVerified') === true) {
+    if (existingUser.exists && existingUser.get('ageVerified') === true && existingUser.get('isAdult') === true) {
       return { status: 'approved', ageVerified: true, sessionId: existingUser.get('didit.sessionId') || null, verificationUrl: null };
     }
     const reconciled = await reconcileDiditSessionsForUid(request.auth.uid);
     const bestReconciled = selectBestCandidate(reconciled.sessions || []);
     if (bestReconciled?.status === 'approved') {
-      await applyDiditStatusToUser({
+      const appliedStatus = await applyDiditStatusToUser({
         uid: request.auth.uid,
         sessionId: bestReconciled.sessionId,
         status: 'approved',
@@ -432,7 +691,9 @@ export const createDiditSession = onCall(
           referenceMatch: true,
         },
       });
-      return { status: 'approved', ageVerified: true, sessionId: bestReconciled.sessionId, verificationUrl: null };
+      if (appliedStatus.ageVerified === true && appliedStatus.isAdult === true) {
+        return { status: 'approved', ageVerified: true, isAdult: true, sessionId: bestReconciled.sessionId, verificationUrl: null };
+      }
     }
 
     const appBaseOrigin = normalizeOrigin(appBaseUrl);
@@ -738,7 +999,7 @@ export const diditWebhook = onRequest({ region: 'europe-west4', secrets: ['DIDIT
   const status = normalized.status;
   const reason = resolveDiditReason(payload);
   const session = resolveDiditSession(payload);
-  const age = resolveDiditAge(session);
+  const age = resolveDiditAge(session, payload);
 
   logger.info('Didit webhook received', {
     hasReference: Boolean(reference),

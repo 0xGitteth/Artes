@@ -12,3 +12,20 @@ export function canPublishUpload(upload = {}) {
   }
   return upload?.reviewStatus === 'approved' || publicationStatus === 'published';
 }
+
+export function getUserPublicPostPublishDecision(user = null) {
+  if (!user || typeof user !== 'object') {
+    return { allowed: false, code: 'adult_verification_required' };
+  }
+  if (user?.didit?.status === 'underage' || user?.idv?.status === 'underage') {
+    return { allowed: false, code: 'underage' };
+  }
+  if (user.ageVerified !== true || user.isAdult !== true) {
+    return { allowed: false, code: 'adult_verification_required' };
+  }
+  return { allowed: true, code: 'allowed' };
+}
+
+export function canUserPublishPublicPost(user = null) {
+  return getUserPublicPostPublishDecision(user).allowed;
+}

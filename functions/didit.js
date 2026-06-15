@@ -57,6 +57,8 @@ export const createUnderagePublicProfilePatch = (now = FieldValue.serverTimestam
   updatedAt: now,
 });
 
+// Recovery policy: public profiles/posts hidden for a confirmed-underage downgrade are
+// not automatically restored after a later adult approval; require admin/manual review.
 export const createUnderagePostPatch = (now = FieldValue.serverTimestamp()) => ({
   hidden: true,
   visibility: 'private',

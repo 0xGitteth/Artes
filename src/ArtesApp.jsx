@@ -195,7 +195,7 @@ import {
   writeStoredActiveProfileId,
 } from './utils/managedProfiles';
 import { isCodexDevIdentity, readTokenClaims } from './utils/codexDevIdentity';
-import { shouldBlockMainAppForAgeState } from './utils/ageGate';
+import { resolveAgeGateOnboardingStep, shouldBlockMainAppForAgeState } from './utils/ageGate';
 import {
   CONSENT_EXCEPTION_REASONS,
   CONTRIBUTOR_CONSENT_STATUSES,
@@ -318,6 +318,11 @@ const computeOnboardingStep = (profileData, authUserData, queryParams, authIsRea
     return 1;
   }
 
+  const ageBlockedStep = resolveAgeGateOnboardingStep({ profile: profileData, uid: authUserData?.uid }, 2);
+  if (ageBlockedStep != null) {
+    if (import.meta.env.DEV) devLog('[onboarding-step:compute]', { traceId: DIAG_TRACE_ID, ...debugPayload, resolvedStep: ageBlockedStep, reason: 'age-gate-blocked' });
+    return ageBlockedStep;
+  }
   if (isOnboardingComplete(profileData)) {
     if (import.meta.env.DEV) devLog('[onboarding-step:compute]', { traceId: DIAG_TRACE_ID, ...debugPayload, resolvedStep: 5, reason: 'onboarding-complete' });
     return 5;

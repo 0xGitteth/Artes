@@ -18,7 +18,7 @@ import {
 import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.js';
 import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
-import { canPublishUpload, requiresMessageIdForAction } from './userModerationActionPolicy.js';
+import { canPublishUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
 import { getCodexDevLoginDecision } from './codexDevLogin.js';
@@ -3767,6 +3767,15 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
 
       await db.runTransaction(async (transaction) => {
         const postRef = db.collection('posts').doc(uploadId);
+        const userRef = db.collection('users').doc(userId);
+        const latestUserSnap = await transaction.get(userRef);
+        const publishDecision = getUserPublicPostPublishDecision(latestUserSnap.exists ? latestUserSnap.data() : null);
+        if (!publishDecision.allowed) {
+          const error = new Error(publishDecision.code);
+          error.status = 403;
+          error.code = publishDecision.code;
+          throw error;
+        }
         const latestUploadSnap = await transaction.get(uploadRef);
         if (!latestUploadSnap.exists) {
           const error = new Error('Upload not found');
@@ -3873,7 +3882,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     res.status(200).json({ ok: true });
   } catch (error) {
     const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Failed to perform action' });
+    res.status(status).json({ error: error.message || 'Failed to perform action', ...(error.code ? { code: error.code } : {}) });
   }
 });
 

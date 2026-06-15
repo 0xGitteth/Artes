@@ -2,7 +2,7 @@ import { hasCodexDevClaim, isCodexDevUid } from './codexDevIdentity.js';
 import { normalizeDiditStatus } from './diditStatus.js';
 
 export const shouldBlockMainAppForAgeState = ({ profile = null, authClaims = null, uid = null, isDevCodex = false } = {}) => {
-  const devByIdentity = isDevCodex === true || profile?.isDevTestUser === true || hasCodexDevClaim(authClaims) || isCodexDevUid(uid || profile?.uid);
+  const devByIdentity = isDevCodex === true || hasCodexDevClaim(authClaims) || isCodexDevUid(uid || profile?.uid);
   if (devByIdentity) return false;
 
   const diditStatus = normalizeDiditStatus(profile?.didit?.status || profile?.diditStatus);
@@ -11,3 +11,7 @@ export const shouldBlockMainAppForAgeState = ({ profile = null, authClaims = nul
 
   return profile?.ageVerified !== true || profile?.isAdult !== true;
 };
+
+export const resolveAgeGateOnboardingStep = (ageStateInput, diditStep = 2) => (
+  shouldBlockMainAppForAgeState(ageStateInput) ? diditStep : null
+);

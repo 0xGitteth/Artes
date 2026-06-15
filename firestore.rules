@@ -15,6 +15,7 @@ service cloud.firestore {
     }
     function isCodexDev() {
       return request.auth != null
+        && request.auth.token.keys().hasAny(['devCodex'])
         && request.auth.token.devCodex == true;
     }
     function isDevAnon() {
@@ -24,9 +25,26 @@ service cloud.firestore {
       return isVerifiedUser() || isCodexDev();
     }
     function isVerifiedAdultOrDev() {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      let userDoc = get(userPath);
       return isCodexDev() || (request.auth != null
+        && request.auth.token.email_verified == true
         && request.auth.token.idvVerified == true
-        && request.auth.token.isAdult == true);
+        && request.auth.token.isAdult == true
+        && exists(userPath)
+        && userDoc.data.ageVerified == true
+        && userDoc.data.isAdult == true
+        && !(userDoc.data.didit is map
+          && ('status' in userDoc.data.didit)
+          && userDoc.data.didit.status == 'underage')
+        && !(userDoc.data.idv is map
+          && ('status' in userDoc.data.idv)
+          && userDoc.data.idv.status == 'underage'));
+    }
+    function hasValidPostCommentAuthorOnCreate() {
+      return request.resource.data.authorId == request.auth.uid
+        && (!('senderUid' in request.resource.data) || request.resource.data.senderUid == request.auth.uid)
+        && (!('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid);
     }
     function noClientGateFieldWrites() {
       return resource == null ? true : !request.resource.data.diff(resource.data).affectedKeys().hasAny([
@@ -965,13 +983,20 @@ service cloud.firestore {
 
       match /comments/{commentId} {
         allow read: if true;
-        allow create: if isSignedIn();
-        allow update, delete: if isSignedIn() && request.auth.uid == resource.data.authorId;
+        allow create: if isVerifiedAdultOrDev()
+          && hasValidPostCommentAuthorOnCreate();
+        allow update: if isVerifiedAdultOrDev()
+          && request.auth.uid == resource.data.authorId
+          && request.resource.data.authorId == resource.data.authorId
+          && (!('senderUid' in resource.data) || request.resource.data.senderUid == resource.data.senderUid)
+          && (!('userId' in resource.data) || request.resource.data.userId == resource.data.userId);
+        allow delete: if isVerifiedAdultOrDev()
+          && request.auth.uid == resource.data.authorId;
       }
 
       match /likes/{userId} {
         allow read: if true;
-        allow create, delete: if isSignedIn() && request.auth.uid == userId;
+        allow create, delete: if isVerifiedAdultOrDev() && request.auth.uid == userId;
       }
     }
 

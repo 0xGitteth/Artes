@@ -153,16 +153,22 @@ service cloud.firestore {
       let thread = get(/databases/$(database)/documents/threads/$(threadId)).data;
       return request.auth != null
         && (
-          (thread.participantUids is list && request.auth.uid in thread.participantUids)
-          || (thread.participants is list && request.auth.uid in thread.participants)
+          ('participantUids' in thread && thread.participantUids is list && request.auth.uid in thread.participantUids)
+          || (!('participantUids' in thread)
+            && 'participants' in thread
+            && thread.participants is list
+            && request.auth.uid in thread.participants)
         );
     }
     function isThreadParticipantAfter(threadId) {
       let thread = getAfter(/databases/$(database)/documents/threads/$(threadId)).data;
       return request.auth != null
         && (
-          (thread.participantUids is list && request.auth.uid in thread.participantUids)
-          || (thread.participants is list && request.auth.uid in thread.participants)
+          ('participantUids' in thread && thread.participantUids is list && request.auth.uid in thread.participantUids)
+          || (!('participantUids' in thread)
+            && 'participants' in thread
+            && thread.participants is list
+            && request.auth.uid in thread.participants)
         );
     }
     function isSupportThreadOwner(threadId) {
@@ -799,8 +805,16 @@ service cloud.firestore {
       allow create: if request.auth != null
         && (
           (request.resource.data.type == 'dm'
+            && request.resource.data.participantUids is list
             && request.auth.uid in request.resource.data.participantUids
             && request.resource.data.participantUids.size() == 2
+            && (!('participants' in request.resource.data)
+              || (
+                request.resource.data.participants is list
+                && request.resource.data.participants.size() == 2
+                && request.resource.data.participants.hasAll(request.resource.data.participantUids)
+                && request.resource.data.participantUids.hasAll(request.resource.data.participants)
+              ))
             && request.resource.data.dmKey is string
             && request.resource.data.dmKey.size() > 0)
           || (request.resource.data.type == 'support'
@@ -816,8 +830,11 @@ service cloud.firestore {
         && (
           (resource.data.type == 'dm'
             && (
-              (resource.data.participantUids is list && request.auth.uid in resource.data.participantUids)
-              || (resource.data.participants is list && request.auth.uid in resource.data.participants)
+              ('participantUids' in resource.data && resource.data.participantUids is list && request.auth.uid in resource.data.participantUids)
+              || (!('participantUids' in resource.data)
+                && 'participants' in resource.data
+                && resource.data.participants is list
+                && request.auth.uid in resource.data.participants)
             )
             && request.resource.data.diff(resource.data).changedKeys().hasOnly(['updatedAt', 'lastMessageAt', 'lastMessageText', 'lastSenderUid']))
           || (resource.data.type == 'support'

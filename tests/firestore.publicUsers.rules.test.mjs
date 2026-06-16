@@ -404,8 +404,15 @@ async function run() {
       await setDoc(doc(db, 'threads', 'dm_without_owner_rules'), {
         type: 'dm',
         participantUids: ['agency_owner', 'company_owner'],
-        participants: ['agency_owner', 'company_owner'],
+        participants: [ownerUid, 'agency_owner'],
         dmKey: 'agency_owner_company_owner',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'threads', 'dm_legacy_owner_other_rules'), {
+        type: 'dm',
+        participants: [ownerUid, otherUid],
+        dmKey: 'legacy_owner_1_other_1',
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -452,6 +459,42 @@ async function run() {
       senderUid: ownerUid,
       text: 'Blocked because participantUids does not include the sender.',
       createdAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(ownerDb, 'threads', 'dm_without_owner_rules'), {
+      updatedAt: serverTimestamp(),
+      lastMessageAt: serverTimestamp(),
+      lastMessageText: 'Blocked metadata update because participantUids is canonical.',
+      lastSenderUid: ownerUid,
+    }));
+    await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'dm_legacy_owner_other_rules', 'messages', 'legacy_owner_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      text: 'Allowed legacy DM message when only participants exists.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'dm_new_matching_participants_rules'), {
+      type: 'dm',
+      participantUids: [ownerUid, otherUid],
+      participants: [otherUid, ownerUid],
+      dmKey: 'owner_1_other_1_matching',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_new_extra_participants_rules'), {
+      type: 'dm',
+      participantUids: [ownerUid, otherUid],
+      participants: [ownerUid, otherUid, 'agency_owner'],
+      dmKey: 'owner_1_other_1_extra',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_new_different_participants_rules'), {
+      type: 'dm',
+      participantUids: [ownerUid, otherUid],
+      participants: [ownerUid, 'agency_owner'],
+      dmKey: 'owner_1_other_1_different',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     }));
     await assertFails(setDoc(doc(publicDb, 'threads', 'dm_owner_other_rules', 'messages', 'unauth_text'), {
       type: 'text',

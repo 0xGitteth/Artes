@@ -334,6 +334,36 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'contributors', 'unclaimed_contributor'), {
+        displayName: 'Unclaimed Contributor',
+        status: 'unclaimed',
+        claimedByUid: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'contributors', 'other_claimed_contributor'), {
+        displayName: 'Other Claimed Contributor',
+        status: 'claimed',
+        claimedByUid: otherUid,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'claimRequests', 'pending_vouch_request'), {
+        claimantUid: ownerUid,
+        contributorId: 'unclaimed_contributor',
+        status: 'pending',
+        eligibleVoterUids: ['eligible_voter'],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'users', 'eligible_voter'), {
+        uid: 'eligible_voter',
+        displayName: 'Eligible Voter',
+        ageVerified: true,
+        isAdult: true,
+        didit: { status: 'approved' },
+        idv: { status: 'approved' },
+      });
       await setDoc(doc(db, 'posts', 'legacy_without_moderation'), {
         authorId: ownerUid,
         title: 'Legacy title',
@@ -390,6 +420,7 @@ async function run() {
     const teamBatchCardDb = authedContext(testEnv, 'team_batch_card', { email_verified: true }).firestore();
     const selfWithdrawDb = authedContext(testEnv, 'self_withdraw', { email_verified: true }).firestore();
     const ownerUnverifiedRulesDb = authedContext(testEnv, ownerUid, { email_verified: false, __adultDefaults: false }).firestore();
+    const eligibleVoterDb = authedContext(testEnv, 'eligible_voter', { email_verified: true }).firestore();
 
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
@@ -791,6 +822,181 @@ async function run() {
       setDoc(doc(ownerDb, 'users', ownerUid), {
         moderator: true,
       }, { merge: true }),
+    );
+
+    await assertFails(
+      setDoc(doc(ownerUnverifiedDb, 'contributors', 'non_adult_contributor_create'), {
+        displayName: 'Non Adult',
+        displayNameLower: 'non adult',
+        status: 'unclaimed',
+        createdByUid: ownerUid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(ownerDb, 'contributors', 'adult_contributor_create'), {
+        displayName: 'Adult Contributor',
+        displayNameLower: 'adult contributor',
+        roles: ['photographer'],
+        socials: { instagram: 'adult' },
+        status: 'unclaimed',
+        createdByUid: ownerUid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        source: 'client',
+        claimedByUid: null,
+        mergedInto: null,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(ownerDb, 'contributors', 'email_contributor_create'), {
+        displayName: 'Email Contributor',
+        status: 'unclaimed',
+        createdByUid: ownerUid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        email: 'leak@example.com',
+      }),
+    );
+    await assertFails(
+      setDoc(doc(ownerDb, 'contributors', 'spoofed_claimed_contributor_create'), {
+        displayName: 'Spoofed Claimed Contributor',
+        status: 'unclaimed',
+        createdByUid: ownerUid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        claimedByUid: otherUid,
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(ownerDb, 'contributors', 'claimed_contributor'), {
+        bio: 'Updated safe public bio',
+        displayName: 'Claimed Contributor Public Name',
+        displayNameLower: 'claimed contributor public name',
+        socials: { instagram: 'claimed' },
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(ownerDb, 'contributors', 'claimed_contributor'), {
+        status: 'unclaimed',
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(ownerDb, 'contributors', 'claimed_contributor'), {
+        claimedByUid: otherUid,
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(ownerDb, 'contributors', 'claimed_contributor'), {
+        mergedInto: 'other_contributor',
+      }),
+    );
+    await assertFails(
+      setDoc(doc(ownerUnverifiedDb, 'claimRequests', 'non_adult_claim_request_create'), {
+        claimantUid: ownerUid,
+        contributorId: 'unclaimed_contributor',
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(ownerDb, 'claimRequests', 'adult_claim_request_create'), {
+        claimantUid: ownerUid,
+        contributorId: 'unclaimed_contributor',
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        proofMetadata: { method: 'vouch', note: 'public proof summary' },
+      }),
+    );
+    await assertFails(
+      setDoc(doc(ownerDb, 'claimRequests', 'approved_claim_request_create'), {
+        claimantUid: ownerUid,
+        contributorId: 'unclaimed_contributor',
+        status: 'approved',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(ownerDb, 'claimRequests', 'eligible_voters_claim_request_create'), {
+        claimantUid: ownerUid,
+        contributorId: 'unclaimed_contributor',
+        status: 'pending',
+        eligibleVoterUids: ['eligible_voter'],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(ownerDb, 'claimRequests', 'eligible_vouchers_claim_request_create'), {
+        claimantUid: ownerUid,
+        contributorId: 'unclaimed_contributor',
+        status: 'pending',
+        eligibleVoucherUids: ['eligible_voter'],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(ownerDb, 'claimRequests', 'spoofed_claim_request_create'), {
+        claimantUid: otherUid,
+        contributorId: 'unclaimed_contributor',
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(ownerDb, 'claimRequests', 'claimed_by_other_request_create'), {
+        claimantUid: ownerUid,
+        contributorId: 'other_claimed_contributor',
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter'), {
+        claimRequestId: 'pending_vouch_request',
+        voterUid: 'eligible_voter',
+        vote: 'yes',
+        status: 'submitted',
+        createdAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(otherDb, 'claimVouches', 'pending_vouch_request', 'votes', otherUid), {
+        claimRequestId: 'pending_vouch_request',
+        voterUid: otherUid,
+        vote: 'yes',
+        status: 'submitted',
+        createdAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter_spoof'), {
+        claimRequestId: 'pending_vouch_request',
+        voterUid: otherUid,
+        vote: 'yes',
+        status: 'submitted',
+        createdAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter'), {
+        vote: 'no',
+      }),
+    );
+    await assertFails(
+      deleteDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter')),
+    );
+    await assertSucceeds(
+      updateDoc(doc(moderatorDb, 'claimRequests', 'pending_vouch_request'), {
+        status: 'approved',
+      }),
     );
     await assertFails(
       setDoc(doc(ownerDb, 'users', ownerUid), {

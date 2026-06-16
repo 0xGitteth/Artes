@@ -427,8 +427,68 @@ service cloud.firestore {
     }
 
     function hasClaimEligibility(uid) {
-      return get(/databases/$(database)/documents/users/$(uid)).data.ageVerified == true
-        || get(/databases/$(database)/documents/users/$(uid)).data.onboardingStep >= 2;
+      return isVerifiedAdultOrDev();
+    }
+    function isSafeContributorCreate() {
+      return request.resource.data.keys().hasOnly([
+          'displayName',
+          'displayNameLower',
+          'roles',
+          'socials',
+          'status',
+          'createdByUid',
+          'createdAt',
+          'updatedAt',
+          'source',
+          'claimedByUid',
+          'mergedInto'
+        ])
+        && (!('displayName' in request.resource.data) || request.resource.data.displayName is string)
+        && (!('displayNameLower' in request.resource.data) || request.resource.data.displayNameLower is string)
+        && (!('roles' in request.resource.data) || request.resource.data.roles is list)
+        && (!('socials' in request.resource.data) || request.resource.data.socials is map)
+        && (!('source' in request.resource.data) || request.resource.data.source is string)
+        && (!('status' in request.resource.data) || request.resource.data.status in ['unclaimed', 'active'])
+        && (!('createdByUid' in request.resource.data) || request.resource.data.createdByUid == request.auth.uid)
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt == request.time)
+        && (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt == request.time)
+        && (!('claimedByUid' in request.resource.data) || request.resource.data.claimedByUid == null)
+        && (!('mergedInto' in request.resource.data) || request.resource.data.mergedInto == null);
+    }
+    function isSafeClaimRequestCreate() {
+      let contributorPath = /databases/$(database)/documents/contributors/$(request.resource.data.contributorId);
+      let contributor = get(contributorPath).data;
+      return request.resource.data.keys().hasOnly([
+          'claimantUid',
+          'contributorId',
+          'status',
+          'createdAt',
+          'updatedAt',
+          'proofMetadata'
+        ])
+        && request.resource.data.claimantUid == request.auth.uid
+        && request.resource.data.contributorId is string
+        && request.resource.data.status == 'pending'
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt == request.time)
+        && (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt == request.time)
+        && (!('proofMetadata' in request.resource.data)
+          || (request.resource.data.proofMetadata is map
+            && request.resource.data.proofMetadata.keys().hasOnly(['method', 'url', 'note'])
+            && (!('method' in request.resource.data.proofMetadata) || request.resource.data.proofMetadata.method is string)
+            && (!('url' in request.resource.data.proofMetadata) || request.resource.data.proofMetadata.url is string)
+            && (!('note' in request.resource.data.proofMetadata) || request.resource.data.proofMetadata.note is string)))
+        && exists(contributorPath)
+        && (!('claimedByUid' in contributor) || contributor.claimedByUid == null || contributor.claimedByUid == request.auth.uid);
+    }
+    function isSafeClaimVouchCreate(claimRequestId) {
+      let claimRequest = get(/databases/$(database)/documents/claimRequests/$(claimRequestId)).data;
+      return request.resource.data.keys().hasOnly(['claimRequestId', 'voterUid', 'vote', 'status', 'createdAt'])
+        && request.resource.data.claimRequestId == claimRequestId
+        && request.resource.data.voterUid == request.auth.uid
+        && (!('vote' in request.resource.data) || request.resource.data.vote in ['yes', 'no'])
+        && (!('status' in request.resource.data) || request.resource.data.status in ['submitted', 'active'])
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt == request.time)
+        && request.auth.uid in claimRequest.eligibleVoterUids;
     }
     function isAllowedCorrectionType(value) {
       return value == 'safeCorrection'
@@ -1078,15 +1138,16 @@ service cloud.firestore {
 
     match /contributors/{contributorId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn()
-        && !request.resource.data.keys().hasAny(['email']);
+      allow create: if isVerifiedAdultOrDev()
+        && isSafeContributorCreate();
       allow update: if isModerator()
         || (isSignedIn()
           && resource.data.claimedByUid == request.auth.uid
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['bio', 'displayName', 'socials'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bio', 'displayName', 'displayNameLower', 'socials'])
           && request.resource.data.claimedByUid == resource.data.claimedByUid
           && request.resource.data.status == resource.data.status
-          && request.resource.data.mergedInto == resource.data.mergedInto);
+          && (!('createdByUid' in resource.data) || request.resource.data.createdByUid == resource.data.createdByUid)
+          && (!('mergedInto' in resource.data) || request.resource.data.mergedInto == resource.data.mergedInto));
       allow delete: if false;
 
       match /private/{docId} {
@@ -1101,9 +1162,9 @@ service cloud.firestore {
     }
 
     match /claimRequests/{requestId} {
-      allow create: if isSignedIn()
-        && request.resource.data.claimantUid == request.auth.uid
-        && hasClaimEligibility(request.auth.uid);
+      allow create: if isVerifiedAdultOrDev()
+        && hasClaimEligibility(request.auth.uid)
+        && isSafeClaimRequestCreate();
       allow read: if isModerator()
         || (isSignedIn() && request.auth.uid == resource.data.claimantUid);
       allow update: if isModerator()
@@ -1113,14 +1174,24 @@ service cloud.firestore {
 
     match /claimVouches/{vouchId} {
       allow create: if isSignedIn()
-        && request.resource.data.voterUid == request.auth.uid
         && request.resource.data.claimRequestId is string
-        && request.auth.uid in get(/databases/$(database)/documents/claimRequests/$(request.resource.data.claimRequestId)).data.eligibleVoucherUids;
+        && isSafeClaimVouchCreate(request.resource.data.claimRequestId);
       allow read: if isModerator()
         || (isSignedIn() && request.auth.uid == resource.data.voterUid)
         || (isSignedIn()
           && request.auth.uid == get(/databases/$(database)/documents/claimRequests/$(resource.data.claimRequestId)).data.claimantUid);
       allow update, delete: if false;
+
+      match /votes/{voteId} {
+        allow create: if isSignedIn()
+          && voteId == request.auth.uid
+          && isSafeClaimVouchCreate(vouchId);
+        allow read: if isModerator()
+          || (isSignedIn() && request.auth.uid == resource.data.voterUid)
+          || (isSignedIn()
+            && request.auth.uid == get(/databases/$(database)/documents/claimRequests/$(vouchId)).data.claimantUid);
+        allow update, delete: if false;
+      }
     }
 
     match /claimInvites/{inviteId} {

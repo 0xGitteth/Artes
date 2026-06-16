@@ -149,6 +149,32 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles is list
         && role in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles;
     }
+    function isThreadParticipant(threadId) {
+      let thread = get(/databases/$(database)/documents/threads/$(threadId)).data;
+      return request.auth != null
+        && (
+          (thread.participantUids is list && request.auth.uid in thread.participantUids)
+          || (thread.participants is list && request.auth.uid in thread.participants)
+        );
+    }
+    function isThreadParticipantAfter(threadId) {
+      let thread = getAfter(/databases/$(database)/documents/threads/$(threadId)).data;
+      return request.auth != null
+        && (
+          (thread.participantUids is list && request.auth.uid in thread.participantUids)
+          || (thread.participants is list && request.auth.uid in thread.participants)
+        );
+    }
+    function isSupportThreadOwner(threadId) {
+      return request.auth != null
+        && get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'support'
+        && get(/databases/$(database)/documents/threads/$(threadId)).data.userUid == request.auth.uid;
+    }
+    function isSupportModeratorThread(threadId) {
+      return isModerator()
+        && (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'support'
+          || threadId.matches("^support_"));
+    }
     function isAgencyApprovalWrite(userId) {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return isOrganizationOwner('agency')
@@ -789,7 +815,10 @@ service cloud.firestore {
       allow update: if request.auth != null
         && (
           (resource.data.type == 'dm'
-            && request.auth.uid in resource.data.participantUids
+            && (
+              (resource.data.participantUids is list && request.auth.uid in resource.data.participantUids)
+              || (resource.data.participants is list && request.auth.uid in resource.data.participants)
+            )
             && request.resource.data.diff(resource.data).changedKeys().hasOnly(['updatedAt', 'lastMessageAt', 'lastMessageText', 'lastSenderUid']))
           || (resource.data.type == 'support'
             && (
@@ -845,6 +874,7 @@ service cloud.firestore {
         allow create: if request.auth != null
           && (
             (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
+              && isThreadParticipant(threadId)
               && request.resource.data.senderUid == request.auth.uid
               && request.resource.data.type == 'text')
             || (getAfter(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'

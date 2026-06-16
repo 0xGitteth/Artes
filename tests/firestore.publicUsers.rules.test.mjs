@@ -389,6 +389,110 @@ async function run() {
     const teamCardDb = authedContext(testEnv, 'team_card', { email_verified: true }).firestore();
     const teamBatchCardDb = authedContext(testEnv, 'team_batch_card', { email_verified: true }).firestore();
     const selfWithdrawDb = authedContext(testEnv, 'self_withdraw', { email_verified: true }).firestore();
+    const ownerUnverifiedRulesDb = authedContext(testEnv, ownerUid, { email_verified: false, __adultDefaults: false }).firestore();
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'threads', 'dm_owner_other_rules'), {
+        type: 'dm',
+        participantUids: [ownerUid, otherUid],
+        participants: [ownerUid, otherUid],
+        dmKey: 'owner_1_other_1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'threads', 'dm_without_owner_rules'), {
+        type: 'dm',
+        participantUids: ['agency_owner', 'company_owner'],
+        participants: ['agency_owner', 'company_owner'],
+        dmKey: 'agency_owner_company_owner',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'threads', 'support_owner_rules'), {
+        type: 'support',
+        userUid: ownerUid,
+        threadKey: 'support_owner_rules',
+        userCanSend: true,
+        userMessageAllowance: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'threads', 'support_other_rules'), {
+        type: 'support',
+        userUid: otherUid,
+        threadKey: 'support_other_rules',
+        userCanSend: true,
+        userMessageAllowance: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
+    await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'owner_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      text: 'Allowed DM message from a participant.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_without_owner_rules', 'messages', 'owner_non_participant_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      text: 'Blocked because owner_1 is not a participant.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'spoofed_sender_text'), {
+      type: 'text',
+      senderUid: otherUid,
+      text: 'Blocked because senderUid is spoofed.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_without_owner_rules', 'messages', 'missing_participant_uid_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      text: 'Blocked because participantUids does not include the sender.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(publicDb, 'threads', 'dm_owner_other_rules', 'messages', 'unauth_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      text: 'Blocked because the request is unauthenticated.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerUnverifiedRulesDb, 'threads', 'dm_without_owner_rules', 'messages', 'unverified_non_participant_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      text: 'Blocked because unverified non-participants cannot write messages.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'support_owner_rules', 'messages', 'owner_support_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      senderRole: 'user',
+      text: 'Allowed support message from the thread owner.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'support_other_rules', 'messages', 'other_support_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      senderRole: 'user',
+      text: 'Blocked because owner_1 does not own this support thread.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertSucceeds(setDoc(doc(moderatorDb, 'threads', 'support_owner_rules', 'messages', 'moderator_support_text'), {
+      type: 'text',
+      senderUid: 'mod_1',
+      senderRole: 'moderator',
+      text: 'Allowed support message from a moderator.',
+      createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(publicDb, 'threads', 'support_owner_rules', 'messages', 'unauth_support_text'), {
+      type: 'text',
+      senderUid: ownerUid,
+      senderRole: 'user',
+      text: 'Blocked because the support request is unauthenticated.',
+      createdAt: serverTimestamp(),
+    }));
 
     await assertSucceeds(getDoc(doc(ownerDb, 'announcements', 'active_update')));
     await assertFails(getDoc(doc(ownerDb, 'announcements', 'draft_update')));

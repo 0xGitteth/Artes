@@ -349,12 +349,41 @@ async function run() {
         updatedAt: new Date(),
       });
       await setDoc(doc(db, 'claimRequests', 'pending_vouch_request'), {
+        requestedByUid: ownerUid,
         claimantUid: ownerUid,
         contributorId: 'unclaimed_contributor',
         status: 'pending',
         eligibleVoterUids: ['eligible_voter'],
         createdAt: new Date(),
         updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'claimRequests', 'legacy_claimant_vouch_request'), {
+        claimantUid: ownerUid,
+        contributorId: 'unclaimed_contributor',
+        status: 'pending',
+        eligibleVoterUids: ['eligible_voter'],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'claimVouches', 'pending_vouch_request'), {
+        claimRequestId: 'pending_vouch_request',
+        voterUid: 'eligible_voter',
+        vote: 'yes',
+        createdAt: new Date(),
+      });
+      await setDoc(doc(db, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter'), {
+        claimRequestId: 'pending_vouch_request',
+        voterUid: 'eligible_voter',
+        vote: 'yes',
+        status: 'submitted',
+        createdAt: new Date(),
+      });
+      await setDoc(doc(db, 'claimVouches', 'legacy_claimant_vouch_request', 'votes', 'eligible_voter'), {
+        claimRequestId: 'legacy_claimant_vouch_request',
+        voterUid: 'eligible_voter',
+        vote: 'yes',
+        status: 'submitted',
+        createdAt: new Date(),
       });
       await setDoc(doc(db, 'users', 'eligible_voter'), {
         uid: 'eligible_voter',
@@ -959,7 +988,19 @@ async function run() {
       }),
     );
     await assertSucceeds(
-      setDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter'), {
+      getDoc(doc(ownerDb, 'claimRequests', 'pending_vouch_request')),
+    );
+    await assertSucceeds(
+      getDoc(doc(ownerDb, 'claimRequests', 'legacy_claimant_vouch_request')),
+    );
+    await assertSucceeds(
+      getDoc(doc(moderatorDb, 'claimRequests', 'pending_vouch_request')),
+    );
+    await assertFails(
+      getDoc(doc(otherDb, 'claimRequests', 'pending_vouch_request')),
+    );
+    await assertFails(
+      setDoc(doc(eligibleVoterDb, 'claimVouches', 'direct_top_level_vouch'), {
         claimRequestId: 'pending_vouch_request',
         voterUid: 'eligible_voter',
         vote: 'yes',
@@ -967,6 +1008,17 @@ async function run() {
         createdAt: serverTimestamp(),
       }),
     );
+    await assertFails(
+      setDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter_direct'), {
+        claimRequestId: 'pending_vouch_request',
+        voterUid: 'eligible_voter',
+        vote: 'yes',
+        status: 'submitted',
+        createdAt: serverTimestamp(),
+      }),
+    );
+    // submitClaimVouch is intentionally not exercised through Firestore rules;
+    // it writes these vote docs with the Admin SDK inside a transaction.
     await assertFails(
       setDoc(doc(otherDb, 'claimVouches', 'pending_vouch_request', 'votes', otherUid), {
         claimRequestId: 'pending_vouch_request',
@@ -984,6 +1036,24 @@ async function run() {
         status: 'submitted',
         createdAt: serverTimestamp(),
       }),
+    );
+    await assertSucceeds(
+      getDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter')),
+    );
+    await assertSucceeds(
+      getDoc(doc(ownerDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter')),
+    );
+    await assertSucceeds(
+      getDoc(doc(ownerDb, 'claimVouches', 'legacy_claimant_vouch_request', 'votes', 'eligible_voter')),
+    );
+    await assertSucceeds(
+      getDoc(doc(moderatorDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter')),
+    );
+    await assertFails(
+      getDoc(doc(otherDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter')),
+    );
+    await assertSucceeds(
+      getDoc(doc(ownerDb, 'claimVouches', 'pending_vouch_request')),
     );
     await assertFails(
       updateDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter'), {

@@ -480,15 +480,12 @@ service cloud.firestore {
         && exists(contributorPath)
         && (!('claimedByUid' in contributor) || contributor.claimedByUid == null || contributor.claimedByUid == request.auth.uid);
     }
-    function isSafeClaimVouchCreate(claimRequestId) {
-      let claimRequest = get(/databases/$(database)/documents/claimRequests/$(claimRequestId)).data;
-      return request.resource.data.keys().hasOnly(['claimRequestId', 'voterUid', 'vote', 'status', 'createdAt'])
-        && request.resource.data.claimRequestId == claimRequestId
-        && request.resource.data.voterUid == request.auth.uid
-        && (!('vote' in request.resource.data) || request.resource.data.vote in ['yes', 'no'])
-        && (!('status' in request.resource.data) || request.resource.data.status in ['submitted', 'active'])
-        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt == request.time)
-        && request.auth.uid in claimRequest.eligibleVoterUids;
+    function isClaimRequester(data) {
+      return isSignedIn()
+        && (
+          (('requestedByUid' in data) && data.requestedByUid == request.auth.uid)
+          || (('claimantUid' in data) && data.claimantUid == request.auth.uid)
+        );
     }
     function isAllowedCorrectionType(value) {
       return value == 'safeCorrection'
@@ -1166,30 +1163,24 @@ service cloud.firestore {
         && hasClaimEligibility(request.auth.uid)
         && isSafeClaimRequestCreate();
       allow read: if isModerator()
-        || (isSignedIn() && request.auth.uid == resource.data.claimantUid);
+        || isClaimRequester(resource.data);
       allow update: if isModerator()
         && request.resource.data.diff(resource.data).changedKeys().hasOnly(['status']);
       allow delete: if false;
     }
 
     match /claimVouches/{vouchId} {
-      allow create: if isSignedIn()
-        && request.resource.data.claimRequestId is string
-        && isSafeClaimVouchCreate(request.resource.data.claimRequestId);
+      allow create: if false;
       allow read: if isModerator()
         || (isSignedIn() && request.auth.uid == resource.data.voterUid)
-        || (isSignedIn()
-          && request.auth.uid == get(/databases/$(database)/documents/claimRequests/$(resource.data.claimRequestId)).data.claimantUid);
+        || isClaimRequester(get(/databases/$(database)/documents/claimRequests/$(resource.data.claimRequestId)).data);
       allow update, delete: if false;
 
       match /votes/{voteId} {
-        allow create: if isSignedIn()
-          && voteId == request.auth.uid
-          && isSafeClaimVouchCreate(vouchId);
+        allow create: if false;
         allow read: if isModerator()
           || (isSignedIn() && request.auth.uid == resource.data.voterUid)
-          || (isSignedIn()
-            && request.auth.uid == get(/databases/$(database)/documents/claimRequests/$(vouchId)).data.claimantUid);
+          || isClaimRequester(get(/databases/$(database)/documents/claimRequests/$(vouchId)).data);
         allow update, delete: if false;
       }
     }

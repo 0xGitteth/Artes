@@ -403,6 +403,7 @@ async function run() {
       });
       await setDoc(doc(db, 'threads', 'dm_without_owner_rules'), {
         type: 'dm',
+        userUid: ownerUid,
         participantUids: ['agency_owner', 'company_owner'],
         participants: [ownerUid, 'agency_owner'],
         dmKey: 'agency_owner_company_owner',

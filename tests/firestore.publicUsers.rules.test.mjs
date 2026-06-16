@@ -409,6 +409,12 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'threads', 'dm_without_owner_rules', 'messages', 'canonical_only_message'), {
+        type: 'text',
+        senderUid: 'agency_owner',
+        text: 'Existing message in a malformed DM thread.',
+        createdAt: new Date(),
+      });
       await setDoc(doc(db, 'threads', 'dm_legacy_owner_other_rules'), {
         type: 'dm',
         participants: [ownerUid, otherUid],
@@ -442,12 +448,16 @@ async function run() {
       text: 'Allowed DM message from a participant.',
       createdAt: serverTimestamp(),
     }));
+    await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules')));
+    await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'owner_text')));
     await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_without_owner_rules', 'messages', 'owner_non_participant_text'), {
       type: 'text',
       senderUid: ownerUid,
       text: 'Blocked because owner_1 is not a participant.',
       createdAt: serverTimestamp(),
     }));
+    await assertFails(getDoc(doc(ownerDb, 'threads', 'dm_without_owner_rules')));
+    await assertFails(getDoc(doc(ownerDb, 'threads', 'dm_without_owner_rules', 'messages', 'canonical_only_message')));
     await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'spoofed_sender_text'), {
       type: 'text',
       senderUid: otherUid,
@@ -472,6 +482,8 @@ async function run() {
       text: 'Allowed legacy DM message when only participants exists.',
       createdAt: serverTimestamp(),
     }));
+    await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_legacy_owner_other_rules')));
+    await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_legacy_owner_other_rules', 'messages', 'legacy_owner_text')));
     await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'dm_new_matching_participants_rules'), {
       type: 'dm',
       participantUids: [ownerUid, otherUid],
@@ -515,6 +527,8 @@ async function run() {
       text: 'Allowed support message from the thread owner.',
       createdAt: serverTimestamp(),
     }));
+    await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'support_owner_rules')));
+    await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'support_owner_rules', 'messages', 'owner_support_text')));
     await assertFails(setDoc(doc(ownerDb, 'threads', 'support_other_rules', 'messages', 'other_support_text'), {
       type: 'text',
       senderUid: ownerUid,
@@ -529,6 +543,8 @@ async function run() {
       text: 'Allowed support message from a moderator.',
       createdAt: serverTimestamp(),
     }));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_owner_rules')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_owner_rules', 'messages', 'owner_support_text')));
     await assertFails(setDoc(doc(publicDb, 'threads', 'support_owner_rules', 'messages', 'unauth_support_text'), {
       type: 'text',
       senderUid: ownerUid,

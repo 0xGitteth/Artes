@@ -11,6 +11,8 @@ const pick = (source = {}, keys = []) => keys.reduce((acc, key) => {
 
 const firstString = (...values) => values.map((value) => String(value || '').trim()).find(Boolean) || null;
 
+const uniqueMatchCount = (matches = []) => new Set(matches.map((match) => match?.id).filter(Boolean)).size;
+
 const flattenFingerprintCandidate = (candidate) => {
   if (!candidate) return [];
   if (Array.isArray(candidate)) return candidate.flatMap(flattenFingerprintCandidate);
@@ -152,19 +154,25 @@ const addSnapshotDocs = (matches, snapshot, matchType, fingerprints = null) => {
 };
 
 export const fetchModerationExamplesForFingerprints = async ({ db, fingerprints, sourceContext = {}, limit = 5 }) => {
-  if (!fingerprints) return [];
+  if (!fingerprints && !sourceContext.finalOutcome) return [];
   const matches = [];
   const collection = db.collection('moderationExamples');
-  if (fingerprints.sha256) {
+  if (fingerprints?.sha256) {
     addSnapshotDocs(matches, await collection.where('fingerprints.sha256', '==', fingerprints.sha256).limit(limit).get(), 'sha256');
   }
-  if (fingerprints.dhash) {
+  if (fingerprints?.dhash) {
     addSnapshotDocs(matches, await collection.where('fingerprints.dhash', '==', fingerprints.dhash).limit(limit).get(), 'dhash');
   }
-  if (fingerprints.dhashPrefix) {
-    addSnapshotDocs(matches, await collection.where('fingerprints.dhashPrefix', '==', fingerprints.dhashPrefix).limit(limit).get(), 'dhashPrefix', fingerprints);
+  if (fingerprints?.dhashPrefix) {
+    const prefixCandidateLimit = Math.max(limit * 5, 25);
+    addSnapshotDocs(
+      matches,
+      await collection.where('fingerprints.dhashPrefix', '==', fingerprints.dhashPrefix).limit(prefixCandidateLimit).get(),
+      'dhashPrefix',
+      fingerprints,
+    );
   }
-  if (matches.length < limit && sourceContext.finalOutcome) {
+  if (uniqueMatchCount(matches) < limit && sourceContext.finalOutcome) {
     addSnapshotDocs(matches, await collection.where('finalOutcome', '==', sourceContext.finalOutcome).limit(limit).get(), 'similar');
   }
   return rankModerationExampleMatches(matches, limit).map(sanitizeModerationExample);

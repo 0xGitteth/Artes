@@ -98,10 +98,11 @@ const makeDb = (docs = []) => ({
       where: (field, op, value) => {
         this.queries.push({ field, op, value });
         return {
-          limit: () => ({
+          limit: (requestedLimit) => ({
             get: async () => ({
               docs: docs
                 .filter((doc) => field.split('.').reduce((acc, key) => acc?.[key], doc.data) === value)
+                .slice(0, requestedLimit || docs.length)
                 .map((doc) => ({ id: doc.id, data: () => doc.data })),
             }),
           }),
@@ -182,4 +183,85 @@ test('fallback outcome value triggers similar finalOutcome query', async () => {
     ['fingerprints.sha256', 'missing'],
     ['finalOutcome', 'reviewDecision'],
   ]);
+});
+
+test('selected upload fingerprints are preferred over reviewCase fingerprints', () => {
+  const reviewCase = { fingerprints: { sha256: 'image-a', dhash: 'aaaaaaaaaaaaaaaa', dhashPrefix: 'aaaa' } };
+  const upload = { fingerprints: { sha256: 'image-b', dhash: 'bbbbbbbbbbbbbbbb', dhashPrefix: 'bbbb' } };
+  assert.deepEqual(resolveModerationExampleFingerprints(upload, reviewCase), {
+    sha256: 'image-b',
+    dhash: 'bbbbbbbbbbbbbbbb',
+    dhashPrefix: 'bbbb',
+  });
+
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export const getModerationExamplesForCase');
+  const body = source.slice(start, source.indexOf('export const moderatorClaim', start));
+  assert.match(body, /resolveModerationExampleFingerprints\(upload, reviewCase\)/);
+});
+
+test('upload-only endpoint loads linked reviewCase as optional source context', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export const getModerationExamplesForCase');
+  const body = source.slice(start, source.indexOf('export const moderatorClaim', start));
+  assert.match(body, /const linkedReviewCaseId = String\(upload\?\.reviewCaseId \|\| ''\)\.trim\(\)/);
+  assert.match(body, /if \(!reviewCase && linkedReviewCaseId\)/);
+  assert.match(body, /collection\('reviewCases'\)\.doc\(linkedReviewCaseId\)\.get\(\)/);
+  assert.match(body, /reviewCase = linkedReviewSnap\.exists \? linkedReviewSnap\.data\(\) \|\| \{\} : null/);
+});
+
+test('upload-only linked reviewCase finalPolicyOutcome can drive fallback context', () => {
+  assert.equal(resolveModerationSourceFinalOutcome({
+    reviewCase: { moderatorDecision: { finalPolicyOutcome: 'linkedPolicyOutcome' } },
+    upload: { outcome: 'uploadOutcome' },
+  }), 'linkedPolicyOutcome');
+});
+
+test('upload-only lookup with missing linked reviewCase still uses upload outcome', () => {
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: null, upload: { outcome: 'uploadOutcome' } }), 'uploadOutcome');
+});
+
+test('no fingerprints but finalOutcome returns similar examples', async () => {
+  const db = makeDb([{ id: 'similar', data: { finalOutcome: 'allowed' } }]);
+  const examples = await fetchModerationExamplesForFingerprints({ db, fingerprints: null, sourceContext: { finalOutcome: 'allowed' }, limit: 5 });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['similar']);
+  assert.deepEqual(db.queries.map((query) => [query.field, query.value]), [['finalOutcome', 'allowed']]);
+});
+
+test('no fingerprints and no finalOutcome returns empty result', async () => {
+  const db = makeDb([{ id: 'similar', data: { finalOutcome: 'allowed' } }]);
+  const examples = await fetchModerationExamplesForFingerprints({ db, fingerprints: null, sourceContext: {}, limit: 5 });
+  assert.deepEqual(examples, []);
+  assert.deepEqual(db.queries, []);
+});
+
+test('fallback runs when raw matches hit limit but unique ranked count is still low', async () => {
+  const db = makeDb([
+    { id: 'duplicate', data: { fingerprints: { sha256: 'sha', dhash: '0000000000000000', dhashPrefix: '0000' } } },
+    { id: 'similar1', data: { finalOutcome: 'allowed', createdAt: '2026-01-01T00:00:00.000Z' } },
+    { id: 'similar2', data: { finalOutcome: 'allowed', createdAt: '2026-01-02T00:00:00.000Z' } },
+  ]);
+  const examples = await fetchModerationExamplesForFingerprints({
+    db,
+    fingerprints: { sha256: 'sha', dhash: '0000000000000000', dhashPrefix: '0000' },
+    sourceContext: { finalOutcome: 'allowed' },
+    limit: 3,
+  });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['duplicate', 'similar2', 'similar1']);
+  assert.ok(db.queries.some((query) => query.field === 'finalOutcome' && query.value === 'allowed'));
+});
+
+test('dhashPrefix query uses larger candidate window before hamming filtering', async () => {
+  const docs = Array.from({ length: 5 }, (_, index) => ({
+    id: `far${index}`,
+    data: { fingerprints: { dhashPrefix: '0000', dhash: 'ffffffffffffffff' } },
+  }));
+  docs.push({ id: 'later-near', data: { fingerprints: { dhashPrefix: '0000', dhash: '0000000000000001' } } });
+  const db = makeDb(docs);
+  const examples = await fetchModerationExamplesForFingerprints({
+    db,
+    fingerprints: { dhash: '0000000000000000', dhashPrefix: '0000' },
+    limit: 3,
+  });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['later-near']);
 });

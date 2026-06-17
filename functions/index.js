@@ -2918,9 +2918,14 @@ export const getModerationExamplesForCase = onRequest({ cors: true, region: 'eur
         return;
       }
       upload = uploadSnap.exists ? uploadSnap.data() || {} : null;
+      const linkedReviewCaseId = String(upload?.reviewCaseId || '').trim();
+      if (!reviewCase && linkedReviewCaseId) {
+        const linkedReviewSnap = await db.collection('reviewCases').doc(linkedReviewCaseId).get();
+        reviewCase = linkedReviewSnap.exists ? linkedReviewSnap.data() || {} : null;
+      }
     }
 
-    const fingerprints = resolveModerationExampleFingerprints(reviewCase, upload);
+    const fingerprints = resolveModerationExampleFingerprints(upload, reviewCase);
     const sourceContext = {
       finalOutcome: resolveModerationSourceFinalOutcome({ reviewCase, upload }),
     };

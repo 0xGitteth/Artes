@@ -17,6 +17,7 @@ const claimProofPath = `claimProofs/${claimRequestId}/${ownerUid}.png`;
 const jpegMeta = { contentType: 'image/jpeg' };
 const pngMeta = { contentType: 'image/png' };
 const textMeta = { contentType: 'text/plain' };
+const webpMeta = { contentType: 'image/webp' };
 
 const testEnv = await initializeTestEnvironment({
   projectId: 'artes-media-app',
@@ -72,7 +73,19 @@ try {
   await assertFails(getBytes(ref(otherStorage, uploadPath)));
 
   await assertSucceeds(
-    uploadBytes(ref(ownerStorage, claimProofPath), new Blob(['valid-proof'], { type: 'image/png' }), pngMeta),
+    uploadBytes(ref(ownerStorage, claimProofPath), new Blob(['valid-png-proof'], { type: 'image/png' }), pngMeta),
+  );
+
+  await assertSucceeds(
+    uploadBytes(ref(ownerStorage, claimProofPath), new Blob(['valid-jpeg-proof'], { type: 'image/jpeg' }), jpegMeta),
+  );
+
+  await assertSucceeds(
+    uploadBytes(ref(ownerStorage, claimProofPath), new Blob(['valid-webp-proof'], { type: 'image/webp' }), webpMeta),
+  );
+
+  await assertFails(
+    uploadBytes(ref(ownerStorage, claimProofPath), new Blob(['not-image-proof'], { type: 'text/plain' }), textMeta),
   );
 
   await assertFails(
@@ -80,7 +93,7 @@ try {
   );
 
   await assertFails(
-    uploadBytes(ref(ownerStorage, `claimProofs/${claimRequestId}/${ownerUid}.jpg`), new Blob(['wrong-type'], { type: 'image/jpeg' }), jpegMeta),
+    uploadBytes(ref(ownerStorage, `claimProofs/${claimRequestId}/${ownerUid}.jpg`), new Blob(['wrong-filename-extension'], { type: 'image/jpeg' }), jpegMeta),
   );
 
   await assertFails(

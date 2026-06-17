@@ -31,7 +31,7 @@ service firebase.storage {
     }
     function isValidClaimProofUpload(fileName) {
       return request.resource != null
-        && request.resource.contentType == 'image/png'
+        && request.resource.contentType in ['image/png', 'image/jpeg', 'image/webp']
         && request.resource.size <= 10 * 1024 * 1024
         && fileName == request.auth.uid + '.png';
     }

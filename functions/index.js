@@ -20,7 +20,12 @@ import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } 
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
-import { fetchModerationExamplesForFingerprints, resolveModerationExampleFingerprints } from './moderationExamplesLookup.js';
+import {
+  fetchModerationExamplesForFingerprints,
+  resolveEffectiveUploadId,
+  resolveModerationExampleFingerprints,
+  resolveModerationSourceFinalOutcome,
+} from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
 import { getCodexDevLoginDecision } from './codexDevLogin.js';
 
@@ -2903,7 +2908,7 @@ export const getModerationExamplesForCase = onRequest({ cors: true, region: 'eur
         return;
       }
       reviewCase = reviewSnap.data() || {};
-      effectiveUploadId = effectiveUploadId || reviewCase.uploadId || reviewCase.linkedUploadId || null;
+      effectiveUploadId = resolveEffectiveUploadId({ requestUploadId: uploadId, reviewCase });
     }
 
     if (effectiveUploadId) {
@@ -2917,7 +2922,7 @@ export const getModerationExamplesForCase = onRequest({ cors: true, region: 'eur
 
     const fingerprints = resolveModerationExampleFingerprints(reviewCase, upload);
     const sourceContext = {
-      finalOutcome: reviewCase?.finalOutcome || upload?.finalOutcome || null,
+      finalOutcome: resolveModerationSourceFinalOutcome({ reviewCase, upload }),
     };
     const examples = await fetchModerationExamplesForFingerprints({ db, fingerprints, sourceContext, limit: 5 });
     res.status(200).json({ ok: true, reviewCaseId: reviewCaseId || null, uploadId: effectiveUploadId || null, examples });

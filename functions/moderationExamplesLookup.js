@@ -1,9 +1,52 @@
+const DHASH_PREFIX_LENGTH = 4;
+const DHASH_THRESHOLD = Number.parseInt(process.env.DHASH_HAMMING_THRESHOLD || '8', 10);
+const hexBitCounts = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
+
 const toArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 
 const pick = (source = {}, keys = []) => keys.reduce((acc, key) => {
   if (source?.[key] !== undefined) acc[key] = source[key];
   return acc;
 }, {});
+
+const firstString = (...values) => values.map((value) => String(value || '').trim()).find(Boolean) || null;
+
+const flattenFingerprintCandidate = (candidate) => {
+  if (!candidate) return [];
+  if (Array.isArray(candidate)) return candidate.flatMap(flattenFingerprintCandidate);
+  if (typeof candidate !== 'object') return [];
+  return [candidate];
+};
+
+export const hammingDistance = (a, b) => {
+  if (!a || !b || a.length !== b.length) return Number.POSITIVE_INFINITY;
+  let distance = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = Number.parseInt(a[i], 16);
+    const right = Number.parseInt(b[i], 16);
+    if (Number.isNaN(left) || Number.isNaN(right)) return Number.POSITIVE_INFINITY;
+    distance += hexBitCounts[left ^ right] || 0;
+  }
+  return distance;
+};
+
+export const resolveEffectiveUploadId = ({ requestUploadId = null, reviewCase = null } = {}) => firstString(
+  requestUploadId,
+  reviewCase?.uploadId,
+  reviewCase?.linkedUploadId,
+  Array.isArray(reviewCase?.linkedUploadIds) ? reviewCase.linkedUploadIds.find((item) => String(item || '').trim()) : null,
+);
+
+export const resolveModerationSourceFinalOutcome = ({ reviewCase = null, upload = null } = {}) => firstString(
+  reviewCase?.finalOutcome,
+  reviewCase?.moderatorDecision?.finalPolicyOutcome,
+  reviewCase?.decision,
+  reviewCase?.outcome,
+  upload?.finalOutcome,
+  upload?.outcome,
+  upload?.moderatorDecision?.finalPolicyOutcome,
+  upload?.decision,
+);
 
 export const resolveModerationExampleFingerprints = (...sources) => {
   const resolved = {};
@@ -12,6 +55,7 @@ export const resolveModerationExampleFingerprints = (...sources) => {
     const candidates = [
       source.fingerprints,
       source.fingerprint,
+      source.reportedFingerprints,
       source.imageFingerprint,
       source.moderationFingerprint,
       source.uploadFingerprint,
@@ -20,14 +64,15 @@ export const resolveModerationExampleFingerprints = (...sources) => {
       source.reuse?.fingerprints,
       source,
     ];
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      if (!resolved.sha256 && candidate.sha256) resolved.sha256 = String(candidate.sha256);
-      if (!resolved.dhash && candidate.dhash) resolved.dhash = String(candidate.dhash);
-      if (!resolved.dhashPrefix && candidate.dhashPrefix) resolved.dhashPrefix = String(candidate.dhashPrefix);
+    for (const candidateGroup of candidates) {
+      for (const candidate of flattenFingerprintCandidate(candidateGroup)) {
+        if (!resolved.sha256 && candidate.sha256) resolved.sha256 = String(candidate.sha256);
+        if (!resolved.dhash && candidate.dhash) resolved.dhash = String(candidate.dhash);
+        if (!resolved.dhashPrefix && candidate.dhashPrefix) resolved.dhashPrefix = String(candidate.dhashPrefix);
+      }
     }
   }
-  if (!resolved.dhashPrefix && resolved.dhash) resolved.dhashPrefix = resolved.dhash.slice(0, 8);
+  if (!resolved.dhashPrefix && resolved.dhash) resolved.dhashPrefix = resolved.dhash.slice(0, DHASH_PREFIX_LENGTH);
   return Object.keys(resolved).length ? resolved : null;
 };
 
@@ -95,8 +140,15 @@ export const rankModerationExampleMatches = (matches = [], limit = 5) => {
     .slice(0, limit);
 };
 
-const addSnapshotDocs = (matches, snapshot, matchType) => {
-  snapshot.docs.forEach((doc) => matches.push({ id: doc.id, data: doc.data() || {}, matchType }));
+const addSnapshotDocs = (matches, snapshot, matchType, fingerprints = null) => {
+  snapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    if (matchType === 'dhashPrefix' && fingerprints?.dhash) {
+      const candidateDhash = data?.fingerprints?.dhash;
+      if (!candidateDhash || hammingDistance(fingerprints.dhash, candidateDhash) > DHASH_THRESHOLD) return;
+    }
+    matches.push({ id: doc.id, data, matchType });
+  });
 };
 
 export const fetchModerationExamplesForFingerprints = async ({ db, fingerprints, sourceContext = {}, limit = 5 }) => {
@@ -110,7 +162,7 @@ export const fetchModerationExamplesForFingerprints = async ({ db, fingerprints,
     addSnapshotDocs(matches, await collection.where('fingerprints.dhash', '==', fingerprints.dhash).limit(limit).get(), 'dhash');
   }
   if (fingerprints.dhashPrefix) {
-    addSnapshotDocs(matches, await collection.where('fingerprints.dhashPrefix', '==', fingerprints.dhashPrefix).limit(limit).get(), 'dhashPrefix');
+    addSnapshotDocs(matches, await collection.where('fingerprints.dhashPrefix', '==', fingerprints.dhashPrefix).limit(limit).get(), 'dhashPrefix', fingerprints);
   }
   if (matches.length < limit && sourceContext.finalOutcome) {
     addSnapshotDocs(matches, await collection.where('finalOutcome', '==', sourceContext.finalOutcome).limit(limit).get(), 'similar');

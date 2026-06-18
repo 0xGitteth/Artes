@@ -96,16 +96,19 @@ const makeDb = (docs = []) => ({
     assert.equal(name, 'moderationExamples');
     return {
       where: (field, op, value) => {
-        this.queries.push({ field, op, value });
+        this.queries.push({ field, op, value, limit: null });
         return {
-          limit: (requestedLimit) => ({
-            get: async () => ({
-              docs: docs
-                .filter((doc) => field.split('.').reduce((acc, key) => acc?.[key], doc.data) === value)
-                .slice(0, requestedLimit || docs.length)
-                .map((doc) => ({ id: doc.id, data: () => doc.data })),
-            }),
-          }),
+          limit: (requestedLimit) => {
+            this.queries[this.queries.length - 1].limit = requestedLimit;
+            return {
+              get: async () => ({
+                docs: docs
+                  .filter((doc) => field.split('.').reduce((acc, key) => acc?.[key], doc.data) === value)
+                  .slice(0, requestedLimit || docs.length)
+                  .map((doc) => ({ id: doc.id, data: () => doc.data })),
+              }),
+            };
+          },
         };
       },
     };
@@ -264,4 +267,70 @@ test('dhashPrefix query uses larger candidate window before hamming filtering', 
     limit: 3,
   });
   assert.deepEqual(examples.map((item) => item.exampleId), ['later-near']);
+});
+
+test('dhashPrefix ranking prefers smaller hamming distance over newer createdAt', () => {
+  const ranked = rankModerationExampleMatches([
+    { id: 'distance-8-newer', matchType: 'dhashPrefix', distance: 8, data: { createdAt: '2026-01-03T00:00:00.000Z' } },
+    { id: 'distance-1-older', matchType: 'dhashPrefix', distance: 1, data: { createdAt: '2026-01-01T00:00:00.000Z' } },
+  ]);
+  assert.deepEqual(ranked.map((item) => item.id), ['distance-1-older', 'distance-8-newer']);
+});
+
+test('dhashPrefix ranking falls back to newest createdAt when distance is equal', () => {
+  const ranked = rankModerationExampleMatches([
+    { id: 'older', matchType: 'dhashPrefix', distance: 2, data: { createdAt: '2026-01-01T00:00:00.000Z' } },
+    { id: 'newer', matchType: 'dhashPrefix', distance: 2, data: { createdAt: '2026-01-02T00:00:00.000Z' } },
+  ]);
+  assert.deepEqual(ranked.map((item) => item.id), ['newer', 'older']);
+});
+
+test('dhashPrefix dedupe keeps better same-type distance but exact matches keep priority', () => {
+  const ranked = rankModerationExampleMatches([
+    { id: 'same', matchType: 'dhashPrefix', distance: 8, data: { createdAt: '2026-01-03T00:00:00.000Z' } },
+    { id: 'same', matchType: 'dhashPrefix', distance: 1, data: { createdAt: '2026-01-01T00:00:00.000Z' } },
+    { id: 'sha', matchType: 'sha256', data: { createdAt: '2026-01-01T00:00:00.000Z' } },
+    { id: 'dhash', matchType: 'dhash', data: { createdAt: '2026-01-01T00:00:00.000Z' } },
+  ]);
+  assert.deepEqual(ranked.map((item) => item.id), ['sha', 'dhash', 'same']);
+  assert.equal(ranked.find((item) => item.id === 'same').distance, 1);
+});
+
+test('sha256 query uses candidate window and local ranking returns newest capped results', async () => {
+  const docs = Array.from({ length: 6 }, (_, index) => ({
+    id: `sha${index}`,
+    data: { fingerprints: { sha256: 'sha' }, createdAt: `2026-01-0${index + 1}T00:00:00.000Z` },
+  }));
+  const db = makeDb(docs);
+  const examples = await fetchModerationExamplesForFingerprints({ db, fingerprints: { sha256: 'sha' }, limit: 3 });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['sha5', 'sha4', 'sha3']);
+  assert.equal(db.queries.find((query) => query.field === 'fingerprints.sha256').limit, 25);
+  assert.equal(examples.length, 3);
+});
+
+test('dhash query uses candidate window and final response remains capped', async () => {
+  const docs = Array.from({ length: 6 }, (_, index) => ({
+    id: `dhash${index}`,
+    data: { fingerprints: { dhash: '0000000000000000' }, createdAt: `2026-01-0${index + 1}T00:00:00.000Z` },
+  }));
+  const db = makeDb(docs);
+  const examples = await fetchModerationExamplesForFingerprints({ db, fingerprints: { dhash: '0000000000000000' }, limit: 3 });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['dhash5', 'dhash4', 'dhash3']);
+  assert.equal(db.queries.find((query) => query.field === 'fingerprints.dhash').limit, 25);
+  assert.equal(examples.length, 3);
+});
+
+test('fallback still uses unique count after dedupe with candidate windows', async () => {
+  const db = makeDb([
+    { id: 'duplicate', data: { fingerprints: { sha256: 'sha', dhash: '0000000000000000', dhashPrefix: '0000' }, finalOutcome: 'ignored' } },
+    { id: 'fallback', data: { finalOutcome: 'allowed', createdAt: '2026-01-02T00:00:00.000Z' } },
+  ]);
+  const examples = await fetchModerationExamplesForFingerprints({
+    db,
+    fingerprints: { sha256: 'sha', dhash: '0000000000000000', dhashPrefix: '0000' },
+    sourceContext: { finalOutcome: 'allowed' },
+    limit: 2,
+  });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['duplicate', 'fallback']);
+  assert.ok(db.queries.some((query) => query.field === 'finalOutcome'));
 });

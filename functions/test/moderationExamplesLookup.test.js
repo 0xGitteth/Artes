@@ -334,3 +334,27 @@ test('fallback still uses unique count after dedupe with candidate windows', asy
   assert.deepEqual(examples.map((item) => item.exampleId), ['duplicate', 'fallback']);
   assert.ok(db.queries.some((query) => query.field === 'finalOutcome'));
 });
+
+test('finalOutcome fallback uses candidate window and fills capped response after duplicate candidates', async () => {
+  const docs = [
+    { id: 'fingerprint', data: { fingerprints: { sha256: 'sha' }, finalOutcome: 'allowed', createdAt: '2026-01-01T00:00:00.000Z' } },
+    ...Array.from({ length: 5 }, () => ({
+      id: 'fingerprint',
+      data: { finalOutcome: 'allowed', createdAt: '2026-01-01T00:00:00.000Z' },
+    })),
+    ...Array.from({ length: 4 }, (_, index) => ({
+      id: `later-similar-${index}`,
+      data: { finalOutcome: 'allowed', createdAt: `2026-01-0${index + 2}T00:00:00.000Z` },
+    })),
+  ];
+  const db = makeDb(docs);
+  const examples = await fetchModerationExamplesForFingerprints({
+    db,
+    fingerprints: { sha256: 'sha' },
+    sourceContext: { finalOutcome: 'allowed' },
+    limit: 3,
+  });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['fingerprint', 'later-similar-3', 'later-similar-2']);
+  assert.equal(db.queries.find((query) => query.field === 'finalOutcome').limit, 25);
+  assert.equal(examples.length, 3);
+});

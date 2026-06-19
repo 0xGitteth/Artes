@@ -202,7 +202,7 @@ export const fetchModerationExamplesForFingerprints = async ({ db, fingerprints,
     );
   }
   if (uniqueMatchCount(matches) < limit && sourceContext.finalOutcome) {
-    addSnapshotDocs(matches, await collection.where('finalOutcome', '==', sourceContext.finalOutcome).limit(limit).get(), 'similar');
+    addSnapshotDocs(matches, await collection.where('finalOutcome', '==', sourceContext.finalOutcome).limit(candidateWindow).get(), 'similar');
   }
   return rankModerationExampleMatches(matches, limit).map(sanitizeModerationExample);
 };

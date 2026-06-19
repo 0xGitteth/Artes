@@ -34,11 +34,17 @@ export const hammingDistance = (a, b) => {
   return distance;
 };
 
-export const resolveEffectiveUploadId = ({ requestUploadId = null, reviewCase = null } = {}) => firstString(
-  requestUploadId,
+export const resolveReviewCaseUploadIds = (reviewCase = null) => [
   reviewCase?.uploadId,
   reviewCase?.linkedUploadId,
-  Array.isArray(reviewCase?.linkedUploadIds) ? reviewCase.linkedUploadIds.find((item) => String(item || '').trim()) : null,
+  ...(Array.isArray(reviewCase?.linkedUploadIds) ? reviewCase.linkedUploadIds : []),
+]
+  .map((item) => String(item || '').trim())
+  .filter(Boolean);
+
+export const resolveEffectiveUploadId = ({ requestUploadId = null, reviewCase = null } = {}) => firstString(
+  requestUploadId,
+  ...resolveReviewCaseUploadIds(reviewCase),
 );
 
 export const resolveModerationSourceFinalOutcome = ({ reviewCase = null, upload = null } = {}) => firstString(
@@ -168,9 +174,19 @@ export const rankModerationExampleMatches = (matches = [], limit = 5) => {
     .slice(0, limit);
 };
 
-const addSnapshotDocs = (matches, snapshot, matchType, fingerprints = null) => {
+const isSourceModerationExample = (data = {}, sourceIdentifiers = {}) => {
+  const sourceReviewCaseId = String(sourceIdentifiers.sourceReviewCaseId || '').trim();
+  const sourceUploadId = String(sourceIdentifiers.sourceUploadId || '').trim();
+  return Boolean(
+    (sourceReviewCaseId && data?.reviewCaseId === sourceReviewCaseId)
+    || (sourceUploadId && data?.uploadId === sourceUploadId),
+  );
+};
+
+const addSnapshotDocs = (matches, snapshot, matchType, fingerprints = null, sourceIdentifiers = {}) => {
   snapshot.docs.forEach((doc) => {
     const data = doc.data() || {};
+    if (isSourceModerationExample(data, sourceIdentifiers)) return;
     if (matchType === 'dhashPrefix' && fingerprints?.dhash) {
       const candidateDhash = data?.fingerprints?.dhash;
       const distance = candidateDhash ? hammingDistance(fingerprints.dhash, candidateDhash) : Number.POSITIVE_INFINITY;
@@ -182,16 +198,16 @@ const addSnapshotDocs = (matches, snapshot, matchType, fingerprints = null) => {
   });
 };
 
-export const fetchModerationExamplesForFingerprints = async ({ db, fingerprints, sourceContext = {}, limit = 5 }) => {
+export const fetchModerationExamplesForFingerprints = async ({ db, fingerprints, sourceContext = {}, sourceIdentifiers = {}, limit = 5 }) => {
   if (!fingerprints && !sourceContext.finalOutcome) return [];
   const matches = [];
   const collection = db.collection('moderationExamples');
   const candidateWindow = getCandidateWindow(limit);
   if (fingerprints?.sha256) {
-    addSnapshotDocs(matches, await collection.where('fingerprints.sha256', '==', fingerprints.sha256).limit(candidateWindow).get(), 'sha256');
+    addSnapshotDocs(matches, await collection.where('fingerprints.sha256', '==', fingerprints.sha256).limit(candidateWindow).get(), 'sha256', null, sourceIdentifiers);
   }
   if (fingerprints?.dhash) {
-    addSnapshotDocs(matches, await collection.where('fingerprints.dhash', '==', fingerprints.dhash).limit(candidateWindow).get(), 'dhash');
+    addSnapshotDocs(matches, await collection.where('fingerprints.dhash', '==', fingerprints.dhash).limit(candidateWindow).get(), 'dhash', null, sourceIdentifiers);
   }
   if (fingerprints?.dhashPrefix) {
     addSnapshotDocs(
@@ -199,10 +215,11 @@ export const fetchModerationExamplesForFingerprints = async ({ db, fingerprints,
       await collection.where('fingerprints.dhashPrefix', '==', fingerprints.dhashPrefix).limit(candidateWindow).get(),
       'dhashPrefix',
       fingerprints,
+      sourceIdentifiers,
     );
   }
   if (uniqueMatchCount(matches) < limit && sourceContext.finalOutcome) {
-    addSnapshotDocs(matches, await collection.where('finalOutcome', '==', sourceContext.finalOutcome).limit(candidateWindow).get(), 'similar');
+    addSnapshotDocs(matches, await collection.where('finalOutcome', '==', sourceContext.finalOutcome).limit(candidateWindow).get(), 'similar', null, sourceIdentifiers);
   }
   return rankModerationExampleMatches(matches, limit).map(sanitizeModerationExample);
 };

@@ -8,6 +8,7 @@ import {
   resolveEffectiveUploadId,
   resolveModerationExampleFingerprints,
   resolveModerationSourceFinalOutcome,
+  resolveReviewCaseUploadIds,
   sanitizeModerationExample,
 } from '../moderationExamplesLookup.js';
 
@@ -119,6 +120,26 @@ test('resolveEffectiveUploadId supports linkedUploadIds and preserves request ov
   assert.equal(resolveEffectiveUploadId({ reviewCase: { linkedUploadIds: ['', 'linked1'] } }), 'linked1');
   assert.equal(resolveEffectiveUploadId({ reviewCase: { uploadId: 'upload1', linkedUploadIds: ['linked1'] } }), 'upload1');
   assert.equal(resolveEffectiveUploadId({ requestUploadId: 'override1', reviewCase: { uploadId: 'upload1' } }), 'override1');
+});
+
+
+
+test('resolveReviewCaseUploadIds collects uploadId, linkedUploadId, and linkedUploadIds', () => {
+  assert.deepEqual(resolveReviewCaseUploadIds({
+    uploadId: 'primary',
+    linkedUploadId: 'linked',
+    linkedUploadIds: ['', 'array-linked', null],
+  }), ['primary', 'linked', 'array-linked']);
+});
+
+test('endpoint validates explicit uploadId against reviewCase linked upload ids', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export const getModerationExamplesForCase');
+  const body = source.slice(start, source.indexOf('export const moderatorClaim', start));
+  assert.match(body, /const allowedUploadIds = resolveReviewCaseUploadIds\(reviewCase\)/);
+  assert.match(body, /if \(uploadId && !allowedUploadIds\.includes\(uploadId\)\)/);
+  assert.match(body, /uploadId is not linked to reviewCaseId/);
+  assert.match(body, /if \(!uploadSnap\.exists\)/, 'linked but missing explicit upload returns 404');
 });
 
 test('reportedFingerprints object resolves sha256, dhash, and dhashPrefix', () => {
@@ -356,5 +377,57 @@ test('finalOutcome fallback uses candidate window and fills capped response afte
   });
   assert.deepEqual(examples.map((item) => item.exampleId), ['fingerprint', 'later-similar-3', 'later-similar-2']);
   assert.equal(db.queries.find((query) => query.field === 'finalOutcome').limit, 25);
+  assert.equal(examples.length, 3);
+});
+
+test('source reviewCaseId and uploadId examples are excluded across exact and fallback matches', async () => {
+  const db = makeDb([
+    {
+      id: 'current-review-case-sha',
+      data: { reviewCaseId: 'case-current', uploadId: 'other-upload', fingerprints: { sha256: 'sha' }, finalOutcome: 'allowed' },
+    },
+    {
+      id: 'current-upload-sha',
+      data: { reviewCaseId: 'other-case', uploadId: 'upload-current', fingerprints: { sha256: 'sha' }, finalOutcome: 'allowed' },
+    },
+    {
+      id: 'other-sha',
+      data: { reviewCaseId: 'case-other', uploadId: 'upload-other', fingerprints: { sha256: 'sha' }, finalOutcome: 'allowed', createdAt: '2026-01-03T00:00:00.000Z' },
+    },
+    {
+      id: 'fallback-current-case',
+      data: { reviewCaseId: 'case-current', uploadId: 'fallback-upload', finalOutcome: 'allowed', createdAt: '2026-01-04T00:00:00.000Z' },
+    },
+    {
+      id: 'fallback-other',
+      data: { reviewCaseId: 'case-fallback-other', uploadId: 'upload-fallback-other', finalOutcome: 'allowed', createdAt: '2026-01-02T00:00:00.000Z' },
+    },
+  ]);
+  const examples = await fetchModerationExamplesForFingerprints({
+    db,
+    fingerprints: { sha256: 'sha' },
+    sourceContext: { finalOutcome: 'allowed' },
+    sourceIdentifiers: { sourceReviewCaseId: 'case-current', sourceUploadId: 'upload-current' },
+    limit: 3,
+  });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['other-sha', 'fallback-other']);
+});
+
+test('source exclusion still caps final response when enough other examples exist', async () => {
+  const docs = [
+    { id: 'current-upload', data: { uploadId: 'upload-current', fingerprints: { sha256: 'sha' } } },
+    ...Array.from({ length: 5 }, (_, index) => ({
+      id: `other-${index}`,
+      data: { fingerprints: { sha256: 'sha' }, createdAt: `2026-01-0${index + 1}T00:00:00.000Z` },
+    })),
+  ];
+  const db = makeDb(docs);
+  const examples = await fetchModerationExamplesForFingerprints({
+    db,
+    fingerprints: { sha256: 'sha' },
+    sourceIdentifiers: { sourceUploadId: 'upload-current' },
+    limit: 3,
+  });
+  assert.deepEqual(examples.map((item) => item.exampleId), ['other-4', 'other-3', 'other-2']);
   assert.equal(examples.length, 3);
 });

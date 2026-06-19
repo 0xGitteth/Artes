@@ -25,6 +25,7 @@ import {
   resolveEffectiveUploadId,
   resolveModerationExampleFingerprints,
   resolveModerationSourceFinalOutcome,
+  resolveReviewCaseUploadIds,
 } from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
 import { getCodexDevLoginDecision } from './codexDevLogin.js';
@@ -2908,12 +2909,17 @@ export const getModerationExamplesForCase = onRequest({ cors: true, region: 'eur
         return;
       }
       reviewCase = reviewSnap.data() || {};
+      const allowedUploadIds = resolveReviewCaseUploadIds(reviewCase);
+      if (uploadId && !allowedUploadIds.includes(uploadId)) {
+        res.status(400).json({ error: 'uploadId is not linked to reviewCaseId' });
+        return;
+      }
       effectiveUploadId = resolveEffectiveUploadId({ requestUploadId: uploadId, reviewCase });
     }
 
     if (effectiveUploadId) {
       const uploadSnap = await db.collection('uploads').doc(effectiveUploadId).get();
-      if (!uploadSnap.exists && !reviewCaseId) {
+      if (!uploadSnap.exists) {
         res.status(404).json({ error: 'Upload not found', examples: [] });
         return;
       }
@@ -2929,7 +2935,11 @@ export const getModerationExamplesForCase = onRequest({ cors: true, region: 'eur
     const sourceContext = {
       finalOutcome: resolveModerationSourceFinalOutcome({ reviewCase, upload }),
     };
-    const examples = await fetchModerationExamplesForFingerprints({ db, fingerprints, sourceContext, limit: 5 });
+    const sourceIdentifiers = {
+      sourceReviewCaseId: reviewCaseId || String(upload?.reviewCaseId || '').trim() || null,
+      sourceUploadId: effectiveUploadId || null,
+    };
+    const examples = await fetchModerationExamplesForFingerprints({ db, fingerprints, sourceContext, sourceIdentifiers, limit: 5 });
     res.status(200).json({ ok: true, reviewCaseId: reviewCaseId || null, uploadId: effectiveUploadId || null, examples });
   } catch (error) {
     const status = error.status || 500;

@@ -20,6 +20,13 @@ import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } 
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
+import {
+  fetchModerationExamplesForFingerprints,
+  resolveEffectiveUploadId,
+  resolveModerationExampleFingerprints,
+  resolveModerationSourceFinalOutcome,
+  resolveReviewCaseUploadIds,
+} from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
 import { getCodexDevLoginDecision } from './codexDevLogin.js';
 
@@ -2871,6 +2878,72 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to request upload review case' });
+  }
+});
+
+
+export const getModerationExamplesForCase = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+  try {
+    const decoded = await verifyToken(req);
+    await ensureModerator(decoded);
+    const body = parseJsonBody(req) || {};
+    const reviewCaseId = String(body.reviewCaseId || '').trim();
+    const uploadId = String(body.uploadId || '').trim();
+    if (!reviewCaseId && !uploadId) {
+      res.status(400).json({ error: 'reviewCaseId or uploadId is required' });
+      return;
+    }
+
+    let reviewCase = null;
+    let upload = null;
+    let effectiveUploadId = uploadId;
+
+    if (reviewCaseId) {
+      const reviewSnap = await db.collection('reviewCases').doc(reviewCaseId).get();
+      if (!reviewSnap.exists) {
+        res.status(404).json({ error: 'Review case not found', examples: [] });
+        return;
+      }
+      reviewCase = reviewSnap.data() || {};
+      const allowedUploadIds = resolveReviewCaseUploadIds(reviewCase);
+      if (uploadId && !allowedUploadIds.includes(uploadId)) {
+        res.status(400).json({ error: 'uploadId is not linked to reviewCaseId' });
+        return;
+      }
+      effectiveUploadId = resolveEffectiveUploadId({ requestUploadId: uploadId, reviewCase });
+    }
+
+    if (effectiveUploadId) {
+      const uploadSnap = await db.collection('uploads').doc(effectiveUploadId).get();
+      if (!uploadSnap.exists) {
+        res.status(404).json({ error: 'Upload not found', examples: [] });
+        return;
+      }
+      upload = uploadSnap.exists ? uploadSnap.data() || {} : null;
+      const linkedReviewCaseId = String(upload?.reviewCaseId || '').trim();
+      if (!reviewCase && linkedReviewCaseId) {
+        const linkedReviewSnap = await db.collection('reviewCases').doc(linkedReviewCaseId).get();
+        reviewCase = linkedReviewSnap.exists ? linkedReviewSnap.data() || {} : null;
+      }
+    }
+
+    const fingerprints = resolveModerationExampleFingerprints(upload, reviewCase);
+    const sourceContext = {
+      finalOutcome: resolveModerationSourceFinalOutcome({ reviewCase, upload }),
+    };
+    const sourceIdentifiers = {
+      sourceReviewCaseId: reviewCaseId || String(upload?.reviewCaseId || '').trim() || null,
+      sourceUploadId: effectiveUploadId || null,
+    };
+    const examples = await fetchModerationExamplesForFingerprints({ db, fingerprints, sourceContext, sourceIdentifiers, limit: 5 });
+    res.status(200).json({ ok: true, reviewCaseId: reviewCaseId || null, uploadId: effectiveUploadId || null, examples });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Failed to fetch moderation examples' });
   }
 });
 

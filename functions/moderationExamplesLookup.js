@@ -1,3 +1,5 @@
+import { mapFinalOutcomeByAction } from './moderationExampleBuilder.js';
+
 const DHASH_PREFIX_LENGTH = 4;
 const DHASH_THRESHOLD = Number.parseInt(process.env.DHASH_HAMMING_THRESHOLD || '8', 10);
 const hexBitCounts = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
@@ -47,14 +49,21 @@ export const resolveEffectiveUploadId = ({ requestUploadId = null, reviewCase = 
   ...resolveReviewCaseUploadIds(reviewCase),
 );
 
+const mapStoredFinalOutcome = (source = null) => mapFinalOutcomeByAction({
+  action: source?.moderatorDecision?.action || null,
+  decision: source?.decision || null,
+});
+
 export const resolveModerationSourceFinalOutcome = ({ reviewCase = null, upload = null } = {}) => firstString(
   reviewCase?.finalOutcome,
+  mapStoredFinalOutcome(reviewCase),
   reviewCase?.moderatorDecision?.finalPolicyOutcome,
   reviewCase?.decision,
   reviewCase?.outcome,
   upload?.finalOutcome,
-  upload?.outcome,
+  mapStoredFinalOutcome(upload),
   upload?.moderatorDecision?.finalPolicyOutcome,
+  upload?.outcome,
   upload?.decision,
 );
 

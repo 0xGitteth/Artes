@@ -431,3 +431,33 @@ test('source exclusion still caps final response when enough other examples exis
   assert.deepEqual(examples.map((item) => item.exampleId), ['other-4', 'other-3', 'other-2']);
   assert.equal(examples.length, 3);
 });
+
+test('finalOutcome mapping uses moderationExampleBuilder mapper before raw finalPolicyOutcome', () => {
+  assert.equal(resolveModerationSourceFinalOutcome({
+    reviewCase: { moderatorDecision: { action: 'requestUserCorrection', finalPolicyOutcome: 'allowed' } },
+  }), 'needs_user_correction');
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: { moderatorDecision: { action: 'approveAsIs' } } }), 'allowed');
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: { moderatorDecision: { action: 'approveWithTaxonomyCorrection' } } }), 'allowed');
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: { moderatorDecision: { action: 'approve' } } }), 'allowed');
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: { moderatorDecision: { action: 'rejectForbidden' } } }), 'forbidden');
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: { decision: 'rejected' } }), 'forbidden');
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: { moderatorDecision: { action: 'queueFreshEvaluation' } } }), 'fresh_eval_queued');
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: { moderatorDecision: { action: 'acceptCorrection' } } }), 'correction_accepted');
+  assert.equal(resolveModerationSourceFinalOutcome({ reviewCase: { moderatorDecision: { action: 'rejectCorrection' } } }), 'user_disagreed');
+});
+
+test('explicit reviewCase finalOutcome remains highest priority over mapped action', () => {
+  assert.equal(resolveModerationSourceFinalOutcome({
+    reviewCase: { finalOutcome: 'stored_final', moderatorDecision: { action: 'rejectForbidden' }, decision: 'rejected' },
+  }), 'stored_final');
+});
+
+test('upload moderatorDecision action mapping is used when reviewCase has no usable outcome', () => {
+  assert.equal(resolveModerationSourceFinalOutcome({
+    reviewCase: { decision: 'unknownDecision' },
+    upload: { moderatorDecision: { action: 'requestUserCorrection', finalPolicyOutcome: 'allowed' } },
+  }), 'unknownDecision');
+  assert.equal(resolveModerationSourceFinalOutcome({
+    upload: { moderatorDecision: { action: 'requestUserCorrection', finalPolicyOutcome: 'allowed' } },
+  }), 'needs_user_correction');
+});

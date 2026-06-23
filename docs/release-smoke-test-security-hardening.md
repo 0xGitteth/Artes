@@ -47,25 +47,37 @@ Use this checklist after the security hardening chain is deployed to a non-produ
 
 ## Deploy readiness notes
 
-The repository configuration supports these focused deploy commands:
+The repository configuration supports these focused deploy commands. Replace the project placeholder with the intended staging or production Firebase project before running any command:
 
 ```sh
-firebase deploy --only functions
-firebase deploy --only firestore:rules
-firebase deploy --only storage
+firebase deploy --only functions --project <staging-or-production-project>
+firebase deploy --only firestore:rules --project <staging-or-production-project>
+firebase deploy --only storage --project <staging-or-production-project>
 ```
 
-Do not deploy automatically from local verification unless explicitly instructed and credentials are available.
+Do not deploy automatically from local verification unless explicitly instructed and credentials are available. Do not rely on the currently active Firebase project for release deploys. Confirm the target project before running deploy commands. The only configured project in `.firebaserc` appears to be production (`artes-media-app`), but keep the explicit `--project` flag so the release operator consciously chooses the target.
 
 ## Local validation commands used for this release check
 
+Run these from the repository root. `npm run test` is currently the default rules-test alias for `npm run test:rules`, so keep it for parity with CI expectations but do not treat it as separate non-rules coverage.
+
 ```sh
 npm install
+npm --prefix functions install
 npm run lint
 npm run test
 npm run test:rules
 npm run test:rules:storage
+find tests -maxdepth 1 -type f -name '*.test.mjs' ! -name '*.rules.test.mjs' -print0 | xargs -0 node --test
 node --test functions/test/*.test.js
 npm run build
 git diff --check
+```
+
+### Additional rules tests not covered by `npm run test:rules`
+
+`npm run test:rules` currently covers `tests/firestore.publicUsers.rules.test.mjs`, `tests/storage.profileImages.rules.test.mjs`, and `tests/storage.uploads.rules.test.mjs`. Run the additional existing Firestore rules tests explicitly:
+
+```sh
+firebase emulators:exec --only firestore "node tests/firestore.claimInvites.rules.test.mjs && node tests/firestore.moodboards.rules.test.mjs"
 ```

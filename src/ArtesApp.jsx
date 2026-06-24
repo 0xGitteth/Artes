@@ -25,6 +25,7 @@ import {
   normalizeDiditStatus,
   resolveEffectiveDiditState,
 } from './utils/diditStatus';
+import { resolvePublicDisplayNameSeed } from './utils/publicIdentity';
 import {
   ensureUserProfile,
   fetchUserProfile,
@@ -3266,7 +3267,11 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [roles, setRoles] = useState([]);
     const MATCH_STEP = 1.5;
     const [profileData, setProfileData] = useState(() => ({
-       displayName: profile?.displayName || '',
+       displayName: resolvePublicDisplayNameSeed({
+         appPublicDisplayName: profile?.displayName,
+         publicProfile: Array.isArray(users) ? users.find((entry) => entry?.uid === (profile?.uid || authUser?.uid)) : null,
+         googleDisplayName: authUser?.providerData?.some((provider) => provider?.providerId === 'google.com') ? authUser?.displayName : '',
+       }),
        bio: profile?.bio || '',
        insta: '',
        linkedAgencyName: profile?.linkedAgencyName || '',
@@ -3440,11 +3445,15 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (!authUser) return;
       setEmail(authUser.email || '');
       setProfileData((prev) => {
-        const resolvedDisplayName = pickPreferredDisplayName(prev?.displayName, profile?.displayName, authUser.displayName);
+        const resolvedDisplayName = resolvePublicDisplayNameSeed({
+          appPublicDisplayName: prev?.displayName || profile?.displayName,
+          publicProfile: Array.isArray(users) ? users.find((entry) => entry?.uid === (profile?.uid || authUser?.uid)) : null,
+          googleDisplayName: authUser?.providerData?.some((provider) => provider?.providerId === 'google.com') ? authUser?.displayName : '',
+        });
         if (resolvedDisplayName === (prev?.displayName || '')) return prev;
         return { ...prev, displayName: resolvedDisplayName };
       });
-    }, [authUser, profile?.displayName]);
+    }, [authUser, profile?.displayName, profile?.uid, users]);
 
     useEffect(() => {
       if (!isGoogleUser || !authUser?.uid || syncedGoogleProfile) return;
@@ -3908,7 +3917,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
           <Input label="E-mailadres" value={email} onChange={(e) => setEmail(e.target.value)} />
           <Input label="Wachtwoord" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <Input label="Echte naam (volledige naam)" value={profileData.displayName} onChange={e => setProfileData({...profileData, displayName: e.target.value})} />
+          <Input label="Weergavenaam" value={profileData.displayName} onChange={e => setProfileData({...profileData, displayName: e.target.value})} />
           {(error || authError) && <p className="text-sm text-red-500">{error || authError}</p>}
           <Button onClick={async () => {
               try {
@@ -3928,7 +3937,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                   await updateUserProfile(uid, {
                     onboardingStep: 2,
                     onboardingComplete: false,
-                    displayName: profileData.displayName || createdUser?.displayName || 'Nieuwe Maker',
+                    displayName: profileData.displayName || 'Gebruiker',
                     email: createdUser?.email || email,
                     authProvider: 'password',
                   });

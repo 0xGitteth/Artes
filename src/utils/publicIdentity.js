@@ -9,3 +9,21 @@ export const resolvePublicDisplayName = (publicProfile = null) => {
 
   return 'Gebruiker';
 };
+
+export const resolvePublicDisplayNameSeed = ({
+  appPublicDisplayName = '',
+  publicProfile = null,
+  diditDisplayName = '',
+  googleDisplayName = '',
+} = {}) => {
+  const appValue = toCleanString(appPublicDisplayName);
+  if (appValue) return appValue;
+
+  const publicValue = toCleanString(publicProfile?.displayName);
+  if (publicValue) return publicValue;
+
+  const diditSeed = toCleanString(diditDisplayName);
+  if (diditSeed) return diditSeed;
+
+  return toCleanString(googleDisplayName);
+};

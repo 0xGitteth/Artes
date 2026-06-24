@@ -553,10 +553,9 @@ export const reloadCurrentUser = async () => {
   return auth.currentUser;
 };
 
-const resolveDisplayName = (user) => {
-  if (user?.displayName) return user.displayName;
-  if (user?.email) return user.email.split('@')[0];
-  return 'Artes gebruiker';
+const resolveInitialPublicDisplayNameSeed = (user, providerId = resolveAuthProvider(user)) => {
+  if (providerId === 'google.com') return String(user?.displayName || '').trim();
+  return '';
 };
 
 const normalizeUsername = (value) => String(value || '')
@@ -632,7 +631,7 @@ const sanitizePublicProfileField = (key, value) => {
   return value;
 };
 
-const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
+export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
   const hasRequestedPublicField = [
     'uid',
     'profileId',
@@ -718,6 +717,10 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     payload.displayName = existingPublic.displayName;
   }
 
+  if (payload.displayName === undefined && payload.username !== undefined) {
+    delete payload.displayName;
+  }
+
   if (payload.avatar === undefined && existingPublic?.avatar !== undefined) {
     payload.avatar = existingPublic.avatar;
   }
@@ -730,7 +733,9 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     payload.headerImage = existingPublic.headerImage;
   }
 
-  payload.displayNameLower = String(payload.displayName || existingPublic?.displayName || '').toLowerCase();
+  if (payload.displayName !== undefined || existingPublic?.displayName !== undefined) {
+    payload.displayNameLower = String(payload.displayName || existingPublic?.displayName || '').toLowerCase();
+  }
 
   Object.keys(payload).forEach((key) => {
     if (!PUBLIC_USER_ALLOWED_FIELDS.includes(key)) {
@@ -760,8 +765,8 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   const payload = buildPublicProfilePayload(data, uid, existingPublic);
   if (!Object.keys(payload).length) return;
 
-  if (payload.displayName === undefined || payload.displayName === null) {
-    payload.displayName = existingPublic?.displayName || '';
+  if ((payload.displayName === undefined || payload.displayName === null) && existingPublic?.displayName !== undefined) {
+    payload.displayName = existingPublic.displayName;
   }
 
   const normalizedUsername = normalizeUsername(payload.username);
@@ -772,7 +777,11 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
     payload.username = normalizedUsername;
   }
 
-  payload.displayNameLower = String(payload.displayName || '').toLowerCase();
+  if (payload.displayName !== undefined) {
+    payload.displayNameLower = String(payload.displayName || '').toLowerCase();
+  } else {
+    delete payload.displayNameLower;
+  }
   
   const finalPayload = {
     uid,
@@ -1703,7 +1712,7 @@ export const ensureUserProfile = async (user) => {
   if (!canAccessFirestore({ authReady: authStateReady, user }) || !user?.uid) return null;
   const providerId = resolveAuthProvider(user);
   const defaultOnboardingStep = providerId === 'google.com' ? 2 : 1;
-  const resolvedDisplayName = resolveDisplayName(user);
+  const resolvedDisplayName = resolveInitialPublicDisplayNameSeed(user, providerId);
   const resolvedEmail = user.email ?? null;
   const writeAllowed = await canWriteUserProfile(user);
   const snapshot = await fetchUserProfile(user.uid, { authReady: authStateReady, user });
@@ -1742,14 +1751,14 @@ export const ensureUserProfile = async (user) => {
         return data;
       }
     }
-    const displayName = updates.displayName || data.displayName || resolvedDisplayName;
+    const displayName = updates.displayName || data.displayName || '';
     const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
     try {
       await writePublicUserProfile(
         user.uid,
         {
           ...data,
-          displayName,
+          ...(displayName ? { displayName } : {}),
           username,
           photoURL: data.photoURL ?? user.photoURL ?? null,
         },
@@ -1802,7 +1811,7 @@ export const ensureUserProfile = async (user) => {
   try {
     await writePublicUserProfile(user.uid, {
       username,
-      displayName: resolvedDisplayName,
+      ...(resolvedDisplayName ? { displayName: resolvedDisplayName } : {}),
       photoURL: user.photoURL ?? null,
     });
   } catch (error) {

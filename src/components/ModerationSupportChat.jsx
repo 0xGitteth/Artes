@@ -139,20 +139,32 @@ export default function ModerationSupportChat({ authReady, authUser, isModerator
   }, [activeThreadId, authReady, authUser]);
 
   useEffect(() => {
-    if (!activeThreadId || !isModerator) return;
-    const db = getFirebaseDbInstance();
-    const threadRef = doc(db, 'threads', activeThreadId);
-    runTransaction(db, async (transaction) => {
-      const snap = await transaction.get(threadRef);
-      if (!snap.exists()) return;
-      const data = snap.data();
-      if ((data?.unreadForModerator || 0) === 0) return;
-      transaction.update(threadRef, {
-        unreadForModerator: 0,
-        updatedAt: serverTimestamp(),
-      });
-    }).catch(() => {});
-  }, [activeThreadId, isModerator]);
+    if (!activeThreadId || !isModerator || !functionsBase || !authUser) return;
+    const markRead = async () => {
+      try {
+        const token = await authUser.getIdToken();
+        const response = await fetch(`${functionsBase}/markSupportThreadReadForModerator`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ threadId: activeThreadId }),
+        });
+        if (!response.ok && import.meta.env.DEV) {
+          console.warn('[ModerationSupportChat] Failed to mark support thread read for moderator', {
+            status: response.status,
+            threadId: activeThreadId,
+          });
+        }
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.warn('[ModerationSupportChat] Failed to mark support thread read for moderator', error);
+        }
+      }
+    };
+    markRead();
+  }, [activeThreadId, authUser, functionsBase, isModerator]);
 
   useEffect(() => {
     if (!canAccessFirestore({ authReady, user: authUser })) return;

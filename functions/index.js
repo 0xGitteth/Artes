@@ -29,6 +29,7 @@ import {
 } from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
 import { getCodexDevLoginDecision } from './codexDevLogin.js';
+import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -5473,6 +5474,8 @@ export const onFollowingDeleted = onDocumentDeleted({
 export const config = {
   runtime: 'nodejs18',
 };
+
+export const markSupportThreadReadForModerator = createMarkSupportThreadReadForModerator({ db, verifyToken, ensureModerator, parseJsonBody });
 
 export { ensureSupportThread, ensureModerationThread } from "./supportChat.js";
 export { createDiditSession, refreshDiditSession, diditWebhook };

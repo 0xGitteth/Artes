@@ -747,13 +747,34 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
 };
 
 
-const cleanupLegacyPublicEmailIfNeeded = async (db, uid, existingPublic = {}) => {
-  if (!uid || !existingPublic || !Object.prototype.hasOwnProperty.call(existingPublic, 'email')) {
-    return false;
-  }
+const LEGACY_PUBLIC_IDENTITY_FIELDS = [
+  'email',
+  'authProvider',
+  'legalName',
+  'didit',
+  'providerData',
+  'authDisplayName',
+  'firebaseDisplayName',
+  'googleDisplayName',
+];
+
+const getLegacyPublicIdentityCleanupPatch = (existingPublic = {}, deleteValue = deleteField()) => {
+  const cleanupPatch = {};
+  LEGACY_PUBLIC_IDENTITY_FIELDS.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(existingPublic || {}, field)) {
+      cleanupPatch[field] = deleteValue;
+    }
+  });
+  return cleanupPatch;
+};
+
+const cleanupLegacyPublicIdentityFieldsIfNeeded = async (db, uid, existingPublic = {}) => {
+  if (!uid || !existingPublic) return false;
+  const cleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
+  if (!Object.keys(cleanupPatch).length) return false;
 
   await updateDoc(doc(db, 'publicUsers', uid), {
-    email: deleteField(),
+    ...cleanupPatch,
     updatedAt: serverTimestamp(),
   });
 
@@ -782,6 +803,8 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   } else {
     delete payload.displayNameLower;
   }
+
+  Object.assign(payload, getLegacyPublicIdentityCleanupPatch(existingPublic));
   
   const finalPayload = {
     uid,
@@ -1226,12 +1249,8 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const publicPatch = buildPublicProfilePayload(safeData, resolvedUid, existingPublic);
-  const hadLegacyPublicEmail = Object.prototype.hasOwnProperty.call(existingPublic || {}, 'email');
-  if (hadLegacyPublicEmail) {
-    publicPatch.email = deleteField();
-  } else {
-    delete publicPatch.email;
-  }
+  const legacyPublicIdentityCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
+  Object.assign(publicPatch, legacyPublicIdentityCleanupPatch);
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -1273,29 +1292,12 @@ export const updateUserProfile = async (uid, data) => {
     throw new Error('Profiel opslaan mislukt: private profiel kon niet worden bijgewerkt.');
   }
 
-  let removedLegacyEmail = false;
-  try {
-    removedLegacyEmail = await cleanupLegacyPublicEmailIfNeeded(getFirebaseDb(), resolvedUid, existingPublic);
-  } catch (e) {
-    console.error(
-      '[updateUserProfile] PUBLIC USERS LEGACY EMAIL CLEANUP FAILED',
-      e.code,
-      e.message,
-      {
-        uid: resolvedUid,
-        path: publicDocPath,
-        keys: ['email', 'updatedAt'],
-      }
-    );
-    throw new Error('Profiel opslaan mislukt: legacy public profiel data kon niet worden opgeschoond.');
-  }
-
   if (import.meta.env.DEV) {
     console.log('[updateUserProfile] PUBLIC WRITE', {
       uid: resolvedUid,
       path: publicDocPath,
       keys: Object.keys(publicPatch).sort(),
-      removedLegacyEmail: hadLegacyPublicEmail,
+      legacyIdentityCleanupKeys: Object.keys(legacyPublicIdentityCleanupPatch).sort(),
     });
   }
 

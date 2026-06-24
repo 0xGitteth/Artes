@@ -25,7 +25,7 @@ import {
   normalizeDiditStatus,
   resolveEffectiveDiditState,
 } from './utils/diditStatus';
-import { resolvePublicDisplayNameSeed } from './utils/publicIdentity';
+import { resolveOnboardingDisplayNameState, resolvePublicDisplayNameSeed, shouldIncludeGoogleDisplayNameSeed } from './utils/publicIdentity';
 import {
   ensureUserProfile,
   fetchUserProfile,
@@ -3304,6 +3304,8 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     const [diditRefreshAttempts, setDiditRefreshAttempts] = useState(0);
     const [diditDebugResult, setDiditDebugResult] = useState('');
     const [syncedGoogleProfile, setSyncedGoogleProfile] = useState(false);
+    const [syncedGoogleDisplayNameSeed, setSyncedGoogleDisplayNameSeed] = useState(false);
+    const [displayNameEdited, setDisplayNameEdited] = useState(false);
     const [contributorMatches, setContributorMatches] = useState([]);
     const [matchLoading, setMatchLoading] = useState(false);
     const [matchError, setMatchError] = useState(null);
@@ -3445,18 +3447,20 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (!authUser) return;
       setEmail(authUser.email || '');
       setProfileData((prev) => {
-        const resolvedDisplayName = resolvePublicDisplayNameSeed({
-          appPublicDisplayName: prev?.displayName || profile?.displayName,
+        const resolvedDisplayName = resolveOnboardingDisplayNameState({
+          currentDisplayName: prev?.displayName,
+          fieldEdited: displayNameEdited,
+          appPublicDisplayName: profile?.displayName,
           publicProfile: Array.isArray(users) ? users.find((entry) => entry?.uid === (profile?.uid || authUser?.uid)) : null,
           googleDisplayName: authUser?.providerData?.some((provider) => provider?.providerId === 'google.com') ? authUser?.displayName : '',
         });
         if (resolvedDisplayName === (prev?.displayName || '')) return prev;
         return { ...prev, displayName: resolvedDisplayName };
       });
-    }, [authUser, profile?.displayName, profile?.uid, users]);
+    }, [authUser, displayNameEdited, profile?.displayName, profile?.uid, users]);
 
     useEffect(() => {
-      if (!isGoogleUser || !authUser?.uid || syncedGoogleProfile) return;
+      if (!isGoogleUser || !authUser?.uid) return;
       setAccountCreated(true);
       setStep((prev) => {
         const nextStep = prev < 2 ? 2 : prev;
@@ -3470,23 +3474,45 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         }
         return nextStep;
       });
-      const existingAppDisplayName = String(profile?.displayName || '').trim();
       const googleDisplayName = String(authUser.displayName || '').trim();
-      const googleSyncPayload = {
-        onboardingStep: 2,
-        onboardingComplete: false,
-        email: authUser.email ?? null,
-        authProvider: 'google.com',
-      };
+      const includeGoogleDisplayName = shouldIncludeGoogleDisplayNameSeed({
+        isGoogleUser,
+        profileLoading,
+        profile,
+        googleDisplayName,
+      });
+      if (syncedGoogleProfile && (!includeGoogleDisplayName || syncedGoogleDisplayNameSeed)) return;
+      const googleSyncPayload = syncedGoogleProfile
+        ? {}
+        : {
+          onboardingStep: 2,
+          onboardingComplete: false,
+          email: authUser.email ?? null,
+          authProvider: 'google.com',
+        };
 
       // Google is fallback only and must not overwrite an existing app profile displayName.
-      if (!existingAppDisplayName && googleDisplayName) {
+      if (includeGoogleDisplayName && !syncedGoogleDisplayNameSeed) {
         googleSyncPayload.displayName = googleDisplayName;
       }
+      if (!Object.keys(googleSyncPayload).length) return;
 
-      updateUserProfile(authUser.uid, googleSyncPayload).catch((e) => console.error('Failed to sync Google profile', e));
-      setSyncedGoogleProfile(true);
-    }, [isGoogleUser, authUser?.uid, authUser?.displayName, authUser?.email, profile?.displayName, syncedGoogleProfile]);
+      updateUserProfile(authUser.uid, googleSyncPayload)
+        .then(() => {
+          if (!syncedGoogleProfile) setSyncedGoogleProfile(true);
+          if (googleSyncPayload.displayName) setSyncedGoogleDisplayNameSeed(true);
+        })
+        .catch((e) => console.error('Failed to sync Google profile', e));
+    }, [
+      isGoogleUser,
+      authUser?.uid,
+      authUser?.displayName,
+      authUser?.email,
+      profile,
+      profileLoading,
+      syncedGoogleDisplayNameSeed,
+      syncedGoogleProfile,
+    ]);
 
     useEffect(() => {
       if (!profile?.pendingClaimContributorId) return;
@@ -3917,7 +3943,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
           <Input label="E-mailadres" value={email} onChange={(e) => setEmail(e.target.value)} />
           <Input label="Wachtwoord" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <Input label="Weergavenaam" value={profileData.displayName} onChange={e => setProfileData({...profileData, displayName: e.target.value})} />
+          <Input label="Weergavenaam" value={profileData.displayName} onChange={e => { setDisplayNameEdited(true); setProfileData({...profileData, displayName: e.target.value}); }} />
           {(error || authError) && <p className="text-sm text-red-500">{error || authError}</p>}
           <Button onClick={async () => {
               try {
@@ -4212,7 +4238,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         <h2 className="text-sm font-bold text-blue-600 uppercase mb-1">Stap 4/5</h2>
         <h1 className="text-3xl font-bold dark:text-white mb-6">Maak je profiel af</h1>
         <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 space-y-4">
-          <Input label="Weergavenaam" value={profileData.displayName} onChange={e => setProfileData({...profileData, displayName: e.target.value})} />
+          <Input label="Weergavenaam" value={profileData.displayName} onChange={e => { setDisplayNameEdited(true); setProfileData({...profileData, displayName: e.target.value}); }} />
           <Input label="Korte bio" value={profileData.bio} onChange={e => setProfileData({...profileData, bio: e.target.value})} />
           
           <div className="flex gap-4">

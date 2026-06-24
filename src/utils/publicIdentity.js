@@ -27,3 +27,33 @@ export const resolvePublicDisplayNameSeed = ({
 
   return toCleanString(googleDisplayName);
 };
+
+export const resolveOnboardingDisplayNameState = ({
+  currentDisplayName = '',
+  fieldEdited = false,
+  appPublicDisplayName = '',
+  publicProfile = null,
+  diditDisplayName = '',
+  googleDisplayName = '',
+} = {}) => {
+  if (fieldEdited) return toCleanString(currentDisplayName);
+  return resolvePublicDisplayNameSeed({
+    appPublicDisplayName,
+    publicProfile,
+    diditDisplayName,
+    googleDisplayName,
+  });
+};
+
+export const shouldIncludeGoogleDisplayNameSeed = ({
+  isGoogleUser = false,
+  profileLoading = true,
+  profile = null,
+  googleDisplayName = '',
+} = {}) => Boolean(
+  isGoogleUser
+  && !profileLoading
+  && profile
+  && !toCleanString(profile?.displayName)
+  && toCleanString(googleDisplayName),
+);

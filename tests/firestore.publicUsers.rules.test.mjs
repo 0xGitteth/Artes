@@ -53,6 +53,14 @@ async function run() {
         fanOfCount: 2,
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'publicUsers', 'legacy_auth_provider_user'), {
+        uid: 'legacy_auth_provider_user',
+        username: 'legacyauthprovider',
+        displayName: 'Legacy Auth Provider',
+        displayNameLower: 'legacy auth provider',
+        authProvider: 'google.com',
+        updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'profiles', 'active_agency_profile'), {
         type: 'agency',
         displayName: 'Active Agency Profile',
@@ -913,6 +921,13 @@ async function run() {
         username: 'providerdataleak',
         providerData: [{ providerId: 'google.com', displayName: 'Google Name' }],
         updatedAt: new Date(),
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(doc(publicUserDbFor('legacy_auth_provider_user'), 'publicUsers', 'legacy_auth_provider_user'), {
+        username: 'legacyauthclean',
+        authProvider: deleteField(),
       }),
     );
 

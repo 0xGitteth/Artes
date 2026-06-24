@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { resolvePublicDisplayName, resolvePublicDisplayNameSeed } from '../src/utils/publicIdentity.js';
+import {
+  resolveOnboardingDisplayNameState,
+  resolvePublicDisplayName,
+  resolvePublicDisplayNameSeed,
+  shouldIncludeGoogleDisplayNameSeed,
+} from '../src/utils/publicIdentity.js';
 
 assert.equal(resolvePublicDisplayName({ displayName: 'Public Name', username: 'handle' }), 'Public Name');
 assert.equal(resolvePublicDisplayName({ username: '@handle' }), 'handle');
@@ -22,5 +27,28 @@ assert.equal(
   resolvePublicDisplayNameSeed({ appPublicDisplayName: 'User Edited Name', diditDisplayName: 'New Legal Name', googleDisplayName: 'New Google Name' }),
   'User Edited Name',
 );
+
+assert.equal(
+  resolveOnboardingDisplayNameState({ currentDisplayName: 'Google Seed', appPublicDisplayName: 'Loaded App Name', googleDisplayName: 'Google Seed' }),
+  'Loaded App Name',
+);
+assert.equal(
+  resolveOnboardingDisplayNameState({ currentDisplayName: 'Google Seed', publicProfile: { displayName: 'Loaded Public Name' }, googleDisplayName: 'Google Seed' }),
+  'Loaded Public Name',
+);
+assert.equal(
+  resolveOnboardingDisplayNameState({ currentDisplayName: 'Typed Name', fieldEdited: true, appPublicDisplayName: 'Loaded App Name', publicProfile: { displayName: 'Loaded Public Name' }, googleDisplayName: 'Google Seed' }),
+  'Typed Name',
+);
+assert.equal(
+  resolveOnboardingDisplayNameState({ currentDisplayName: '', googleDisplayName: 'Google Seed' }),
+  'Google Seed',
+);
+
+assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: true, profile: {}, googleDisplayName: 'Google Seed' }), false);
+assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: null, googleDisplayName: 'Google Seed' }), false);
+assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: { displayName: 'Saved App Name' }, googleDisplayName: 'Google Seed' }), false);
+assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: false, profileLoading: false, profile: {}, googleDisplayName: 'Google Seed' }), false);
+assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: {}, googleDisplayName: 'Google Seed' }), true);
 
 console.log('PASS publicIdentity.logic.test');

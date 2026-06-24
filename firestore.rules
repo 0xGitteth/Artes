@@ -792,7 +792,6 @@ service cloud.firestore {
           'linkedCompanyLink',
           'quickProfilePreviewMode',
           'quickProfilePostIds',
-          'authProvider',
           'onboardingComplete',
           'onboardingStep',
           'fansCount',
@@ -810,10 +809,17 @@ service cloud.firestore {
         && request.resource.data.username.size() >= 3
         && request.resource.data.username.size() <= 20
         && request.resource.data.username.matches('^[a-z0-9]+$')
-        && request.resource.data.displayName is string
-        && request.resource.data.displayNameLower is string
-        && request.resource.data.displayNameLower.matches('^[a-z0-9 @._-]+$')
-        && (!('authProvider' in request.resource.data) || request.resource.data.authProvider is string)
+        && (
+          (
+            !('displayName' in request.resource.data)
+            && !('displayNameLower' in request.resource.data)
+          )
+          || (
+            request.resource.data.displayName is string
+            && request.resource.data.displayNameLower is string
+            && request.resource.data.displayNameLower.matches('^[a-z0-9 @._-]+$')
+          )
+        )
         && (!('onboardingComplete' in request.resource.data) || request.resource.data.onboardingComplete is bool)
         && (!('onboardingStep' in request.resource.data)
           || (

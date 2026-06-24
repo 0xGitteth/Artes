@@ -118,6 +118,7 @@ import { stableDiscoverOrder } from './utils/discoverOrdering';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
 import PostCreditDisplay from './components/PostCreditDisplay';
+import { normalizeModerationExamplesResponse } from './utils/moderationExamplesUi';
 import { isAnonymousDisplayOnlyShadowProfile, isClaimableTemporaryContributor } from './utils/postCredits';
 import { creditMatchesShadowProfile, getCanClaimShadowProfile } from './utils/shadowProfile';
 import SensitiveOverlay from './components/SensitiveOverlay';
@@ -5782,6 +5783,8 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [correctedThemes, setCorrectedThemes] = useState([]);
   const [correctedTriggers, setCorrectedTriggers] = useState([]);
   const [decisionResultStatus, setDecisionResultStatus] = useState('');
+  const [moderationExamplesState, setModerationExamplesState] = useState({ loading: false, error: '', examples: [] });
+  const moderationExamplesCacheRef = useRef(new Map());
   const reviewCasesListenerLogRef = useRef(null);
   const validDecisionReasonCodes = useMemo(
     () => new Set(MODERATOR_REASON_CODES_BY_ACTION[decision] || []),
@@ -5993,6 +5996,61 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
       })
       .catch(() => setSelectedUpload(null));
   }, [authReady, selectedCase, profileAgeVerified]);
+
+  useEffect(() => {
+    if (!selectedCase?.id || !authUser || !moderationApiBase || isModerator !== true) {
+      setModerationExamplesState({ loading: false, error: '', examples: [] });
+      return;
+    }
+    const cacheKey = selectedCase.id;
+    const cached = moderationExamplesCacheRef.current.get(cacheKey);
+    if (cached) {
+      setModerationExamplesState({ loading: false, error: '', examples: cached });
+      return;
+    }
+
+    let active = true;
+    const loadModerationExamples = async () => {
+      setModerationExamplesState({ loading: true, error: '', examples: [] });
+      try {
+        const token = await authUser.getIdToken();
+        const uploadId = selectedCase.uploadId || selectedCase.linkedUploadIds?.[0] || null;
+        const response = await fetch(`${moderationApiBase}/getModerationExamplesForCase`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            reviewCaseId: selectedCase.id,
+            ...(uploadId ? { uploadId } : {}),
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Kon eerdere beslissingen niet laden.');
+        }
+        const examples = normalizeModerationExamplesResponse(payload);
+        moderationExamplesCacheRef.current.set(cacheKey, examples);
+        if (active) {
+          setModerationExamplesState({ loading: false, error: '', examples });
+        }
+      } catch (error) {
+        if (active) {
+          setModerationExamplesState({
+            loading: false,
+            error: error?.message || 'Kon eerdere beslissingen niet laden.',
+            examples: [],
+          });
+        }
+      }
+    };
+
+    loadModerationExamples();
+    return () => {
+      active = false;
+    };
+  }, [selectedCase?.id, selectedCase?.uploadId, selectedCase?.linkedUploadIds, authUser, moderationApiBase, isModerator]);
 
   useEffect(() => {
     if (!selectedCaseId || !authUser || !moderationApiBase) return;
@@ -6650,6 +6708,55 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                       <p><span className="font-semibold">Policy versie:</span> {previousModeratorExample?.policyVersion || 'Onbekend'}</p>
                     </div>
                   )}
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3 text-xs text-slate-600 dark:text-slate-200 space-y-3">
+                    <div>
+                      <p className="font-semibold text-slate-700 dark:text-slate-100">Vergelijkbare eerdere beslissingen</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Alleen gesanitiseerde voorbeelden via de moderatie-endpoint.
+                      </p>
+                    </div>
+                    {moderationExamplesState.loading && (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Eerdere beslissingen laden…</p>
+                    )}
+                    {!moderationExamplesState.loading && moderationExamplesState.error && (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                        Vergelijkbare eerdere beslissingen zijn nu niet beschikbaar.
+                      </p>
+                    )}
+                    {!moderationExamplesState.loading && !moderationExamplesState.error && moderationExamplesState.examples.length === 0 && (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Nog geen vergelijkbare eerdere beslissingen gevonden.
+                      </p>
+                    )}
+                    {!moderationExamplesState.loading && !moderationExamplesState.error && moderationExamplesState.examples.length > 0 && (
+                      <div className="space-y-2">
+                        {moderationExamplesState.examples.map((example, index) => (
+                          <div key={example.exampleId || `moderation-example-${index}`} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/60 p-2 space-y-1">
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                              <span><span className="font-semibold">Einduitkomst:</span> {example.finalOutcome || 'Onbekend'}</span>
+                              {example.learningStatus && <span><span className="font-semibold">Learning:</span> {example.learningStatus}</span>}
+                              <span><span className="font-semibold">Match:</span> {example.fingerprintMatchType || 'Onbekend'}</span>
+                              {example.createdAt && <span><span className="font-semibold">Datum:</span> {formatDateTimeNl(example.createdAt) || 'Onbekend'}</span>}
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                              <p><span className="font-semibold">Actie:</span> {example.moderatorDecision?.action || 'Onbekend'}</p>
+                              <p><span className="font-semibold">Reason:</span> {example.moderatorDecision?.reasonCode || 'Onbekend'}</p>
+                              <p><span className="font-semibold">AI outcome:</span> {example.aiSnapshot?.outcome || 'Onbekend'}</p>
+                              <p><span className="font-semibold">AI classificatie:</span> {example.aiSnapshot?.classification || 'Onbekend'}</p>
+                              <p><span className="font-semibold">Should review:</span> {formatBooleanNl(example.aiSnapshot?.shouldReview)}</p>
+                              {example.analytics?.mismatchType && <p><span className="font-semibold">Mismatch:</span> {example.analytics.mismatchType}</p>}
+                            </div>
+                            <div className="space-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                              <p><span className="font-semibold">Applied triggers:</span> {formatListNl(example.aiSnapshot?.appliedTriggers)}</p>
+                              <p><span className="font-semibold">Suggested triggers:</span> {formatListNl(example.aiSnapshot?.suggestedTriggers)}</p>
+                              <p><span className="font-semibold">Forbidden reasons:</span> {formatListNl(example.aiSnapshot?.forbiddenReasons)}</p>
+                              <p><span className="font-semibold">Required themes:</span> {formatListNl(example.aiSnapshot?.requiredThemes)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
                     <button
                       type="button"

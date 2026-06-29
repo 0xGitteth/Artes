@@ -665,8 +665,9 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
   }
   payload.profileId = uid;
   payload.ownerUid = uid;
-  if (data.displayName !== undefined) {
-    payload.displayName = data.displayName;
+  const normalizedDisplayName = String(data.displayName || '').trim();
+  if (data.displayName !== undefined && normalizedDisplayName) {
+    payload.displayName = normalizedDisplayName;
   }
   if (data.username !== undefined) {
     payload.username = normalizeUsername(data.username);
@@ -713,8 +714,9 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
     payload.username = existingUsername || generateUsername(payload.displayName || existingPublic?.displayName, uid);
   }
 
-  if (payload.displayName === undefined && existingPublic?.displayName !== undefined) {
-    payload.displayName = existingPublic.displayName;
+  const existingDisplayName = String(existingPublic?.displayName || '').trim();
+  if (payload.displayName === undefined && existingDisplayName) {
+    payload.displayName = existingDisplayName;
   }
 
   if (payload.displayName === undefined && payload.username !== undefined) {
@@ -733,8 +735,8 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
     payload.headerImage = existingPublic.headerImage;
   }
 
-  if (payload.displayName !== undefined || existingPublic?.displayName !== undefined) {
-    payload.displayNameLower = String(payload.displayName || existingPublic?.displayName || '').toLowerCase();
+  if (payload.displayName !== undefined) {
+    payload.displayNameLower = String(payload.displayName).toLowerCase();
   }
 
   Object.keys(payload).forEach((key) => {
@@ -784,10 +786,12 @@ const cleanupLegacyPublicIdentityFieldsIfNeeded = async (db, uid, existingPublic
 const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   if (!uid) return;
   const payload = buildPublicProfilePayload(data, uid, existingPublic);
-  if (!Object.keys(payload).length) return;
+  const legacyCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
+  if (!Object.keys(payload).length && !Object.keys(legacyCleanupPatch).length) return;
 
-  if ((payload.displayName === undefined || payload.displayName === null) && existingPublic?.displayName !== undefined) {
-    payload.displayName = existingPublic.displayName;
+  const existingDisplayName = String(existingPublic?.displayName || '').trim();
+  if ((payload.displayName === undefined || payload.displayName === null) && existingDisplayName) {
+    payload.displayName = existingDisplayName;
   }
 
   const normalizedUsername = normalizeUsername(payload.username);
@@ -804,7 +808,7 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
     delete payload.displayNameLower;
   }
 
-  Object.assign(payload, getLegacyPublicIdentityCleanupPatch(existingPublic));
+  Object.assign(payload, legacyCleanupPatch);
   
   const finalPayload = {
     uid,

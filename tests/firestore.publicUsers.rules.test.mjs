@@ -70,6 +70,13 @@ async function run() {
         authProvider: 'google.com',
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'publicUsers', 'legacy_cleanup_only_user'), {
+        uid: 'legacy_cleanup_only_user',
+        username: 'legacycleanuponly',
+        email: 'cleanup-only@example.com',
+        authProvider: 'google.com',
+        updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'profiles', 'active_agency_profile'), {
         type: 'agency',
         displayName: 'Active Agency Profile',
@@ -944,6 +951,13 @@ async function run() {
       updateDoc(doc(publicUserDbFor('legacy_email_auth_user'), 'publicUsers', 'legacy_email_auth_user'), {
         displayName: 'Legacy Cleaned Name',
         displayNameLower: 'legacy cleaned name',
+        email: deleteField(),
+        authProvider: deleteField(),
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(doc(publicUserDbFor('legacy_cleanup_only_user'), 'publicUsers', 'legacy_cleanup_only_user'), {
         email: deleteField(),
         authProvider: deleteField(),
       }),

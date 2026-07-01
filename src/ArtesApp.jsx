@@ -3475,10 +3475,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         return nextStep;
       });
       const googleDisplayName = String(authUser.displayName || '').trim();
+      const publicProfile = Array.isArray(users)
+        ? users.find((entry) => entry?.uid === (profile?.uid || authUser?.uid))
+        : null;
       const includeGoogleDisplayName = shouldIncludeGoogleDisplayNameSeed({
         isGoogleUser,
         profileLoading,
         profile,
+        publicProfile,
         googleDisplayName,
       });
       if (syncedGoogleProfile && (!includeGoogleDisplayName || syncedGoogleDisplayNameSeed)) return;
@@ -3512,6 +3516,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       profileLoading,
       syncedGoogleDisplayNameSeed,
       syncedGoogleProfile,
+      users,
     ]);
 
     useEffect(() => {

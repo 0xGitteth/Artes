@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../src/firebase.js', import.meta.url), 'utf8');
+const appSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 'utf8');
 const match = source.match(/export const buildPublicProfilePayload = \(data = \{}, uid, existingPublic = \{}\) => \{[\s\S]*?\n\};\n\n\nconst LEGACY_PUBLIC_IDENTITY_FIELDS/);
 assert.ok(match, 'buildPublicProfilePayload helper exists');
 const helper = match[0];
@@ -23,5 +24,6 @@ assert.match(source, /const LEGACY_PUBLIC_IDENTITY_FIELDS = \[\n  'email',\n  'a
 assert.match(source, /const legacyCleanupPatch = getLegacyPublicIdentityCleanupPatch\(existingPublic\);\n\s+if \(!Object\.keys\(payload\)\.length && !Object\.keys\(legacyCleanupPatch\)\.length\) return;/, 'cleanup-only publicUsers writes are not skipped');
 assert.match(source, /Object\.assign\(payload, legacyCleanupPatch\);/, 'writePublicUserProfile deletes legacy public identity fields before writing');
 assert.match(source, /const resolveInitialPublicDisplayNameSeed = \(user, providerId = resolveAuthProvider\(user\)\) => \{\n\s+if \(providerId === 'google\.com'\) return String\(user\?\.displayName \|\| ''\)\.trim\(\);\n\s+return '';\n\};/, 'Google profile name is initial seed only');
+assert.match(appSource, /const includeGoogleDisplayName = shouldIncludeGoogleDisplayNameSeed\(\{\n\s+isGoogleUser,\n\s+profileLoading,\n\s+profile,\n\s+publicProfile,\n\s+googleDisplayName,\n\s+\}\);/, 'Google sync displayName seed is guarded by existing publicUsers displayName');
 
 console.log('PASS firebase.publicIdentitySync.client.test');

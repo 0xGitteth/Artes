@@ -65,11 +65,13 @@ export const shouldIncludeGoogleDisplayNameSeed = ({
   isGoogleUser = false,
   profileLoading = true,
   profile = null,
+  publicProfile = null,
   googleDisplayName = '',
 } = {}) => Boolean(
   isGoogleUser
   && !profileLoading
   && profile
   && !normalizeSeedDisplayName(profile?.displayName)
+  && !normalizeSeedDisplayName(publicProfile?.displayName)
   && normalizeSeedDisplayName(googleDisplayName),
 );

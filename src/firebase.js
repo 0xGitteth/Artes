@@ -1759,6 +1759,16 @@ export const ensureUserProfile = async (user) => {
     }
     const displayName = updates.displayName || data.displayName || '';
     const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
+    let existingPublic = {};
+    try {
+      const existingPublicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', user.uid));
+      existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
+    } catch (error) {
+      if (!isPermissionDenied(error)) throw error;
+      if (import.meta.env.DEV) {
+        console.log('ensureUserProfile skipped public profile lookup: permission denied');
+      }
+    }
     try {
       await writePublicUserProfile(
         user.uid,
@@ -1768,7 +1778,7 @@ export const ensureUserProfile = async (user) => {
           username,
           photoURL: data.photoURL ?? user.photoURL ?? null,
         },
-        {},
+        existingPublic,
       );
     } catch (error) {
       if (!isPermissionDenied(error)) throw error;

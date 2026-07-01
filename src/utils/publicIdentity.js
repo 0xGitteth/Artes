@@ -1,5 +1,21 @@
 const toCleanString = (value) => String(value || '').trim();
 
+const PUBLIC_DISPLAY_NAME_PLACEHOLDERS = new Set([
+  'onbekende maker',
+  'gebruiker',
+  'artes gebruiker',
+  'nieuwe maker',
+]);
+
+export const isPublicDisplayNamePlaceholder = (value) => (
+  PUBLIC_DISPLAY_NAME_PLACEHOLDERS.has(toCleanString(value).toLowerCase())
+);
+
+export const normalizeSeedDisplayName = (value) => {
+  const cleaned = toCleanString(value);
+  return cleaned && !isPublicDisplayNamePlaceholder(cleaned) ? cleaned : '';
+};
+
 export const resolvePublicDisplayName = (publicProfile = null) => {
   const displayName = toCleanString(publicProfile?.displayName);
   if (displayName) return displayName;
@@ -16,16 +32,16 @@ export const resolvePublicDisplayNameSeed = ({
   diditDisplayName = '',
   googleDisplayName = '',
 } = {}) => {
-  const appValue = toCleanString(appPublicDisplayName);
+  const appValue = normalizeSeedDisplayName(appPublicDisplayName);
   if (appValue) return appValue;
 
-  const publicValue = toCleanString(publicProfile?.displayName);
+  const publicValue = normalizeSeedDisplayName(publicProfile?.displayName);
   if (publicValue) return publicValue;
 
-  const diditSeed = toCleanString(diditDisplayName);
+  const diditSeed = normalizeSeedDisplayName(diditDisplayName);
   if (diditSeed) return diditSeed;
 
-  return toCleanString(googleDisplayName);
+  return normalizeSeedDisplayName(googleDisplayName);
 };
 
 export const resolveOnboardingDisplayNameState = ({
@@ -54,6 +70,6 @@ export const shouldIncludeGoogleDisplayNameSeed = ({
   isGoogleUser
   && !profileLoading
   && profile
-  && !toCleanString(profile?.displayName)
-  && toCleanString(googleDisplayName),
+  && !normalizeSeedDisplayName(profile?.displayName)
+  && normalizeSeedDisplayName(googleDisplayName),
 );

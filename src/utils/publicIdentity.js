@@ -73,5 +73,6 @@ export const shouldIncludeGoogleDisplayNameSeed = ({
   && profile
   && !normalizeSeedDisplayName(profile?.displayName)
   && !normalizeSeedDisplayName(publicProfile?.displayName)
+  && !normalizeSeedDisplayName(toCleanString(publicProfile?.username).replace(/^@+/, ''))
   && normalizeSeedDisplayName(googleDisplayName),
 );

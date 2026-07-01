@@ -78,8 +78,10 @@ assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoa
 assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: null, googleDisplayName: 'Google Seed' }), false);
 assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: { displayName: 'Saved App Name' }, googleDisplayName: 'Google Seed' }), false);
 assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: {}, publicProfile: { displayName: 'Saved Public Name' }, googleDisplayName: 'Google Seed' }), false);
+assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: {}, publicProfile: { username: '@savedhandle' }, googleDisplayName: 'Google Seed' }), false);
 assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: { displayName: 'Onbekende maker' }, googleDisplayName: 'Google Seed' }), true);
 assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: { displayName: 'Onbekende maker' }, publicProfile: { displayName: 'Gebruiker' }, googleDisplayName: 'Google Seed' }), true);
+assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: { displayName: 'Onbekende maker' }, publicProfile: { displayName: 'Gebruiker', username: 'Gebruiker' }, googleDisplayName: 'Google Seed' }), true);
 assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: false, profileLoading: false, profile: {}, googleDisplayName: 'Google Seed' }), false);
 assert.equal(shouldIncludeGoogleDisplayNameSeed({ isGoogleUser: true, profileLoading: false, profile: {}, googleDisplayName: 'Google Seed' }), true);
 

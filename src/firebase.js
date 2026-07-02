@@ -553,10 +553,9 @@ export const reloadCurrentUser = async () => {
   return auth.currentUser;
 };
 
-const resolveDisplayName = (user) => {
-  if (user?.displayName) return user.displayName;
-  if (user?.email) return user.email.split('@')[0];
-  return 'Artes gebruiker';
+const resolveInitialPublicDisplayNameSeed = (user, providerId = resolveAuthProvider(user)) => {
+  if (providerId === 'google.com') return String(user?.displayName || '').trim();
+  return '';
 };
 
 const normalizeUsername = (value) => String(value || '')
@@ -632,7 +631,7 @@ const sanitizePublicProfileField = (key, value) => {
   return value;
 };
 
-const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
+export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
   const hasRequestedPublicField = [
     'uid',
     'profileId',
@@ -666,8 +665,9 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
   }
   payload.profileId = uid;
   payload.ownerUid = uid;
-  if (data.displayName !== undefined) {
-    payload.displayName = data.displayName;
+  const normalizedDisplayName = String(data.displayName || '').trim();
+  if (data.displayName !== undefined && normalizedDisplayName) {
+    payload.displayName = normalizedDisplayName;
   }
   if (data.username !== undefined) {
     payload.username = normalizeUsername(data.username);
@@ -714,8 +714,13 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     payload.username = existingUsername || generateUsername(payload.displayName || existingPublic?.displayName, uid);
   }
 
-  if (payload.displayName === undefined && existingPublic?.displayName !== undefined) {
-    payload.displayName = existingPublic.displayName;
+  const existingDisplayName = String(existingPublic?.displayName || '').trim();
+  if (payload.displayName === undefined && existingDisplayName) {
+    payload.displayName = existingDisplayName;
+  }
+
+  if (payload.displayName === undefined && payload.username !== undefined) {
+    delete payload.displayName;
   }
 
   if (payload.avatar === undefined && existingPublic?.avatar !== undefined) {
@@ -730,7 +735,9 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
     payload.headerImage = existingPublic.headerImage;
   }
 
-  payload.displayNameLower = String(payload.displayName || existingPublic?.displayName || '').toLowerCase();
+  if (payload.displayName !== undefined) {
+    payload.displayNameLower = String(payload.displayName).toLowerCase();
+  }
 
   Object.keys(payload).forEach((key) => {
     if (!PUBLIC_USER_ALLOWED_FIELDS.includes(key)) {
@@ -742,13 +749,34 @@ const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
 };
 
 
-const cleanupLegacyPublicEmailIfNeeded = async (db, uid, existingPublic = {}) => {
-  if (!uid || !existingPublic || !Object.prototype.hasOwnProperty.call(existingPublic, 'email')) {
-    return false;
-  }
+const LEGACY_PUBLIC_IDENTITY_FIELDS = [
+  'email',
+  'authProvider',
+  'legalName',
+  'didit',
+  'providerData',
+  'authDisplayName',
+  'firebaseDisplayName',
+  'googleDisplayName',
+];
+
+const getLegacyPublicIdentityCleanupPatch = (existingPublic = {}, deleteValue = deleteField()) => {
+  const cleanupPatch = {};
+  LEGACY_PUBLIC_IDENTITY_FIELDS.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(existingPublic || {}, field)) {
+      cleanupPatch[field] = deleteValue;
+    }
+  });
+  return cleanupPatch;
+};
+
+const cleanupLegacyPublicIdentityFieldsIfNeeded = async (db, uid, existingPublic = {}) => {
+  if (!uid || !existingPublic) return false;
+  const cleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
+  if (!Object.keys(cleanupPatch).length) return false;
 
   await updateDoc(doc(db, 'publicUsers', uid), {
-    email: deleteField(),
+    ...cleanupPatch,
     updatedAt: serverTimestamp(),
   });
 
@@ -758,10 +786,12 @@ const cleanupLegacyPublicEmailIfNeeded = async (db, uid, existingPublic = {}) =>
 const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   if (!uid) return;
   const payload = buildPublicProfilePayload(data, uid, existingPublic);
-  if (!Object.keys(payload).length) return;
+  const legacyCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
+  if (!Object.keys(payload).length && !Object.keys(legacyCleanupPatch).length) return;
 
-  if (payload.displayName === undefined || payload.displayName === null) {
-    payload.displayName = existingPublic?.displayName || '';
+  const existingDisplayName = String(existingPublic?.displayName || '').trim();
+  if ((payload.displayName === undefined || payload.displayName === null) && existingDisplayName) {
+    payload.displayName = existingDisplayName;
   }
 
   const normalizedUsername = normalizeUsername(payload.username);
@@ -772,7 +802,13 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
     payload.username = normalizedUsername;
   }
 
-  payload.displayNameLower = String(payload.displayName || '').toLowerCase();
+  if (payload.displayName !== undefined) {
+    payload.displayNameLower = String(payload.displayName || '').toLowerCase();
+  } else {
+    delete payload.displayNameLower;
+  }
+
+  Object.assign(payload, legacyCleanupPatch);
   
   const finalPayload = {
     uid,
@@ -1217,12 +1253,8 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const publicPatch = buildPublicProfilePayload(safeData, resolvedUid, existingPublic);
-  const hadLegacyPublicEmail = Object.prototype.hasOwnProperty.call(existingPublic || {}, 'email');
-  if (hadLegacyPublicEmail) {
-    publicPatch.email = deleteField();
-  } else {
-    delete publicPatch.email;
-  }
+  const legacyPublicIdentityCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
+  Object.assign(publicPatch, legacyPublicIdentityCleanupPatch);
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -1264,29 +1296,12 @@ export const updateUserProfile = async (uid, data) => {
     throw new Error('Profiel opslaan mislukt: private profiel kon niet worden bijgewerkt.');
   }
 
-  let removedLegacyEmail = false;
-  try {
-    removedLegacyEmail = await cleanupLegacyPublicEmailIfNeeded(getFirebaseDb(), resolvedUid, existingPublic);
-  } catch (e) {
-    console.error(
-      '[updateUserProfile] PUBLIC USERS LEGACY EMAIL CLEANUP FAILED',
-      e.code,
-      e.message,
-      {
-        uid: resolvedUid,
-        path: publicDocPath,
-        keys: ['email', 'updatedAt'],
-      }
-    );
-    throw new Error('Profiel opslaan mislukt: legacy public profiel data kon niet worden opgeschoond.');
-  }
-
   if (import.meta.env.DEV) {
     console.log('[updateUserProfile] PUBLIC WRITE', {
       uid: resolvedUid,
       path: publicDocPath,
       keys: Object.keys(publicPatch).sort(),
-      removedLegacyEmail: hadLegacyPublicEmail,
+      legacyIdentityCleanupKeys: Object.keys(legacyPublicIdentityCleanupPatch).sort(),
     });
   }
 
@@ -1703,7 +1718,7 @@ export const ensureUserProfile = async (user) => {
   if (!canAccessFirestore({ authReady: authStateReady, user }) || !user?.uid) return null;
   const providerId = resolveAuthProvider(user);
   const defaultOnboardingStep = providerId === 'google.com' ? 2 : 1;
-  const resolvedDisplayName = resolveDisplayName(user);
+  const resolvedDisplayName = resolveInitialPublicDisplayNameSeed(user, providerId);
   const resolvedEmail = user.email ?? null;
   const writeAllowed = await canWriteUserProfile(user);
   const snapshot = await fetchUserProfile(user.uid, { authReady: authStateReady, user });
@@ -1742,18 +1757,28 @@ export const ensureUserProfile = async (user) => {
         return data;
       }
     }
-    const displayName = updates.displayName || data.displayName || resolvedDisplayName;
+    const displayName = updates.displayName || data.displayName || '';
     const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
+    let existingPublic = {};
+    try {
+      const existingPublicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', user.uid));
+      existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
+    } catch (error) {
+      if (!isPermissionDenied(error)) throw error;
+      if (import.meta.env.DEV) {
+        console.log('ensureUserProfile skipped public profile lookup: permission denied');
+      }
+    }
     try {
       await writePublicUserProfile(
         user.uid,
         {
           ...data,
-          displayName,
+          ...(displayName ? { displayName } : {}),
           username,
           photoURL: data.photoURL ?? user.photoURL ?? null,
         },
-        {},
+        existingPublic,
       );
     } catch (error) {
       if (!isPermissionDenied(error)) throw error;
@@ -1802,7 +1827,7 @@ export const ensureUserProfile = async (user) => {
   try {
     await writePublicUserProfile(user.uid, {
       username,
-      displayName: resolvedDisplayName,
+      ...(resolvedDisplayName ? { displayName: resolvedDisplayName } : {}),
       photoURL: user.photoURL ?? null,
     });
   } catch (error) {

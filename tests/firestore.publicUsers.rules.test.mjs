@@ -53,6 +53,30 @@ async function run() {
         fanOfCount: 2,
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'publicUsers', 'legacy_auth_provider_user'), {
+        uid: 'legacy_auth_provider_user',
+        username: 'legacyauthprovider',
+        displayName: 'Legacy Auth Provider',
+        displayNameLower: 'legacy auth provider',
+        authProvider: 'google.com',
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'publicUsers', 'legacy_email_auth_user'), {
+        uid: 'legacy_email_auth_user',
+        username: 'legacyemailauth',
+        displayName: 'Legacy Email Auth',
+        displayNameLower: 'legacy email auth',
+        email: 'legacy-auth@example.com',
+        authProvider: 'google.com',
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'publicUsers', 'legacy_cleanup_only_user'), {
+        uid: 'legacy_cleanup_only_user',
+        username: 'legacycleanuponly',
+        email: 'cleanup-only@example.com',
+        authProvider: 'google.com',
+        updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'profiles', 'active_agency_profile'), {
         type: 'agency',
         displayName: 'Active Agency Profile',
@@ -436,6 +460,7 @@ async function run() {
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
     const codexDevDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, email_verified: false }).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
+    const publicUserDbFor = (uid) => authedContext(testEnv, uid, { email_verified: true }).firestore();
     const moderatorDb = authedContext(testEnv, 'mod_1', { email_verified: true, email: 'mod_1@example.com' }).firestore();
     const agencyOwnerDb = authedContext(testEnv, 'agency_owner', { email_verified: true }).firestore();
     const companyOwnerDb = authedContext(testEnv, 'company_owner', { email_verified: true }).firestore();
@@ -845,6 +870,137 @@ async function run() {
         displayNameLower: 'owner no uid',
         updatedAt: new Date(),
       }, { merge: true }),
+    );
+
+
+    await assertSucceeds(
+      setDoc(doc(publicUserDbFor('ownerusernameonly'), 'publicUsers', 'ownerusernameonly'), {
+        uid: 'ownerusernameonly',
+        profileId: 'ownerusernameonly',
+        ownerUid: 'ownerusernameonly',
+        username: 'ownerusernameonly',
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertSucceeds(
+      setDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        username: 'owner1',
+        displayName: 'Owner With Display Name',
+        displayNameLower: 'owner with display name',
+        updatedAt: new Date(),
+      }, { merge: true }),
+    );
+
+    await assertFails(
+      setDoc(doc(publicUserDbFor('displaynamemissinglower'), 'publicUsers', 'displaynamemissinglower'), {
+        username: 'missinglower',
+        displayName: 'Missing Lower',
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertFails(
+      setDoc(doc(publicUserDbFor('displaylowermissingname'), 'publicUsers', 'displaylowermissingname'), {
+        username: 'missingname',
+        displayNameLower: 'missing name',
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertFails(
+      setDoc(doc(publicUserDbFor('publicemailleak'), 'publicUsers', 'publicemailleak'), {
+        username: 'publicemailleak',
+        email: 'private@example.com',
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertFails(
+      setDoc(doc(publicUserDbFor('publiclegalleak'), 'publicUsers', 'publiclegalleak'), {
+        username: 'publiclegalleak',
+        legalName: 'Private Legal Name',
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertFails(
+      setDoc(doc(publicUserDbFor('publicdiditleak'), 'publicUsers', 'publicdiditleak'), {
+        username: 'publicdiditleak',
+        didit: { status: 'approved' },
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertFails(
+      setDoc(doc(publicUserDbFor('providerdataleak'), 'publicUsers', 'providerdataleak'), {
+        username: 'providerdataleak',
+        providerData: [{ providerId: 'google.com', displayName: 'Google Name' }],
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(doc(publicUserDbFor('legacy_auth_provider_user'), 'publicUsers', 'legacy_auth_provider_user'), {
+        username: 'legacyauthclean',
+        authProvider: deleteField(),
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(doc(publicUserDbFor('legacy_email_auth_user'), 'publicUsers', 'legacy_email_auth_user'), {
+        displayName: 'Legacy Cleaned Name',
+        displayNameLower: 'legacy cleaned name',
+        email: deleteField(),
+        authProvider: deleteField(),
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(doc(publicUserDbFor('legacy_cleanup_only_user'), 'publicUsers', 'legacy_cleanup_only_user'), {
+        email: deleteField(),
+        authProvider: deleteField(),
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(publicUserDbFor('legacy_auth_provider_user'), 'publicUsers', 'legacy_auth_provider_user'), {
+        username: 'legacyauthbad',
+        authProvider: 'google.com',
+      }),
+    );
+
+    await assertFails(
+      setDoc(doc(publicUserDbFor('authproviderleak'), 'publicUsers', 'authproviderleak'), {
+        username: 'authproviderleak',
+        authProvider: 'google.com',
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertFails(
+      setDoc(doc(otherDb, 'publicUsers', ownerUid), {
+        username: 'otherowner',
+        updatedAt: new Date(),
+      }),
+    );
+
+    await assertFails(
+      updateDoc(doc(otherDb, 'publicUsers', ownerUid), {
+        username: 'otherowner',
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        username: 'ownerprime',
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(doc(publicUserDbFor('ownerusernameonly'), 'publicUsers', 'ownerusernameonly'), {
+        username: 'ownerusernameonly2',
+      }),
     );
 
     await assertFails(

@@ -11001,7 +11001,7 @@ function CommunityTopicDetail({ communityId, topicId, onBack, authUser, currentP
 }
 function ChallengeDetail({ setView, posts, onPostClick, challenge, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
    const challengeData = challenge || DEFAULT_CHALLENGE_CONFIG;
-   const visiblePosts = useMemo(
+   const challengeVisiblePosts = useMemo(
     () => posts.filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'),
     [posts, triggerVisibility],
    );
@@ -11014,7 +11014,7 @@ function ChallengeDetail({ setView, posts, onPostClick, challenge, triggerVisibi
             <p className="text-sm text-amber-800 dark:text-amber-200/80">{challengeData.description}</p>
          </div>
          <AdaptivePhotoGrid
-           posts={visiblePosts}
+           posts={challengeVisiblePosts}
            onPostClick={onPostClick}
            getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
            renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
@@ -11181,7 +11181,7 @@ function ExternalProfilePreviewModal({ profileId, seedProfile, ownerUid, onClose
 
 function PublicExternalProfile({ profileId, seedProfile, currentUserId, posts = [], onPostClick, triggerVisibility, revealedSensitivePostsById, onRevealSensitivePost }) {
   const { loading, profile: externalProfile, error } = usePublicExternalProfile(profileId, seedProfile, currentUserId);
-  const visiblePosts = useMemo(() => (posts || [])
+  const externalProfilePosts = useMemo(() => (posts || [])
     .filter((post) => String(post?.authorProfileId || '').trim() === String(profileId || '').trim())
     .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed'), [posts, profileId, triggerVisibility]);
 
@@ -11220,11 +11220,11 @@ function PublicExternalProfile({ profileId, seedProfile, currentUserId, posts = 
                 <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">Profiel</p>
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Publicaties</h2>
               </div>
-              <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{visiblePosts.length} totaal</span>
+              <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{externalProfilePosts.length} totaal</span>
             </div>
-            {visiblePosts.length ? (
+            {externalProfilePosts.length ? (
               <AdaptivePhotoGrid
-                posts={visiblePosts}
+                posts={externalProfilePosts}
                 onPostClick={onPostClick}
                 getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
                 renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}

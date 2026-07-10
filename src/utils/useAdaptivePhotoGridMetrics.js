@@ -39,7 +39,8 @@ export const getAdaptiveGridMetrics = (element, { columnCountMode = 'css' } = {}
     ? getAdaptivePhotoGridColumnCountForWidth(measuredWidth, cssColumnCount)
     : cssColumnCount;
   const fallbackColumnWidth = Math.max(1, (measuredWidth - (columnGap * Math.max(0, columnCount - 1))) / columnCount);
-  const columnWidth = columns[0] || fallbackColumnWidth;
+  const canUseParsedColumnWidth = columnCountMode !== 'width' || columnCount === cssColumnCount;
+  const columnWidth = (canUseParsedColumnWidth && columns[0]) || fallbackColumnWidth;
 
   return { columnWidth, columnGap, rowHeight, rowGap, columnCount, measuredWidth };
 };

@@ -189,17 +189,20 @@ assert.equal(getAdaptivePhotoGridColumnCountForWidth(1280, 20), 24, 'Wide deskto
 assert.equal(getAdaptivePhotoGridColumnCountForWidth(0, 20), 20, 'Existing valid metrics should be kept when no measured width is available');
 assert.equal(getAdaptivePhotoGridTemplateColumns(20), 'repeat(20, minmax(0, 1fr))', 'Synced grid CSS should be rendered from the same column count used by masonry');
 const previousWindow = globalThis.window;
-const metricsElement = {
-  getBoundingClientRect: () => ({ width: 992 }),
+const setMockGridMetricsWindow = ({ columnCount, columnWidth, measuredWidth }) => {
+  globalThis.window = {
+    getComputedStyle: () => ({
+      gridTemplateColumns: Array.from({ length: columnCount }, () => `${columnWidth}px`).join(' '),
+      columnGap: '8px',
+      rowGap: '4px',
+      gridAutoRows: '4px',
+    }),
+  };
+  return {
+    getBoundingClientRect: () => ({ width: measuredWidth }),
+  };
 };
-globalThis.window = {
-  getComputedStyle: () => ({
-    gridTemplateColumns: Array.from({ length: 24 }, () => '34px').join(' '),
-    columnGap: '8px',
-    rowGap: '4px',
-    gridAutoRows: '4px',
-  }),
-};
+const metricsElement = setMockGridMetricsWindow({ columnCount: 24, columnWidth: 34, measuredWidth: 992 });
 assert.equal(
   getAdaptiveGridMetrics(metricsElement).columnCount,
   24,
@@ -210,6 +213,27 @@ assert.equal(
   16,
   'Width-derived adaptive grid metrics should only be used when explicitly requested',
 );
+const staleCssElement = setMockGridMetricsWindow({ columnCount: 12, columnWidth: 56, measuredWidth: 760 });
+const staleCssModeMetrics = getAdaptiveGridMetrics(staleCssElement);
+const staleWidthModeMetrics = getAdaptiveGridMetrics(staleCssElement, { columnCountMode: 'width' });
+const expectedSixteenColumnWidth = (760 - (8 * 15)) / 16;
+assert.equal(staleCssModeMetrics.columnCount, 12, 'CSS mode should keep the CSS-derived 12-column count');
+assert.equal(staleCssModeMetrics.columnWidth, 56, 'CSS mode should keep the parsed 12-column CSS track width');
+assert.equal(staleWidthModeMetrics.columnCount, 16, 'Width mode should resolve the measured width to 16 columns');
+assert.equal(
+  staleWidthModeMetrics.columnWidth,
+  expectedSixteenColumnWidth,
+  'Width mode should recalculate columnWidth when the resolved column count differs from stale CSS tracks',
+);
+assert.notEqual(
+  staleWidthModeMetrics.columnWidth,
+  staleCssModeMetrics.columnWidth,
+  'Width mode should not reuse stale CSS track width when the column counts differ',
+);
+const matchingWidthElement = setMockGridMetricsWindow({ columnCount: 16, columnWidth: 40, measuredWidth: 760 });
+const matchingWidthMetrics = getAdaptiveGridMetrics(matchingWidthElement, { columnCountMode: 'width' });
+assert.equal(matchingWidthMetrics.columnCount, 16, 'Width mode should keep a matching CSS-derived column count');
+assert.equal(matchingWidthMetrics.columnWidth, 40, 'Width mode may reuse parsed CSS track width when CSS count already matches width-derived count');
 globalThis.window = previousWindow;
 const discoverUserLayout = getAdaptivePhotoGridItemLayout(null, { ...desktop24Metrics, aspectRatio: 1, columnSpan: desktopUserSpan });
 assert.equal(discoverUserLayout.aspectRatio, 1, 'Discover user cards should keep square media');

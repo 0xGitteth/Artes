@@ -33,6 +33,7 @@ import {
   isManagedProfileSetupRequired,
   getPreviousManagedProfileForSwipe,
   shouldShowManagedProfileHeaderSwitcher,
+  shouldIgnoreManagedProfileHeaderSwipeStart,
   shouldShowManagedProfileSetupProfile,
   normalizeRequestedActiveProfileId,
   readStoredActiveProfileId,
@@ -252,6 +253,31 @@ assert.deepEqual(
   { showDots: false, showActiveProfileCard: false },
   'Header switcher presentation hides dots when only one managed profile is available',
 );
+
+const mockClosestTarget = (matchedSelector = '') => ({
+  closest: (selector) => (selector.includes(matchedSelector) ? { matchedSelector } : null),
+});
+assert.equal(
+  shouldIgnoreManagedProfileHeaderSwipeStart(mockClosestTarget('[data-profile-header-swipe-ignore="true"]')),
+  true,
+  'Header swipe ignores touches that start inside marked horizontal scroll regions',
+);
+assert.equal(
+  shouldIgnoreManagedProfileHeaderSwipeStart(mockClosestTarget('[data-profile-switcher-interactive="true"]')),
+  true,
+  'Header swipe ignores touches that start inside the dot switcher',
+);
+assert.equal(
+  shouldIgnoreManagedProfileHeaderSwipeStart(mockClosestTarget('button')),
+  true,
+  'Header swipe ignores touches that start inside interactive controls',
+);
+assert.equal(
+  shouldIgnoreManagedProfileHeaderSwipeStart({ closest: () => null }),
+  false,
+  'Header swipe is still allowed from the normal hero background',
+);
+
 assert.equal(
   getManagedProfileHeaderSwipeDirection({ deltaX: -80, deltaY: 12 }),
   'next',

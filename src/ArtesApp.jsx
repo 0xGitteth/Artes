@@ -167,6 +167,7 @@ import {
   getExternalProfileIdFromView,
   getManagedProfileHeaderSwipeDirection,
   getManagedProfileHeaderSwitcherPresentation,
+  shouldIgnoreManagedProfileHeaderSwipeStart,
   getManagedProfilePrefillDisplayName,
   getManagedProfileSetupActionLabel,
   getManagedProfileSetupDescription,
@@ -5276,7 +5277,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
     if (!showManagedProfileSwitcher) return;
     const touch = event.touches?.[0];
     if (!touch) return;
-    const startedOnInteractiveElement = Boolean(event.target?.closest?.('button, a, input, select, textarea, [role=button], [data-profile-switcher-interactive="true"]'));
+    const startedOnInteractiveElement = shouldIgnoreManagedProfileHeaderSwipeStart(event.target);
     profileHeaderTouchStartRef.current = {
       x: touch.clientX,
       y: touch.clientY,
@@ -5441,7 +5442,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
            )}
            
            {managedProfileSwitcherPresentation.showDots ? (
-             <div className="absolute inset-x-0 top-4 z-30 flex items-center justify-center px-20 md:top-6" data-profile-switcher-interactive="true">
+             <div className="absolute left-3 right-36 top-4 z-30 flex items-center justify-center min-[380px]:inset-x-0 min-[380px]:px-20 md:top-6" data-profile-switcher-interactive="true">
                <div className="flex items-center justify-center gap-2" aria-label="Profiel kiezen">
                  {switcherProfiles.map((switcherProfile, index) => {
                    const switcherProfileId = getManagedProfileId(switcherProfile);
@@ -5473,7 +5474,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
               <div className="mx-auto flex max-h-[min(370px,calc(100dvh-5rem))] w-full max-w-4xl flex-col items-center overflow-hidden md:max-h-[440px]">
                 <div className="w-full shrink-0">
                   <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{headerDisplayName}</h1>
-                  <div className="no-scrollbar -mx-2 flex max-w-full justify-center gap-2 overflow-x-auto px-2 pb-1">
+                  <div className="no-scrollbar -mx-2 flex max-w-full justify-center gap-2 overflow-x-auto px-2 pb-1" data-profile-header-swipe-ignore="true">
                      {headerRoleLabels.map((label) => (
                        <span key={label} className="shrink-0 whitespace-nowrap text-xs font-bold uppercase tracking-widest text-blue-900 dark:text-white bg-white/80 dark:bg-white/10 px-3 py-1 rounded-full backdrop-blur border border-blue-200/60 dark:border-white/20 shadow-sm">
                          {label}
@@ -5560,7 +5561,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                     </div>
                   )}
                   {themes && themes.length > 0 ? (
-                    <div className="no-scrollbar -mx-5 flex w-[calc(100%+2.5rem)] max-w-[calc(100%+2.5rem)] gap-2 overflow-x-auto px-5 pb-1">
+                    <div className="no-scrollbar -mx-5 flex w-[calc(100%+2.5rem)] max-w-[calc(100%+2.5rem)] gap-2 overflow-x-auto px-5 pb-1" data-profile-header-swipe-ignore="true">
                       {themes.map((theme) => (
                         <span key={theme} className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
                           {theme}

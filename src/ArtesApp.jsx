@@ -13410,22 +13410,25 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
 
     const navItemClass = "group flex min-h-[3.75rem] w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/70 active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30";
     const navIconClass = "h-4 w-4 shrink-0 text-slate-400 transition group-hover:text-blue-600 dark:group-hover:text-blue-200";
+    const navDangerTitleClass = "text-rose-600 dark:text-rose-300";
+    const navNormalTitleClass = "text-slate-900 dark:text-white";
+    const navDangerIconClass = "h-4 w-4 shrink-0 text-rose-500 transition group-hover:text-rose-600 dark:text-rose-300 dark:group-hover:text-rose-200";
 
     const renderNavButton = ({ title, description, icon: Icon, onClick, danger = false, dot = false }) => (
-      <button type="button" onClick={onClick} className={`${navItemClass} ${danger ? 'border-rose-100 text-rose-600 hover:border-rose-200 hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-300 dark:hover:bg-rose-950/30' : ''}`}>
+      <button type="button" onClick={onClick} className={`${navItemClass} ${danger ? 'border-rose-100 hover:border-rose-200 hover:bg-rose-50 dark:border-rose-900/50 dark:hover:bg-rose-950/30' : ''}`}>
         <span className="min-w-0">
-          <span className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+          <span className={`flex items-center gap-2 text-sm font-bold ${danger ? navDangerTitleClass : navNormalTitleClass}`}>
             {title}
             {dot && <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />}
           </span>
           {description && <span className="mt-0.5 block text-xs leading-relaxed text-slate-500 dark:text-slate-300">{description}</span>}
         </span>
-        <Icon className={navIconClass} />
+        <Icon className={danger ? navDangerIconClass : navIconClass} />
       </button>
     );
 
     const renderHome = () => (
-      <div className="flex min-h-0 flex-1 flex-col gap-5 px-3 pb-4 md:px-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 px-3 pt-3 pb-4 md:px-5 md:pt-5">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-bold text-xl">Instellingen</h3>
@@ -13464,13 +13467,13 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
           )}
         </div>
         <div className="border-t border-slate-200 pt-3 dark:border-slate-800">
-          {renderNavButton({ title: 'Log uit', description: 'Accountactie', icon: LogOut, onClick: onLogout, danger: true })}
+          {renderNavButton({ title: 'Log uit', icon: LogOut, onClick: onLogout, danger: true })}
         </div>
       </div>
     );
 
     const renderHeader = (title) => (
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 md:px-5">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 md:px-5">
         <button type="button" onClick={goHome} className="inline-flex items-center gap-1 rounded-full px-2 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-slate-200 dark:hover:bg-slate-800"><ChevronLeft className="h-4 w-4" />Terug</button>
         <h3 className="min-w-0 flex-1 truncate text-center text-base font-bold md:text-lg">{title}</h3>
         <button onClick={onClose} className="rounded-full p-2 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-slate-800" aria-label="Sluit instellingen"><X/></button>
@@ -13478,9 +13481,9 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
     );
 
     const renderTheme = () => (
-      <>
+      <div className="flex min-h-0 flex-1 flex-col">
         {renderHeader('Thema')}
-        <div className="space-y-3 p-3 md:p-5">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 no-scrollbar md:p-5">
           {[{ label: 'Licht', active: !darkMode, icon: Sun }, { label: 'Donker', active: darkMode, icon: Moon }].map(({ label, active, icon: Icon }) => (
             <button key={label} type="button" onClick={() => { if (!active) onToggleDark?.(); }} className={`flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${active ? 'border-blue-500 bg-blue-50 text-blue-800 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-100' : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800'}`}>
               <span className="flex items-center gap-3 font-bold"><Icon className="h-5 w-5" />{label}</span>
@@ -13488,13 +13491,13 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
             </button>
           ))}
         </div>
-      </>
+      </div>
     );
 
     const renderAbout = () => (
-      <>
+      <div className="flex min-h-0 flex-1 flex-col">
         {renderHeader('Over deze testversie')}
-        <div className="space-y-4 p-3 md:p-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 no-scrollbar md:p-5">
           <section className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-relaxed text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
             <h4 className="text-base font-bold">Artes is nog in ontwikkeling</h4>
             <p className="mt-2">Je gebruikt momenteel een vroege testversie van Artes. Onderdelen kunnen nog veranderen en sommige functies kunnen tijdelijk niet volledig werken.</p>
@@ -13502,20 +13505,20 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
             <button type="button" onClick={onOpenSupport} className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-400 dark:text-blue-950 dark:hover:bg-blue-300">Feedback geven via support <ArrowRight className="h-4 w-4" /></button>
           </section>
         </div>
-      </>
+      </div>
     );
 
     const renderPrivacy = () => (
-      <>
+      <div className="flex min-h-0 flex-1 flex-col">
         {renderHeader('Privacybeleid')}
-        <div className="p-3 md:p-5"><PrivacyPolicyView /></div>
-      </>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 no-scrollbar md:p-5"><PrivacyPolicyView /></div>
+      </div>
     );
 
     const renderProfiles = () => (
-      <>
+      <div className="flex min-h-0 flex-1 flex-col">
         {renderHeader('Profielen beheren')}
-        <div className="space-y-4 p-3 md:p-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 no-scrollbar md:p-5">
           <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-500 ring-1 ring-slate-200 dark:bg-slate-800/70 dark:text-slate-300 dark:ring-slate-700">Algemene voorkeuren gelden voor je hele account. Profielgegevens gelden voor het geselecteerde profiel.</p>
           {activeProfile && (
             <section className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-sm font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
@@ -13603,7 +13606,7 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
           {createFlowOpen && <form onSubmit={handleCreateSubmit} className="space-y-3 rounded-xl border border-blue-100 bg-white p-3 shadow-sm dark:border-blue-900/60 dark:bg-slate-900"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-slate-900 dark:text-white">{createSetupProfile ? `${PROFILE_TYPE_LABELS[createType] || 'Profiel'} instellen` : 'Nieuw profiel toevoegen'}</p><p className="text-xs leading-relaxed text-slate-500 dark:text-slate-300">{createSetupProfile ? 'Controleer de vooringevulde gegevens en vul een naam in om dit klaargezette profiel op te slaan.' : 'Kies wat je wilt beheren als. Je kunt later nog meer profielen van hetzelfde type toevoegen.'}</p></div><button type="button" onClick={() => { setCreateFlowOpen(false); setCreateError(''); setCreateSetupProfile(null); }} disabled={createPending} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100" aria-label="Sluit profiel toevoegen"><X className="h-4 w-4" /></button></div><div className="grid gap-2 min-[420px]:grid-cols-3">{MANAGED_EXTERNAL_PROFILE_TYPES.map((profileType) => <button key={profileType} type="button" onClick={() => handleCreateTypeChange(profileType)} disabled={createPending} className={`rounded-lg border px-3 py-2 text-left text-xs font-bold transition disabled:opacity-60 ${createType === profileType ? 'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}>{PROFILE_TYPE_LABELS[profileType]}</button>)}</div><label className="block space-y-1.5"><span className="text-xs font-bold uppercase tracking-wide text-slate-400">Naam profiel</span><input type="text" value={createDisplayName} onChange={(event) => { setCreateDisplayName(event.target.value); setCreateError(''); }} disabled={createPending} maxLength={MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH} placeholder="Bijvoorbeeld Studio Luna" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950" /></label>{createError && <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs font-semibold text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-100">{createError}</p>}<div className="flex flex-col-reverse gap-2"><button type="button" onClick={() => { setCreateFlowOpen(false); setCreateError(''); setCreateSetupProfile(null); }} disabled={createPending} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Annuleren</button><button type="submit" disabled={createPending} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-70 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200">{createPending && <Loader2 className="h-4 w-4 animate-spin" />}Opslaan</button></div></form>}
           {!createFlowOpen && <button type="button" onClick={openCreateFlow} className="mt-1 flex w-full items-center justify-between rounded-2xl border border-dashed border-blue-200 bg-white p-4 text-left text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-900/70 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/30"><span>Organisatieprofiel toevoegen</span><Plus className="h-4 w-4" /></button>}
         </div>
-      </>
+      </div>
     );
 
     return (

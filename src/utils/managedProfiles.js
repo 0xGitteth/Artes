@@ -567,6 +567,18 @@ export const shouldShowManagedProfileHeaderSwitcher = ({ isOwn = false, managedP
   Boolean(isOwn) && getManagedProfileSwitcherProfiles(managedProfiles).length > 1
 );
 
+export const getManagedProfileHeaderSwitcherPresentation = ({ isOwn = false, managedProfiles = [] } = {}) => {
+  const showDots = shouldShowManagedProfileHeaderSwitcher({ isOwn, managedProfiles });
+  return {
+    showDots,
+    showActiveProfileCard: false,
+  };
+};
+
+export const shouldIgnoreManagedProfileHeaderSwipeStart = (target = null) => Boolean(
+  target?.closest?.('button, a, input, select, textarea, [role=button], [data-profile-switcher-interactive="true"], [data-profile-header-swipe-ignore="true"]')
+);
+
 export const getManagedProfileAtSwitcherOffset = ({ managedProfiles = [], activeProfile = null, offset = 0 } = {}) => {
   const profiles = getManagedProfileSwitcherProfiles(managedProfiles);
   if (!profiles.length) return null;

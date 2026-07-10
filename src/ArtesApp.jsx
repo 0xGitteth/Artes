@@ -166,6 +166,8 @@ import {
   getManagedProfileInitials,
   getExternalProfileIdFromView,
   getManagedProfileHeaderSwipeDirection,
+  getManagedProfileHeaderSwitcherPresentation,
+  shouldIgnoreManagedProfileHeaderSwipeStart,
   getManagedProfilePrefillDisplayName,
   getManagedProfileSetupActionLabel,
   getManagedProfileSetupDescription,
@@ -5242,6 +5244,10 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
     && switcherProfiles.length > 1
     && typeof onSelectActiveProfile === 'function'
   );
+  const managedProfileSwitcherPresentation = getManagedProfileHeaderSwitcherPresentation({
+    isOwn: showManagedProfileSwitcher,
+    managedProfiles: switcherProfiles,
+  });
   const headerDisplayName = activeSwitcherProfileIsSetup
     ? getManagedProfileDisplayName(activeSwitcherProfile)
     : (normalizedProfile?.displayName || '');
@@ -5271,7 +5277,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
     if (!showManagedProfileSwitcher) return;
     const touch = event.touches?.[0];
     if (!touch) return;
-    const startedOnInteractiveElement = Boolean(event.target?.closest?.('button, a, input, select, textarea, [role=button], [data-profile-switcher-interactive="true"]'));
+    const startedOnInteractiveElement = shouldIgnoreManagedProfileHeaderSwipeStart(event.target);
     profileHeaderTouchStartRef.current = {
       x: touch.clientX,
       y: touch.clientY,
@@ -5409,7 +5415,11 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
   const hasCompany = Boolean(companyName);
   return (
      <div className="min-h-screen bg-white dark:bg-slate-900 pb-20">
-        <div className="relative min-h-[430px] w-full overflow-hidden bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:min-h-[520px]">
+        <div
+          className="relative min-h-[430px] w-full overflow-hidden bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:min-h-[520px]"
+          onTouchStart={handleProfileHeaderTouchStart}
+          onTouchEnd={handleProfileHeaderTouchEnd}
+        >
            <img
              src={headerImage}
              alt=""
@@ -5431,56 +5441,46 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
              </div>
            )}
            
-           <div className="absolute inset-x-0 bottom-0 z-20 px-5 pb-6 text-center">
+           {managedProfileSwitcherPresentation.showDots ? (
+             <div className="absolute left-3 right-36 top-4 z-30 flex items-center justify-center min-[380px]:inset-x-0 min-[380px]:px-20 md:top-6" data-profile-switcher-interactive="true">
+               <div className="flex items-center justify-center gap-2" aria-label="Profiel kiezen">
+                 {switcherProfiles.map((switcherProfile, index) => {
+                   const switcherProfileId = getManagedProfileId(switcherProfile);
+                   const switcherProfileName = getManagedProfileDisplayName(switcherProfile);
+                   const isSwitcherProfileActive = index === activeSwitcherIndex;
+                   const switcherProfileActionLabel = isSwitcherProfileActive
+                     ? `Actief profiel: ${switcherProfileName}`
+                     : `Beheren als ${switcherProfileName}`;
+                   return (
+                     <button
+                       key={switcherProfileId}
+                       type="button"
+                       aria-pressed={isSwitcherProfileActive}
+                       aria-label={switcherProfileActionLabel}
+                       title={switcherProfileActionLabel}
+                       onClick={() => handleHeaderSelectActiveProfile(switcherProfile)}
+                       className={`h-2.5 rounded-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-950 ${isSwitcherProfileActive ? 'w-7 bg-blue-600 shadow-sm dark:bg-blue-300' : 'w-2.5 bg-blue-200 hover:bg-blue-300 dark:bg-white/35 dark:hover:bg-white/55'}`}
+                     />
+                   );
+                 })}
+               </div>
+               {activeProfileSwitchStatus ? (
+                 <p className="sr-only" aria-live="polite">{activeProfileSwitchStatus}</p>
+               ) : null}
+             </div>
+           ) : null}
+
+           <div className="absolute inset-x-0 bottom-0 top-0 z-20 flex items-center justify-center px-5 pb-14 pt-20 text-center md:pb-20 md:pt-24">
               <div className="mx-auto flex max-h-[min(370px,calc(100dvh-5rem))] w-full max-w-4xl flex-col items-center overflow-hidden md:max-h-[440px]">
                 <div className="w-full shrink-0">
                   <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{headerDisplayName}</h1>
-                  <div className="no-scrollbar -mx-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-1">
+                  <div className="no-scrollbar -mx-2 flex max-w-full justify-center gap-2 overflow-x-auto px-2 pb-1" data-profile-header-swipe-ignore="true">
                      {headerRoleLabels.map((label) => (
                        <span key={label} className="shrink-0 whitespace-nowrap text-xs font-bold uppercase tracking-widest text-blue-900 dark:text-white bg-white/80 dark:bg-white/10 px-3 py-1 rounded-full backdrop-blur border border-blue-200/60 dark:border-white/20 shadow-sm">
                          {label}
                        </span>
                      ))}
                   </div>
-                  {showManagedProfileSwitcher && activeSwitcherProfile ? (
-                    <div
-                      className="mx-auto mt-4 flex max-w-full flex-col items-center gap-2 rounded-3xl border border-white/60 bg-white/75 px-4 py-3 text-blue-950 shadow-sm backdrop-blur-md [touch-action:pan-y] dark:border-white/15 dark:bg-slate-950/55 dark:text-white sm:max-w-md"
-                      onTouchStart={handleProfileHeaderTouchStart}
-                      onTouchEnd={handleProfileHeaderTouchEnd}
-                    >
-                      <div className="min-w-0 text-center">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700/70 dark:text-blue-200/80">{activeSwitcherProfileIsSetup ? 'Klaargezet profiel' : 'Actief profiel'}</p>
-                        <p className="mt-1 truncate text-sm font-extrabold md:text-base">
-                          {activeSwitcherProfileIsSetup ? getManagedProfileDisplayName(activeSwitcherProfile) : `Beheren als ${getManagedProfileDisplayName(activeSwitcherProfile)}`}
-                        </p>
-                        <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(activeSwitcherProfile)}</p>
-                      </div>
-                      <div className="flex items-center justify-center gap-2" aria-label="Profiel kiezen">
-                        {switcherProfiles.map((switcherProfile, index) => {
-                          const switcherProfileId = getManagedProfileId(switcherProfile);
-                          const switcherProfileName = getManagedProfileDisplayName(switcherProfile);
-                          const isSwitcherProfileActive = index === activeSwitcherIndex;
-                          const switcherProfileActionLabel = isSwitcherProfileActive
-                            ? `Actief profiel: ${switcherProfileName}`
-                            : `Beheren als ${switcherProfileName}`;
-                          return (
-                            <button
-                              key={switcherProfileId}
-                              type="button"
-                              aria-pressed={isSwitcherProfileActive}
-                              aria-label={switcherProfileActionLabel}
-                              title={switcherProfileActionLabel}
-                              onClick={() => handleHeaderSelectActiveProfile(switcherProfile)}
-                              className={`h-2.5 rounded-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-950 ${isSwitcherProfileActive ? 'w-7 bg-blue-600 shadow-sm dark:bg-blue-300' : 'w-2.5 bg-blue-200 hover:bg-blue-300 dark:bg-white/35 dark:hover:bg-white/55'}`}
-                            />
-                          );
-                        })}
-                      </div>
-                      {activeProfileSwitchStatus ? (
-                        <p className="text-xs font-semibold text-blue-700 dark:text-blue-200" aria-live="polite">{activeProfileSwitchStatus}</p>
-                      ) : null}
-                    </div>
-                  ) : null}
                   {activeSwitcherProfileIsSetup ? (
                     <SetupProfileOverlay profile={activeSwitcherProfile} onOpenSetupProfile={() => onOpenManagedProfileSetup?.(activeSwitcherProfile)} />
                   ) : null}
@@ -5561,7 +5561,7 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                     </div>
                   )}
                   {themes && themes.length > 0 ? (
-                    <div className="no-scrollbar -mx-5 flex w-[calc(100%+2.5rem)] max-w-[calc(100%+2.5rem)] gap-2 overflow-x-auto px-5 pb-1">
+                    <div className="no-scrollbar -mx-5 flex w-[calc(100%+2.5rem)] max-w-[calc(100%+2.5rem)] gap-2 overflow-x-auto px-5 pb-1" data-profile-header-swipe-ignore="true">
                       {themes.map((theme) => (
                         <span key={theme} className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
                           {theme}

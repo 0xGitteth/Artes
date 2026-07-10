@@ -25,6 +25,7 @@ import {
   getManagedProfileAvatar,
   getManagedProfileInitials,
   getManagedProfileHeaderSwipeDirection,
+  getManagedProfileHeaderSwitcherPresentation,
   findManagedExternalProfileByType,
   getManagedProfileSwitcherActiveIndex,
   getNextManagedProfileForSwipe,
@@ -240,6 +241,16 @@ assert.equal(
   shouldShowManagedProfileHeaderSwitcher({ isOwn: false, managedProfiles: ownerManagedProfiles }),
   false,
   'Header switcher is hidden for visitors viewing another profile',
+);
+assert.deepEqual(
+  getManagedProfileHeaderSwitcherPresentation({ isOwn: true, managedProfiles: ownerManagedProfiles }),
+  { showDots: true, showActiveProfileCard: false },
+  'Header switcher presentation only shows pagination dots and never the active-profile card',
+);
+assert.deepEqual(
+  getManagedProfileHeaderSwitcherPresentation({ isOwn: true, managedProfiles }),
+  { showDots: false, showActiveProfileCard: false },
+  'Header switcher presentation hides dots when only one managed profile is available',
 );
 assert.equal(
   getManagedProfileHeaderSwipeDirection({ deltaX: -80, deltaY: 12 }),

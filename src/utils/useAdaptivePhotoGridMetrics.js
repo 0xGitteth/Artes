@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { getAdaptivePhotoGridColumnCountForWidth } from './adaptivePhotoGrid';
+import { getAdaptivePhotoGridColumnCountForWidth } from './adaptivePhotoGrid.js';
 
 const parsePixelValue = (value, fallback = 0) => {
   const number = Number.parseFloat(value);
   return Number.isFinite(number) ? number : fallback;
 };
 
-const getAdaptiveGridMetrics = (element) => {
+const getCssGridColumnCount = (gridTemplate, columns) => {
+  if (columns.length > 0) return columns.length;
+
+  const repeatCount = Number.parseInt(gridTemplate.match(/repeat\((\d+),/)?.[1] || '', 10);
+  return Number.isFinite(repeatCount) && repeatCount > 0 ? repeatCount : 1;
+};
+
+export const getAdaptiveGridMetrics = (element, { columnCountMode = 'css' } = {}) => {
   if (!element || typeof window === 'undefined') return null;
 
   const styles = window.getComputedStyle(element);
@@ -27,11 +34,10 @@ const getAdaptiveGridMetrics = (element) => {
   const rowHeight = parsePixelValue(styles.gridAutoRows, 4);
   const measuredWidth = element.getBoundingClientRect().width;
 
-  // Keep JS layout metrics tied to the same width breakpoints as the CSS grid.
-  // This avoids a transient resize state where CSS has switched column counts
-  // but the masonry placement is still calculated with the previous count.
-  const cssColumnCount = columns.length || Number.parseInt(gridTemplate.match(/repeat\((\d+),/)?.[1] || '', 10);
-  const columnCount = getAdaptivePhotoGridColumnCountForWidth(measuredWidth, cssColumnCount || 1);
+  const cssColumnCount = getCssGridColumnCount(gridTemplate, columns);
+  const columnCount = columnCountMode === 'width'
+    ? getAdaptivePhotoGridColumnCountForWidth(measuredWidth, cssColumnCount)
+    : cssColumnCount;
   const fallbackColumnWidth = Math.max(1, (measuredWidth - (columnGap * Math.max(0, columnCount - 1))) / columnCount);
   const columnWidth = columns[0] || fallbackColumnWidth;
 
@@ -46,7 +52,7 @@ const areAdaptiveGridMetricsEqual = (a, b) => Boolean(a && b
   && a.columnCount === b.columnCount
   && Math.abs(a.measuredWidth - b.measuredWidth) < 0.5);
 
-export default function useAdaptivePhotoGridMetrics(refreshKey) {
+export default function useAdaptivePhotoGridMetrics(refreshKey, { columnCountMode = 'css' } = {}) {
   const gridRef = useRef(null);
   const [gridMetrics, setGridMetrics] = useState(null);
 
@@ -62,7 +68,7 @@ export default function useAdaptivePhotoGridMetrics(refreshKey) {
       && Number.isFinite(Number(m.columnGap)) && Number(m.columnGap) >= 0;
 
     const updateGridMetrics = (attempt = 0) => {
-      const nextMetrics = getAdaptiveGridMetrics(element);
+      const nextMetrics = getAdaptiveGridMetrics(element, { columnCountMode });
       if (nextMetrics && isValidMetrics(nextMetrics)) {
         setGridMetrics((previousMetrics) => (areAdaptiveGridMetricsEqual(previousMetrics, nextMetrics) ? previousMetrics : nextMetrics));
         return;
@@ -93,7 +99,7 @@ export default function useAdaptivePhotoGridMetrics(refreshKey) {
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateGridMetrics);
     };
-  }, [refreshKey]);
+  }, [refreshKey, columnCountMode]);
 
   return { gridRef, gridMetrics };
 }

@@ -10,6 +10,7 @@ import {
   getAdaptivePhotoTileSpan,
   getDiscoverUserCardColumnSpan,
 } from '../src/utils/adaptivePhotoGrid.js';
+import { getAdaptiveGridMetrics } from '../src/utils/useAdaptivePhotoGridMetrics.js';
 
 const post = (imageMeta) => ({ id: 'post', imageMeta });
 const spanNumber = (style) => Number(String(style.gridRowEnd).replace('span ', ''));
@@ -187,6 +188,29 @@ assert.equal(getAdaptivePhotoGridColumnCountForWidth(1024, 16), 20, 'Desktop bre
 assert.equal(getAdaptivePhotoGridColumnCountForWidth(1280, 20), 24, 'Wide desktop breakpoint widths should resolve to the wide CSS grid column count');
 assert.equal(getAdaptivePhotoGridColumnCountForWidth(0, 20), 20, 'Existing valid metrics should be kept when no measured width is available');
 assert.equal(getAdaptivePhotoGridTemplateColumns(20), 'repeat(20, minmax(0, 1fr))', 'Synced grid CSS should be rendered from the same column count used by masonry');
+const previousWindow = globalThis.window;
+const metricsElement = {
+  getBoundingClientRect: () => ({ width: 992 }),
+};
+globalThis.window = {
+  getComputedStyle: () => ({
+    gridTemplateColumns: Array.from({ length: 24 }, () => '34px').join(' '),
+    columnGap: '8px',
+    rowGap: '4px',
+    gridAutoRows: '4px',
+  }),
+};
+assert.equal(
+  getAdaptiveGridMetrics(metricsElement).columnCount,
+  24,
+  'Default adaptive grid metrics should preserve the actual CSS-derived 24-column grid even inside a 992px container',
+);
+assert.equal(
+  getAdaptiveGridMetrics(metricsElement, { columnCountMode: 'width' }).columnCount,
+  16,
+  'Width-derived adaptive grid metrics should only be used when explicitly requested',
+);
+globalThis.window = previousWindow;
 const discoverUserLayout = getAdaptivePhotoGridItemLayout(null, { ...desktop24Metrics, aspectRatio: 1, columnSpan: desktopUserSpan });
 assert.equal(discoverUserLayout.aspectRatio, 1, 'Discover user cards should keep square media');
 assert.equal(discoverUserLayout.mediaHeight, discoverUserLayout.tileWidth, 'Discover user card media should render square before footer height is added');
@@ -194,6 +218,7 @@ const artesAppSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.u
 const discoverUserSpanUsageCount = (artesAppSource.match(/getDiscoverUserCardColumnSpan/g) || []).length;
 assert.equal(discoverUserSpanUsageCount, 2, 'Discover user card sizing helper should only be imported and used by the Discover mixed grid');
 assert.match(artesAppSource, /getAdaptivePhotoGridTemplateColumns\(mixedGridMetrics\?\.columnCount\)/, 'Discover mixed grid CSS columns should be rendered from measured masonry metrics');
+assert.match(artesAppSource, /useAdaptivePhotoGridMetrics\(mixedRefreshKey, \{ columnCountMode: 'width' \}\)/, 'Width-derived metrics should be scoped to the mixed Discover grid');
 
 console.log('adaptivePhotoGrid logic tests passed');
 

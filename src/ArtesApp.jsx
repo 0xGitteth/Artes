@@ -4674,7 +4674,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
   // build a refresh key for the mixed Discover grid so metrics remeasure when relevant inputs change
   const mixedImageMetaVersion = useMemo(() => JSON.stringify(visiblePosts.map((p) => (p.imageMeta ? `${p.id}:${p.imageMeta.aspectRatio || p.imageMeta.width || p.imageMeta.height}` : `${p.id}:null`))), [visiblePosts]);
   const mixedRefreshKey = `${tab}::${search}::${mixedContent.length}::${mixedImageMetaVersion}::${recoveredImageMetaVersion}`;
-  const { gridRef: mixedGridRef, gridMetrics: mixedGridMetrics } = useAdaptivePhotoGridMetrics(mixedRefreshKey);
+  const { gridRef: mixedGridRef, gridMetrics: mixedGridMetrics } = useAdaptivePhotoGridMetrics(mixedRefreshKey, { columnCountMode: 'width' });
 
   const filteredPosts = visiblePosts.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) && (activeThemes.length === 0 || p.styles?.some(s => activeThemes.includes(s))));
   const filteredUsers = visibleUsers.filter((u) => (

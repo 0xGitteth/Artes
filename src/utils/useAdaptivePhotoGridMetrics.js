@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { getAdaptivePhotoGridColumnCountForWidth } from './adaptivePhotoGrid';
 
 const parsePixelValue = (value, fallback = 0) => {
   const number = Number.parseFloat(value);
@@ -26,13 +27,11 @@ const getAdaptiveGridMetrics = (element) => {
   const rowHeight = parsePixelValue(styles.gridAutoRows, 4);
   const measuredWidth = element.getBoundingClientRect().width;
 
-  // try to infer column count from explicit columns or repeat() syntax
-  let columnCount = columns.length;
-  if (!columnCount) {
-    const repeatMatch = gridTemplate.match(/repeat\((\d+),/);
-    if (repeatMatch) columnCount = Number.parseInt(repeatMatch[1], 10);
-  }
-  columnCount = columnCount || 1;
+  // Keep JS layout metrics tied to the same width breakpoints as the CSS grid.
+  // This avoids a transient resize state where CSS has switched column counts
+  // but the masonry placement is still calculated with the previous count.
+  const cssColumnCount = columns.length || Number.parseInt(gridTemplate.match(/repeat\((\d+),/)?.[1] || '', 10);
+  const columnCount = getAdaptivePhotoGridColumnCountForWidth(measuredWidth, cssColumnCount || 1);
   const fallbackColumnWidth = Math.max(1, (measuredWidth - (columnGap * Math.max(0, columnCount - 1))) / columnCount);
   const columnWidth = columns[0] || fallbackColumnWidth;
 

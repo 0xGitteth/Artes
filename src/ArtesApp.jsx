@@ -113,7 +113,7 @@ import PhotoDetailModal from './components/PhotoDetailModal';
 import PostImageDisplay from './components/PostImageDisplay';
 import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
 import ModalShell from './components/ModalShell';
-import { getAdaptivePhotoFrameStyle, getAdaptivePhotoMasonryLayout, getDiscoverUserCardColumnSpan } from './utils/adaptivePhotoGrid';
+import { getAdaptivePhotoFrameStyle, getAdaptivePhotoGridTemplateColumns, getAdaptivePhotoMasonryLayout, getDiscoverUserCardColumnSpan } from './utils/adaptivePhotoGrid';
 import useAdaptivePhotoGridMetrics from './utils/useAdaptivePhotoGridMetrics';
 import { stableDiscoverOrder } from './utils/discoverOrdering';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
@@ -4692,13 +4692,16 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
     getPost: (layoutItem) => (layoutItem.isPost ? layoutItem.item.data : null),
     getAspectRatio: (layoutItem) => (layoutItem.isPost ? getOverride?.(layoutItem.item.data.id)?.aspectRatio : 1),
     getColumnSpan: (layoutItem) => {
-      // Discover-only user/profile card sizing: map a target pixel width to column span.
+      // Discover-only user/profile card sizing: map the active grid metrics to a column span.
       if (layoutItem.isPost) return undefined;
       return getDiscoverUserCardColumnSpan(mixedGridMetrics);
     },
     getFooterHeight: () => 36,
     getMinMediaHeight: (layoutItem) => (layoutItem.shouldCover ? 176 : 0),
   });
+  const mixedGridStyle = {
+    gridTemplateColumns: getAdaptivePhotoGridTemplateColumns(mixedGridMetrics?.columnCount),
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-2.5 pt-0 pb-3 md:px-4 md:py-6">
@@ -4710,7 +4713,7 @@ function Discover({ users, posts, profile, currentUserId, onUserClick, onPostCli
           </div>
        </div>
 
-      {tab === 'all' && <div ref={mixedGridRef} className="grid min-w-0 max-w-full [grid-template-columns:repeat(12,minmax(0,1fr))] gap-x-2 gap-y-1 [grid-auto-rows:4px] sm:[grid-template-columns:repeat(16,minmax(0,1fr))] lg:[grid-template-columns:repeat(20,minmax(0,1fr))] xl:[grid-template-columns:repeat(24,minmax(0,1fr))]">{mixedMasonryLayout.map((layout) => {
+      {tab === 'all' && <div ref={mixedGridRef} className="grid min-w-0 max-w-full gap-x-2 gap-y-1 [grid-auto-rows:4px]" style={mixedGridStyle}>{mixedMasonryLayout.map((layout) => {
         const { item: layoutItem, index: i, style, className: spanClassName, tileType, frameStyle: layoutFrameStyle } = layout;
         const { item, isPost, shouldCover } = layoutItem;
         const postFrameStyle = layoutFrameStyle || (isPost ? getAdaptivePhotoFrameStyle(item.data, getOverride?.(item.data.id)?.aspectRatio) : undefined);

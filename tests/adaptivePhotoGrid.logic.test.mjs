@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   classifyAdaptivePhotoTile,
+  getAdaptivePhotoGridColumnCountForWidth,
   getAdaptivePhotoGridItemLayout,
   getAdaptivePhotoGridItemStyle,
+  getAdaptivePhotoGridTemplateColumns,
   getAdaptivePhotoMasonryLayout,
   getAdaptivePhotoTileSpan,
   getDiscoverUserCardColumnSpan,
@@ -155,8 +157,10 @@ assert.equal(getDiscoverUserCardColumnSpan(undefined), fallbackUserSpan, 'Discov
 
 const desktopUserSpan = getDiscoverUserCardColumnSpan(desktop24Metrics);
 const desktopSquareSpan = getAdaptivePhotoTileSpan(post({ aspectRatio: 1 }), { availableColumns: desktop24Metrics.columnCount }).columnSpan;
-assert.ok(desktopUserSpan < desktopSquareSpan, 'Discover user cards should be more compact than desktop square photo cards');
-assert.ok(getDiscoverUserCardColumnSpan(metrics) >= 3, 'Discover user cards should stay readable on mobile-sized grids');
+const legacyDesktopUserSpan = Math.ceil((120 + desktop24Metrics.columnGap) / (desktop24Metrics.columnWidth + desktop24Metrics.columnGap));
+assert.equal(desktopUserSpan, desktopSquareSpan, 'Discover user cards should match a square photo tile span on desktop grids');
+assert.ok(desktopUserSpan > legacyDesktopUserSpan, 'Discover user cards should be larger than the previous compact desktop implementation');
+assert.equal(getDiscoverUserCardColumnSpan(metrics), 4, 'Discover user cards should keep the existing mobile-sized grid span');
 assert.equal(
   getDiscoverUserCardColumnSpan({ ...desktop24Metrics, containerWidth: undefined, measuredWidth: 760 }),
   desktopUserSpan,
@@ -164,25 +168,32 @@ assert.equal(
 );
 assert.equal(
   getDiscoverUserCardColumnSpan({ ...desktop24Metrics, containerWidth: undefined, measuredWidth: 900 }),
-  5,
-  'Desktop measuredWidth should select the 150px target instead of the 120px fallback',
+  desktopSquareSpan,
+  'Desktop measuredWidth should use the active grid ratio instead of a compact fixed target',
 );
 assert.equal(
   getDiscoverUserCardColumnSpan({ ...desktop24Metrics, containerWidth: undefined, measuredWidth: 1200 }),
-  6,
-  'Wide desktop measuredWidth should select the 160px target instead of the 120px fallback',
+  desktopSquareSpan,
+  'Wide desktop measuredWidth should keep user cards aligned to square photo tile spans',
 );
 assert.equal(
   getDiscoverUserCardColumnSpan({ ...desktop24Metrics, containerWidth: 900 }),
-  5,
-  'Existing containerWidth-based desktop sizing should keep using the 150px target',
+  desktopSquareSpan,
+  'Existing containerWidth-based desktop sizing should use the active grid ratio',
 );
+assert.equal(getAdaptivePhotoGridColumnCountForWidth(639, 24), 12, 'Mobile widths should resolve to the mobile CSS grid column count');
+assert.equal(getAdaptivePhotoGridColumnCountForWidth(640, 12), 16, 'Breakpoint widths should resolve to the tablet CSS grid column count');
+assert.equal(getAdaptivePhotoGridColumnCountForWidth(1024, 16), 20, 'Desktop breakpoint widths should resolve to the desktop CSS grid column count');
+assert.equal(getAdaptivePhotoGridColumnCountForWidth(1280, 20), 24, 'Wide desktop breakpoint widths should resolve to the wide CSS grid column count');
+assert.equal(getAdaptivePhotoGridColumnCountForWidth(0, 20), 20, 'Existing valid metrics should be kept when no measured width is available');
+assert.equal(getAdaptivePhotoGridTemplateColumns(20), 'repeat(20, minmax(0, 1fr))', 'Synced grid CSS should be rendered from the same column count used by masonry');
 const discoverUserLayout = getAdaptivePhotoGridItemLayout(null, { ...desktop24Metrics, aspectRatio: 1, columnSpan: desktopUserSpan });
 assert.equal(discoverUserLayout.aspectRatio, 1, 'Discover user cards should keep square media');
 assert.equal(discoverUserLayout.mediaHeight, discoverUserLayout.tileWidth, 'Discover user card media should render square before footer height is added');
 const artesAppSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 'utf8');
 const discoverUserSpanUsageCount = (artesAppSource.match(/getDiscoverUserCardColumnSpan/g) || []).length;
 assert.equal(discoverUserSpanUsageCount, 2, 'Discover user card sizing helper should only be imported and used by the Discover mixed grid');
+assert.match(artesAppSource, /getAdaptivePhotoGridTemplateColumns\(mixedGridMetrics\?\.columnCount\)/, 'Discover mixed grid CSS columns should be rendered from measured masonry metrics');
 
 console.log('adaptivePhotoGrid logic tests passed');
 

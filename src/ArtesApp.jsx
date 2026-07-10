@@ -5,7 +5,7 @@ import {
   Settings, LogOut, Shield, Camera, Handshake, ChevronLeft,
   X, AlertTriangle, AlertOctagon, UserPlus, Link as LinkIcon,
   Maximize2, Share2, MoreHorizontal, LayoutGrid, User, CheckCircle,
-  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, Bell, Lock, HelpCircle, Mail, Globe, Loader2, MessageCircle, GitMerge, Smartphone, FolderPlus
+  Briefcase, Building2, Star, Edit3, Moon, Sun, ArrowRight, Info, ExternalLink, Trash2, MapPin, HelpCircle, Mail, Globe, Loader2, MessageCircle, GitMerge, Smartphone, FolderPlus
 } from 'lucide-react';
 import {
   fetchUserIndex,
@@ -17,6 +17,7 @@ import {
   deletePost,
 } from './services/firebaseClient';
 import useRecoveredImageMeta from './utils/useRecoveredImageMeta';
+import PrivacyPolicyView from './components/settings/PrivacyPolicyView';
 import {
   DIDIT_APPROVED_STATUSES,
   DIDIT_REFRESHABLE_STATUSES,
@@ -13386,396 +13387,238 @@ function SettingsModal({ onClose, moderatorAccess, onOpenModeration, onOpenSuppo
       );
     };
 
-    return (
-        <div className="fixed inset-0 z-50 bg-black/50 flex justify-end">
-            <div className="bg-white dark:bg-slate-900 w-[min(20rem,calc(100vw-1rem))] h-[calc(100dvh-1rem)] m-2 md:m-0 md:h-full p-3 flex flex-col gap-3 text-slate-900 dark:text-slate-100 md:w-80 md:p-6 md:gap-6 rounded-2xl md:rounded-none overflow-y-auto no-scrollbar">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-base md:text-xl">Instellingen</h3>
-                  <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"><X/></button>
+    const [settingsView, setSettingsView] = useState(initialSetupProfile ? 'profiles' : 'home');
+
+    const resetProfileTemporaryState = useCallback(() => {
+      if (createPending || editPending) return;
+      setCreateFlowOpen(false);
+      setCreateSetupProfile(null);
+      setCreateError('');
+      setCreateSuccess('');
+      closeEditProfile();
+    }, [createPending, editPending]);
+
+    const goHome = () => {
+      if (settingsView === 'profiles') resetProfileTemporaryState();
+      setSettingsView('home');
+    };
+
+    const openInternalView = (view) => {
+      if (settingsView === 'profiles' && view !== 'profiles') resetProfileTemporaryState();
+      setSettingsView(view);
+    };
+
+    const navItemClass = "group flex min-h-[3.75rem] w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/70 active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30";
+    const navIconClass = "h-4 w-4 shrink-0 text-slate-400 transition group-hover:text-blue-600 dark:group-hover:text-blue-200";
+    const navDangerTitleClass = "text-rose-600 dark:text-rose-300";
+    const navNormalTitleClass = "text-slate-900 dark:text-white";
+    const navDangerIconClass = "h-4 w-4 shrink-0 text-rose-500 transition group-hover:text-rose-600 dark:text-rose-300 dark:group-hover:text-rose-200";
+
+    const renderNavButton = ({ title, description, icon: Icon, onClick, danger = false, dot = false }) => (
+      <button type="button" onClick={onClick} className={`${navItemClass} ${danger ? 'border-rose-100 hover:border-rose-200 hover:bg-rose-50 dark:border-rose-900/50 dark:hover:bg-rose-950/30' : ''}`}>
+        <span className="min-w-0">
+          <span className={`flex items-center gap-2 text-sm font-bold ${danger ? navDangerTitleClass : navNormalTitleClass}`}>
+            {title}
+            {dot && <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />}
+          </span>
+          {description && <span className="mt-0.5 block text-xs leading-relaxed text-slate-500 dark:text-slate-300">{description}</span>}
+        </span>
+        <Icon className={danger ? navDangerIconClass : navIconClass} />
+      </button>
+    );
+
+    const renderHome = () => (
+      <div className="flex min-h-0 flex-1 flex-col gap-5 px-3 pt-3 pb-4 md:px-5 md:pt-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-xl">Instellingen</h3>
+            <span className="mt-1 inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-blue-700 ring-1 ring-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:ring-blue-900/70">Testversie</span>
+          </div>
+          <button onClick={onClose} className="rounded-full p-2 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-slate-800" aria-label="Sluit instellingen"><X/></button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1 no-scrollbar">
+          <section className="space-y-2">
+            <h4 className="px-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Account en profielen</h4>
+            {renderNavButton({ title: 'Profielen beheren', description: 'Beheer je persoonlijke profiel en organisatieprofielen.', icon: User, onClick: () => openInternalView('profiles') })}
+            {renderNavButton({ title: 'Bevestigingsverzoeken', description: 'Bekijk verzoeken waarbij jouw bevestiging nodig is.', icon: MessageCircle, onClick: onOpenVouchRequests })}
+          </section>
+          <section className="space-y-2">
+            <h4 className="px-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Voorkeuren</h4>
+            {renderNavButton({ title: 'Thema', description: darkMode ? 'Donkere weergave is actief.' : 'Lichte weergave is actief.', icon: darkMode ? Moon : Sun, onClick: () => openInternalView('theme') })}
+          </section>
+          <section className="space-y-2">
+            <h4 className="px-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Hulp en informatie</h4>
+            {renderNavButton({ title: 'Privacybeleid', description: 'Lees hoe Artes met persoonsgegevens omgaat.', icon: Shield, onClick: () => openInternalView('privacy') })}
+            {renderNavButton({ title: 'Support', icon: HelpCircle, onClick: onOpenSupport })}
+            {renderNavButton({ title: 'Artes als app gebruiken', icon: Smartphone, onClick: onOpenAppShortcutInfo })}
+            {renderNavButton({ title: 'Over deze testversie', description: 'Informatie over de huidige ontwikkelfase van Artes.', icon: Info, onClick: () => openInternalView('about') })}
+          </section>
+          {(moderatorAccess === true || debugAllowed()) && (
+            <section className="space-y-2">
+              <h4 className="px-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Beheer</h4>
+              {moderatorAccess === true && renderNavButton({ title: 'Moderatie', description: 'Open het moderatieportaal.', icon: Shield, onClick: onOpenModeration, dot: showModerationDot })}
+              {debugAllowed() && (
+                <Link to="/debug" onClick={onClose} className={navItemClass}>
+                  <span className="text-sm font-bold text-slate-900 dark:text-white">Debug</span>
+                  <Info className={navIconClass} />
+                </Link>
+              )}
+            </section>
+          )}
+        </div>
+        <div className="border-t border-slate-200 pt-3 dark:border-slate-800">
+          {renderNavButton({ title: 'Log uit', icon: LogOut, onClick: onLogout, danger: true })}
+        </div>
+      </div>
+    );
+
+    const renderHeader = (title) => (
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 md:px-5">
+        <button type="button" onClick={goHome} className="inline-flex items-center gap-1 rounded-full px-2 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-slate-200 dark:hover:bg-slate-800"><ChevronLeft className="h-4 w-4" />Terug</button>
+        <h3 className="min-w-0 flex-1 truncate text-center text-base font-bold md:text-lg">{title}</h3>
+        <button onClick={onClose} className="rounded-full p-2 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-slate-800" aria-label="Sluit instellingen"><X/></button>
+      </div>
+    );
+
+    const renderTheme = () => (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {renderHeader('Thema')}
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 no-scrollbar md:p-5">
+          {[{ label: 'Licht', active: !darkMode, icon: Sun }, { label: 'Donker', active: darkMode, icon: Moon }].map(({ label, active, icon: Icon }) => (
+            <button key={label} type="button" onClick={() => { if (!active) onToggleDark?.(); }} className={`flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${active ? 'border-blue-500 bg-blue-50 text-blue-800 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-100' : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800'}`}>
+              <span className="flex items-center gap-3 font-bold"><Icon className="h-5 w-5" />{label}</span>
+              {active && <CheckCircle className="h-5 w-5" />}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+
+    const renderAbout = () => (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {renderHeader('Over deze testversie')}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 no-scrollbar md:p-5">
+          <section className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-relaxed text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
+            <h4 className="text-base font-bold">Artes is nog in ontwikkeling</h4>
+            <p className="mt-2">Je gebruikt momenteel een vroege testversie van Artes. Onderdelen kunnen nog veranderen en sommige functies kunnen tijdelijk niet volledig werken.</p>
+            <p className="mt-2">Loop je ergens tegenaan of mis je iets? Laat het weten via support.</p>
+            <button type="button" onClick={onOpenSupport} className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-400 dark:text-blue-950 dark:hover:bg-blue-300">Feedback geven via support <ArrowRight className="h-4 w-4" /></button>
+          </section>
+        </div>
+      </div>
+    );
+
+    const renderPrivacy = () => (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {renderHeader('Privacybeleid')}
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 no-scrollbar md:p-5"><PrivacyPolicyView /></div>
+      </div>
+    );
+
+    const renderProfiles = () => (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {renderHeader('Profielen beheren')}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 no-scrollbar md:p-5">
+          <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-500 ring-1 ring-slate-200 dark:bg-slate-800/70 dark:text-slate-300 dark:ring-slate-700">Algemene voorkeuren gelden voor je hele account. Profielgegevens gelden voor het geselecteerde profiel.</p>
+          {activeProfile && (
+            <section className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-sm font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
+              <ManagedProfileAvatar profile={activeProfile} sizeClass="h-9 w-9" />
+              <span className="min-w-0 truncate">Actief profiel: {getManagedProfileDisplayName(activeProfile)}</span>
+            </section>
+          )}
+          <section className="space-y-2">
+            <h4 className="text-xs font-bold uppercase tracking-wide text-slate-400">Persoonlijk profiel</h4>
+            {personalProfile && (
+              <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70">
+                <div className="grid min-w-0 gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-200"><User className="h-4 w-4" /></span>
+                    <div className="min-w-0 flex-1"><p className="break-words text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(personalProfile)}</p><p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(personalProfile)}</p></div>
+                  </div>
+                  <div>{renderProfileSelectionAction(personalProfile)}</div>
                 </div>
-                <div className="space-y-2.5 md:space-y-4">
-                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm leading-relaxed text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
-                      <p className="font-bold">Artes is nog in ontwikkeling</p>
-                      <p className="mt-1">Je test nu een vroege versie van Artes. Sommige onderdelen kunnen nog veranderen of tijdelijk niet helemaal goed werken.</p>
-                      <p className="mt-1">Loop je ergens tegenaan of mis je iets? Laat het weten via support.</p>
-                      <button
-                        type="button"
-                        onClick={onOpenSupport}
-                        className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700 underline-offset-2 hover:underline dark:text-blue-200"
-                      >
-                        Feedback geven via support <ArrowRight className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <h4 className="text-xs uppercase font-bold text-slate-400">Account</h4>
-                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Meldingen</span><Bell className="w-4 h-4"/></div>
-                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Privacy</span><Lock className="w-4 h-4"/></div>
-                    <button
-                      type="button"
-                      onClick={onLogout}
-                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3 text-rose-600 dark:text-rose-300"
-                    >
-                      <span>Log uit</span>
-                      <LogOut className="w-4 h-4" />
-                    </button>
-                    <h4 className="text-xs uppercase font-bold text-slate-400">Mijn profielen</h4>
-                    <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 dark:border-slate-700 dark:bg-slate-800/70 md:rounded-2xl md:p-3">
-                      <p className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-relaxed text-slate-500 ring-1 ring-slate-100 dark:bg-slate-900/50 dark:text-slate-300 dark:ring-slate-700/70">
-                        Algemene voorkeuren gelden voor je hele account. De gegevens onder Mijn profielen gelden voor het geselecteerde profiel.
-                      </p>
-                      {activeProfile && (
-                        <div className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
-                          <ManagedProfileAvatar profile={activeProfile} sizeClass="h-7 w-7" />
-                          <span>Actief profiel: {getManagedProfileDisplayName(activeProfile)}</span>
-                        </div>
-                      )}
-                      {personalProfile && (
-                        <div className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="flex min-w-0 items-start gap-3">
-                              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-200">
-                                <User className="h-4 w-4" />
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(personalProfile)}</p>
-                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(personalProfile)}</p>
-                              </div>
-                            </div>
-                            <div className="flex justify-end">{renderProfileSelectionAction(personalProfile)}</div>
-                          </div>
-                        </div>
-                      )}
-                      {hasPersonalOrganizationHints && (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
-                          Je persoonlijke profiel bevat organisatie-informatie. Binnen Artes worden persoonlijke profielen en Bedrijfsprofielen, Agencies en Collectieven apart beheerd. Je persoonlijke Profiel blijft bestaan.
-                        </div>
-                      )}
-                      {setupProfiles.length > 0 && (
-                        <div className="space-y-2 pt-1">
-                          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Klaargezette profielen</p>
-                          {setupProfiles.map((setupProfile) => (
-                            <div
-                              key={setupProfile.profileId || setupProfile.id}
-                              className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/25"
-                            >
-                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="flex min-w-0 items-start gap-3">
-                                  <ManagedProfileAvatar profile={setupProfile} sizeClass="mt-0.5 h-10 w-10" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(setupProfile)}</p>
-                                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200 dark:bg-slate-950/60 dark:text-amber-100 dark:ring-amber-800/70">
-                                        {getManagedProfileSetupStatusLabel(setupProfile)}
-                                      </span>
-                                    </div>
-                                    <p className="mt-0.5 text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(setupProfile)}</p>
-                                    <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{getManagedProfileSetupDescription(setupProfile)}</p>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => openSetupProfileCreateFlow(setupProfile)}
-                                  className="shrink-0 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-blue-700 dark:bg-blue-400 dark:text-blue-950 dark:hover:bg-blue-300"
-                                >
-                                  {getManagedProfileSetupActionLabel(setupProfile)}
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className="space-y-2 pt-1">
-                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Beheerde profielen</p>
-                        {hasExternalProfiles ? (
-                          <div className="space-y-2">
-                            {externalProfiles.map((externalProfile) => {
-                              const externalProfileId = getManagedProfileId(externalProfile);
-                              const isEditing = editingProfileId === externalProfileId;
-                              const externalBio = getManagedProfileBio(externalProfile);
-                              return (
-                                <div
-                                  key={externalProfile.profileId || externalProfile.id}
-                                  className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70"
-                                >
-                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                    <div className="flex min-w-0 items-start gap-3">
-                                      <ManagedProfileAvatar profile={externalProfile} sizeClass="mt-0.5 h-10 w-10" />
-                                      <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(externalProfile)}</p>
-                                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>
-                                        {externalBio ? (
-                                          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500 dark:text-slate-300">{externalBio}</p>
-                                        ) : (
-                                          <p className="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">Nog geen omschrijving toegevoegd.</p>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="flex flex-wrap justify-end gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => openEditProfile(externalProfile)}
-                                        disabled={editPending}
-                                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                      >
-                                        <Edit3 className="h-3.5 w-3.5" />
-                                        Bewerken
-                                      </button>
-                                      {renderProfileSelectionAction(externalProfile)}
-                                    </div>
-                                  </div>
-                                  {isEditing && (
-                                    <form onSubmit={(event) => handleEditSubmit(event, externalProfile)} className="mt-3 space-y-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/70 dark:bg-blue-950/20">
-                                      <div className="rounded-lg bg-white/80 px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-100 dark:bg-slate-950/40 dark:text-slate-200 dark:ring-slate-800">
-                                        Type: {getManagedProfileTypeLabel(externalProfile)}
-                                      </div>
-                                      <div className="space-y-2 rounded-lg bg-white/80 p-3 ring-1 ring-slate-100 dark:bg-slate-950/40 dark:ring-slate-800">
-                                        <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Profielfoto</span>
-                                        <div className="flex items-center gap-3">
-                                          <ManagedProfileAvatar profile={{ ...externalProfile, avatar: editAvatar }} sizeClass="h-14 w-14" />
-                                          <div className="flex flex-wrap gap-2">
-                                            <label className="cursor-pointer rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
-                                              Foto uploaden
-                                              <input type="file" accept="image/*" className="sr-only" onChange={handleEditAvatarFile} disabled={editPending} />
-                                            </label>
-                                            {editAvatar && (
-                                              <button
-                                                type="button"
-                                                onClick={() => { setEditAvatar(''); setEditAvatarBlob(null); setEditCropSource(''); setEditError(''); }}
-                                                disabled={editPending}
-                                                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-500 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                                              >
-                                                Verwijderen
-                                              </button>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">Gebruik dezelfde uitsnede als bij je persoonlijke profielfoto. De foto wordt opgeslagen op dit beheerde profiel.</p>
-                                        {editCropSource && (
-                                          <ProfileImageCropper
-                                            source={editCropSource}
-                                            onCancel={() => setEditCropSource('')}
-                                            onApply={({ avatar, avatarBlob, error }) => {
-                                              if (error) {
-                                                setEditError(error);
-                                                return;
-                                              }
-                                              setEditAvatar(avatar);
-                                              setEditAvatarBlob(avatarBlob || null);
-                                              setEditCropSource('');
-                                              setEditError('');
-                                            }}
-                                          />
-                                        )}
-                                      </div>
-                                      <label className="block space-y-1.5">
-                                        <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Naam</span>
-                                        <input
-                                          type="text"
-                                          value={editDisplayName}
-                                          onChange={(event) => { setEditDisplayName(event.target.value); setEditError(''); }}
-                                          disabled={editPending}
-                                          maxLength={MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH}
-                                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
-                                        />
-                                      </label>
-                                      <label className="block space-y-1.5">
-                                        <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Omschrijving</span>
-                                        <textarea
-                                          value={editBio}
-                                          onChange={(event) => { setEditBio(event.target.value); setEditError(''); }}
-                                          disabled={editPending}
-                                          maxLength={MAX_MANAGED_PROFILE_BIO_LENGTH}
-                                          rows={3}
-                                          placeholder="Korte omschrijving van dit profiel"
-                                          className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
-                                        />
-                                        <span className="block text-right text-[11px] font-semibold text-slate-400">{editBio.length}/{MAX_MANAGED_PROFILE_BIO_LENGTH}</span>
-                                      </label>
-                                      {editError && (
-                                        <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs font-semibold text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-100">{editError}</p>
-                                      )}
-                                      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                                        <button
-                                          type="button"
-                                          onClick={closeEditProfile}
-                                          disabled={editPending}
-                                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                        >
-                                          Annuleren
-                                        </button>
-                                        <button
-                                          type="submit"
-                                          disabled={editPending}
-                                          className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-70 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-                                        >
-                                          {editPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                                          Opslaan
-                                        </button>
-                                      </div>
-                                    </form>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <p className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-3 text-sm leading-relaxed text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-                            Je beheert nog geen Bedrijfsprofiel, Agency of Collectief.
-                          </p>
+              </div>
+            )}
+          </section>
+          {hasPersonalOrganizationHints && <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300">Op je persoonlijke profiel staan ook gegevens van een organisatie. In Artes beheer je persoonlijke profielen en organisatieprofielen apart. Daarom staat hieronder een organisatieprofiel voor je klaar. Je persoonlijke profiel blijft bestaan.</div>}
+          {setupProfiles.length > 0 && (
+            <section className="space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-wide text-slate-400">Nog in te stellen</h4>
+              {setupProfiles.map((setupProfile) => (
+                <div key={setupProfile.profileId || setupProfile.id} className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/25">
+                  <div className="grid min-w-0 gap-3">
+                    <div className="flex min-w-0 items-start gap-3"><ManagedProfileAvatar profile={setupProfile} sizeClass="mt-0.5 h-10 w-10" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(setupProfile)}</p><p className="mt-0.5 text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(setupProfile)}</p><span className="mt-2 inline-flex rounded-full bg-white px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200 dark:bg-slate-950/60 dark:text-amber-100 dark:ring-amber-800/70">NOG NIET OPENBAAR</span></div></div>
+                    <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">Dit profiel is klaargezet met je bestaande organisatiegegevens. Rond de instellingen af om het apart te beheren en ermee te publiceren.</p>
+                    <button type="button" onClick={() => openSetupProfileCreateFlow(setupProfile)} className="w-full rounded-full bg-blue-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-400 dark:text-blue-950 dark:hover:bg-blue-300">Profiel instellen</button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          )}
+          <section className="space-y-2">
+            <h4 className="text-xs font-bold uppercase tracking-wide text-slate-400">Organisatieprofielen</h4>
+            {hasExternalProfiles ? <div className="space-y-2">{externalProfiles.map((externalProfile) => {
+              const externalProfileId = getManagedProfileId(externalProfile);
+              const isEditing = editingProfileId === externalProfileId;
+              const externalBio = getManagedProfileBio(externalProfile);
+              return <div key={externalProfile.profileId || externalProfile.id} className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-700/70"><div className="grid min-w-0 gap-3"><div className="flex min-w-0 items-start gap-3"><ManagedProfileAvatar profile={externalProfile} sizeClass="mt-0.5 h-10 w-10" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-bold text-slate-900 dark:text-white">{getManagedProfileDisplayName(externalProfile)}</p><p className="text-xs font-semibold text-slate-500 dark:text-slate-300">{getManagedProfileTypeLabel(externalProfile)}</p>{externalBio ? <p className="mt-1 break-words text-sm leading-relaxed text-slate-500 dark:text-slate-300">{externalBio}</p> : <p className="mt-1 text-sm leading-relaxed text-slate-400 dark:text-slate-500">Nog geen omschrijving toegevoegd.</p>}</div></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openEditProfile(externalProfile)} disabled={editPending} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"><Edit3 className="h-3.5 w-3.5" />Bewerken</button>{renderProfileSelectionAction(externalProfile)}</div></div>{isEditing && (
+                <form onSubmit={(event) => handleEditSubmit(event, externalProfile)} className="mt-3 space-y-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/70 dark:bg-blue-950/20">
+                  <div className="rounded-lg bg-white/80 px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-100 dark:bg-slate-950/40 dark:text-slate-200 dark:ring-slate-800">Type: {getManagedProfileTypeLabel(externalProfile)}</div>
+                  <div className="space-y-2 rounded-lg bg-white/80 p-3 ring-1 ring-slate-100 dark:bg-slate-950/40 dark:ring-slate-800">
+                    <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Profielfoto</span>
+                    <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center">
+                      <ManagedProfileAvatar profile={{ ...externalProfile, avatar: editAvatar }} sizeClass="h-14 w-14" />
+                      <div className="flex flex-wrap gap-2">
+                        <label className="cursor-pointer rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+                          Foto uploaden
+                          <input type="file" accept="image/*" className="sr-only" onChange={handleEditAvatarFile} disabled={editPending} />
+                        </label>
+                        {editAvatar && (
+                          <button type="button" onClick={() => { setEditAvatar(''); setEditAvatarBlob(null); setEditCropSource(''); setEditError(''); }} disabled={editPending} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-500 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Verwijderen</button>
                         )}
                       </div>
-                      {createSuccess && (
-                        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">
-                          {createSuccess}
-                        </p>
-                      )}
-                      {createFlowOpen && (
-                        <form onSubmit={handleCreateSubmit} className="space-y-3 rounded-xl border border-blue-100 bg-white p-3 shadow-sm dark:border-blue-900/60 dark:bg-slate-900">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-bold text-slate-900 dark:text-white">{createSetupProfile ? `${PROFILE_TYPE_LABELS[createType] || 'Profiel'} instellen` : 'Nieuw profiel toevoegen'}</p>
-                              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-300">{createSetupProfile ? 'Controleer de vooringevulde gegevens en vul een naam in om dit klaargezette profiel op te slaan.' : 'Kies wat je wilt beheren als. Je kunt later nog meer profielen van hetzelfde type toevoegen.'}</p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => { setCreateFlowOpen(false); setCreateError(''); setCreateSetupProfile(null); }}
-                              disabled={createPending}
-                              className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                              aria-label="Sluit profiel toevoegen"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                          <div className="grid gap-2 sm:grid-cols-3">
-                            {MANAGED_EXTERNAL_PROFILE_TYPES.map((profileType) => (
-                              <button
-                                key={profileType}
-                                type="button"
-                                onClick={() => handleCreateTypeChange(profileType)}
-                                disabled={createPending}
-                                className={`rounded-lg border px-3 py-2 text-left text-xs font-bold transition disabled:opacity-60 ${createType === profileType ? 'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}
-                              >
-                                {PROFILE_TYPE_LABELS[profileType]}
-                              </button>
-                            ))}
-                          </div>
-                          <label className="block space-y-1.5">
-                            <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Naam profiel</span>
-                            <input
-                              type="text"
-                              value={createDisplayName}
-                              onChange={(event) => { setCreateDisplayName(event.target.value); setCreateError(''); }}
-                              disabled={createPending}
-                              maxLength={MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH}
-                              placeholder="Bijvoorbeeld Studio Luna"
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
-                            />
-                          </label>
-                          {createError && (
-                            <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs font-semibold text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-100">{createError}</p>
-                          )}
-                          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                            <button
-                              type="button"
-                              onClick={() => { setCreateFlowOpen(false); setCreateError(''); setCreateSetupProfile(null); }}
-                              disabled={createPending}
-                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                            >
-                              Annuleren
-                            </button>
-                            <button
-                              type="submit"
-                              disabled={createPending}
-                              className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-70 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-                            >
-                              {createPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                              Opslaan
-                            </button>
-                          </div>
-                        </form>
-                      )}
-                      {!createFlowOpen && (
-                        <button
-                          type="button"
-                          onClick={openCreateFlow}
-                          className="mt-1 flex w-full items-center justify-between rounded-lg border border-dashed border-blue-200 bg-white p-3 text-left text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-50 dark:border-blue-900/70 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/30"
-                        >
-                          <span>Nieuw profiel toevoegen</span>
-                          <span className="flex items-center gap-1 text-xs font-medium">
-                            Beheren als
-                            <Plus className="h-4 w-4" />
-                          </span>
-                        </button>
-                      )}
-                    </section>
-                    <h4 className="text-xs uppercase font-bold text-slate-400">Weergave</h4>
-                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between gap-2 md:p-3 md:gap-3">
-                      <button
-                        type="button"
-                        onClick={onToggleDark}
-                        className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold md:rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                      >
-                        {darkMode ? 'Light mode' : 'Dark mode'}
-                      </button>
-                      {darkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-slate-500" />}
                     </div>
-                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between md:p-3"><span>Taal</span><Globe className="w-4 h-4"/></div>
-                    {moderatorAccess === true && (
-                      <>
-                        <h4 className="text-xs uppercase font-bold text-slate-400">Moderatie</h4>
-                        <button
-                          type="button"
-                          onClick={onOpenModeration}
-                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
-                        >
-                          <span className="flex items-center gap-2">
-                            Artes Moderatie
-                            {showModerationDot && <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />}
-                          </span>
-                          <Shield className="w-4 h-4"/>
-                        </button>
-                        <p className="text-xs text-slate-500 dark:text-slate-300">
-                          Open het moderatieportaal om chats, reviews en rapportages te beheren.
-                        </p>
-                      </>
+                    <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">Gebruik dezelfde uitsnede als bij je persoonlijke profielfoto. De foto wordt opgeslagen op dit beheerde profiel.</p>
+                    {editCropSource && (
+                      <ProfileImageCropper
+                        source={editCropSource}
+                        onCancel={() => setEditCropSource('')}
+                        onApply={({ avatar, avatarBlob, error }) => {
+                          if (error) {
+                            setEditError(error);
+                            return;
+                          }
+                          setEditAvatar(avatar);
+                          setEditAvatarBlob(avatarBlob || null);
+                          setEditCropSource('');
+                          setEditError('');
+                        }}
+                      />
                     )}
-                    <h4 className="text-xs uppercase font-bold text-slate-400">Overig</h4>
-                    {debugAllowed() && (
-                      <Link
-                        to="/debug"
-                        onClick={onClose}
-                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
-                      >
-                        <span>Debug</span>
-                        <Info className="w-4 h-4" />
-                      </Link>
-                    )}
-                    <button
-                      type="button"
-                      onClick={onOpenVouchRequests}
-                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
-                    >
-                      <span>Vouch verzoeken</span>
-                      <MessageCircle className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onOpenSupport}
-                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
-                    >
-                      <span>Support</span>
-                      <HelpCircle className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onOpenAppShortcutInfo}
-                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded flex justify-between items-center text-left md:p-3"
-                    >
-                      <span>Artes als app gebruiken</span>
-                      <Smartphone className="w-4 h-4" />
-                    </button>
-                </div>
-            </div>
+                  </div>
+                  <label className="block space-y-1.5"><span className="text-xs font-bold uppercase tracking-wide text-slate-400">Naam</span><input type="text" value={editDisplayName} onChange={(event) => { setEditDisplayName(event.target.value); setEditError(''); }} disabled={editPending} maxLength={MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950" /></label>
+                  <label className="block space-y-1.5"><span className="text-xs font-bold uppercase tracking-wide text-slate-400">Omschrijving</span><textarea value={editBio} onChange={(event) => { setEditBio(event.target.value); setEditError(''); }} disabled={editPending} maxLength={MAX_MANAGED_PROFILE_BIO_LENGTH} rows={3} placeholder="Korte omschrijving van dit profiel" className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950" /><span className="block text-right text-[11px] font-semibold text-slate-400">{editBio.length}/{MAX_MANAGED_PROFILE_BIO_LENGTH}</span></label>
+                  {editError && <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs font-semibold text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-100">{editError}</p>}
+                  <div className="flex flex-col-reverse gap-2"><button type="button" onClick={closeEditProfile} disabled={editPending} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Annuleren</button><button type="submit" disabled={editPending} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-70 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200">{editPending && <Loader2 className="h-4 w-4 animate-spin" />}Opslaan</button></div>
+                </form>)}</div>; })}</div> : <p className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-3 text-sm leading-relaxed text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">{setupProfiles.length > 0 ? 'Je beheert nog geen andere bedrijfsprofielen, agencies of collectieven.' : 'Je beheert nog geen bedrijfsprofielen, agencies of collectieven.'}</p>}
+          </section>
+          {createSuccess && <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:text-emerald-100">{createSuccess}</p>}
+          {createFlowOpen && <form onSubmit={handleCreateSubmit} className="space-y-3 rounded-xl border border-blue-100 bg-white p-3 shadow-sm dark:border-blue-900/60 dark:bg-slate-900"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-slate-900 dark:text-white">{createSetupProfile ? `${PROFILE_TYPE_LABELS[createType] || 'Profiel'} instellen` : 'Nieuw profiel toevoegen'}</p><p className="text-xs leading-relaxed text-slate-500 dark:text-slate-300">{createSetupProfile ? 'Controleer de vooringevulde gegevens en vul een naam in om dit klaargezette profiel op te slaan.' : 'Kies wat je wilt beheren als. Je kunt later nog meer profielen van hetzelfde type toevoegen.'}</p></div><button type="button" onClick={() => { setCreateFlowOpen(false); setCreateError(''); setCreateSetupProfile(null); }} disabled={createPending} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100" aria-label="Sluit profiel toevoegen"><X className="h-4 w-4" /></button></div><div className="grid gap-2 min-[420px]:grid-cols-3">{MANAGED_EXTERNAL_PROFILE_TYPES.map((profileType) => <button key={profileType} type="button" onClick={() => handleCreateTypeChange(profileType)} disabled={createPending} className={`rounded-lg border px-3 py-2 text-left text-xs font-bold transition disabled:opacity-60 ${createType === profileType ? 'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}>{PROFILE_TYPE_LABELS[profileType]}</button>)}</div><label className="block space-y-1.5"><span className="text-xs font-bold uppercase tracking-wide text-slate-400">Naam profiel</span><input type="text" value={createDisplayName} onChange={(event) => { setCreateDisplayName(event.target.value); setCreateError(''); }} disabled={createPending} maxLength={MAX_MANAGED_PROFILE_DISPLAY_NAME_LENGTH} placeholder="Bijvoorbeeld Studio Luna" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950" /></label>{createError && <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs font-semibold text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-100">{createError}</p>}<div className="flex flex-col-reverse gap-2"><button type="button" onClick={() => { setCreateFlowOpen(false); setCreateError(''); setCreateSetupProfile(null); }} disabled={createPending} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Annuleren</button><button type="submit" disabled={createPending} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-70 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200">{createPending && <Loader2 className="h-4 w-4 animate-spin" />}Opslaan</button></div></form>}
+          {!createFlowOpen && <button type="button" onClick={openCreateFlow} className="mt-1 flex w-full items-center justify-between rounded-2xl border border-dashed border-blue-200 bg-white p-4 text-left text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-900/70 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-blue-950/30"><span>Organisatieprofiel toevoegen</span><Plus className="h-4 w-4" /></button>}
         </div>
+      </div>
+    );
+
+    return (
+      <div className="fixed inset-0 z-50 flex justify-end bg-black/50">
+        <div className="m-2 flex h-[calc(100dvh-1rem)] w-[min(30rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl bg-white text-slate-900 shadow-2xl dark:bg-slate-900 dark:text-slate-100 md:m-0 md:h-full md:rounded-none">
+          {settingsView === 'home' && renderHome()}
+          {settingsView === 'profiles' && renderProfiles()}
+          {settingsView === 'theme' && renderTheme()}
+          {settingsView === 'privacy' && renderPrivacy()}
+          {settingsView === 'about' && renderAbout()}
+        </div>
+      </div>
     ) 
 }
 function VouchRequestsPanel({ authUser, functionsBase }) {

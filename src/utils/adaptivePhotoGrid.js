@@ -96,13 +96,14 @@ const getPositiveInteger = (value, fallback) => Math.max(1, Math.floor(getPositi
 
 const getSpanFromFraction = (availableColumns, fraction) => Math.max(1, Math.round(availableColumns * fraction));
 
-export const getDiscoverUserCardColumnSpan = ({
-  containerWidth,
-  measuredWidth,
-  columnWidth,
-  columnGap,
-  columnCount,
-} = {}) => {
+export const getDiscoverUserCardColumnSpan = (metrics = {}) => {
+  const {
+    containerWidth,
+    measuredWidth,
+    columnWidth,
+    columnGap,
+    columnCount,
+  } = metrics ?? {};
   const safeColumnCount = getPositiveInteger(columnCount, FALLBACK_GRID_METRICS.columnCount);
   const safeColumnWidth = getPositiveNumber(columnWidth, FALLBACK_GRID_METRICS.columnWidth);
   const safeColumnGap = Number.isFinite(Number(columnGap)) && Number(columnGap) >= 0 ? Number(columnGap) : FALLBACK_GRID_METRICS.columnGap;

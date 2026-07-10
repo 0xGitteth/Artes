@@ -149,6 +149,10 @@ assert.equal(realisticDesktopSpans[0].gridColumnStart, 9, 'Desktop square span 8
 assert.equal(realisticDesktopSpans[1].gridColumnStart, 7, 'Desktop landscape span 12 should be included in tie breaking');
 assert.equal(realisticDesktopSpans[2].gridColumnStart, 1, 'Very wide desktop panorama spans should keep conservative left-most placement');
 
+const fallbackUserSpan = getDiscoverUserCardColumnSpan({});
+assert.equal(getDiscoverUserCardColumnSpan(null), fallbackUserSpan, 'Discover user card sizing should tolerate null metrics during first render');
+assert.equal(getDiscoverUserCardColumnSpan(undefined), fallbackUserSpan, 'Discover user card sizing should tolerate undefined metrics during first render');
+
 const desktopUserSpan = getDiscoverUserCardColumnSpan(desktop24Metrics);
 const desktopSquareSpan = getAdaptivePhotoTileSpan(post({ aspectRatio: 1 }), { availableColumns: desktop24Metrics.columnCount }).columnSpan;
 assert.ok(desktopUserSpan < desktopSquareSpan, 'Discover user cards should be more compact than desktop square photo cards');

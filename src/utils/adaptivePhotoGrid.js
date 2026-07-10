@@ -19,6 +19,23 @@ const FALLBACK_GRID_METRICS = {
 export const ADAPTIVE_PHOTO_GRID_MOBILE_MAX_WIDTH = 640;
 export const ADAPTIVE_PHOTO_GRID_MAX_MEDIA_HEIGHT_RATIO = 1.25;
 export const ADAPTIVE_PHOTO_GRID_MAX_MEDIA_HEIGHT = 560;
+export const ADAPTIVE_PHOTO_GRID_COLUMN_BREAKPOINTS = [
+  { minWidth: 1280, columnCount: 24 },
+  { minWidth: 1024, columnCount: 20 },
+  { minWidth: 640, columnCount: 16 },
+];
+
+export const getAdaptivePhotoGridColumnCountForWidth = (width, fallback = FALLBACK_GRID_METRICS.columnCount) => {
+  const measuredWidth = Number(width);
+  if (!Number.isFinite(measuredWidth) || measuredWidth <= 0) return fallback;
+
+  const matchingBreakpoint = ADAPTIVE_PHOTO_GRID_COLUMN_BREAKPOINTS.find(({ minWidth }) => measuredWidth >= minWidth);
+  return matchingBreakpoint?.columnCount ?? FALLBACK_GRID_METRICS.columnCount;
+};
+
+export const getAdaptivePhotoGridTemplateColumns = (columnCount) => (
+  `repeat(${getPositiveInteger(columnCount, FALLBACK_GRID_METRICS.columnCount)}, minmax(0, 1fr))`
+);
 
 export const getPostImageAspectRatio = (post) => {
   const imageMeta = post?.imageMeta;
@@ -109,8 +126,11 @@ export const getDiscoverUserCardColumnSpan = (metrics = {}) => {
   const safeColumnGap = Number.isFinite(Number(columnGap)) && Number(columnGap) >= 0 ? Number(columnGap) : FALLBACK_GRID_METRICS.columnGap;
   const width = Number(containerWidth ?? measuredWidth ?? 0);
   const measuredContainerWidth = Number.isFinite(width) && width > 0 ? width : 0;
-  const targetPx = measuredContainerWidth >= 1200 ? 160 : (measuredContainerWidth >= 900 ? 150 : (measuredContainerWidth >= 640 ? 140 : 120));
+  if (measuredContainerWidth >= ADAPTIVE_PHOTO_GRID_MOBILE_MAX_WIDTH) {
+    return Math.max(1, Math.min(safeColumnCount, getSpanFromFraction(safeColumnCount, 1 / 3)));
+  }
 
+  const targetPx = 120;
   return Math.max(1, Math.min(safeColumnCount, Math.ceil((targetPx + safeColumnGap) / (safeColumnWidth + safeColumnGap))));
 };
 

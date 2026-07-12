@@ -5410,21 +5410,20 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
   const companyName = resolveLinkedProfileName(normalizedProfile.linkedCompanyId, normalizedProfile.linkedCompanyName, allUsers);
   const agencyLink = normalizedProfile.linkedAgencyLink || '';
   const companyLink = normalizedProfile.linkedCompanyLink || '';
-  const hasProfileHeaderImage = Boolean(normalizedProfile.headerImage);
   const headerImage = normalizedProfile.headerImage || normalizedProfile.avatar;
   const hasAgency = Boolean(agencyName);
   const hasCompany = Boolean(companyName);
   return (
      <div className="min-h-screen bg-white dark:bg-slate-900 pb-20">
         <div
-          className="relative min-h-[430px] w-full overflow-hidden bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:min-h-[520px]"
+          className="relative min-h-[430px] w-full overflow-hidden bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:h-[calc(100dvh-4rem)] md:min-h-0"
           onTouchStart={handleProfileHeaderTouchStart}
           onTouchEnd={handleProfileHeaderTouchEnd}
         >
            <img
              src={headerImage}
              alt=""
-             className={`h-full min-h-[430px] w-full md:min-h-[520px] ${hasProfileHeaderImage ? 'object-cover' : 'object-contain p-12 opacity-70 blur-[1px] md:p-24'}`}
+             className="absolute inset-0 h-full w-full object-cover"
            />
            <div className="absolute inset-0 bg-white/40 dark:bg-black/55" />
            <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-white/50 dark:from-black/70 dark:via-black/30 dark:to-black/80" />
@@ -5471,8 +5470,8 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
              </div>
            ) : null}
 
-           <div className="absolute inset-x-0 bottom-0 top-0 z-20 flex items-center justify-center px-5 pb-14 pt-20 text-center md:pb-20 md:pt-24">
-              <div className="mx-auto flex max-h-[min(370px,calc(100dvh-5rem))] w-full max-w-4xl flex-col items-center overflow-hidden md:max-h-[440px]">
+           <div className="absolute inset-x-0 bottom-0 top-0 z-20 flex items-center justify-center px-5 pb-14 pt-20 text-center md:pb-16 md:pt-20">
+              <div className="mx-auto flex max-h-[min(370px,calc(100dvh-5rem))] w-full max-w-4xl flex-col items-center overflow-hidden md:max-h-[calc(100dvh-10rem)]">
                 <div className="w-full shrink-0">
                   <h1 className="mb-3 max-w-full break-words text-3xl font-bold leading-tight text-blue-700 dark:text-white md:text-5xl">{headerDisplayName}</h1>
                   <div className="no-scrollbar -mx-2 flex max-w-full justify-center gap-2 overflow-x-auto px-2 pb-1" data-profile-header-swipe-ignore="true">
@@ -5562,12 +5561,14 @@ function ImmersiveProfile({ profile, isOwn, posts, allPostsForMoodboards = posts
                     </div>
                   )}
                   {themes && themes.length > 0 ? (
-                    <div className="no-scrollbar -mx-5 flex w-[calc(100%+2.5rem)] max-w-[calc(100%+2.5rem)] gap-2 overflow-x-auto px-5 pb-1" data-profile-header-swipe-ignore="true">
-                      {themes.map((theme) => (
-                        <span key={theme} className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
-                          {theme}
-                        </span>
-                      ))}
+                    <div className="no-scrollbar -mx-5 w-[calc(100%+2.5rem)] max-w-[calc(100%+2.5rem)] overflow-x-auto pb-1" data-profile-header-swipe-ignore="true">
+                      <div className="flex min-w-full w-max justify-center gap-2 px-5">
+                        {themes.map((theme) => (
+                          <span key={theme} className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-semibold border ${getThemeStyle(theme)}`}>
+                            {theme}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -11401,7 +11402,6 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
       .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed')
       .slice(0, 3);
   }, [manualIds, previewMode, triggerVisibility, userPosts]);
-  const hasPreviewHeaderImage = Boolean(userProfile?.headerImage);
   const headerImage = userProfile?.headerImage || userProfile?.avatar;
   const resolvedFansCount = Number(fanCounts?.fansCount ?? userProfile?.fansCount ?? 0);
   const resolvedFanOfCount = Number(fanCounts?.fanOfCount ?? userProfile?.fanOfCount ?? 0);
@@ -11423,7 +11423,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
     <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-2 md:p-6">
       <div className="bg-white dark:bg-slate-900 rounded-2xl md:rounded-[28px] w-full max-w-3xl xl:max-w-4xl max-h-[calc(100dvh-1rem)] md:max-h-[calc(100vh-2rem)] shadow-2xl overflow-hidden border border-white/10 flex flex-col">
         <div className="relative h-52 w-full shrink-0 bg-gradient-to-br from-blue-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 md:h-72">
-          <img src={headerImage} alt="" className={`h-full w-full ${hasPreviewHeaderImage ? 'object-cover' : 'object-contain p-8 opacity-70 blur-[1px] md:p-14'}`} />
+          <img src={headerImage} alt="" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black/90" />
           <div className="absolute inset-x-0 bottom-0 flex max-h-full flex-col overflow-hidden p-4 text-white md:p-8">
             <div className="shrink-0">

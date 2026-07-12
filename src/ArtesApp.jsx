@@ -116,6 +116,7 @@ import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
 import ModalShell from './components/ModalShell';
 import { getAdaptivePhotoFrameStyle, getAdaptivePhotoGridTemplateColumns, getAdaptivePhotoMasonryLayout, getDiscoverUserCardColumnSpan } from './utils/adaptivePhotoGrid';
 import useAdaptivePhotoGridMetrics from './utils/useAdaptivePhotoGridMetrics';
+import { getQuickProfilePreviewPosts } from './utils/quickProfilePreview';
 import { stableDiscoverOrder } from './utils/discoverOrdering';
 import { shouldIgnoreTileActivation } from './utils/domInteraction';
 import { isPanoramaImage } from './utils/imageMeta';
@@ -11383,25 +11384,12 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
   const userPosts = useMemo(() => getProfileVisiblePosts(posts, userId, userProfile?.contributorId), [posts, userId, userProfile?.contributorId]);
   const previewMode = userProfile?.quickProfilePreviewMode || 'latest';
   const manualIds = Array.isArray(userProfile?.quickProfilePostIds) ? userProfile.quickProfilePostIds : [];
-  const previewPosts = useMemo(() => {
-    let rankedPosts = [];
-    if (previewMode === 'manual' && manualIds.length) {
-      const manualPosts = manualIds
-        .map((id) => userPosts.find((post) => post.id === id))
-        .filter(Boolean);
-      if (manualPosts.length) rankedPosts = manualPosts;
-    }
-    if (!rankedPosts.length && previewMode === 'best') {
-      rankedPosts = [...userPosts]
-        .sort((a, b) => (b.likes || 0) - (a.likes || 0));
-    }
-    if (!rankedPosts.length) {
-      rankedPosts = [...userPosts];
-    }
-    return rankedPosts
-      .filter((post) => getPostContentPreference(post, triggerVisibility) !== 'hideFeed')
-      .slice(0, 3);
-  }, [manualIds, previewMode, triggerVisibility, userPosts]);
+  const previewPosts = useMemo(() => getQuickProfilePreviewPosts({
+    posts: userPosts,
+    previewMode,
+    manualIds,
+    getContentPreference: (post) => getPostContentPreference(post, triggerVisibility),
+  }), [manualIds, previewMode, triggerVisibility, userPosts]);
   const headerImage = userProfile?.headerImage || userProfile?.avatar;
   const resolvedFansCount = Number(fanCounts?.fansCount ?? userProfile?.fansCount ?? 0);
   const resolvedFanOfCount = Number(fanCounts?.fanOfCount ?? userProfile?.fanOfCount ?? 0);
@@ -11479,17 +11467,35 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
               <span className="text-xs text-slate-500 dark:text-slate-400">{userPosts.length} totaal</span>
             </div>
             {previewPosts.length > 0 ? (
-              <AdaptivePhotoGrid
-                posts={previewPosts}
-                getShouldCover={(post) => shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById)}
-                renderOverlay={(post) => <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />}
-                renderFooter={(post) => (
-                  <span className="block p-3">
-                    <span className="block text-sm font-semibold text-slate-800 dark:text-slate-200">{post.title}</span>
-                    <span className="block text-xs text-slate-500 dark:text-slate-400">{post.description}</span>
-                  </span>
-                )}
-              />
+              <div className="grid grid-cols-3 gap-2 sm:gap-3" data-quick-profile-preview-grid>
+                {previewPosts.map((post) => {
+                  const shouldCover = shouldCoverPost(post, triggerVisibility, revealedSensitivePostsById);
+                  return (
+                    <article
+                      key={post.id}
+                      className={`group relative min-w-0 overflow-hidden rounded-xl bg-slate-100 text-left shadow-sm ring-1 ring-black/5 dark:bg-slate-800 dark:ring-white/10 ${post.isChallenge ? 'ring-2 ring-amber-400' : ''}`.trim()}
+                      data-quick-profile-preview-item
+                    >
+                      <div className="relative aspect-square w-full overflow-hidden">
+                        {shouldCover ? (
+                          <SensitiveOverlay className="absolute inset-0 z-20" onReveal={() => onRevealSensitivePost?.(post.id)} />
+                        ) : null}
+                        <img
+                          src={post.imageUrl}
+                          alt={post.title || ''}
+                          loading="lazy"
+                          className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+                        />
+                        {post.title ? (
+                          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/35 to-transparent p-2 pt-8 text-white">
+                            <span className="block truncate text-[11px] font-semibold leading-tight sm:text-xs">{post.title}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
             ) : (
               <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 text-center text-sm text-slate-500 dark:text-slate-300">
                 Nog geen publicaties om te tonen. Zodra hier werk wordt geplaatst, verschijnt het op dit profiel.

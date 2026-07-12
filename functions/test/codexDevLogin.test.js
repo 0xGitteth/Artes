@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getCodexDevLoginDecision } from '../codexDevLogin.js';
+import {
+  getCodexDevLoginDecision,
+  getCodexDevLoginDiagnostics,
+  shouldExposeCodexDevLoginDiagnostics,
+} from '../codexDevLogin.js';
 
 const envFor = (overrides = {}) => ({
   CODEX_DEV_LOGIN_ENABLED: 'true',
@@ -67,5 +71,62 @@ test('NODE_ENV production alone does not block when explicit dev-login checks pa
   assert.deepEqual(
     getCodexDevLoginDecision(envFor({ GCLOUD_PROJECT: 'artes-staging', ARTES_ENV: 'staging', NODE_ENV: 'production' })),
     { allowed: true, code: 'allowed' }
+  );
+});
+
+test('Codex dev login diagnostics distinguish a missing ARTES_ENV without exposing values', () => {
+  assert.deepEqual(
+    getCodexDevLoginDiagnostics(envFor({ ARTES_ENV: undefined })),
+    {
+      artesEnvState: 'missing',
+      loginForbidden: false,
+      loginEnabled: true,
+      projectIdState: 'present',
+      projectAllowed: true,
+      decisionCode: 'forbidden_environment',
+    }
+  );
+});
+
+test('Codex dev login diagnostics distinguish the explicit forbidden switch without exposing values', () => {
+  assert.deepEqual(
+    getCodexDevLoginDiagnostics(envFor({ CODEX_DEV_LOGIN_FORBIDDEN: 'true' })),
+    {
+      artesEnvState: 'allowed',
+      loginForbidden: true,
+      loginEnabled: true,
+      projectIdState: 'present',
+      projectAllowed: true,
+      decisionCode: 'forbidden_environment',
+    }
+  );
+});
+
+test('Codex dev login diagnostics distinguish project allowlist failures without exposing project ids', () => {
+  assert.deepEqual(
+    getCodexDevLoginDiagnostics(envFor({ GCLOUD_PROJECT: 'artes-prod' })),
+    {
+      artesEnvState: 'allowed',
+      loginForbidden: false,
+      loginEnabled: true,
+      projectIdState: 'present',
+      projectAllowed: false,
+      decisionCode: 'project_not_allowed',
+    }
+  );
+});
+
+test('Codex dev login diagnostics require both an env flag and request header', () => {
+  const reqWithHeader = { get: (name) => (name === 'x-codex-dev-diagnostics' ? '1' : '') };
+  const reqWithoutHeader = { get: () => '' };
+
+  assert.equal(shouldExposeCodexDevLoginDiagnostics(reqWithHeader, envFor()), false);
+  assert.equal(
+    shouldExposeCodexDevLoginDiagnostics(reqWithoutHeader, envFor({ CODEX_DEV_LOGIN_DIAGNOSTICS_ENABLED: 'true' })),
+    false
+  );
+  assert.equal(
+    shouldExposeCodexDevLoginDiagnostics(reqWithHeader, envFor({ CODEX_DEV_LOGIN_DIAGNOSTICS_ENABLED: 'true' })),
+    true
   );
 });

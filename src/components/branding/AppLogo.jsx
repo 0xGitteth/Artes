@@ -27,7 +27,7 @@ export default function AppLogo({ size = 28, alt = 'Artes', className = '', vari
 
   return (
     <img
-      src="/brand/logo.png"
+      src="/brand/logo square.png"
       alt={alt}
       className={className}
       style={{

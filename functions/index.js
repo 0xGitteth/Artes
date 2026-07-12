@@ -28,7 +28,11 @@ import {
   resolveReviewCaseUploadIds,
 } from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
-import { getCodexDevLoginDecision } from './codexDevLogin.js';
+import {
+  getCodexDevLoginDecision,
+  getCodexDevLoginDiagnostics,
+  shouldExposeCodexDevLoginDiagnostics,
+} from './codexDevLogin.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 
 const suggestThreshold = 0.45;
@@ -2202,7 +2206,13 @@ export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4
 
   const devLoginDecision = getCodexDevLoginDecision();
   if (!devLoginDecision.allowed) {
-    res.status(403).json({ error: 'Codex dev login is unavailable', code: devLoginDecision.code });
+    res.status(403).json({
+      error: 'Codex dev login is unavailable',
+      code: devLoginDecision.code,
+      ...(shouldExposeCodexDevLoginDiagnostics(req) ? {
+        diagnostics: getCodexDevLoginDiagnostics(),
+      } : {}),
+    });
     return;
   }
 

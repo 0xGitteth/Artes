@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Image as ImageIcon, Search, Users, Plus, Bookmark,
@@ -104,12 +104,16 @@ import {
   where,
 } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
+import ChatPanel from './components/ChatPanel';
+import ModerationSupportChat from './components/ModerationSupportChat';
 import LikeIcon from './components/icons/LikeIcon';
 import CommentIcon from './components/icons/CommentIcon';
 import SupportLanding from './components/SupportLanding';
 import SearchWithAutocomplete from './components/SearchWithAutocomplete';
+import PhotoDetailModal from './components/PhotoDetailModal';
 import PostImageDisplay from './components/PostImageDisplay';
 import AdaptivePhotoGrid from './components/AdaptivePhotoGrid';
+import ModalShell from './components/ModalShell';
 import { getAdaptivePhotoFrameStyle, getAdaptivePhotoGridTemplateColumns, getAdaptivePhotoMasonryLayout, getDiscoverUserCardColumnSpan } from './utils/adaptivePhotoGrid';
 import useAdaptivePhotoGridMetrics from './utils/useAdaptivePhotoGridMetrics';
 import { getQuickProfilePreviewPosts } from './utils/quickProfilePreview';
@@ -122,6 +126,7 @@ import { isAnonymousDisplayOnlyShadowProfile, isClaimableTemporaryContributor } 
 import { creditMatchesShadowProfile, getCanClaimShadowProfile } from './utils/shadowProfile';
 import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
+import ProfileImageCropper from './components/ProfileImageCropper';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { selectPendingApprovedUploadReminder } from './utils/pendingApprovedUpload';
 
@@ -214,12 +219,6 @@ import {
   normalizeConsentCredit,
   validateUploadConsent,
 } from './utils/uploadConsent';
-
-const ChatPanel = lazy(() => import('./components/ChatPanel'));
-const ModerationSupportChat = lazy(() => import('./components/ModerationSupportChat'));
-const PhotoDetailModal = lazy(() => import('./components/PhotoDetailModal'));
-const ModalShell = lazy(() => import('./components/ModalShell'));
-const ProfileImageCropper = lazy(() => import('./components/ProfileImageCropper'));
 
 const getContributorAliasSearch = (term) => {
   const value = String(term || '').trim();
@@ -2771,14 +2770,12 @@ export default function ArtesApp() {
           {!profileLoading && view === 'chat' && (
             authUser ? (
               <div className="max-w-6xl mx-auto px-4 py-6 h-[75vh]">
-                <Suspense fallback={<div className="p-6 text-sm text-slate-500 dark:text-slate-400">Chat laden...</div>}>
-                  <ChatPanel
-                    authUser={authUser}
-                    functionsBase={functionsBase}
-                    initialThreadId={supportThreadId}
-                    onResumeApprovedUpload={handleResumeApprovedUpload}
-                  />
-                </Suspense>
+                <ChatPanel
+                  authUser={authUser}
+                  functionsBase={functionsBase}
+                  initialThreadId={supportThreadId}
+                  onResumeApprovedUpload={handleResumeApprovedUpload}
+                />
               </div>
             ) : (
               <div className="max-w-2xl mx-auto px-4 py-6">
@@ -2976,8 +2973,7 @@ export default function ArtesApp() {
         )}
 
       {showActiveAppAnnouncement && (
-        <Suspense fallback={null}>
-          <ModalShell className="max-w-lg">
+        <ModalShell className="max-w-lg">
           <div className="flex shrink-0 items-center justify-between gap-3 px-6 py-4 border-b border-slate-200 dark:border-slate-700">
             <h3 className="font-semibold text-lg dark:text-white">{activeAppAnnouncement.title || 'App update'}</h3>
             <button onClick={handleDismissAnnouncement} disabled={announcementDismissPending} className="text-slate-500">
@@ -2992,8 +2988,7 @@ export default function ArtesApp() {
               {announcementDismissPending ? 'Opslaan...' : 'Sluiten'}
             </Button>
           </div>
-          </ModalShell>
-        </Suspense>
+        </ModalShell>
       )}
         {pendingApprovedReminder && (
           <div className="fixed top-5 right-5 z-[75] w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-blue-200 bg-white/95 dark:bg-slate-900/95 dark:border-slate-700 shadow-2xl p-4">
@@ -3074,8 +3069,7 @@ export default function ArtesApp() {
           )
         )}
         {selectedPost && (
-          <Suspense fallback={null}>
-            <PhotoDetailModal
+          <PhotoDetailModal
             post={selectedPost}
             onClose={() => setSelectedPost(null)}
             currentUser={authUser}
@@ -3090,7 +3084,6 @@ export default function ArtesApp() {
             onRevealSensitivePost={handleRevealSensitivePost}
             onOpenMoodboardSave={setMoodboardSavePost}
           />
-          </Suspense>
         )}
         {moodboardSavePost && (
           <MoodboardSaveModal
@@ -7412,14 +7405,12 @@ function ModerationPortal({
       {activeTab === 'chat' && (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900 min-h-[60vh]">
           {authUser ? (
-            <Suspense fallback={<div className="p-6 text-sm text-slate-500 dark:text-slate-400">Chat laden...</div>}>
-              <ModerationSupportChat
+            <ModerationSupportChat
               authReady={authReady}
               authUser={authUser}
               isModerator={isModerator}
               functionsBase={functionsBase}
             />
-            </Suspense>
           ) : (
             <div className="p-6 text-sm text-slate-500 dark:text-slate-400">Log in om de chat te openen.</div>
           )}
@@ -10214,8 +10205,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                         Deze profielfoto wordt overal gebruikt, inclusief de header van je profiel en quick profile.
                       </p>
                       {cropSource ? (
-                        <Suspense fallback={<div className="text-xs text-slate-500">Afbeeldingseditor laden...</div>}>
-                          <ProfileImageCropper
+                        <ProfileImageCropper
                           source={cropSource}
                           measuredHeaderAspectRatio={headerAspectRatio}
                           onCancel={() => setCropSource('')}
@@ -10230,7 +10220,6 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
                             setCropSource('');
                           }}
                         />
-                        </Suspense>
                       ) : null}
                       {formData.headerImage ? (
                         <div className="space-y-2">

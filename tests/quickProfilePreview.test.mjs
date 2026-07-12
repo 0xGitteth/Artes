@@ -40,6 +40,28 @@ assert.deepEqual(
   'Manual quick profile preview should skip hidden selected posts without reordering available selections',
 );
 
+assert.deepEqual(
+  getQuickProfilePreviewPosts({
+    posts,
+    previewMode: 'manual',
+    manualIds: ['manual-1', 'manual-2'],
+    getContentPreference: (item) => (item.id === 'manual-1' || item.id === 'manual-2' ? 'hideFeed' : 'show'),
+  }).map((item) => item.id),
+  [],
+  'Manual quick profile preview should not fall back to latest when all selected posts exist but are hidden',
+);
+
+assert.deepEqual(
+  getQuickProfilePreviewPosts({
+    posts,
+    previewMode: 'manual',
+    manualIds: ['manual-2', 'best-1', 'manual-1'],
+    getContentPreference: (item) => (item.id === 'best-1' ? 'hideFeed' : 'show'),
+  }).map((item) => item.id),
+  ['manual-2', 'manual-1'],
+  'Manual quick profile preview should preserve manual order, omit hidden selected posts, and not fill remaining slots with latest posts',
+);
+
 const source = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 'utf8');
 const userPreviewModalSource = source.slice(source.indexOf('function UserPreviewModal'), source.indexOf('function ShadowProfileModal'));
 assert.ok(userPreviewModalSource.includes('data-quick-profile-preview-grid'), 'UserPreviewModal should render the fixed quick profile preview grid');

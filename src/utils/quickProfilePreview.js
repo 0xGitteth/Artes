@@ -6,22 +6,25 @@ export const getQuickProfilePreviewPosts = ({
   limit = 3,
 } = {}) => {
   const visiblePosts = posts.filter((post) => getContentPreference(post) !== 'hideFeed');
-  let rankedPosts = [];
 
   if (previewMode === 'manual' && manualIds.length) {
-    const postsById = new Map(visiblePosts.map((post) => [post.id, post]));
-    rankedPosts = manualIds
+    const postsById = new Map(posts.map((post) => [post.id, post]));
+    const manualPosts = manualIds
       .map((id) => postsById.get(id))
       .filter(Boolean);
+
+    if (manualPosts.length) {
+      return manualPosts
+        .filter((post) => getContentPreference(post) !== 'hideFeed')
+        .slice(0, limit);
+    }
   }
 
-  if (!rankedPosts.length && previewMode === 'best') {
-    rankedPosts = [...visiblePosts].sort((a, b) => (b.likes || 0) - (a.likes || 0));
+  if (previewMode === 'best') {
+    return [...visiblePosts]
+      .sort((a, b) => (b.likes || 0) - (a.likes || 0))
+      .slice(0, limit);
   }
 
-  if (!rankedPosts.length) {
-    rankedPosts = visiblePosts;
-  }
-
-  return rankedPosts.slice(0, limit);
+  return visiblePosts.slice(0, limit);
 };

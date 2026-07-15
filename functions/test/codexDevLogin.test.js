@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   getCodexDevLoginDecision,
   getCodexDevLoginDiagnostics,
+  isValidCodexDevLoginSecret,
   shouldExposeCodexDevLoginDiagnostics,
 } from '../codexDevLogin.js';
 
@@ -129,4 +130,22 @@ test('Codex dev login diagnostics require both an env flag and request header', 
     shouldExposeCodexDevLoginDiagnostics(reqWithHeader, envFor({ CODEX_DEV_LOGIN_DIAGNOSTICS_ENABLED: 'true' })),
     true
   );
+});
+
+test('Codex dev login secret check rejects missing request secrets', () => {
+  assert.equal(isValidCodexDevLoginSecret(undefined, 'expected-secret'), false);
+  assert.equal(isValidCodexDevLoginSecret('', 'expected-secret'), false);
+});
+
+test('Codex dev login secret check rejects wrong request secrets', () => {
+  assert.equal(isValidCodexDevLoginSecret('wrong-secret', 'expected-secret'), false);
+});
+
+test('Codex dev login secret check accepts the correct request secret', () => {
+  assert.equal(isValidCodexDevLoginSecret('expected-secret', 'expected-secret'), true);
+});
+
+test('Codex dev login secret check rejects missing configured secrets', () => {
+  assert.equal(isValidCodexDevLoginSecret('expected-secret', undefined), false);
+  assert.equal(isValidCodexDevLoginSecret('expected-secret', ''), false);
 });

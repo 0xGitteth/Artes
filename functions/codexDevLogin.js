@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from 'crypto';
+
 const truthy = (value) => String(value || '').trim().toLowerCase() === 'true';
 const ALLOWED_ARTES_ENVS = new Set(['development', 'staging', 'preview', 'local']);
 
@@ -64,5 +66,18 @@ export const shouldExposeCodexDevLoginDiagnostics = (req, env = process.env) => 
   truthy(env.CODEX_DEV_LOGIN_DIAGNOSTICS_ENABLED)
   && String(req?.get?.('x-codex-dev-diagnostics') || '').trim() === '1'
 );
+
+const hashSecret = (value) => createHash('sha256').update(String(value), 'utf8').digest();
+
+export const isValidCodexDevLoginSecret = (requestSecret, expectedSecret) => {
+  const normalizedRequestSecret = typeof requestSecret === 'string' ? requestSecret : '';
+  const normalizedExpectedSecret = typeof expectedSecret === 'string' ? expectedSecret : '';
+  if (!normalizedRequestSecret || !normalizedExpectedSecret) return false;
+
+  return timingSafeEqual(
+    hashSecret(normalizedRequestSecret),
+    hashSecret(normalizedExpectedSecret),
+  );
+};
 
 export const canIssueCodexDevToken = (env = process.env) => getCodexDevLoginDecision(env).allowed;

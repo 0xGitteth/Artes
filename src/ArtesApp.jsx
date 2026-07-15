@@ -3129,6 +3129,7 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
   const auth = getFirebaseAuthInstance();
   const showCodexDevLogin = import.meta.env.DEV && debugAllowed() && Boolean(functionsBase);
+  const codexDevLoginSecret = import.meta.env.VITE_CODEX_DEV_LOGIN_SECRET;
 
   const handleCodexDevLogin = async () => {
     try {
@@ -3137,10 +3138,15 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
         setLocalError('Codex dev login is niet beschikbaar: VITE_FUNCTIONS_BASE_URL ontbreekt.');
         return;
       }
+      if (!codexDevLoginSecret) {
+        setLocalError('Codex dev login is niet beschikbaar: VITE_CODEX_DEV_LOGIN_SECRET ontbreekt.');
+        return;
+      }
       const response = await fetch(`${functionsBase}/createDevCodexToken`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Codex-Dev-Secret': codexDevLoginSecret,
         },
       });
       const data = await response.json().catch(() => ({}));

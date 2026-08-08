@@ -2,7 +2,7 @@
 
 Start
 
-1. Run `nvm use 24`
+1. Run `source "$NVM_DIR/nvm.sh" && nvm use 24`
 2. Run `npm install`
 3. Run `NODE_USE_ENV_PROXY=1 npm run dev -- --host 0.0.0.0`
 4. Open de forwarded preview URL

@@ -14,6 +14,17 @@ const readRequestBody = (req) => new Promise((resolve, reject) => {
   req.on('error', reject)
 })
 
+const resolveFunctionsBase = (env) => {
+  const getEnv = (name) => env[name] || process.env[name] || ''
+  const explicitBase = getEnv('VITE_FUNCTIONS_BASE_URL')
+    || getEnv('VITE_FUNCTIONS_BASE')
+    || getEnv('VITE_MODERATION_API_BASE')
+
+  if (explicitBase) return explicitBase
+
+  return getEnv('VITE_MODERATION_FUNCTION_URL').replace(/\/moderateImage\/?$/, '')
+}
+
 const codexDevLoginProxyPlugin = ({ functionsBase, secret }) => ({
   name: 'codex-dev-login-proxy',
   apply: 'serve',
@@ -26,7 +37,7 @@ const codexDevLoginProxyPlugin = ({ functionsBase, secret }) => ({
 
       if (!functionsBase || !secret) {
         jsonResponse(res, 503, {
-          error: 'Codex dev login proxy is not configured. Set CODEX_DEV_LOGIN_SECRET and VITE_FUNCTIONS_BASE_URL for the Vite dev server.',
+          error: 'Codex dev login proxy is not configured. Set CODEX_DEV_LOGIN_SECRET and a supported Functions endpoint variable for the Vite dev server.',
           code: 'codex_dev_proxy_not_configured',
         })
         return
@@ -64,7 +75,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       codexDevLoginProxyPlugin({
-        functionsBase: env.VITE_FUNCTIONS_BASE_URL || process.env.VITE_FUNCTIONS_BASE_URL || '',
+        functionsBase: resolveFunctionsBase(env),
         secret: env.CODEX_DEV_LOGIN_SECRET || process.env.CODEX_DEV_LOGIN_SECRET || '',
       }),
     ],

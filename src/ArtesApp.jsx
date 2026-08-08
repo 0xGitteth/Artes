@@ -3128,30 +3128,20 @@ function LoginScreen({ setView, onLogin, error, loading, authUser, appConfig, on
   const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_SIGNIN !== 'false';
   const enableApple = import.meta.env.VITE_ENABLE_APPLE_SIGNIN === 'true';
   const auth = getFirebaseAuthInstance();
-  const showCodexDevLogin = import.meta.env.DEV && debugAllowed() && Boolean(functionsBase);
-  const codexDevLoginSecret = import.meta.env.VITE_CODEX_DEV_LOGIN_SECRET;
+  const showCodexDevLogin = import.meta.env.DEV && debugAllowed();
 
   const handleCodexDevLogin = async () => {
     try {
       setLocalError(null);
-      if (!functionsBase) {
-        setLocalError('Codex dev login is niet beschikbaar: VITE_FUNCTIONS_BASE_URL ontbreekt.');
-        return;
-      }
-      if (!codexDevLoginSecret) {
-        setLocalError('Codex dev login is niet beschikbaar: VITE_CODEX_DEV_LOGIN_SECRET ontbreekt.');
-        return;
-      }
-      const response = await fetch(`${functionsBase}/createDevCodexToken`, {
+      const response = await fetch('/__codex-dev-login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Codex-Dev-Secret': codexDevLoginSecret,
         },
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data?.token) {
-        throw new Error(data?.error || 'Codex dev login mislukt.');
+        throw new Error(data?.error || 'Codex dev login proxy is niet beschikbaar of niet goed geconfigureerd.');
       }
       await signInWithCustomToken(auth, data.token);
       const refreshedConfig = await getAppConfig({ forceRefresh: true });

@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { VertexAI } from '@google-cloud/vertexai';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
 import { onDocumentCreated, onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { logger } from 'firebase-functions';
@@ -28,12 +29,18 @@ import {
   resolveReviewCaseUploadIds,
 } from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
-import { getCodexDevLoginDecision } from './codexDevLogin.js';
+import {
+  getCodexDevLoginDecision,
+  getCodexDevLoginDiagnostics,
+  isValidCodexDevLoginSecret,
+  shouldExposeCodexDevLoginDiagnostics,
+} from './codexDevLogin.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
 const mediumLogThreshold = 0.55;
+const codexDevLoginSecret = defineSecret('CODEX_DEV_LOGIN_SECRET');
 
 const ADULT_ART_NUDE_TRIGGER = 'adultArtNude';
 const ADULT_EROTIC_SUGGESTIVE_TRIGGER = 'adultEroticSuggestive';
@@ -2194,15 +2201,27 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
   }
 });
 
-export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4' }, async (req, res) => {
+export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4', secrets: [codexDevLoginSecret] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
 
+  const requestSecret = req.get('x-codex-dev-secret');
+  if (!isValidCodexDevLoginSecret(requestSecret, codexDevLoginSecret.value())) {
+    res.status(403).json({ error: 'Codex dev login is unavailable', code: 'forbidden_secret' });
+    return;
+  }
+
   const devLoginDecision = getCodexDevLoginDecision();
   if (!devLoginDecision.allowed) {
-    res.status(403).json({ error: 'Codex dev login is unavailable', code: devLoginDecision.code });
+    res.status(403).json({
+      error: 'Codex dev login is unavailable',
+      code: devLoginDecision.code,
+      ...(shouldExposeCodexDevLoginDiagnostics(req) ? {
+        diagnostics: getCodexDevLoginDiagnostics(),
+      } : {}),
+    });
     return;
   }
 

@@ -2,9 +2,12 @@
 
 Start
 
-1. Run `npm install`
-2. Run `npm run dev -- --host 0.0.0.0`
-3. Open de forwarded preview URL
+1. Run `source "$NVM_DIR/nvm.sh" && nvm use 24`
+2. Run `npm install`
+3. Run `NODE_USE_ENV_PROXY=1 npm run dev -- --host 0.0.0.0`
+4. Open de forwarded preview URL
+
+Node 24 is required because the Codex cloud environment uses `HTTP_PROXY`/`HTTPS_PROXY` and the server-side fetch for the Codex dev-login proxy must use that proxy.
 
 Login
 

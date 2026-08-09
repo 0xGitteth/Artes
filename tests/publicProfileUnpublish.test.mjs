@@ -45,6 +45,16 @@ assert.deepEqual(
   { onboardingStep: 5 },
   'ordinary lower-step writes remain monotonic',
 );
+assert.deepEqual(
+  normalizeOnboardingWritePatch(completed, { onboardingStep: 2, onboardingComplete: false }),
+  { onboardingStep: 5, onboardingComplete: true },
+  'ordinary updateUserProfile writes cannot bypass the atomic reset',
+);
+assert.deepEqual(
+  normalizeOnboardingWritePatch({}, { onboardingStep: 2, onboardingComplete: false }),
+  { onboardingStep: 2, onboardingComplete: false },
+  'a genuinely new account can initialize onboarding normally',
+);
 
 const db = createFakeDb([[privatePath, completed], [publicPath, visible], [managedPath, managed]]);
 assert.equal((await resetPersonalOnboardingAtomically({ db, uid })).status, 'reset-unpublished');
@@ -66,13 +76,27 @@ assert.equal(missing.get(privatePath).onboardingComplete, false);
 const diditPrivate = { ...completed, ageVerified: false, isAdult: false, didit: { status: 'underage' } };
 const diditHidden = { ...visible, hidden: true, status: 'inactive', visibility: 'private' };
 const didit = createFakeDb([[privatePath, diditPrivate], [publicPath, diditHidden]]);
-assert.equal((await resetPersonalOnboardingAtomically({ db: didit, uid })).status, 'reset-preserved-didit-safety-profile');
+assert.equal((await resetPersonalOnboardingAtomically({ db: didit, uid })).status, 'reset-preserved-unavailable-profile');
 assert.deepEqual(didit.get(publicPath), diditHidden);
 assert.equal(isAvailablePersonalPublicProfile(didit.get(publicPath)), false);
 
 const staleDidit = createFakeDb([[privatePath, diditPrivate], [publicPath, visible]]);
 assert.equal((await resetPersonalOnboardingAtomically({ db: staleDidit, uid })).status, 'reset-unpublished');
 assert.equal(staleDidit.has(publicPath), false, 'visible Didit projection is never preserved');
+
+for (const [label, unavailable] of [
+  ['hidden', { ...visible, hidden: true, fansCount: 7 }],
+  ['inactive/private', { ...visible, status: 'inactive', visibility: 'private', fanOfCount: 4 }],
+  ['admin disabled', { ...visible, deactivatedReason: 'disabled-by-admin', fansCount: 9 }],
+]) {
+  const safetyDb = createFakeDb([[privatePath, completed], [publicPath, unavailable]]);
+  assert.equal(
+    (await resetPersonalOnboardingAtomically({ db: safetyDb, uid })).status,
+    'reset-preserved-unavailable-profile',
+    `${label} profile is preserved`,
+  );
+  assert.deepEqual(safetyDb.get(publicPath), unavailable, `${label} markers and counters remain unchanged`);
+}
 
 const functionsSource = readFileSync(new URL('../functions/index.js', import.meta.url), 'utf8');
 assert.match(functionsSource, /export const resetPersonalOnboarding = onCall[\s\S]*?request\.auth\?\.uid[\s\S]*?resetPersonalOnboardingAtomically/);
@@ -83,5 +107,8 @@ const appSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 
 const handlers = [...appSource.matchAll(/const handleOpenIdCheck = async \(\) => \{[\s\S]*?\n[ \t]+\};/g)];
 assert.equal(handlers.length, 2);
 handlers.forEach(([handler]) => assert.match(handler, /await resetPersonalOnboardingToIdCheck\(\)/));
+assert.match(appSource, /shouldInitializeGoogleOnboarding = !isOnboardingComplete\(profile\)/);
+assert.match(appSource, /createdNewAccount \|\| !isOnboardingComplete\(profile\)/);
+assert.match(firebaseSource, /normalizeOnboardingWritePatch\(existingPrivate, safeData\)/);
 
 console.log('PASS publicProfileUnpublish.test');

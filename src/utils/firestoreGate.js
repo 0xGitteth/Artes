@@ -12,12 +12,6 @@ const toFiniteOnboardingStep = (value) => {
   return Number.isFinite(numeric) ? numeric : null;
 };
 
-export const isExplicitOnboardingReset = (patch = {}) => (
-  patch?.onboardingComplete === false
-  && toFiniteOnboardingStep(patch?.onboardingStep) !== null
-  && toFiniteOnboardingStep(patch?.onboardingStep) < 5
-);
-
 export const normalizeOnboardingWritePatch = (existing = {}, patch = {}) => {
   const nextPatch = { ...patch };
   const hasStep = Object.prototype.hasOwnProperty.call(nextPatch, 'onboardingStep');
@@ -26,22 +20,14 @@ export const normalizeOnboardingWritePatch = (existing = {}, patch = {}) => {
 
   const previousStep = toFiniteOnboardingStep(existing?.onboardingStep);
   const requestedStep = hasStep ? toFiniteOnboardingStep(nextPatch.onboardingStep) : null;
-  // Lower onboarding writes stay monotonic unless the caller explicitly pairs
-  // an incomplete step with the false completion marker.
-  const explicitReset = isExplicitOnboardingReset(nextPatch);
-
   if (requestedStep !== null) {
-    nextPatch.onboardingStep = explicitReset
+    nextPatch.onboardingStep = previousStep === null
       ? requestedStep
-      : previousStep === null
-        ? requestedStep
-        : Math.max(previousStep, requestedStep);
+      : Math.max(previousStep, requestedStep);
   }
 
   if (hasComplete) {
-    nextPatch.onboardingComplete = explicitReset
-      ? false
-      : isOnboardingComplete(existing) || nextPatch.onboardingComplete === true;
+    nextPatch.onboardingComplete = isOnboardingComplete(existing) || nextPatch.onboardingComplete === true;
   }
 
   return nextPatch;

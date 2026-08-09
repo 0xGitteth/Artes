@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import { isOnboardingComplete } from '../src/utils/firestoreGate.js';
 import { isPublishedPersonalUserProfile, isPublicProfileVisible } from '../src/utils/managedProfiles.js';
 import { syncPublicProfileFromCurrentPrivate } from '../src/utils/publicProfileSync.js';
-import { normalizePublicProfileField } from '../src/utils/publicProfileFieldNormalization.js';
+import {
+  normalizePublicProfileField,
+  resolvePublicDisplayName,
+} from '../src/utils/publicProfileFieldNormalization.js';
 import {
   isAvailablePersonalDmRecipient,
   isAvailablePersonalPublicProfile,
@@ -57,6 +60,10 @@ assert.equal(normalizePublicProfileField('bio', 7), '');
 assert.equal(normalizePublicProfileField('linkedAgencyStatus', { legacy: true }), undefined);
 assert.equal(normalizePublicProfileField('linkedAgencyId', { legacy: true }), null);
 assert.equal(normalizePublicProfileField('quickProfilePreviewMode', 'broken'), 'latest');
+assert.equal(resolvePublicDisplayName({ malformed: true }, ' Existing Name '), 'Existing Name');
+assert.equal(resolvePublicDisplayName('', 'Existing Name'), 'Existing Name');
+assert.equal(resolvePublicDisplayName(42, ''), undefined);
+assert.notEqual(String(resolvePublicDisplayName({ malformed: true }, 'Existing Name') || '').toLowerCase(), '');
 assert.equal(isLegitimatelyPublishedPersonalProfile({
   privateProfile:{onboardingComplete:true},
   publicProfile:{onboardingComplete:true,hidden:true},

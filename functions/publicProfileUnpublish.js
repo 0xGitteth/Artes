@@ -25,13 +25,6 @@ export const resetPersonalOnboardingAtomically = async ({ db, uid, onboardingSte
     const privateSnap = await transaction.get(privateRef);
     if (!privateSnap.exists) return { status: 'missing-private-profile' };
 
-    const privateProfile = privateSnap.data() || {};
-    const resetProfile = {
-      ...privateProfile,
-      onboardingStep,
-      onboardingComplete: false,
-    };
-
     const publicSnap = await transaction.get(publicRef);
     transaction.set(privateRef, {
       onboardingStep,
@@ -40,11 +33,8 @@ export const resetPersonalOnboardingAtomically = async ({ db, uid, onboardingSte
     if (!publicSnap.exists) return { status: 'reset-already-unpublished' };
 
     const publicProfile = publicSnap.data() || {};
-    if (
-      isDiditSafetyDeactivatedPrivateProfile(resetProfile)
-      && !isAvailablePersonalPublicProfile(publicProfile)
-    ) {
-      return { status: 'reset-preserved-didit-safety-profile' };
+    if (!isAvailablePersonalPublicProfile(publicProfile)) {
+      return { status: 'reset-preserved-unavailable-profile' };
     }
 
     transaction.delete(publicRef);

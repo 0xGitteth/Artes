@@ -52,7 +52,10 @@ import {
   normalizeOnboardingWritePatch,
 } from './utils/firestoreGate';
 import { syncPublicProfileFromCurrentPrivate } from './utils/publicProfileSync';
-import { normalizePublicProfileField } from './utils/publicProfileFieldNormalization';
+import {
+  normalizePublicProfileField,
+  resolvePublicDisplayName,
+} from './utils/publicProfileFieldNormalization';
 import {
   AFFILIATION_STATUSES,
   applyAffiliationStatusTransitions,
@@ -669,9 +672,9 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
   }
   payload.profileId = uid;
   payload.ownerUid = uid;
-  const normalizedDisplayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
-  if (data.displayName !== undefined) {
-    payload.displayName = normalizedDisplayName;
+  const resolvedDisplayName = resolvePublicDisplayName(data.displayName, existingPublic?.displayName);
+  if (resolvedDisplayName) {
+    payload.displayName = resolvedDisplayName;
   }
   if (data.username !== undefined) {
     payload.username = sanitizePublicProfileField('username', data.username);
@@ -716,11 +719,6 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
   if (!hasUsername) {
     const existingUsername = normalizeUsername(existingPublic?.username);
     payload.username = existingUsername || generateUsername(payload.displayName || existingPublic?.displayName, uid);
-  }
-
-  const existingDisplayName = typeof existingPublic?.displayName === 'string' ? existingPublic.displayName.trim() : '';
-  if (payload.displayName === undefined && existingDisplayName) {
-    payload.displayName = existingDisplayName;
   }
 
   if (payload.displayName === undefined && payload.username !== undefined) {
@@ -1227,6 +1225,11 @@ export const updateUserProfile = async (uid, data) => {
     deleteValue: deleteField(),
   });
   Object.assign(safeData, affiliationTransition);
+
+  // Ordinary profile writes are never allowed to move completed onboarding
+  // backwards. Explicit resets must use resetPersonalOnboardingToIdCheck so
+  // the private reset and public unpublish happen in one server transaction.
+  Object.assign(safeData, normalizeOnboardingWritePatch(existingPrivate, safeData));
 
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
   const userDocPath = `users/${resolvedUid}`;

@@ -3494,11 +3494,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         googleDisplayName,
       });
       if (syncedGoogleProfile && (!includeGoogleDisplayName || syncedGoogleDisplayNameSeed)) return;
+      const shouldInitializeGoogleOnboarding = !isOnboardingComplete(profile);
       const googleSyncPayload = syncedGoogleProfile
         ? {}
         : {
-          onboardingStep: 2,
-          onboardingComplete: false,
+          ...(shouldInitializeGoogleOnboarding ? {
+            onboardingStep: 2,
+            onboardingComplete: false,
+          } : {}),
           email: authUser.email ?? null,
           authProvider: 'google.com',
         };
@@ -3967,15 +3970,19 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                   throw new Error('Email signup staat uitgeschakeld.');
                 }
                 let createdUser = authUser;
+                let createdNewAccount = false;
                 if (!accountCreated) {
                   createdUser = await onSignup?.(email, password, profileData.displayName);
+                  createdNewAccount = true;
                   setAccountCreated(true);
                 }
                 const uid = createdUser?.uid || authUser?.uid;
                 if (uid) {
                   await updateUserProfile(uid, {
-                    onboardingStep: 2,
-                    onboardingComplete: false,
+                    ...((createdNewAccount || !isOnboardingComplete(profile)) ? {
+                      onboardingStep: 2,
+                      onboardingComplete: false,
+                    } : {}),
                     displayName: profileData.displayName || 'Gebruiker',
                     email: createdUser?.email || email,
                     authProvider: 'password',

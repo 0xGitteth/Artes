@@ -2,6 +2,13 @@ export const cleanPublicStringArray = (value) => (Array.isArray(value)
   ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
   : []);
 
+export const resolvePublicDisplayName = (value, existingValue) => {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (normalized) return normalized;
+  const existing = typeof existingValue === 'string' ? existingValue.trim() : '';
+  return existing || undefined;
+};
+
 export const normalizePublicProfileField = (key, value) => {
   if (value === undefined) return undefined;
   if (key === 'photoURL' || key === 'avatar' || key === 'headerImage') {

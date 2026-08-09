@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   buildPublicUserBackfillPayload,
+  isPublishEligibleUser,
   runBackfill,
 } from '../functions/scripts/backfillPublicUsersFromUsers.js';
 
@@ -49,6 +50,7 @@ assert.equal(payload.quickProfilePreviewMode, 'manual');
 assert.deepEqual(payload.quickProfilePostIds, ['post_1', 'post_2']);
 assert.deepEqual(payload.roles, ['assistant', 'model']);
 assert.deepEqual(payload.themes, ['Product', 'Conceptual']);
+assert.equal(payload.onboardingComplete, true);
 assert.equal(payload.updatedAt, '__SERVER_TIMESTAMP__');
 
 for (const privateField of ['email', 'legalName', 'didit', 'idv', 'ageVerified', 'isAdult', 'preferences', 'supportThreadId']) {
@@ -67,6 +69,10 @@ assert.equal(Object.prototype.hasOwnProperty.call(invalidQuickPayload, 'quickPro
 assert.equal(Object.prototype.hasOwnProperty.call(invalidQuickPayload, 'quickProfilePostIds'), false);
 assert.deepEqual(invalidQuickPayload.roles, []);
 assert.deepEqual(invalidQuickPayload.themes, []);
+assert.equal(isPublishEligibleUser({ onboardingComplete: true }), true, 'completed onboarding does not require age fields');
+assert.equal(isPublishEligibleUser({ onboardingStep: 5 }), true, 'legacy step 5 is publish eligible');
+assert.equal(isPublishEligibleUser({ onboardingStep: '5' }), true, 'legacy string step 5 is publish eligible');
+assert.equal(isPublishEligibleUser({ onboardingStep: 4, ageVerified: true, isAdult: true }), false, 'age fields do not publish incomplete onboarding');
 
 const docs = [
   {
@@ -79,17 +85,22 @@ const docs = [
       quickProfilePreviewMode: 'manual',
       quickProfilePostIds: ['post_1', 'post_2'],
       onboardingComplete: true,
-      ageVerified: true,
-      isAdult: true,
+    }),
+  },
+  {
+    id: 'legacy_step_user',
+    data: () => ({
+      displayName: 'Legacy Step User',
+      onboardingStep: 5,
     }),
   },
   {
     id: 'not_eligible_user',
     data: () => ({
       displayName: 'Not Eligible User',
-      onboardingComplete: true,
+      onboardingStep: 4,
       ageVerified: true,
-      isAdult: false,
+      isAdult: true,
     }),
   },
 ];
@@ -160,10 +171,10 @@ const createFakeDb = () => {
 const dryRunDb = createFakeDb();
 const dryRunStats = await runBackfill({ db: dryRunDb, dryRun: true, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(dryRunStats, {
-  scanned: 2,
-  eligible: 1,
+  scanned: 3,
+  eligible: 2,
   skippedNotEligible: 1,
-  wouldWrite: 1,
+  wouldWrite: 2,
   written: 0,
   failed: 0,
   legacyPrivateFieldsFound: 5,
@@ -174,16 +185,16 @@ assert.equal(dryRunDb.batchSetCalls, 0, 'dry run must not enqueue writes');
 const applyDb = createFakeDb();
 const applyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(applyStats, {
-  scanned: 2,
-  eligible: 1,
+  scanned: 3,
+  eligible: 2,
   skippedNotEligible: 1,
-  wouldWrite: 1,
-  written: 1,
+  wouldWrite: 2,
+  written: 2,
   failed: 0,
   legacyPrivateFieldsFound: 5,
   legacyPrivateFieldsDeleted: 5,
 });
-assert.equal(applyDb.batchSetCalls, 1, 'apply should enqueue one eligible publicUsers write');
+assert.equal(applyDb.batchSetCalls, 2, 'apply should enqueue every onboarding-eligible publicUsers write');
 
 const writtenPayload = applyDb.queuedWrites[0].payload;
 for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {
@@ -195,6 +206,7 @@ assert.equal(writtenPayload.ownerUid, 'eligible_user');
 assert.deepEqual(writtenPayload.themes, ['Product']);
 assert.equal(writtenPayload.quickProfilePreviewMode, 'manual');
 assert.deepEqual(writtenPayload.quickProfilePostIds, ['post_1', 'post_2']);
+assert.equal(writtenPayload.onboardingComplete, true);
 
 const updatedPublicUser = applyDb.publicUsers.get('eligible_user');
 for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {
@@ -206,5 +218,9 @@ assert.equal(updatedPublicUser.ownerUid, 'eligible_user');
 assert.deepEqual(updatedPublicUser.themes, ['Product']);
 assert.equal(updatedPublicUser.quickProfilePreviewMode, 'manual');
 assert.deepEqual(updatedPublicUser.quickProfilePostIds, ['post_1', 'post_2']);
+assert.equal(updatedPublicUser.onboardingComplete, true);
+
+const legacyStepPublicUser = applyDb.publicUsers.get('legacy_step_user');
+assert.equal(legacyStepPublicUser.onboardingComplete, true, 'legacy step publication stamps the public completion marker');
 
 console.log('PASS backfillPublicUsersFromUsers.test');

@@ -109,8 +109,7 @@ const copyStringOnly = (payload, source, field) => {
 
 export const isPublishEligibleUser = (userData = {}) => (
   userData?.onboardingComplete === true
-  && userData?.ageVerified === true
-  && userData?.isAdult === true
+  || Number(userData?.onboardingStep || 0) >= 5
 );
 
 export const getLegacyPrivatePublicUserFields = (publicUserData = {}) => LEGACY_PRIVATE_PUBLIC_USER_FIELDS
@@ -134,6 +133,7 @@ export const buildPublicUserBackfillPayload = (uid, userData = {}, { serverTimes
     displayNameLower: displayName.toLowerCase(),
     roles: cleanStringArray(userData.roles),
     themes: cleanStringArray(userData.themes),
+    onboardingComplete: true,
     updatedAt: serverTimestamp(),
   };
 

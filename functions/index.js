@@ -36,6 +36,7 @@ import {
   shouldExposeCodexDevLoginDiagnostics,
 } from './codexDevLogin.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
+import { isAvailablePersonalDmRecipient } from './publicProfileAvailability.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -2080,12 +2081,6 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       return;
     }
 
-    const recipientPublicSnap = await db.collection('publicUsers').doc(recipientUid).get();
-    if (!recipientPublicSnap.exists || recipientPublicSnap.data()?.onboardingComplete !== true) {
-      res.status(404).json({ error: 'Profiel is niet beschikbaar.' });
-      return;
-    }
-
     const participantPair = [decoded.uid, recipientUid].sort();
     const dmKey = participantPair.join('_');
     const canonicalThreadId = `dm_${dmKey}`;
@@ -2127,6 +2122,12 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
         return left.id.localeCompare(right.id);
       });
       res.status(200).json({ threadId: sorted[0].id });
+      return;
+    }
+
+    const recipientPublicSnap = await db.collection('publicUsers').doc(recipientUid).get();
+    if (!recipientPublicSnap.exists || !isAvailablePersonalDmRecipient(recipientPublicSnap.data())) {
+      res.status(404).json({ error: 'Profiel is niet beschikbaar.' });
       return;
     }
 

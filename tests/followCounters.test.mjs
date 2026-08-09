@@ -162,9 +162,29 @@ hiddenTargetDeleteDb.put('publicUsers/target', {
   fansCount: 4,
 });
 const hiddenTargetDeleteResult = await applyDelete(hiddenTargetDeleteDb);
-assert.deepEqual(hiddenTargetDeleteResult.decremented, ['fan']);
-assert.equal(hiddenTargetDeleteDb.get('publicUsers/target').fansCount, 4, 'delete does not merge into gated target');
-assert.equal(hiddenTargetDeleteDb.get('publicUsers/fan').fanOfCount, 1, 'available counterpart remains accurate');
+assert.deepEqual(hiddenTargetDeleteResult.decremented.sort(), ['fan', 'target']);
+assert.equal(hiddenTargetDeleteDb.get('publicUsers/target').fansCount, 3, 'hidden existing target still undoes its applied counter');
+assert.equal(hiddenTargetDeleteDb.get('publicUsers/fan').fanOfCount, 1, 'counter deletion remains symmetric');
+
+const inactiveFanDeleteDb = createFakeDb(validEntries().filter(([path]) => path !== relationPath));
+inactiveFanDeleteDb.put('publicUsers/fan', {
+  onboardingComplete: true,
+  status: 'inactive',
+  deactivatedReason: 'underage',
+  fanOfCount: 2,
+});
+const inactiveFanDeleteResult = await applyDelete(inactiveFanDeleteDb);
+assert.deepEqual(inactiveFanDeleteResult.decremented.sort(), ['fan', 'target']);
+assert.equal(inactiveFanDeleteDb.get('publicUsers/fan').fanOfCount, 1, 'inactive/deactivated existing fan still decrements');
+assert.equal(inactiveFanDeleteDb.get('publicUsers/target').fansCount, 3);
+
+const missingTargetDeleteDb = createFakeDb(validEntries().filter(([path]) => (
+  path !== relationPath && path !== 'users/target' && path !== 'publicUsers/target'
+)));
+const missingTargetDeleteResult = await applyDelete(missingTargetDeleteDb);
+assert.deepEqual(missingTargetDeleteResult.decremented, ['fan']);
+assert.equal(missingTargetDeleteDb.get('publicUsers/fan').fanOfCount, 1);
+assert.equal(missingTargetDeleteDb.has('publicUsers/target'), false, 'delete counterpart never recreates missing target profile');
 
 const functionsSource = readFileSync(new URL('../functions/index.js', import.meta.url), 'utf8');
 assert.match(functionsSource, /onFollowingCreated[\s\S]*?applyFollowingCreatedCounters\(\{/);

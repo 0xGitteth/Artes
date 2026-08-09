@@ -78,17 +78,13 @@ export const applyFollowingDeletedCounters = async ({
   return db.runTransaction(async (transaction) => {
     const fanRefs = getPersonalProfileRefs(db, uid);
     const targetRefs = getPersonalProfileRefs(db, targetUid);
-    const [fanPrivateSnap, fanPublicSnap, targetPrivateSnap, targetPublicSnap] = await Promise.all([
-      transaction.get(fanRefs.privateRef),
+    const [fanPublicSnap, targetPublicSnap] = await Promise.all([
       transaction.get(fanRefs.publicRef),
-      transaction.get(targetRefs.privateRef),
       transaction.get(targetRefs.publicRef),
     ]);
-    const fanAvailable = isAvailableProfileSnapshotPair(fanPrivateSnap, fanPublicSnap);
-    const targetAvailable = isAvailableProfileSnapshotPair(targetPrivateSnap, targetPublicSnap);
     const decremented = [];
 
-    if (targetAvailable) {
+    if (targetPublicSnap.exists) {
       const targetCurrent = Number(targetPublicSnap.data()?.fansCount) || 0;
       transaction.update(targetRefs.publicRef, {
         fansCount: Math.max(0, targetCurrent - 1),
@@ -96,7 +92,7 @@ export const applyFollowingDeletedCounters = async ({
       });
       decremented.push('target');
     }
-    if (fanAvailable) {
+    if (fanPublicSnap.exists) {
       const fanCurrent = Number(fanPublicSnap.data()?.fanOfCount) || 0;
       transaction.update(fanRefs.publicRef, {
         fanOfCount: Math.max(0, fanCurrent - 1),
@@ -106,7 +102,7 @@ export const applyFollowingDeletedCounters = async ({
     }
 
     return {
-      status: decremented.length ? 'decremented' : 'skipped-unavailable',
+      status: decremented.length ? 'decremented' : 'skipped-missing',
       decremented,
     };
   });

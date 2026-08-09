@@ -38,6 +38,7 @@ import {
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
+import { unpublishIncompletePersonalProfileFromCurrentState } from './publicProfileUnpublish.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -2212,6 +2213,14 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create dm thread' });
   }
+});
+
+export const unpublishIncompletePersonalProfile = onCall({ region: 'europe-west4' }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  return unpublishIncompletePersonalProfileFromCurrentState({ db, uid });
 });
 
 export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4', secrets: [codexDevLoginSecret] }, async (req, res) => {

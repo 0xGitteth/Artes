@@ -45,7 +45,13 @@ import {
   makeAliasId,
   normalizeAliasValue,
 } from './utils/contributorClaims';
-import { canAccessFirestore, devLog, isOnboardingComplete } from './utils/firestoreGate';
+import {
+  canAccessFirestore,
+  devLog,
+  isExplicitOnboardingReset,
+  isOnboardingComplete,
+  normalizeOnboardingWritePatch,
+} from './utils/firestoreGate';
 import { syncPublicProfileFromCurrentPrivate } from './utils/publicProfileSync';
 import {
   AFFILIATION_STATUSES,
@@ -404,6 +410,12 @@ export const refreshDiditSession = async (sessionId = null) => {
   const callable = httpsCallable(getFirebaseFunctions(), 'refreshDiditSession');
   const payload = sessionId ? { sessionId } : {};
   const result = await callable(payload);
+  return result?.data || null;
+};
+
+const requestIncompletePersonalProfileUnpublish = async () => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'unpublishIncompletePersonalProfile');
+  const result = await callable({});
   return result?.data || null;
 };
 
@@ -888,7 +900,7 @@ const logOnboardingWrite = ({ uid, label, patch, prevStep, prevComplete, nextSte
 export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = {}) => {
   if (!uid || !patch || typeof patch !== 'object') return;
   const userRef = doc(getFirebaseDb(), 'users', uid);
-  const nextPatch = { ...patch };
+  let nextPatch = { ...patch };
 
   if (!hasOnboardingWriteKeys(nextPatch)) {
     await setDoc(userRef, nextPatch, { merge: true });
@@ -898,22 +910,11 @@ export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = 
   const snapshot = await getDoc(userRef);
   const existing = snapshot.exists() ? snapshot.data() : {};
   const prevStep = toOnboardingStepNumber(existing?.onboardingStep);
-  const prevComplete = existing?.onboardingComplete === true;
-
-  const requestedStep = toOnboardingStepNumber(nextPatch.onboardingStep);
-  let nextStep = prevStep;
-
-  if (requestedStep != null) {
-    nextStep = prevStep == null ? requestedStep : Math.max(prevStep, requestedStep);
-    nextPatch.onboardingStep = nextStep;
-  }
-
-  const requestedComplete = nextPatch.onboardingComplete === true;
-  const nextComplete = prevComplete || requestedComplete;
-
-  if ('onboardingComplete' in nextPatch && nextPatch.onboardingComplete !== nextComplete) {
-    nextPatch.onboardingComplete = nextComplete;
-  }
+  const prevComplete = isOnboardingComplete(existing);
+  nextPatch = normalizeOnboardingWritePatch(existing, nextPatch);
+  const nextState = { ...existing, ...nextPatch };
+  const nextStep = toOnboardingStepNumber(nextState?.onboardingStep);
+  const nextComplete = isOnboardingComplete(nextState);
 
   logOnboardingWrite({
     uid,
@@ -1292,6 +1293,10 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const shouldSyncPublic = isOnboardingComplete(resultingPrivate);
+  const shouldRequestPublicUnpublish = (
+    !shouldSyncPublic
+    && isExplicitOnboardingReset(safeData)
+  );
   if (!didWriteUser) {
     if (import.meta.env.DEV) {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid: resolvedUid, reason: 'user-write-not-allowed-or-blocked' });
@@ -1336,6 +1341,23 @@ export const updateUserProfile = async (uid, data) => {
         }
       );
       throw new Error('Profiel opslaan mislukt: public profiel kon niet worden bijgewerkt.');
+    }
+  } else if (shouldRequestPublicUnpublish) {
+    try {
+      const unpublishResult = await requestIncompletePersonalProfileUnpublish();
+      if (import.meta.env.DEV) {
+        console.log('[updateUserProfile] PUBLIC UNPUBLISH', {
+          uid: resolvedUid,
+          path: publicDocPath,
+          status: unpublishResult?.status || 'unknown',
+        });
+      }
+    } catch (e) {
+      console.error('[updateUserProfile] PUBLIC UNPUBLISH FAILED', e.code, e.message, {
+        uid: resolvedUid,
+        path: publicDocPath,
+      });
+      throw new Error('Profiel opslaan mislukt: openbaar profiel kon niet worden ingetrokken.');
     }
   }
 

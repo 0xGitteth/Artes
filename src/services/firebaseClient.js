@@ -6,6 +6,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import { canAccessFirestore, devLog, isOnboardingComplete } from '../utils/firestoreGate';
+import { syncPublicProfileFromCurrentPrivate } from '../utils/publicProfileSync';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
 import { buildPostAuthorFields, isLegacySetupProfileId, isPublicProfileVisible, resolvePostAuthorProfile } from '../utils/managedProfiles';
 import {
@@ -19,6 +20,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  runTransaction,
   writeBatch,
   updateDoc,
   deleteDoc,
@@ -219,14 +221,25 @@ export const createProfile = async (uid, profile) => {
 // Update is merged into both private and public profile indices.
 // Keep profile preview preferences in sync with UI expectations.
 export const updateProfile = async (uid, payload) => {
-  const privateSnap = await getDoc(doc(db, 'users', uid));
+  const privateRef = doc(db, 'users', uid);
+  const publicRef = doc(db, 'publicUsers', uid);
+  const privateSnap = await getDoc(privateRef);
   const resultingProfile = { ...(privateSnap.exists() ? privateSnap.data() : {}), ...payload };
   logFirestoreOp('UPDATE', `users/${uid}`, 'updateProfile');
-  await setDoc(doc(db, 'users', uid), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+  await setDoc(privateRef, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
   if (isOnboardingComplete(resultingProfile)) {
-    const publicPayload = { ...toPublicProfilePayload(resultingProfile, uid), onboardingComplete: true };
     logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
-    await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
+    await syncPublicProfileFromCurrentPrivate({
+      db,
+      runTransaction,
+      privateRef,
+      publicRef,
+      isOnboardingComplete,
+      buildWritePayload: (currentPrivate) => ({
+        ...toPublicProfilePayload(currentPrivate, uid),
+        onboardingComplete: true,
+      }),
+    });
   }
 };
 

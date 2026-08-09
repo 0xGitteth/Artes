@@ -238,6 +238,8 @@ export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimesta
     failed: 0,
     legacyPrivateFieldsFound: 0,
     legacyPrivateFieldsDeleted: 0,
+    codexPublicProfilesWouldDelete: 0,
+    codexPublicProfilesDeleted: 0,
   };
 
   const userDocs = await getUserSnapshots(db, uid);
@@ -248,7 +250,20 @@ export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimesta
   for (const docSnap of userDocs) {
     stats.scanned += 1;
     const userData = docSnap.data() || {};
-    if (isCodexDevUid(docSnap.id) || !isPublishEligibleUser(userData)) {
+    if (isCodexDevUid(docSnap.id)) {
+      const publicRef = db.collection('publicUsers').doc(docSnap.id);
+      const publicSnap = await publicRef.get();
+      if (publicSnap.exists) {
+        stats.codexPublicProfilesWouldDelete += 1;
+        if (!dryRun) {
+          batch.delete(publicRef);
+          batchCount += 1;
+          stats.codexPublicProfilesDeleted += 1;
+        }
+      }
+      continue;
+    }
+    if (!isPublishEligibleUser(userData)) {
       stats.skippedNotEligible += 1;
       continue;
     }

@@ -5,8 +5,12 @@ import {
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  orderBy,
+  query,
   setDoc,
   Timestamp,
   updateDoc,
@@ -14,6 +18,7 @@ import {
   deleteField,
   serverTimestamp,
   writeBatch,
+  where,
 } from 'firebase/firestore';
 
 const PROJECT_ID = 'artes-rules-test';
@@ -119,6 +124,9 @@ async function run() {
         status: 'active',
         createdAt: new Date(),
         updatedAt: new Date(),
+      });
+      await setDoc(doc(db, 'profiles', 'legacy_codex_profile'), {
+        type: 'agency', displayName: 'Legacy Codex Agency', ownerUid: 'codex-dev-user', status: 'active', createdAt: new Date(), updatedAt: new Date(),
       });
       await setDoc(doc(db, 'users', ownerUid), {
         onboardingComplete: true,
@@ -580,6 +588,9 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'threads', 'dm_codex_owner_legacy'), {
+        type: 'dm', participantUids: ['codex-dev-user', ownerUid], dmKey: 'codex-dev-user_owner_1', createdAt: new Date(), updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'threads', 'support_owner_rules'), {
         type: 'support',
         userUid: ownerUid,
@@ -642,6 +653,10 @@ async function run() {
     }));
     await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_legacy_owner_other_rules')));
     await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_legacy_owner_other_rules', 'messages', 'legacy_owner_text')));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_codex_owner_legacy', 'messages', 'blocked_legacy_message'), {
+      type: 'text', senderUid: ownerUid, text: 'Must stay retired', createdAt: serverTimestamp(),
+    }));
+    await assertFails(getDoc(doc(ownerDb, 'threads', 'dm_codex_owner_legacy')));
     await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'dm_new_matching_participants_rules'), {
       type: 'dm',
       participantUids: [ownerUid, otherUid],
@@ -772,6 +787,12 @@ async function run() {
     await assertSucceeds(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
       displayName: 'Owner Company Profile Updated',
       updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(codexDevDb, 'profiles', 'codex_company_profile'), {
+      type: 'company', displayName: 'Codex Company', ownerUid: 'codex-dev-user', status: 'active', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(codexDevDb, 'profiles', 'legacy_codex_profile'), {
+      displayName: 'Published Codex Agency', updatedAt: serverTimestamp(),
     }));
     await assertSucceeds(updateDoc(doc(ownerDb, 'profiles', 'owner_company_profile'), {
       displayName: 'Owner Company Profile With Bio',
@@ -2067,6 +2088,20 @@ async function run() {
     };
 
     await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), basePost));
+    await assertFails(setDoc(doc(codexDevDb, 'posts', 'codex_production_denied'), {
+      ...basePost, authorId: 'codex-dev-user', credits: [{ ...basePost.credits[0], uid: 'codex-dev-user' }],
+    }));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'legacy_codex_production_post'), {
+        ...basePost, authorId: 'codex-dev-user', credits: [{ ...basePost.credits[0], uid: 'codex-dev-user' }],
+      });
+    });
+    await assertFails(updateDoc(doc(codexDevDb, 'posts', 'legacy_codex_production_post'), { title: 'blocked' }));
+    await assertFails(deleteDoc(doc(codexDevDb, 'posts', 'legacy_codex_production_post')));
+    await assertFails(setDoc(doc(codexDevDb, 'posts', 'safe_correction_ok', 'comments', 'codex_comment_denied'), {
+      type: 'text', text: 'blocked', authorId: 'codex-dev-user', createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(codexDevDb, 'posts', 'safe_correction_ok', 'likes', 'codex-dev-user'), { createdAt: serverTimestamp() }));
 
     await assertFails(setDoc(doc(ownerEmailFalseAdultDb, 'posts', 'adult_gate_email_false_denied'), {
       ...basePost,
@@ -2084,12 +2119,25 @@ async function run() {
       ...basePost,
       title: 'Adult false denied',
     }));
-    await assertSucceeds(setDoc(doc(codexDevDb, 'posts', 'adult_gate_codex_dev_allowed'), {
+    await assertSucceeds(setDoc(doc(codexDevDb, 'codexDevPosts', 'adult_gate_codex_dev_allowed'), {
       ...basePost,
       authorId: 'codex-dev-user',
       title: 'Codex dev allowed',
       credits: [{ uid: 'codex-dev-user', role: 'photographer', name: 'Codex', isSelf: true, consentStatus: 'accepted' }],
+      createdAt: serverTimestamp(),
     }));
+    await assertSucceeds(getDoc(doc(codexDevDb, 'codexDevPosts', 'adult_gate_codex_dev_allowed')));
+    await assertFails(getDoc(doc(ownerDb, 'codexDevPosts', 'adult_gate_codex_dev_allowed')));
+    await assertSucceeds(getDocs(query(
+      collection(codexDevDb, 'codexDevPosts'),
+      where('authorId', '==', 'codex-dev-user'),
+      orderBy('createdAt', 'desc'),
+    )));
+    await assertFails(getDocs(query(
+      collection(ownerDb, 'codexDevPosts'),
+      where('authorId', '==', 'codex-dev-user'),
+      orderBy('createdAt', 'desc'),
+    )));
 
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'users', ownerUid), {

@@ -25,8 +25,24 @@ export const applyFollowingCreatedCounters = async ({
   if (!relationSnap.exists) return { status: 'missing-relation' };
 
   if (isCodexDevUid(uid) || isCodexDevUid(targetUid)) {
+    const relationData = relationSnap.data() || {};
+    let repaired = null;
+    if (relationData.countersApplied === true) {
+      const ordinaryUid = isCodexDevUid(uid) ? targetUid : uid;
+      const ordinaryRef = db.collection('publicUsers').doc(ordinaryUid);
+      const ordinarySnap = await transaction.get(ordinaryRef);
+      if (ordinarySnap.exists) {
+        const counterField = isCodexDevUid(uid) ? 'fansCount' : 'fanOfCount';
+        const current = Number(ordinarySnap.data()?.[counterField]) || 0;
+        transaction.update(ordinaryRef, {
+          [counterField]: Math.max(0, current - 1),
+          updatedAt: fieldValue.serverTimestamp(),
+        });
+        repaired = counterField;
+      }
+    }
     transaction.delete(relationRef);
-    return { status: 'rejected-test-actor' };
+    return { status: 'rejected-test-actor', repaired };
   }
 
   const relationData = relationSnap.data() || {};

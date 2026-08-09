@@ -76,6 +76,10 @@ assert.equal(isPublishEligibleUser({ onboardingStep: 4, ageVerified: true, isAdu
 
 const docs = [
   {
+    id: 'codex-dev-user',
+    data: () => ({ onboardingComplete: true, isDevTestUser: true }),
+  },
+  {
     id: 'eligible_user',
     data: () => ({
       displayName: 'Eligible User',
@@ -107,6 +111,7 @@ const docs = [
 
 const createFakeDb = () => {
   const publicUsers = new Map([
+    ['codex-dev-user', { displayName: 'Codex', ageVerified: true, isDevTestUser: true }],
     ['eligible_user', {
       displayName: 'Stale Eligible User',
       themes: ['Old Theme'],
@@ -148,9 +153,14 @@ const createFakeDb = () => {
           batchSetCalls += 1;
           pending.push({ ref, payload: nextPayload, options });
         },
+        delete: (ref) => pending.push({ ref, delete: true }),
         commit: async () => {
           pending.forEach((write) => {
             queuedWrites.push(write);
+            if (write.delete) {
+              publicUsers.delete(write.ref.id);
+              return;
+            }
             const existing = publicUsers.get(write.ref.id) || {};
             const next = { ...existing };
             Object.entries(write.payload).forEach(([key, value]) => {
@@ -171,7 +181,7 @@ const createFakeDb = () => {
 const dryRunDb = createFakeDb();
 const dryRunStats = await runBackfill({ db: dryRunDb, dryRun: true, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(dryRunStats, {
-  scanned: 3,
+  scanned: 4,
   eligible: 2,
   skippedNotEligible: 1,
   wouldWrite: 2,
@@ -179,24 +189,32 @@ assert.deepEqual(dryRunStats, {
   failed: 0,
   legacyPrivateFieldsFound: 5,
   legacyPrivateFieldsDeleted: 0,
+  codexPublicProfilesWouldDelete: 1,
+  codexPublicProfilesDeleted: 0,
 });
 assert.equal(dryRunDb.batchSetCalls, 0, 'dry run must not enqueue writes');
 
 const applyDb = createFakeDb();
 const applyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(applyStats, {
-  scanned: 3,
+  scanned: 4,
   eligible: 2,
   skippedNotEligible: 1,
   wouldWrite: 2,
-  written: 2,
+  written: 3,
   failed: 0,
   legacyPrivateFieldsFound: 5,
   legacyPrivateFieldsDeleted: 5,
+  codexPublicProfilesWouldDelete: 1,
+  codexPublicProfilesDeleted: 1,
 });
 assert.equal(applyDb.batchSetCalls, 2, 'apply should enqueue every onboarding-eligible publicUsers write');
+assert.equal(applyDb.publicUsers.has('codex-dev-user'), false, 'apply deletes the legacy Codex projection');
+const secondApplyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
+assert.equal(secondApplyStats.codexPublicProfilesWouldDelete, 0);
+assert.equal(secondApplyStats.codexPublicProfilesDeleted, 0, 'second apply is idempotent for Codex deletion');
 
-const writtenPayload = applyDb.queuedWrites[0].payload;
+const writtenPayload = applyDb.queuedWrites.find((write) => write.ref.id === 'eligible_user').payload;
 for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {
   assert.equal(writtenPayload[legacyField], '__DELETE__', `${legacyField} should be deleted in the merge payload`);
 }

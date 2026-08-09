@@ -8,6 +8,8 @@ import {
   isCodexDevToken,
   resolveCodexDevUid,
 } from '../functions/codexDevIdentity.js';
+import { isCodexDevIdentity as isClientCodexIdentity } from '../src/utils/codexDevIdentity.js';
+import { isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload } from '../functions/uploadReuseIsolation.js';
 
 test('canonical identity requires the configured uid and both trusted claims', () => {
   const env = { CODEX_DEV_UID: 'isolated-codex' };
@@ -28,6 +30,25 @@ test('private capability profile passes onboarding gates without being a public 
   assert.equal(profile.devActor, CODEX_DEV_ACTOR);
 });
 
+test('client identity trusts authenticated claims regardless of missing or mismatched build UID', () => {
+  const trustedClaims = { devCodex: true, devActor: 'codex' };
+  assert.equal(isClientCodexIdentity({ claims: trustedClaims, uid: 'non-default-server-uid' }), true);
+  assert.equal(isClientCodexIdentity({ claims: trustedClaims, uid: 'different-from-vite-config' }), true);
+  assert.equal(isClientCodexIdentity({ claims: {}, uid: 'codex-dev-user' }), false);
+});
+
+test('upload-result reuse is isolated in both directions', () => {
+  const ordinary = { id: 'ordinary', outcome: 'allowed' };
+  const codex = { id: 'codex', testActor: 'codex', outcome: 'forbidden', reviewCaseId: 'test-case' };
+  assert.equal(isUploadReusableForActor(codex, false), false);
+  assert.equal(isUploadReusableForActor(ordinary, true), false);
+  assert.equal(selectExactReusableUpload([codex, ordinary], false), ordinary);
+  assert.equal(selectExactReusableUpload([ordinary, codex], true), codex);
+  const nearCandidates = [{ id: 'test-near', data: codex }, { id: 'ordinary-near', data: ordinary }];
+  assert.equal(selectNearReusableUpload({ uploads: nearCandidates, isCodexActor: false, distanceFor: () => 1, threshold: 5 }).id, 'ordinary-near');
+  assert.equal(selectNearReusableUpload({ uploads: nearCandidates, isCodexActor: true, distanceFor: () => 1, threshold: 5 }).id, 'test-near');
+});
+
 test('ensureCodexDevProfileState deletes rather than writes a publicUsers projection', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const start = source.indexOf('export const ensureCodexDevProfileState');
@@ -43,6 +64,7 @@ test('ensureCodexDevProfileState deletes rather than writes a publicUsers projec
 test('client routes Codex posts to its isolated collection and supports private self-profile fallback', async () => {
   const source = await fs.readFile(new URL('../src/services/firebaseClient.js', import.meta.url), 'utf8');
   assert.match(source, /isCodexActor \? 'codexDevPosts' : 'posts'/);
+  assert.match(source, /where\('authorId', '==', user\.uid\)/);
   assert.match(source, /user\?\.uid !== userId \|\| !\(await isCodexDevUser\(user\)\)/);
   assert.doesNotMatch(source, /uid === 'codex-dev-user'/);
 });

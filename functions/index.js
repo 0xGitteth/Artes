@@ -46,6 +46,7 @@ import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js'
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
+import { isUploadReusableForActor, selectNearReusableUpload } from './uploadReuseIsolation.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -1019,10 +1020,11 @@ const findOpenReviewCase = async (userId) => {
   return { id: doc.id, data: doc.data() };
 };
 
-const findExactUpload = async (sha256) => {
-  const snapshot = await db.collection('uploads').where('fingerprints.sha256', '==', sha256).limit(1).get();
+const findExactUpload = async (sha256, { isCodexActor = false } = {}) => {
+  const snapshot = await db.collection('uploads').where('fingerprints.sha256', '==', sha256).limit(25).get();
   if (snapshot.empty) return null;
-  const doc = snapshot.docs[0];
+  const doc = snapshot.docs.find((candidate) => isUploadReusableForActor(candidate.data(), isCodexActor));
+  if (!doc) return null;
   return { id: doc.id, data: doc.data() };
 };
 
@@ -1055,7 +1057,7 @@ const findExactModerationExample = async (sha256) => {
   return ranked[0] || null;
 };
 
-const findNearDuplicateUpload = async ({ dhash, dhashPrefix }) => {
+const findNearDuplicateUpload = async ({ dhash, dhashPrefix }, { isCodexActor = false } = {}) => {
   if (!dhash) return null;
   const snapshot = await db
     .collection('uploads')
@@ -1063,15 +1065,12 @@ const findNearDuplicateUpload = async ({ dhash, dhashPrefix }) => {
     .limit(25)
     .get();
   if (snapshot.empty) return null;
-  let best = null;
-  snapshot.docs.forEach((doc) => {
-    const candidate = doc.data();
-    const distance = hammingDistance(dhash, candidate?.fingerprints?.dhash);
-    if (distance <= dhashThreshold && (!best || distance < best.distance)) {
-      best = { id: doc.id, data: candidate, distance };
-    }
+  return selectNearReusableUpload({
+    uploads: snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() })),
+    isCodexActor,
+    distanceFor: (candidate) => hammingDistance(dhash, candidate?.fingerprints?.dhash),
+    threshold: dhashThreshold,
   });
-  return best;
 };
 
 const isFingerprintBlocked = (fingerprints, blockedFingerprints = []) => {
@@ -1401,6 +1400,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const { image, makerTags, themes } = body;
   const includeDebug = process.env.NODE_ENV === 'development' || body?.debug === true;
   const userId = decoded.uid;
+  const isCodexActor = isCodexDevUid(userId);
   const parsed = parseImageDataUrl(image);
   if (parsed.error) {
     res.status(400).json({ error: parsed.error });
@@ -1468,15 +1468,15 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const skipUploadReuse = Boolean(overrideReservation);
 
   try {
-    matchedModerationExample = await findExactModerationExample(fingerprints.sha256);
+    matchedModerationExample = isCodexActor ? null : await findExactModerationExample(fingerprints.sha256);
 
     if (!skipUploadReuse) {
-      matchedUpload = await findExactUpload(fingerprints.sha256);
+      matchedUpload = await findExactUpload(fingerprints.sha256, { isCodexActor });
       if (matchedUpload) {
         matchedFingerprintType = 'sha256';
       }
       if (!matchedUpload) {
-        matchedUpload = await findNearDuplicateUpload(fingerprints);
+        matchedUpload = await findNearDuplicateUpload(fingerprints, { isCodexActor });
         if (matchedUpload) {
           matchedFingerprintType = 'dhash';
         }
@@ -2053,7 +2053,7 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       res.status(400).json({ error: 'Invalid recipientUid' });
       return;
     }
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevToken(decoded) || isCodexDevUid(recipientUid)) {
       res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
       return;
     }
@@ -2746,6 +2746,10 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev review cases are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const uploadId = String(body?.uploadId || '').trim();
     if (!uploadId) {

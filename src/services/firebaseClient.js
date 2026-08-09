@@ -17,6 +17,7 @@ import {
   onSnapshot,
   query,
   orderBy,
+  where,
   serverTimestamp,
   doc,
   setDoc,
@@ -163,8 +164,11 @@ export const subscribeToPosts = (callback, gate = {}) => {
   isCodexDevUser(user).then((isCodexActor) => {
     if (cancelled) return;
     const postCollection = isCodexActor ? 'codexDevPosts' : 'posts';
+    const postsQuery = isCodexActor
+      ? query(collection(db, postCollection), where('authorId', '==', user.uid), orderBy('createdAt', 'desc'))
+      : query(collection(db, postCollection), orderBy('createdAt', 'desc'));
     unsubscribe = onSnapshot(
-      query(collection(db, postCollection), orderBy('createdAt', 'desc')),
+      postsQuery,
       (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
       (err) => console.error('POSTS LISTENER ERROR:', err.code, err.message, `path=${postCollection}`)
     );

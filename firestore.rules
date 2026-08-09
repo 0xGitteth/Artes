@@ -181,6 +181,18 @@ service cloud.firestore {
             && request.auth.uid in thread.participants)
         );
     }
+    function isTestActorThread(threadId) {
+      let path = /databases/$(database)/documents/threads/$(threadId);
+      let thread = exists(path) ? get(path).data : getAfter(path).data;
+      return thread.type == 'dm' && (
+        ('participantUids' in thread && thread.participantUids is list
+          && thread.participantUids.size() == 2
+          && (isTestActorUid(thread.participantUids[0]) || isTestActorUid(thread.participantUids[1])))
+        || (!('participantUids' in thread) && 'participants' in thread && thread.participants is list
+          && thread.participants.size() == 2
+          && (isTestActorUid(thread.participants[0]) || isTestActorUid(thread.participants[1])))
+      );
+    }
     function isSupportThreadOwner(threadId) {
       return request.auth != null
         && get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'support'
@@ -355,6 +367,7 @@ service cloud.firestore {
 
     function isValidManagedExternalProfileCreate(profileId) {
       return isSignedIn()
+        && !isCodexDev()
         && profileId != request.auth.uid
         && isValidManagedExternalProfileData()
         && request.resource.data.ownerUid == request.auth.uid
@@ -365,6 +378,7 @@ service cloud.firestore {
     function isValidManagedExternalProfileUpdate(profileId) {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return isSignedIn()
+        && !isCodexDev()
         && profileId != request.auth.uid
         && resource.data.ownerUid == request.auth.uid
         && isValidManagedExternalProfileData()
@@ -876,7 +890,7 @@ service cloud.firestore {
     }
 
     match /threads/{threadId} {
-      allow read: if request.auth != null && (
+      allow read: if request.auth != null && !isTestActorThread(threadId) && (
         isDevAnon()
         // eigenaar van support thread
         || (resource.data.type == 'support' && resource.data.userUid == request.auth.uid)
@@ -926,6 +940,7 @@ service cloud.firestore {
             && request.resource.data.userMessageAllowance <= 1)
         );
       allow update: if request.auth != null
+        && !isTestActorThread(threadId)
         && (
           (resource.data.type == 'dm'
             && (
@@ -971,7 +986,7 @@ service cloud.firestore {
       allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if request.auth != null && (
+        allow read: if request.auth != null && !isTestActorThread(threadId) && (
           isDevAnon()
           || isSupportThreadOwner(threadId)
           || (isModerator() && (get(/databases/$(database)/documents/threads/$(threadId)).data.type == "support"
@@ -993,6 +1008,7 @@ service cloud.firestore {
               ))
         );
         allow create: if request.auth != null
+          && !isTestActorThread(threadId)
           && (
             (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
               && isThreadParticipant(threadId)
@@ -1033,6 +1049,7 @@ service cloud.firestore {
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 2000;
         allow update: if request.auth != null
+          && !isTestActorThread(threadId)
           && resource.data.type == 'affiliationRequest'
           && request.resource.data.type == 'affiliationRequest'
           && request.resource.data.requesterUid == resource.data.requesterUid
@@ -1110,9 +1127,11 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if true;
       allow create: if isVerifiedAdultOrDev()
+        && !isCodexDev()
         && hasValidPostAuthorIdentityOnCreate()
         && isPostModerationPublishAllowed(request.resource.data);
       allow update: if isVerifiedAdultOrDev()
+        && !isCodexDev()
         && keepsPostAuthorIdentityOnUpdate()
         && (
           (
@@ -1130,24 +1149,27 @@ service cloud.firestore {
             && isPostModerationPublishAllowed(request.resource.data)
           )
         );
-      allow delete: if isVerifiedAdultOrDev() && resource.data.authorId == request.auth.uid;
+      allow delete: if isVerifiedAdultOrDev() && !isCodexDev() && resource.data.authorId == request.auth.uid;
 
       match /comments/{commentId} {
         allow read: if true;
         allow create: if isVerifiedAdultOrDev()
+          && !isCodexDev()
           && hasValidPostCommentAuthorOnCreate();
         allow update: if isVerifiedAdultOrDev()
+          && !isCodexDev()
           && request.auth.uid == resource.data.authorId
           && request.resource.data.authorId == resource.data.authorId
           && (!('senderUid' in resource.data) || request.resource.data.senderUid == resource.data.senderUid)
           && (!('userId' in resource.data) || request.resource.data.userId == resource.data.userId);
         allow delete: if isVerifiedAdultOrDev()
+          && !isCodexDev()
           && request.auth.uid == resource.data.authorId;
       }
 
       match /likes/{userId} {
         allow read: if true;
-        allow create, delete: if isVerifiedAdultOrDev() && request.auth.uid == userId;
+        allow create, delete: if isVerifiedAdultOrDev() && !isCodexDev() && request.auth.uid == userId;
       }
     }
 

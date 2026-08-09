@@ -265,6 +265,9 @@ export const createManagedExternalProfile = async ({ type, displayName }) => {
   if (!authUser?.uid) {
     throw new Error('Je moet ingelogd zijn om een profiel aan te maken.');
   }
+  if (await isCodexDevUser(authUser)) {
+    throw new Error('Codex Dev kan geen openbaar beheerd profiel aanmaken.');
+  }
 
   const db = getFirebaseDb();
   let profileRef = null;

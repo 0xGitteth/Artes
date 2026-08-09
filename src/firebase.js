@@ -46,6 +46,7 @@ import {
   normalizeAliasValue,
 } from './utils/contributorClaims';
 import { canAccessFirestore, devLog, isOnboardingComplete } from './utils/firestoreGate';
+import { syncPublicProfileFromCurrentPrivate } from './utils/publicProfileSync';
 import {
   AFFILIATION_STATUSES,
   applyAffiliationStatusTransitions,
@@ -785,7 +786,7 @@ const cleanupLegacyPublicIdentityFieldsIfNeeded = async (db, uid, existingPublic
   return true;
 };
 
-const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
+const buildPublicUserWritePayload = (uid, data = {}, existingPublic = {}) => {
   if (!uid) return;
   const payload = buildPublicProfilePayload(data, uid, existingPublic);
   const legacyCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
@@ -812,12 +813,17 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
 
   Object.assign(payload, legacyCleanupPatch);
   
-  const finalPayload = {
+  return {
     uid,
     ...payload,
     onboardingComplete: true,
     updatedAt: serverTimestamp(),
   };
+};
+
+const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
+  const finalPayload = buildPublicUserWritePayload(uid, data, existingPublic);
+  if (!finalPayload) return;
   
   if (import.meta.env.DEV) {
     console.log('[writePublicUserProfile] Writing to publicUsers/' + uid, finalPayload);
@@ -1240,15 +1246,6 @@ export const updateUserProfile = async (uid, data) => {
     updatePayload.email = authUser.email;
   }
 
-  let existingPublic = {};
-  try {
-    const existingPublicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', resolvedUid));
-    existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
-  } catch (error) {
-    if (error?.code !== 'permission-denied') {
-      throw error;
-    }
-  }
   // Sanitize before building the public projection so publicUsers cannot keep
   // different theme data than users after Profile Edit saves.
   if (safeData.themes && Array.isArray(safeData.themes)) {
@@ -1260,9 +1257,7 @@ export const updateUserProfile = async (uid, data) => {
     resultingPrivate.onboardingComplete = true;
     updatePayload.onboardingComplete = true;
   }
-  const publicPatch = buildPublicProfilePayload(resultingPrivate, resolvedUid, existingPublic);
-  const legacyPublicIdentityCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
-  Object.assign(publicPatch, legacyPublicIdentityCleanupPatch);
+  const publicProjectionPreview = buildPublicProfilePayload(resultingPrivate, resolvedUid);
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -1296,7 +1291,7 @@ export const updateUserProfile = async (uid, data) => {
     throw e;
   }
 
-  const shouldSyncPublic = isOnboardingComplete(resultingPrivate) && Object.keys(publicPatch).length > 0;
+  const shouldSyncPublic = isOnboardingComplete(resultingPrivate);
   if (!didWriteUser) {
     if (import.meta.env.DEV) {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid: resolvedUid, reason: 'user-write-not-allowed-or-blocked' });
@@ -1304,18 +1299,30 @@ export const updateUserProfile = async (uid, data) => {
     throw new Error('Profiel opslaan mislukt: private profiel kon niet worden bijgewerkt.');
   }
 
-  if (import.meta.env.DEV) {
-    console.log('[updateUserProfile] PUBLIC WRITE', {
-      uid: resolvedUid,
-      path: publicDocPath,
-      keys: Object.keys(publicPatch).sort(),
-      legacyIdentityCleanupKeys: Object.keys(legacyPublicIdentityCleanupPatch).sort(),
-    });
-  }
-
   if (shouldSyncPublic) {
     try {
-      await writePublicUserProfile(resolvedUid, publicPatch, existingPublic);
+      // Overlapping private merge writes can both succeed. Rebuild the full
+      // projection from transactionally current state so neither caller can
+      // restore unrelated public fields from its stale resultingPrivate copy.
+      const publicWriteResult = await syncPublicProfileFromCurrentPrivate({
+        db: getFirebaseDb(),
+        runTransaction,
+        privateRef: doc(getFirebaseDb(), 'users', resolvedUid),
+        publicRef: doc(getFirebaseDb(), 'publicUsers', resolvedUid),
+        isOnboardingComplete,
+        buildWritePayload: (currentPrivate, currentPublic) => (
+          buildPublicUserWritePayload(resolvedUid, currentPrivate, currentPublic)
+        ),
+      });
+
+      if (import.meta.env.DEV) {
+        console.log('[updateUserProfile] PUBLIC WRITE', {
+          uid: resolvedUid,
+          path: publicDocPath,
+          keys: publicWriteResult.keys,
+          written: publicWriteResult.written,
+        });
+      }
 
     } catch (e) {
       console.error(
@@ -1325,7 +1332,7 @@ export const updateUserProfile = async (uid, data) => {
         {
           uid: resolvedUid,
           path: publicDocPath,
-          keys: Object.keys(publicPatch).sort(),
+          keys: Object.keys(publicProjectionPreview).sort(),
         }
       );
       throw new Error('Profiel opslaan mislukt: public profiel kon niet worden bijgewerkt.');

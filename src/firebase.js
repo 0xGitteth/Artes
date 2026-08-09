@@ -48,6 +48,7 @@ import {
 import {
   canAccessFirestore,
   authorizeOnboardingWritePatch,
+  buildLegacyArtifactMigrationPatch,
   devLog,
   isOnboardingComplete,
   isLegitimateCompletedOnboardingState,
@@ -1886,14 +1887,7 @@ export const migrateArtifactsUserData = async (user) => {
       migratedProfile = true;
     } else {
       const existingData = existingProfileSnap.data() || {};
-      const updates = Object.entries(data).reduce((acc, [key, value]) => {
-        if (value === undefined) return acc;
-        const existingValue = existingData[key];
-        if (existingValue === undefined || existingValue === null) {
-          acc[key] = value;
-        }
-        return acc;
-      }, {});
+      const updates = buildLegacyArtifactMigrationPatch(existingData, data);
       if (Object.keys(updates).length) {
         if (import.meta.env.DEV) {
           console.log('[migrateArtifactsUserData] Updating users/' + user.uid + ' from artifacts', updates);

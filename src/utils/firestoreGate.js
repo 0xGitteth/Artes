@@ -26,6 +26,21 @@ export const isLegitimateCompletedOnboardingState = (profile = {}) => (
   isOnboardingComplete(profile)
 );
 
+export const buildLegacyArtifactMigrationPatch = (existing = {}, source = {}) => {
+  const sourceIsComplete = isLegitimateCompletedOnboardingState(source);
+  const existingIsComplete = isOnboardingComplete(existing);
+  return Object.entries(source).reduce((patch, [key, value]) => {
+    if (value === undefined) return patch;
+    const mayMigrateCompletion = sourceIsComplete
+      && !existingIsComplete
+      && ['onboardingStep', 'onboardingComplete', 'onboardingCompletedAt'].includes(key);
+    if (existing[key] === undefined || existing[key] === null || mayMigrateCompletion) {
+      patch[key] = value;
+    }
+    return patch;
+  }, {});
+};
+
 export const normalizeOnboardingWritePatch = (existing = {}, patch = {}) => {
   const nextPatch = { ...patch };
   const hasStep = Object.prototype.hasOwnProperty.call(nextPatch, 'onboardingStep');

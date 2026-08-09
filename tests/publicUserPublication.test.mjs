@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   authorizeOnboardingWritePatch,
+  buildLegacyArtifactMigrationPatch,
   isOnboardingComplete,
   isLegitimateCompletedOnboardingState,
   normalizeOnboardingWritePatch,
@@ -114,6 +115,25 @@ assert.deepEqual(
   }),
   { displayName: 'Legacy' },
   'an incomplete artifact cannot claim completion or publication eligibility',
+);
+const incompletePersistedUser = { onboardingStep: 2, onboardingComplete: false, bio: 'Current bio' };
+const completedMigrationPatch = buildLegacyArtifactMigrationPatch(incompletePersistedUser, completedArtifact);
+assert.deepEqual(completedMigrationPatch, {
+  onboardingStep: 5,
+  onboardingComplete: true,
+  displayName: 'Legacy',
+});
+const completedPersistedUser = { ...incompletePersistedUser, ...completedMigrationPatch };
+assert.equal(isOnboardingComplete(completedPersistedUser), true, 'completed artifact persists completion before publication');
+assert.deepEqual(
+  buildLegacyArtifactMigrationPatch(completedPersistedUser, completedArtifact),
+  {},
+  'repeated completed artifact migration is idempotent',
+);
+assert.deepEqual(
+  buildLegacyArtifactMigrationPatch(incompletePersistedUser, incompleteArtifact),
+  { displayName: 'Legacy' },
+  'incomplete artifacts cannot overwrite persisted onboarding state or publish',
 );
 assert.deepEqual(
   authorizeOnboardingWritePatch({ bio: 'Current edit' }),
@@ -273,6 +293,7 @@ assert.equal(
 const migration = firebase.match(/export const migrateArtifactsUserData = async \(user\) => \{[\s\S]*?\n\};\n\nconst shouldRedirect/)[0];
 assert.match(migration, /await patchUserProfile\(/, 'artifact private migration is awaited');
 assert.match(migration, /allowOnboardingCompletion: isLegitimateCompletedOnboardingState\(data\)/);
+assert.match(migration, /buildLegacyArtifactMigrationPatch\(existingData, data\)/);
 assert.match(migration, /resultingPrivate = \{ \.\.\.resultingPrivate, \.\.\.persistedPatch \}/);
 assert.match(migration, /const persistedPrivateSnap = await getDoc\(doc\(db, 'users', user\.uid\)\)/);
 assert.match(migration, /publicSnap\.exists\(\) && isOnboardingComplete\(resultingPrivate\)/, 'artifact public snapshot uses the resulting private onboarding gate');

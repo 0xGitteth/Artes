@@ -9,6 +9,7 @@ import { canAccessFirestore, devLog, isOnboardingComplete } from '../utils/fires
 import { syncPublicProfileFromCurrentPrivate } from '../utils/publicProfileSync';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
 import { buildPostAuthorFields, isLegacySetupProfileId, isPublicProfileVisible, resolvePostAuthorProfile } from '../utils/managedProfiles';
+import { isCodexDevUser } from '../utils/codexDevIdentity';
 import {
   getFirestore,
   collection,
@@ -157,11 +158,21 @@ export const subscribeToPosts = (callback, gate = {}) => {
   }
   logFirestoreOp('SUBSCRIBE', 'posts', 'all posts ordered by createdAt');
 
-  return onSnapshot(
-    query(collection(db, 'posts'), orderBy('createdAt', 'desc')),
-    (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
-    (err) => console.error('POSTS LISTENER ERROR:', err.code, err.message, 'path=posts')
-  );
+  let unsubscribe = null;
+  let cancelled = false;
+  isCodexDevUser(user).then((isCodexActor) => {
+    if (cancelled) return;
+    const postCollection = isCodexActor ? 'codexDevPosts' : 'posts';
+    unsubscribe = onSnapshot(
+      query(collection(db, postCollection), orderBy('createdAt', 'desc')),
+      (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
+      (err) => console.error('POSTS LISTENER ERROR:', err.code, err.message, `path=${postCollection}`)
+    );
+  });
+  return () => {
+    cancelled = true;
+    unsubscribe?.();
+  };
 };
 
 export const subscribeToUsers = (callback, gate = {}) => {
@@ -211,7 +222,7 @@ export const createProfile = async (uid, profile) => {
   };
   logFirestoreOp('WRITE', `users/${uid}`, 'createProfile');
   await setDoc(doc(db, 'users', uid), payload);
-  if (isOnboardingComplete(profile)) {
+  if (isOnboardingComplete(profile) && !(await isCodexDevUser(auth.currentUser))) {
     const publicPayload = { ...toPublicProfilePayload(profile, uid), onboardingComplete: true };
     logFirestoreOp('WRITE', `publicUsers/${uid}`, 'createProfile');
     await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
@@ -227,7 +238,7 @@ export const updateProfile = async (uid, payload) => {
   const resultingProfile = { ...(privateSnap.exists() ? privateSnap.data() : {}), ...payload };
   logFirestoreOp('UPDATE', `users/${uid}`, 'updateProfile');
   await setDoc(privateRef, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
-  if (isOnboardingComplete(resultingProfile)) {
+  if (isOnboardingComplete(resultingProfile) && !(await isCodexDevUser(auth.currentUser))) {
     logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
     await syncPublicProfileFromCurrentPrivate({
       db,
@@ -285,15 +296,14 @@ export const publishPost = async (post) => {
   const contributorIds = Array.from(new Set(normalizedCredits.map((credit) => credit?.contributorId).filter(Boolean)));
 
   logFirestoreOp('WRITE', 'posts/{auto}', 'publishPost');
-  const isCodexActor = auth.currentUser.uid === 'codex-dev-user';
-  return addDoc(collection(db, 'posts'), {
+  const isCodexActor = await isCodexDevUser(auth.currentUser);
+  return addDoc(collection(db, isCodexActor ? 'codexDevPosts' : 'posts'), {
     ...post,
     ...authorFields,
     credits: normalizedCredits,
     uploadConsent,
     consentException: normalizedException,
     contributorIds,
-    ...(isCodexActor ? { testActor: 'codex' } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -301,7 +311,8 @@ export const publishPost = async (post) => {
 
 export const updatePost = async (postId, payload) => {
   logFirestoreOp('UPDATE', `posts/${postId}`, 'updatePost');
-  await updateDoc(doc(db, 'posts', postId), {
+  const isCodexActor = await isCodexDevUser(auth.currentUser);
+  await updateDoc(doc(db, isCodexActor ? 'codexDevPosts' : 'posts', postId), {
     ...payload,
     updatedAt: serverTimestamp(),
   });
@@ -309,7 +320,8 @@ export const updatePost = async (postId, payload) => {
 
 export const deletePost = async (postId) => {
   logFirestoreOp('DELETE', `posts/${postId}`, 'deletePost');
-  await deleteDoc(doc(db, 'posts', postId));
+  const isCodexActor = await isCodexDevUser(auth.currentUser);
+  await deleteDoc(doc(db, isCodexActor ? 'codexDevPosts' : 'posts', postId));
 };
 
 export const fetchUserIndex = async (userId, gate = {}) => {
@@ -320,7 +332,11 @@ export const fetchUserIndex = async (userId, gate = {}) => {
     return null;
   }
   const snapshot = await getDoc(doc(db, 'publicUsers', userId));
-  if (!snapshot.exists()) return null;
+  if (!snapshot.exists()) {
+    if (user?.uid !== userId || !(await isCodexDevUser(user))) return null;
+    const privateSnap = await getDoc(doc(db, 'users', userId));
+    return privateSnap.exists() ? { id: userId, ...privateSnap.data() } : null;
+  }
 
   const publicData = snapshot.data() || {};
   if (!isPublicProfileVisible(publicData)) return null;

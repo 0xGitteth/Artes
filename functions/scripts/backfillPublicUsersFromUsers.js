@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url';
 import { cleanPublicStringArray } from '../../src/utils/publicProfileFieldNormalization.js';
+import { isCodexDevUid } from '../codexDevIdentity.js';
 
 const BATCH_LIMIT = 400;
 
@@ -247,7 +248,7 @@ export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimesta
   for (const docSnap of userDocs) {
     stats.scanned += 1;
     const userData = docSnap.data() || {};
-    if (!isPublishEligibleUser(userData)) {
+    if (isCodexDevUid(docSnap.id) || !isPublishEligibleUser(userData)) {
       stats.skippedNotEligible += 1;
       continue;
     }

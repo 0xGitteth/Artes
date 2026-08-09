@@ -40,7 +40,7 @@ import {
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { SUPPORT_INTRO_TEXT } from './utils/supportChat';
-import { isCodexDevUser } from './utils/codexDevIdentity';
+import { isCodexDevUid, isCodexDevUser } from './utils/codexDevIdentity';
 import {
   makeAliasId,
   normalizeAliasValue,
@@ -1194,6 +1194,7 @@ export const updateUserProfile = async (uid, data, { completeOnboarding = false 
     throw new Error('Profiel opslaan mislukt: je bent niet ingelogd of auth is nog niet klaar.');
   }
   const resolvedUid = authUser.uid;
+  const isCodexActor = await isCodexDevUser(authUser);
   if (uid && uid !== resolvedUid && import.meta.env.DEV) {
     console.warn('[updateUserProfile] uid mismatch, forcing auth uid', { requestedUid: uid, authUid: resolvedUid });
   }
@@ -1305,7 +1306,7 @@ export const updateUserProfile = async (uid, data, { completeOnboarding = false 
     throw new Error('Profiel opslaan mislukt: private profiel kon niet worden bijgewerkt.');
   }
 
-  if (shouldSyncPublic) {
+  if (shouldSyncPublic && !isCodexActor) {
     try {
       // Overlapping private merge writes can both succeed. Rebuild the full
       // projection from transactionally current state so neither caller can
@@ -1345,7 +1346,7 @@ export const updateUserProfile = async (uid, data, { completeOnboarding = false 
     }
   }
 
-  const requestCardsToCreate = ['agency', 'company'].filter((affiliationType) => (
+  const requestCardsToCreate = isCodexActor ? [] : ['agency', 'company'].filter((affiliationType) => (
     shouldCreateAffiliationRequestCard({
       existing: existingPrivate,
       next: updatePayload,
@@ -1395,6 +1396,7 @@ export const migrateBackfillPublicUsersFromUsers = async ({ dryRun = false, maxU
 
   for (const userDoc of usersSnapshot.docs) {
     const uid = userDoc.id;
+    if (isCodexDevUid(uid)) continue;
     const userData = userDoc.data() || {};
     const existingPublicSnap = await getDoc(doc(db, 'publicUsers', uid));
     const existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
@@ -1742,6 +1744,7 @@ export const ensureUserProfile = async (user) => {
   const resolvedDisplayName = resolveInitialPublicDisplayNameSeed(user, providerId);
   const resolvedEmail = user.email ?? null;
   const writeAllowed = await canWriteUserProfile(user);
+  const isCodexActor = await isCodexDevUser(user);
   const snapshot = await fetchUserProfile(user.uid, { authReady: authStateReady, user });
   if (!snapshot) return null;
   const isPermissionDenied = (error) => error?.code === 'permission-denied';
@@ -1780,6 +1783,7 @@ export const ensureUserProfile = async (user) => {
     }
     const resultingProfile = { ...data, ...updates };
     if (!isOnboardingComplete(resultingProfile)) return resultingProfile;
+    if (isCodexActor) return resultingProfile;
     resultingProfile.onboardingComplete = true;
     const displayName = updates.displayName || data.displayName || '';
     const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
@@ -1910,7 +1914,7 @@ export const migrateArtifactsUserData = async (user) => {
     resultingPrivate = persistedPrivateSnap.exists() ? persistedPrivateSnap.data() || {} : {};
   }
   let migratedPublic = false;
-  if (publicSnap.exists() && isOnboardingComplete(resultingPrivate)) {
+  if (publicSnap.exists() && isOnboardingComplete(resultingPrivate) && !(await isCodexDevUser(user))) {
     const data = publicSnap.data();
     const existingPublicSnap = await getDoc(doc(db, 'publicUsers', user.uid));
     const existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
@@ -1979,25 +1983,35 @@ export const subscribeToPosts = (cb) =>
     (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', 'Posts listener posts'),
   );
 
-export const addComment = (postId, comment) =>
-  addDoc(collection(getFirebaseDb(), 'posts', postId, 'comments'), {
+const getOwnPostCollection = async () => (
+  (await isCodexDevUser(getFirebaseAuth().currentUser)) ? 'codexDevPosts' : 'posts'
+);
+
+export const addComment = async (postId, comment) =>
+  addDoc(collection(getFirebaseDb(), await getOwnPostCollection(), postId, 'comments'), {
     ...comment,
-    ...(comment?.authorId === 'codex-dev-user' ? { testActor: 'codex' } : {}),
     createdAt: serverTimestamp(),
   });
 
-export const deleteComment = (postId, commentId) =>
-  deleteDoc(doc(getFirebaseDb(), 'posts', postId, 'comments', commentId));
+export const deleteComment = async (postId, commentId) =>
+  deleteDoc(doc(getFirebaseDb(), await getOwnPostCollection(), postId, 'comments', commentId));
 
-export const subscribeToComments = (postId, cb) =>
-  onSnapshot(
-    query(collection(getFirebaseDb(), 'posts', postId, 'comments'), orderBy('createdAt', 'asc')),
-    cb,
-    (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Comments listener posts/${postId}/comments`),
-  );
+export const subscribeToComments = (postId, cb) => {
+  let unsubscribe = null;
+  let cancelled = false;
+  getOwnPostCollection().then((postCollection) => {
+    if (cancelled) return;
+    unsubscribe = onSnapshot(
+      query(collection(getFirebaseDb(), postCollection, postId, 'comments'), orderBy('createdAt', 'asc')),
+      cb,
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Comments listener ${postCollection}/${postId}/comments`),
+    );
+  });
+  return () => { cancelled = true; unsubscribe?.(); };
+};
 
 export const toggleLike = async (postId, uid) => {
-  const likeRef = doc(getFirebaseDb(), 'posts', postId, 'likes', uid);
+  const likeRef = doc(getFirebaseDb(), await getOwnPostCollection(), postId, 'likes', uid);
   const existing = await getDoc(likeRef);
   if (existing.exists()) {
     await deleteDoc(likeRef);
@@ -2006,12 +2020,19 @@ export const toggleLike = async (postId, uid) => {
   }
 };
 
-export const subscribeToLikes = (postId, cb) =>
-  onSnapshot(
-    collection(getFirebaseDb(), 'posts', postId, 'likes'),
-    cb,
-    (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Likes listener posts/${postId}/likes`),
-  );
+export const subscribeToLikes = (postId, cb) => {
+  let unsubscribe = null;
+  let cancelled = false;
+  getOwnPostCollection().then((postCollection) => {
+    if (cancelled) return;
+    unsubscribe = onSnapshot(
+      collection(getFirebaseDb(), postCollection, postId, 'likes'),
+      cb,
+      (err) => console.error('SNAPSHOT ERROR:', err.code, err.message, 'LABEL:', `Likes listener ${postCollection}/${postId}/likes`),
+    );
+  });
+  return () => { cancelled = true; unsubscribe?.(); };
+};
 
 /**
  * Ensures a support thread exists for a user.

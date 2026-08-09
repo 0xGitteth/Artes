@@ -55,6 +55,14 @@ async function run() {
         fanOfCount: 2,
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'publicUsers', otherUid), {
+        onboardingComplete: true,
+        uid: otherUid,
+        username: 'other1',
+        displayName: 'Other One',
+        displayNameLower: 'other one',
+        updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'publicUsers', 'legacy_auth_provider_user'), {
         onboardingComplete: true,
         uid: 'legacy_auth_provider_user',
@@ -120,6 +128,13 @@ async function run() {
         isAdult: true,
         didit: { status: 'approved' },
         idv: { status: 'approved' },
+      });
+      await setDoc(doc(db, 'users', 'codex-dev-user'), {
+        uid: 'codex-dev-user',
+        onboardingComplete: true,
+        onboardingStep: 5,
+        isDevTestUser: true,
+        devActor: 'codex',
       });
       await setDoc(doc(db, 'users', 'agency_owner'), {
         onboardingComplete: true,
@@ -498,7 +513,7 @@ async function run() {
     const ownerIdvFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: false, isAdult: true }).firestore();
     const ownerAdultFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: true, isAdult: false }).firestore();
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
-    const codexDevDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, email_verified: false }).firestore();
+    const codexDevDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, devActor: 'codex', email_verified: false }).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
     const publicUserDbFor = (uid) => authedContext(testEnv, uid, { email_verified: true }).firestore();
     const moderatorDb = authedContext(testEnv, 'mod_1', { email_verified: true, email: 'mod_1@example.com' }).firestore();
@@ -634,6 +649,28 @@ async function run() {
       dmKey: 'owner_1_other_1_matching',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_owner_codex_blocked'), {
+      type: 'dm',
+      participantUids: [ownerUid, 'codex-dev-user'],
+      dmKey: 'codex-dev-user_owner_1',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(codexDevDb, 'threads', 'dm_codex_owner_blocked'), {
+      type: 'dm',
+      participantUids: ['codex-dev-user', ownerUid],
+      dmKey: 'codex-dev-user_owner_1',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'users', ownerUid, 'following', 'codex-dev-user'), {
+      targetUid: 'codex-dev-user',
+      createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(codexDevDb, 'users', 'codex-dev-user', 'following', ownerUid), {
+      targetUid: ownerUid,
+      createdAt: serverTimestamp(),
     }));
     await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_new_extra_participants_rules'), {
       type: 'dm',

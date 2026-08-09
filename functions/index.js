@@ -35,6 +35,13 @@ import {
   isValidCodexDevLoginSecret,
   shouldExposeCodexDevLoginDiagnostics,
 } from './codexDevLogin.js';
+import {
+  CODEX_DEV_ACTOR,
+  buildCodexDevPrivateProfile,
+  isCodexDevToken,
+  isCodexDevUid,
+  resolveCodexDevUid,
+} from './codexDevIdentity.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
@@ -236,56 +243,20 @@ const getAppIdFromEnv = () => {
   }
 };
 
-const codexDevUidDefault = 'codex-dev-user';
-
-const resolveCodexDevUid = () => {
-  const configured = String(process.env.CODEX_DEV_UID || '').trim();
-  return configured || codexDevUidDefault;
-};
-
-const codexDevDisplayName = 'Codex';
-const codexDevActor = 'codex';
-const codexDevRoles = ['assistent'];
-const isCodexDevUid = (uid) => Boolean(uid) && uid === resolveCodexDevUid();
-
-const ensureCodexDevProfileState = async (uid) => {
+export const ensureCodexDevProfileState = async (uid) => {
   const now = FieldValue.serverTimestamp();
   const userRef = db.collection('users').doc(uid);
   const publicUserRef = db.collection('publicUsers').doc(uid);
   const existingUserSnap = await userRef.get();
-
-  const userPayload = {
+  await userRef.set(buildCodexDevPrivateProfile({
     uid,
-    displayName: codexDevDisplayName,
-    authProvider: 'custom',
-    roles: codexDevRoles,
-    onboardingStep: 5,
-    onboardingComplete: true,
-    ageVerified: true,
-    isAdult: true,
-    isDevTestUser: true,
-    devActor: codexDevActor,
-    updatedAt: now,
-  };
-  if (!existingUserSnap.exists) {
-    userPayload.createdAt = now;
-  }
+    now,
+    exists: existingUserSnap.exists,
+  }), { merge: true });
 
-  const publicPayload = {
-    uid,
-    displayName: codexDevDisplayName,
-    displayNameLower: codexDevDisplayName.toLowerCase(),
-    roles: codexDevRoles,
-    ageVerified: true,
-    isAdult: true,
-    isDevTestUser: true,
-    updatedAt: now,
-  };
-
-  await Promise.all([
-    userRef.set(userPayload, { merge: true }),
-    publicUserRef.set(publicPayload, { merge: true }),
-  ]);
+  // A test actor has no public projection. Remove the legacy projection that
+  // used to leak capability/IDV fields and could make Codex discoverable.
+  await publicUserRef.delete();
 };
 
 const buildReportedPostPath = (postId) => {
@@ -1924,7 +1895,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     const uploadPayload = {
       userId: userId || null,
       uploaderUid: userId || null,
-      ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
+      ...(isCodexDevUid(userId) ? { testActor: CODEX_DEV_ACTOR } : {}),
       outcome,
       appliedTriggers: finalAppliedTriggers,
       suggestedTriggers: finalSuggestedTriggers,
@@ -2080,6 +2051,10 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
     const recipientUid = body?.recipientUid;
     if (!recipientUid || recipientUid === decoded.uid) {
       res.status(400).json({ error: 'Invalid recipientUid' });
+      return;
+    }
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
       return;
     }
 
@@ -2252,7 +2227,7 @@ export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4
     await ensureCodexDevProfileState(uid);
     const token = await admin.auth().createCustomToken(uid, {
       devCodex: true,
-      devActor: codexDevActor,
+      devActor: CODEX_DEV_ACTOR,
     });
     res.status(200).json({ ok: true, uid, token });
   } catch (error) {
@@ -2881,7 +2856,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
         ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
         reviewReason: 'manualUserReviewRequest',
         aiSummary,
-        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
+        ...(isCodexDevUid(decoded.uid) ? { testActor: CODEX_DEV_ACTOR } : {}),
         uploadId,
         linkedUploadIds: [uploadId],
         createdAt: FieldValue.serverTimestamp(),
@@ -2893,7 +2868,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
 
     await uploadRef.set(
       {
-        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
+        ...(isCodexDevUid(decoded.uid) ? { testActor: CODEX_DEV_ACTOR } : {}),
         reviewCaseId,
         reviewStatus: 'inReview',
         reviewRequestedAt: FieldValue.serverTimestamp(),
@@ -2905,7 +2880,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
 
     await db.collection('reviewCases').doc(reviewCaseId).set(
       {
-        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
+        ...(isCodexDevUid(decoded.uid) ? { testActor: CODEX_DEV_ACTOR } : {}),
         uploadId,
         linkedUploadIds: FieldValue.arrayUnion(uploadId),
         ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
@@ -3881,7 +3856,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       }
 
       await db.runTransaction(async (transaction) => {
-        const postRef = db.collection('posts').doc(uploadId);
+        const postRef = db.collection(isCodexDevUid(userId) ? 'codexDevPosts' : 'posts').doc(uploadId);
         const userRef = db.collection('users').doc(userId);
         const latestUserSnap = await transaction.get(userRef);
         const publishDecision = getUserPublicPostPublishDecision(latestUserSnap.exists ? latestUserSnap.data() : null);
@@ -3933,7 +3908,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             credits: normalizedCredits,
             likes: 0,
             isChallenge: normalizedIsChallenge,
-            ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
+            ...(isCodexDevUid(userId) ? { testActor: CODEX_DEV_ACTOR } : {}),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
           });
@@ -3942,7 +3917,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
         transaction.set(
           uploadRef,
           {
-            ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
+            ...(isCodexDevUid(userId) ? { testActor: CODEX_DEV_ACTOR } : {}),
             publicationStatus: 'published',
             publishedAt: FieldValue.serverTimestamp(),
             postId: uploadId,

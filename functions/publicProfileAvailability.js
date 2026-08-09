@@ -1,3 +1,5 @@
+import { isCodexDevUid } from './codexDevIdentity.js';
+
 const normalizeVisibilityValue = (value) => String(value || '').trim().toLowerCase();
 
 export const isPersonalOnboardingComplete = (profile = {}) => (
@@ -6,6 +8,7 @@ export const isPersonalOnboardingComplete = (profile = {}) => (
 
 export const isAvailablePersonalPublicProfile = (profile = {}) => {
   if (!profile || typeof profile !== 'object') return false;
+  if (isCodexDevUid(profile.uid || profile.profileId || profile.ownerUid)) return false;
   if (profile.onboardingComplete !== true) return false;
   if (profile.hidden === true) return false;
   if (normalizeVisibilityValue(profile.status) === 'inactive') return false;

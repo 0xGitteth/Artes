@@ -10,6 +10,7 @@ import {
 } from './backfillPublicUsersFromUsers.js';
 import { isAvailablePersonalPublicProfile } from '../publicProfileAvailability.js';
 import { isDiditSafetyDeactivatedPrivateProfile } from '../publicProfileUnpublish.js';
+import { isCodexDevUid } from '../codexDevIdentity.js';
 
 export const DEFAULT_PAGE_SIZE = 200;
 export const PRIVATE_FIELDS = LEGACY_PRIVATE_PUBLIC_USER_FIELDS;
@@ -90,6 +91,7 @@ const emptyStats = () => ({
   writes: 0,
   deletes: 0,
   errors: 0,
+  testActorsSkipped: 0,
 });
 
 const addStats = (stats, changes = {}) => {
@@ -110,6 +112,12 @@ const decideUserReconciliation = ({
   const userData = privateSnap.data() || {};
   const publicExists = publicSnap.exists;
   const publicData = publicExists ? (publicSnap.data() || {}) : {};
+
+  if (isCodexDevUid(uid)) {
+    return publicExists
+      ? { action: 'delete', stats: { testActorsSkipped: 1, publicProfilesDeleted: 1, deletes: 1 } }
+      : { action: 'none', stats: { testActorsSkipped: 1 } };
+  }
 
   if (!isOnboardingComplete(userData)) {
     if (!publicExists) return { action: 'none', stats: { incompleteUsers: 1 } };

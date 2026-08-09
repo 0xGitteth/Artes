@@ -1,4 +1,5 @@
 import { isLegitimatelyPublishedPersonalProfile } from './publicProfileAvailability.js';
+import { isCodexDevUid } from './codexDevIdentity.js';
 
 const getPersonalProfileRefs = (db, uid) => ({
   privateRef: db.collection('users').doc(uid),
@@ -22,6 +23,11 @@ export const applyFollowingCreatedCounters = async ({
 }) => db.runTransaction(async (transaction) => {
   const relationSnap = await transaction.get(relationRef);
   if (!relationSnap.exists) return { status: 'missing-relation' };
+
+  if (isCodexDevUid(uid) || isCodexDevUid(targetUid)) {
+    transaction.delete(relationRef);
+    return { status: 'rejected-test-actor' };
+  }
 
   const relationData = relationSnap.data() || {};
   const normalizedRelation = {
@@ -73,6 +79,9 @@ export const applyFollowingDeletedCounters = async ({
   targetUid,
   fieldValue,
 }) => {
+  if (isCodexDevUid(uid) || isCodexDevUid(targetUid)) {
+    return { status: 'skipped-test-actor' };
+  }
   if (relationData.countersApplied !== true) return { status: 'not-applied' };
 
   return db.runTransaction(async (transaction) => {

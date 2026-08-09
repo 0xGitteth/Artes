@@ -10,7 +10,7 @@ export const hasCodexDevClaim = (claims) => claims?.devCodex === true;
 export const isCodexDevUid = (uid) => Boolean(uid) && uid === getExpectedCodexDevUid();
 
 export const isCodexDevIdentity = ({ claims, uid }) => (
-  hasCodexDevClaim(claims) || isCodexDevUid(uid)
+  hasCodexDevClaim(claims) && isCodexDevUid(uid)
 );
 
 export const readTokenClaims = async (user, forceRefresh = false) => {

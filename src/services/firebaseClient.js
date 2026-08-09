@@ -48,25 +48,50 @@ const normalizeUsername = (value) => String(value || '')
   .replace(/[^a-z0-9]+/g, '')
   .slice(0, 20);
 
-const toPublicProfilePayload = (payload = {}, uid) => {
-  const {
-    email,
-    ...rest
-  } = payload || {};
+const PUBLIC_NULLABLE_STRING_FIELDS = [
+  'photoURL', 'avatar', 'headerImage', 'linkedAgencyName', 'linkedCompanyName',
+  'linkedAgencyId', 'linkedCompanyId', 'linkedAgencyLink', 'linkedCompanyLink',
+];
+const PUBLIC_STRING_FIELDS = [
+  'bio', 'headerPosition', 'linkedAgencyStatus', 'linkedCompanyStatus',
+];
+const PUBLIC_ARRAY_FIELDS = ['roles', 'themes', 'quickProfilePostIds'];
+const cleanStringArray = (value) => (Array.isArray(value)
+  ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
+  : []);
 
+const toPublicProfilePayload = (payload = {}, uid) => {
   const publicPayload = {
-    ...rest,
     uid,
     profileId: uid,
     ownerUid: uid,
     updatedAt: serverTimestamp(),
   };
 
-  if (payload?.displayName) {
-    publicPayload.displayNameLower = String(payload.displayName).toLowerCase();
+  if (typeof payload?.displayName === 'string') {
+    publicPayload.displayName = payload.displayName;
+    publicPayload.displayNameLower = payload.displayName.toLowerCase();
   }
-  if (payload?.username) {
+  if (typeof payload?.username === 'string') {
     publicPayload.username = normalizeUsername(payload.username);
+  }
+  PUBLIC_NULLABLE_STRING_FIELDS.forEach((field) => {
+    if (typeof payload?.[field] === 'string' || payload?.[field] === null) {
+      publicPayload[field] = payload[field];
+    }
+  });
+  PUBLIC_STRING_FIELDS.forEach((field) => {
+    if (typeof payload?.[field] === 'string') publicPayload[field] = payload[field];
+  });
+  PUBLIC_ARRAY_FIELDS.forEach((field) => {
+    if (payload?.[field] !== undefined) publicPayload[field] = cleanStringArray(payload[field]);
+  });
+  if (['latest', 'best', 'manual'].includes(payload?.quickProfilePreviewMode)) {
+    publicPayload.quickProfilePreviewMode = payload.quickProfilePreviewMode;
+  }
+  const step = Number(payload?.onboardingStep);
+  if (Number.isInteger(step) && step >= 0 && step <= 10) {
+    publicPayload.onboardingStep = step;
   }
 
   return publicPayload;

@@ -85,6 +85,9 @@ async function run() {
       for (const completedUid of ['authproviderleak', 'displaylowermissingname', 'displaynamemissinglower', 'legacy_auth_provider_user', 'legacy_cleanup_only_user', 'legacy_email_auth_user', 'ownerusernameonly', 'providerdataleak', 'publicdiditleak', 'publicemailleak', 'publiclegalleak']) {
         await setDoc(doc(db, 'users', completedUid), { uid: completedUid, onboardingComplete: true });
       }
+      await setDoc(doc(db, 'users', 'legacy_step_5'), { uid: 'legacy_step_5', onboardingStep: '5' });
+      await setDoc(doc(db, 'users', 'legacy_step_10'), { uid: 'legacy_step_10', onboardingStep: '10' });
+      await setDoc(doc(db, 'users', 'legacy_step_11'), { uid: 'legacy_step_11', onboardingStep: '11' });
       await setDoc(doc(db, 'profiles', 'active_agency_profile'), {
         type: 'agency',
         displayName: 'Active Agency Profile',
@@ -512,6 +515,23 @@ async function run() {
     const selfWithdrawDb = authedContext(testEnv, 'self_withdraw', { email_verified: true }).firestore();
     const ownerUnverifiedRulesDb = authedContext(testEnv, ownerUid, { email_verified: false, __adultDefaults: false }).firestore();
     const eligibleVoterDb = authedContext(testEnv, 'eligible_voter', { email_verified: true }).firestore();
+
+    for (const uid of ['legacy_step_5', 'legacy_step_10']) {
+      await assertSucceeds(setDoc(doc(publicUserDbFor(uid), 'publicUsers', uid), {
+        uid,
+        profileId: uid,
+        ownerUid: uid,
+        username: uid.replaceAll('_', ''),
+        onboardingComplete: true,
+      }));
+    }
+    await assertFails(setDoc(doc(publicUserDbFor('legacy_step_11'), 'publicUsers', 'legacy_step_11'), {
+      uid: 'legacy_step_11',
+      profileId: 'legacy_step_11',
+      ownerUid: 'legacy_step_11',
+      username: 'legacystep11',
+      onboardingComplete: true,
+    }));
 
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();

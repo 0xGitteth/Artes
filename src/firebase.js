@@ -1847,7 +1847,7 @@ export const migrateArtifactsUserData = async (user) => {
     getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', user.uid)),
     getDoc(doc(db, 'users', user.uid)),
   ]);
-  const migrations = [];
+  let resultingPrivate = existingProfileSnap.exists() ? existingProfileSnap.data() || {} : {};
   let migratedProfile = false;
   if (profileSnap.exists()) {
     const data = profileSnap.data();
@@ -1861,11 +1861,13 @@ export const migrateArtifactsUserData = async (user) => {
       if (import.meta.env.DEV) {
         console.log('[migrateArtifactsUserData] Creating users/' + user.uid + ' from artifacts', data);
       }
-      migrations.push(patchUserProfile(
+      const privatePatch = { ...data, updatedAt: serverTimestamp() };
+      await patchUserProfile(
         user.uid,
-        { ...data, updatedAt: serverTimestamp() },
+        privatePatch,
         { label: 'migrateArtifactsUserData(create)' },
-      ));
+      );
+      resultingPrivate = { ...resultingPrivate, ...data };
       migratedProfile = true;
     } else {
       const existingData = existingProfileSnap.data() || {};
@@ -1881,26 +1883,28 @@ export const migrateArtifactsUserData = async (user) => {
         if (import.meta.env.DEV) {
           console.log('[migrateArtifactsUserData] Updating users/' + user.uid + ' from artifacts', updates);
         }
-        migrations.push(patchUserProfile(
+        await patchUserProfile(
           user.uid,
           { ...updates, updatedAt: serverTimestamp() },
           { label: 'migrateArtifactsUserData(update)' },
-        ));
+        );
+        resultingPrivate = { ...resultingPrivate, ...updates };
         migratedProfile = true;
       }
     }
   }
-  if (publicSnap.exists()) {
+  let migratedPublic = false;
+  if (publicSnap.exists() && isOnboardingComplete(resultingPrivate)) {
     const data = publicSnap.data();
     const existingPublicSnap = await getDoc(doc(db, 'publicUsers', user.uid));
     const existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
-    migrations.push(writePublicUserProfile(user.uid, data, existingPublic));
+    await writePublicUserProfile(user.uid, data, existingPublic);
+    migratedPublic = true;
   }
-  if (!migrations.length) return null;
-  await Promise.all(migrations);
+  if (!migratedProfile && !migratedPublic) return null;
   return {
     migratedProfile,
-    migratedPublic: publicSnap.exists(),
+    migratedPublic,
   };
 };
 

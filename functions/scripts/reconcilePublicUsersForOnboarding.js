@@ -1,17 +1,38 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
+import {
+  LEGACY_PRIVATE_PUBLIC_USER_FIELDS,
+  PUBLIC_ARRAY_FIELDS,
+  PUBLIC_NULLABLE_STRING_FIELDS,
+  PUBLIC_STRING_ONLY_FIELDS,
+  buildLegacyPrivateFieldDeletes,
+  buildPublicUserBackfillPayload,
+} from './backfillPublicUsersFromUsers.js';
 
 const BATCH_LIMIT = 400;
-export const PRIVATE_FIELDS = ['email','normalizedEmail','legalName','realName','birthDate','dateOfBirth','age','didit','diditStatus','idv','idvStatus','ageVerified','ageVerifiedAt','isAdult','authProvider','providerData','preferences','moderation','support','private'];
-const PUBLIC_FIELDS = ['displayName','photoURL','avatar','bio','roles','themes','headerImage','headerPosition','linkedAgencyName','linkedCompanyName','linkedAgencyId','linkedCompanyId','linkedAgencyStatus','linkedCompanyStatus','linkedAgencyLink','linkedCompanyLink','quickProfilePreviewMode','quickProfilePostIds'];
+export const PRIVATE_FIELDS = LEGACY_PRIVATE_PUBLIC_USER_FIELDS;
+export const PROFILE_PROJECTION_FIELDS = [
+  'uid',
+  'profileId',
+  'ownerUid',
+  'username',
+  'displayName',
+  'displayNameLower',
+  ...PUBLIC_NULLABLE_STRING_FIELDS,
+  ...PUBLIC_STRING_ONLY_FIELDS,
+  ...PUBLIC_ARRAY_FIELDS,
+  'quickProfilePostIds',
+  'onboardingComplete',
+  'onboardingStep',
+];
 export const isOnboardingComplete = (profile = {}) => profile?.onboardingComplete === true || Number(profile?.onboardingStep || 0) >= 5;
-const username = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20);
 export const buildPublicProfile = (uid, user = {}, now = () => new Date()) => {
-  const displayName = typeof user.displayName === 'string' ? user.displayName : '';
-  const result = { uid, profileId: uid, ownerUid: uid, username: username(user.username) || `${username(displayName) || 'artes'}${uid.slice(0,4)}`.slice(0,20), displayName, displayNameLower: displayName.toLowerCase(), onboardingComplete: true, updatedAt: now() };
+  const result = {
+    ...buildPublicUserBackfillPayload(uid, user, { serverTimestamp: now }),
+    onboardingComplete: true,
+  };
   const step = Number(user.onboardingStep);
   if (Number.isInteger(step) && step >= 0 && step <= 10) result.onboardingStep = step;
-  for (const field of PUBLIC_FIELDS) if (user[field] !== undefined) result[field] = user[field];
   return result;
 };
 export const parseArgs = (argv = process.argv.slice(2)) => {
@@ -24,9 +45,9 @@ export async function reconcile({ db, apply=false, deleteOrphans=false, uid=null
   const privateSnaps=uid ? [await db.collection('users').doc(uid).get()].filter(s=>s.exists) : (await db.collection('users').get()).docs;
   const publicSnaps=uid ? [await db.collection('publicUsers').doc(uid).get()].filter(s=>s.exists) : (await db.collection('publicUsers').get()).docs;
   const privateIds=new Set(privateSnaps.map(s=>s.id)); const publicMap=new Map(publicSnaps.map(s=>[s.id,s])); let batch=db.batch(), pending=0;
-  const flush=async()=>{if(apply&&pending) await batch.commit(); batch=db.batch(); pending=0;};
+  const flush=async()=>{if(!pending)return;const committingBatch=batch;batch=db.batch();pending=0;if(apply)await committingBatch.commit();};
   const queue=(action,ref,data)=>{if(apply) action==='set'?batch.set(ref,data,{merge:true}):batch.delete(ref); pending+=1;};
-  for(const snap of privateSnaps){stats.privateUsersScanned++; try { const data=snap.data()||{}, pub=publicMap.get(snap.id), ref=db.collection('publicUsers').doc(snap.id); if(isOnboardingComplete(data)){stats.completedUsers++; if(!pub) stats.missingPublicProfiles++; const desired=buildPublicProfile(snap.id,data,serverTimestamp); const cleanup={}; for(const f of PRIVATE_FIELDS) if(pub?.data()?.[f]!==undefined) cleanup[f]=deleteValue(); const current=pub?.data()||{}; const target={...desired}; delete target.updatedAt; const changed=!pub||Object.keys(cleanup).length>0||Object.entries(target).some(([key,value])=>JSON.stringify(current[key])!==JSON.stringify(value)); if(changed){stats.publicProfilesRestored++;stats.writes++;queue('set',ref,{...desired,...cleanup});} } else {stats.incompleteUsers++;if(pub){stats.publicProfilesDeleted++;stats.deletes++;queue('delete',ref);}} if(pending>=BATCH_LIMIT) await flush(); } catch(e){stats.errors++;console.error(`[reconcile] ${snap.id}:`,e.message);} }
+  for(const snap of privateSnaps){stats.privateUsersScanned++; try { const data=snap.data()||{}, pub=publicMap.get(snap.id), ref=db.collection('publicUsers').doc(snap.id); if(isOnboardingComplete(data)){stats.completedUsers++; if(!pub) stats.missingPublicProfiles++; const desired=buildPublicProfile(snap.id,data,serverTimestamp); const current=pub?.data()||{}; const cleanup=buildLegacyPrivateFieldDeletes(current,{deleteValue}); for(const field of PROFILE_PROJECTION_FIELDS) if(Object.prototype.hasOwnProperty.call(current,field)&&!Object.prototype.hasOwnProperty.call(desired,field)) cleanup[field]=deleteValue(); const target={...desired}; delete target.updatedAt; const changed=!pub||Object.keys(cleanup).length>0||Object.entries(target).some(([key,value])=>JSON.stringify(current[key])!==JSON.stringify(value)); if(changed){stats.publicProfilesRestored++;stats.writes++;queue('set',ref,{...desired,...cleanup});} } else {stats.incompleteUsers++;if(pub){stats.publicProfilesDeleted++;stats.deletes++;queue('delete',ref);}} } catch(e){stats.errors++;console.error(`[reconcile] ${snap.id}:`,e.message);} if(pending>=BATCH_LIMIT) await flush(); }
   for(const pub of publicSnaps) if(!privateIds.has(pub.id)){stats.orphanPublicProfiles++;if(deleteOrphans){stats.deletes++;queue('delete',pub.ref);if(pending>=BATCH_LIMIT) await flush();}}
   await flush(); return stats;
 }

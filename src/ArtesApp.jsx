@@ -142,6 +142,11 @@ import {
 import { canShowMoodboardsTab, getMoodboardCoverImages, normalizeMoodboardTitle, resolveMoodboardItemPosts } from './utils/moodboards';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
+import {
+  hasPendingOnboardingReset,
+  markConfirmedOnboardingReset,
+  reconcileConfirmedOnboardingReset,
+} from './utils/onboardingResetState';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
 import { resolvePublicDisplayName } from './utils/publicIdentity';
 import {
@@ -3271,7 +3276,12 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (typeof window === 'undefined') return new URLSearchParams();
       return new URLSearchParams(window.location.search || '');
     }, []);
-    const [step, setStep] = useState(() => computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady) ?? 1);
+    const [explicitResetPending, setExplicitResetPending] = useState(() => hasPendingOnboardingReset(authUser?.uid));
+    const [step, setStep] = useState(() => (
+      hasPendingOnboardingReset(authUser?.uid)
+        ? 2
+        : computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady) ?? 1
+    ));
     const [roles, setRoles] = useState([]);
     const MATCH_STEP = 1.5;
     const [profileData, setProfileData] = useState(() => ({
@@ -3404,6 +3414,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }, [authUser, accountCreated]);
 
     useEffect(() => {
+      if (explicitResetPending) {
+        setStep(2);
+        reconcileConfirmedOnboardingReset(authUser?.uid, profile);
+        if (profile?.onboardingComplete === false && Number(profile?.onboardingStep) === 2) {
+          setExplicitResetPending(false);
+        }
+        return;
+      }
       const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
       if (!resolvedStep) return;
       setStep((prevStep) => {
@@ -3442,7 +3460,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         }
         return resolvedStep;
       });
-    }, [authReady, authUser, onboardingQueryParams, profile]);
+    }, [authReady, authUser, onboardingQueryParams, profile, explicitResetPending]);
 
     useEffect(() => {
       if (step !== 2) return;
@@ -11987,6 +12005,7 @@ function ShadowProfileModal({
       if (!authUser?.uid) return;
       try {
         await resetPersonalOnboardingToIdCheck();
+        markConfirmedOnboardingReset(authUser.uid);
         if (setView) setView('onboarding');
       } catch (error) {
         console.error('[ShadowProfileModal] Failed to route to ID check', error);
@@ -12558,6 +12577,7 @@ function ClaimInvitePage({
     if (!authUser?.uid) return;
     try {
       await resetPersonalOnboardingToIdCheck();
+      markConfirmedOnboardingReset(authUser.uid);
       if (setView) setView('onboarding');
     } catch (error) {
       console.error('[ClaimInvitePage] Failed to route to ID check', error);

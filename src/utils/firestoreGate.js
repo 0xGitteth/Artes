@@ -22,6 +22,10 @@ export const authorizeOnboardingWritePatch = (patch = {}, { allowCompletion = fa
   return authorized;
 };
 
+export const isLegitimateCompletedOnboardingState = (profile = {}) => (
+  isOnboardingComplete(profile)
+);
+
 export const normalizeOnboardingWritePatch = (existing = {}, patch = {}) => {
   const nextPatch = { ...patch };
   const hasStep = Object.prototype.hasOwnProperty.call(nextPatch, 'onboardingStep');

@@ -106,7 +106,15 @@ assert.doesNotMatch(firebaseSource, /requestIncompletePersonalProfileUnpublish|u
 const appSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 'utf8');
 const handlers = [...appSource.matchAll(/const handleOpenIdCheck = async \(\) => \{[\s\S]*?\n[ \t]+\};/g)];
 assert.equal(handlers.length, 2);
-handlers.forEach(([handler]) => assert.match(handler, /await resetPersonalOnboardingToIdCheck\(\)/));
+handlers.forEach(([handler]) => {
+  assert.match(handler, /await resetPersonalOnboardingToIdCheck\(\)[\s\S]*?markConfirmedOnboardingReset\(authUser\.uid\)[\s\S]*?setView\('onboarding'\)/);
+  assert.ok(
+    handler.indexOf('markConfirmedOnboardingReset(authUser.uid)')
+      < handler.indexOf("setView('onboarding')"),
+    'confirmed reset state is installed before onboarding mounts',
+  );
+});
+assert.match(appSource, /hasPendingOnboardingReset\(authUser\?\.uid\)[\s\S]*?\? 2[\s\S]*?computeOnboardingStep/);
 assert.match(appSource, /shouldInitializeGoogleOnboarding = !isOnboardingComplete\(profile\)/);
 assert.match(appSource, /createdNewAccount \|\| !isOnboardingComplete\(profile\)/);
 assert.match(firebaseSource, /normalizeOnboardingWritePatch\(existingPrivate, safeData\)/);

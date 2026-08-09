@@ -50,6 +50,7 @@ import {
   authorizeOnboardingWritePatch,
   devLog,
   isOnboardingComplete,
+  isLegitimateCompletedOnboardingState,
   normalizeOnboardingWritePatch,
 } from './utils/firestoreGate';
 import { syncPublicProfileFromCurrentPrivate } from './utils/publicProfileSync';
@@ -897,10 +898,10 @@ export const patchUserProfile = async (uid, patch = {}, {
 
   if (!hasOnboardingWriteKeys(nextPatch)) {
     await setDoc(userRef, nextPatch, { merge: true });
-    return;
+    return nextPatch;
   }
 
-  await runTransaction(getFirebaseDb(), async (transaction) => {
+  return runTransaction(getFirebaseDb(), async (transaction) => {
     const snapshot = await transaction.get(userRef);
     const existing = snapshot.exists() ? snapshot.data() : {};
     const prevStep = toOnboardingStepNumber(existing?.onboardingStep);
@@ -921,6 +922,7 @@ export const patchUserProfile = async (uid, patch = {}, {
     });
 
     transaction.set(userRef, nextPatch, { merge: true });
+    return nextPatch;
   });
 };
 
@@ -1872,12 +1874,15 @@ export const migrateArtifactsUserData = async (user) => {
         console.log('[migrateArtifactsUserData] Creating users/' + user.uid + ' from artifacts', data);
       }
       const privatePatch = { ...data, updatedAt: serverTimestamp() };
-      await patchUserProfile(
+      const persistedPatch = await patchUserProfile(
         user.uid,
         privatePatch,
-        { label: 'migrateArtifactsUserData(create)' },
+        {
+          label: 'migrateArtifactsUserData(create)',
+          allowOnboardingCompletion: isLegitimateCompletedOnboardingState(data),
+        },
       );
-      resultingPrivate = { ...resultingPrivate, ...data };
+      resultingPrivate = { ...resultingPrivate, ...persistedPatch };
       migratedProfile = true;
     } else {
       const existingData = existingProfileSnap.data() || {};
@@ -1893,15 +1898,22 @@ export const migrateArtifactsUserData = async (user) => {
         if (import.meta.env.DEV) {
           console.log('[migrateArtifactsUserData] Updating users/' + user.uid + ' from artifacts', updates);
         }
-        await patchUserProfile(
+        const persistedPatch = await patchUserProfile(
           user.uid,
           { ...updates, updatedAt: serverTimestamp() },
-          { label: 'migrateArtifactsUserData(update)' },
+          {
+            label: 'migrateArtifactsUserData(update)',
+            allowOnboardingCompletion: isLegitimateCompletedOnboardingState(data),
+          },
         );
-        resultingPrivate = { ...resultingPrivate, ...updates };
+        resultingPrivate = { ...resultingPrivate, ...persistedPatch };
         migratedProfile = true;
       }
     }
+  }
+  if (migratedProfile) {
+    const persistedPrivateSnap = await getDoc(doc(db, 'users', user.uid));
+    resultingPrivate = persistedPrivateSnap.exists() ? persistedPrivateSnap.data() || {} : {};
   }
   let migratedPublic = false;
   if (publicSnap.exists() && isOnboardingComplete(resultingPrivate)) {

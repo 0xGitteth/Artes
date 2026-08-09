@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import {
   authorizeOnboardingWritePatch,
   isOnboardingComplete,
+  isLegitimateCompletedOnboardingState,
   normalizeOnboardingWritePatch,
 } from '../src/utils/firestoreGate.js';
 import { isPublishedPersonalUserProfile, isPublicProfileVisible } from '../src/utils/managedProfiles.js';
@@ -94,6 +95,25 @@ assert.deepEqual(
   ),
   { onboardingStep: 5, onboardingComplete: true },
   'the explicit completion capability still completes legitimate onboarding',
+);
+const completedArtifact = { onboardingStep: 5, onboardingComplete: true, displayName: 'Legacy' };
+const incompleteArtifact = { onboardingStep: 2, onboardingComplete: false, displayName: 'Legacy' };
+assert.equal(isLegitimateCompletedOnboardingState(completedArtifact), true);
+assert.equal(isLegitimateCompletedOnboardingState(incompleteArtifact), false);
+assert.equal(isLegitimateCompletedOnboardingState({ onboardingStep: 5 }), true);
+assert.deepEqual(
+  authorizeOnboardingWritePatch(completedArtifact, {
+    allowCompletion: isLegitimateCompletedOnboardingState(completedArtifact),
+  }),
+  completedArtifact,
+  'trusted completed artifact migration retains its completion state',
+);
+assert.deepEqual(
+  authorizeOnboardingWritePatch({ ...incompleteArtifact, onboardingComplete: true }, {
+    allowCompletion: isLegitimateCompletedOnboardingState(incompleteArtifact),
+  }),
+  { displayName: 'Legacy' },
+  'an incomplete artifact cannot claim completion or publication eligibility',
 );
 assert.deepEqual(
   authorizeOnboardingWritePatch({ bio: 'Current edit' }),
@@ -252,6 +272,9 @@ assert.equal(
 );
 const migration = firebase.match(/export const migrateArtifactsUserData = async \(user\) => \{[\s\S]*?\n\};\n\nconst shouldRedirect/)[0];
 assert.match(migration, /await patchUserProfile\(/, 'artifact private migration is awaited');
+assert.match(migration, /allowOnboardingCompletion: isLegitimateCompletedOnboardingState\(data\)/);
+assert.match(migration, /resultingPrivate = \{ \.\.\.resultingPrivate, \.\.\.persistedPatch \}/);
+assert.match(migration, /const persistedPrivateSnap = await getDoc\(doc\(db, 'users', user\.uid\)\)/);
 assert.match(migration, /publicSnap\.exists\(\) && isOnboardingComplete\(resultingPrivate\)/, 'artifact public snapshot uses the resulting private onboarding gate');
 assert.ok(migration.indexOf('await patchUserProfile(') < migration.indexOf('await writePublicUserProfile('), 'private artifact state is persisted before public publication');
 assert.doesNotMatch(migration, /Promise\.all\(migrations\)/, 'private and public migration writes are not parallelized');

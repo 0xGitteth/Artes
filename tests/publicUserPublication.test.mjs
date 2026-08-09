@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { isOnboardingComplete } from '../src/utils/firestoreGate.js';
+import {
+  authorizeOnboardingWritePatch,
+  isOnboardingComplete,
+  normalizeOnboardingWritePatch,
+} from '../src/utils/firestoreGate.js';
 import { isPublishedPersonalUserProfile, isPublicProfileVisible } from '../src/utils/managedProfiles.js';
 import { syncPublicProfileFromCurrentPrivate } from '../src/utils/publicProfileSync.js';
 import {
@@ -49,6 +53,53 @@ assert.equal(isLegitimatelyPublishedPersonalProfile({
   privateProfile:{onboardingStep:4,ageVerified:true,isAdult:true},
   publicProfile:{onboardingComplete:true},
 }),false);
+const staleOrdinarySave = authorizeOnboardingWritePatch({
+  bio: 'Safe unrelated edit',
+  onboardingStep: 5,
+  onboardingComplete: true,
+  onboardingCompletedAt: 'stale-completion-time',
+});
+assert.deepEqual(staleOrdinarySave, { bio: 'Safe unrelated edit' });
+const resetPrivateState = { onboardingStep: 2, onboardingComplete: false, bio: 'Old bio' };
+const afterStaleSave = { ...resetPrivateState, ...staleOrdinarySave };
+assert.deepEqual(afterStaleSave, {
+  onboardingStep: 2,
+  onboardingComplete: false,
+  bio: 'Safe unrelated edit',
+});
+assert.equal(isOnboardingComplete(afterStaleSave), false);
+let staleRaceRepublished = false;
+const staleRaceSync = await syncPublicProfileFromCurrentPrivate({
+  db: {},
+  runTransaction: async (_db, operation) => operation({
+    get: async (ref) => ref === 'private'
+      ? { exists: () => true, data: () => ({ ...afterStaleSave }) }
+      : { exists: () => false, data: () => ({}) },
+    set: () => { staleRaceRepublished = true; },
+  }),
+  privateRef: 'private',
+  publicRef: 'public',
+  isOnboardingComplete,
+  buildWritePayload: () => ({ onboardingComplete: true }),
+});
+assert.equal(staleRaceSync.written, false);
+assert.equal(staleRaceRepublished, false, 'a stale ordinary save cannot recreate publicUsers after reset');
+assert.deepEqual(
+  normalizeOnboardingWritePatch(
+    { onboardingStep: 2, onboardingComplete: false },
+    authorizeOnboardingWritePatch(
+      { onboardingStep: 5, onboardingComplete: true },
+      { allowCompletion: true },
+    ),
+  ),
+  { onboardingStep: 5, onboardingComplete: true },
+  'the explicit completion capability still completes legitimate onboarding',
+);
+assert.deepEqual(
+  authorizeOnboardingWritePatch({ bio: 'Current edit' }),
+  { bio: 'Current edit' },
+  'normal edits on complete and incomplete accounts remain ordinary field patches',
+);
 assert.equal(normalizePublicProfileField('photoURL', { legacy: true }), null);
 assert.equal(normalizePublicProfileField('avatar', [1]), null);
 assert.equal(normalizePublicProfileField('headerImage', 42), null);
@@ -71,7 +122,7 @@ assert.equal(isLegitimatelyPublishedPersonalProfile({
 const firebase=fs.readFileSync('src/firebase.js','utf8');
 assert.match(firebase,/if \(!isOnboardingComplete\(resultingProfile\)\) return resultingProfile/);
 assert.match(firebase,/const resultingPrivate = \{ \.\.\.existingPrivate, \.\.\.safeData \}/);
-const updateUserProfile = firebase.match(/export const updateUserProfile = async \(uid, data\) => \{[\s\S]*?\n\};\n\n\/\*\*\n \* One-time backfill/)[0];
+const updateUserProfile = firebase.match(/export const updateUserProfile = async \(uid, data,[\s\S]*?\n\};\n\n\/\*\*\n \* One-time backfill/)[0];
 assert.match(
   updateUserProfile,
   /const shouldSyncPublic = isOnboardingComplete\(resultingPrivate\);/,

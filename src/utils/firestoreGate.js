@@ -12,6 +12,16 @@ const toFiniteOnboardingStep = (value) => {
   return Number.isFinite(numeric) ? numeric : null;
 };
 
+export const authorizeOnboardingWritePatch = (patch = {}, { allowCompletion = false } = {}) => {
+  const authorized = { ...patch };
+  if (!allowCompletion && authorized.onboardingComplete === true) {
+    delete authorized.onboardingComplete;
+    delete authorized.onboardingStep;
+    delete authorized.onboardingCompletedAt;
+  }
+  return authorized;
+};
+
 export const normalizeOnboardingWritePatch = (existing = {}, patch = {}) => {
   const nextPatch = { ...patch };
   const hasStep = Object.prototype.hasOwnProperty.call(nextPatch, 'onboardingStep');

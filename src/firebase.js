@@ -47,6 +47,7 @@ import {
 } from './utils/contributorClaims';
 import {
   canAccessFirestore,
+  authorizeOnboardingWritePatch,
   devLog,
   isOnboardingComplete,
   normalizeOnboardingWritePatch,
@@ -884,39 +885,46 @@ const logOnboardingWrite = ({ uid, label, patch, prevStep, prevComplete, nextSte
   );
 };
 
-export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = {}) => {
+export const patchUserProfile = async (uid, patch = {}, {
+  label = 'unknown',
+  allowOnboardingCompletion = false,
+} = {}) => {
   if (!uid || !patch || typeof patch !== 'object') return;
   const userRef = doc(getFirebaseDb(), 'users', uid);
-  let nextPatch = { ...patch };
+  let nextPatch = authorizeOnboardingWritePatch(patch, {
+    allowCompletion: allowOnboardingCompletion,
+  });
 
   if (!hasOnboardingWriteKeys(nextPatch)) {
     await setDoc(userRef, nextPatch, { merge: true });
     return;
   }
 
-  const snapshot = await getDoc(userRef);
-  const existing = snapshot.exists() ? snapshot.data() : {};
-  const prevStep = toOnboardingStepNumber(existing?.onboardingStep);
-  const prevComplete = isOnboardingComplete(existing);
-  nextPatch = normalizeOnboardingWritePatch(existing, nextPatch);
-  const nextState = { ...existing, ...nextPatch };
-  const nextStep = toOnboardingStepNumber(nextState?.onboardingStep);
-  const nextComplete = isOnboardingComplete(nextState);
+  await runTransaction(getFirebaseDb(), async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+    const existing = snapshot.exists() ? snapshot.data() : {};
+    const prevStep = toOnboardingStepNumber(existing?.onboardingStep);
+    const prevComplete = isOnboardingComplete(existing);
+    nextPatch = normalizeOnboardingWritePatch(existing, nextPatch);
+    const nextState = { ...existing, ...nextPatch };
+    const nextStep = toOnboardingStepNumber(nextState?.onboardingStep);
+    const nextComplete = isOnboardingComplete(nextState);
 
-  logOnboardingWrite({
-    uid,
-    label,
-    patch: nextPatch,
-    prevStep,
-    prevComplete,
-    nextStep,
-    nextComplete,
+    logOnboardingWrite({
+      uid,
+      label,
+      patch: nextPatch,
+      prevStep,
+      prevComplete,
+      nextStep,
+      nextComplete,
+    });
+
+    transaction.set(userRef, nextPatch, { merge: true });
   });
-
-  await setDoc(userRef, nextPatch, { merge: true });
 };
 
-export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
+export const safeUserWrite = async (uid, patch = {}, userOverride = null, options = {}) => {
   if (!uid || !patch || typeof patch !== 'object') return false;
   const user = userOverride ?? authStateUser;
   const canWrite = Boolean(user?.uid) && user.uid === uid;
@@ -927,7 +935,7 @@ export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
   }
 
   try {
-    await patchUserProfile(uid, patch, { label: 'safeUserWrite' });
+    await patchUserProfile(uid, patch, { label: 'safeUserWrite', ...options });
     return true;
   } catch (error) {
     if (error?.code === 'permission-denied') {
@@ -1177,7 +1185,7 @@ export const updateUserAffiliationStatus = async ({ targetUid, type, status }) =
   }
 };
 
-export const updateUserProfile = async (uid, data) => {
+export const updateUserProfile = async (uid, data, { completeOnboarding = false } = {}) => {
   const authUser = await waitForAuthReady();
   if (!authUser?.uid) {
     throw new Error('Profiel opslaan mislukt: je bent niet ingelogd of auth is nog niet klaar.');
@@ -1246,7 +1254,7 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const resultingPrivate = { ...existingPrivate, ...safeData };
-  if (isOnboardingComplete(resultingPrivate)) {
+  if (completeOnboarding && isOnboardingComplete(resultingPrivate)) {
     resultingPrivate.onboardingComplete = true;
     updatePayload.onboardingComplete = true;
   }
@@ -1267,7 +1275,9 @@ export const updateUserProfile = async (uid, data) => {
 
   let didWriteUser = false;
   try {
-    didWriteUser = (await safeUserWrite(resolvedUid, updatePayload, authUser)) === true;
+    didWriteUser = (await safeUserWrite(resolvedUid, updatePayload, authUser, {
+      allowOnboardingCompletion: completeOnboarding,
+    })) === true;
     if (updatePayload.email !== undefined) {
       await setDoc(doc(getFirebaseDb(), 'users', resolvedUid), {
         email: updatePayload.email,

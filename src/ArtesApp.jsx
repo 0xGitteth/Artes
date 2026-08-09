@@ -2375,7 +2375,7 @@ export default function ArtesApp() {
         theme: profileData.preferences?.theme || 'light',
       },
     };
-    await updateUserProfile(authUser.uid, finalProfile);
+    await updateUserProfile(authUser.uid, finalProfile, { completeOnboarding: true });
 
     // Create support thread for the user after onboarding
     try {

@@ -10,7 +10,7 @@ import {
 } from './backfillPublicUsersFromUsers.js';
 import { isAvailablePersonalPublicProfile } from '../publicProfileAvailability.js';
 import { isDiditSafetyDeactivatedPrivateProfile } from '../publicProfileUnpublish.js';
-import { isCodexDevUid } from '../codexDevIdentity.js';
+import { isCodexDevPrivateProfile } from '../codexDevIdentity.js';
 
 export const DEFAULT_PAGE_SIZE = 200;
 export const PRIVATE_FIELDS = LEGACY_PRIVATE_PUBLIC_USER_FIELDS;
@@ -113,7 +113,7 @@ const decideUserReconciliation = ({
   const publicExists = publicSnap.exists;
   const publicData = publicExists ? (publicSnap.data() || {}) : {};
 
-  if (isCodexDevUid(uid)) {
+  if (isCodexDevPrivateProfile(uid, userData)) {
     return publicExists
       ? { action: 'delete', stats: { testActorsSkipped: 1, publicProfilesDeleted: 1, deletes: 1 } }
       : { action: 'none', stats: { testActorsSkipped: 1 } };

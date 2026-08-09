@@ -9,7 +9,7 @@ import { canAccessFirestore, devLog, isOnboardingComplete } from '../utils/fires
 import { syncPublicProfileFromCurrentPrivate } from '../utils/publicProfileSync';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
 import { buildPostAuthorFields, isLegacySetupProfileId, isPublicProfileVisible, resolvePostAuthorProfile } from '../utils/managedProfiles';
-import { isCodexDevUser } from '../utils/codexDevIdentity';
+import { isCodexDevUser, sortCodexDevPostsNewestFirst } from '../utils/codexDevIdentity';
 import {
   getFirestore,
   collection,
@@ -165,11 +165,14 @@ export const subscribeToPosts = (callback, gate = {}) => {
     if (cancelled) return;
     const postCollection = isCodexActor ? 'codexDevPosts' : 'posts';
     const postsQuery = isCodexActor
-      ? query(collection(db, postCollection), where('authorId', '==', user.uid), orderBy('createdAt', 'desc'))
+      ? query(collection(db, postCollection), where('authorId', '==', user.uid))
       : query(collection(db, postCollection), orderBy('createdAt', 'desc'));
     unsubscribe = onSnapshot(
       postsQuery,
-      (snapshot) => callback(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
+      (snapshot) => {
+        const posts = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        callback(isCodexActor ? sortCodexDevPostsNewestFirst(posts) : posts);
+      },
       (err) => console.error('POSTS LISTENER ERROR:', err.code, err.message, `path=${postCollection}`)
     );
   });

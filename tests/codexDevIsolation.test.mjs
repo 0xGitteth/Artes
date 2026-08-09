@@ -8,8 +8,8 @@ import {
   isCodexDevToken,
   resolveCodexDevUid,
 } from '../functions/codexDevIdentity.js';
-import { isCodexDevIdentity as isClientCodexIdentity } from '../src/utils/codexDevIdentity.js';
-import { isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload } from '../functions/uploadReuseIsolation.js';
+import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFirst } from '../src/utils/codexDevIdentity.js';
+import { isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
 
 test('canonical identity requires the configured uid and both trusted claims', () => {
   const env = { CODEX_DEV_UID: 'isolated-codex' };
@@ -49,6 +49,22 @@ test('upload-result reuse is isolated in both directions', () => {
   assert.equal(selectNearReusableUpload({ uploads: nearCandidates, isCodexActor: true, distanceFor: () => 1, threshold: 5 }).id, 'test-near');
 });
 
+test('automatic production review cases are suppressed only for Codex', () => {
+  const forbiddenReasons = [{ trigger: 'test' }];
+  assert.equal(shouldCreateProductionReviewCase({ isCodexActor: true, forbiddenReasons }), false);
+  assert.equal(shouldCreateProductionReviewCase({ isCodexActor: false, forbiddenReasons }), true);
+  assert.equal(shouldCreateProductionReviewCase({ isCodexActor: false, forbiddenReasons: [] }), false);
+});
+
+test('single-field Codex feed results retain newest-first display ordering', () => {
+  const ordered = sortCodexDevPostsNewestFirst([
+    { id: 'old', createdAt: { seconds: 1 } },
+    { id: 'new', createdAt: { toMillis: () => 3000 } },
+    { id: 'middle', createdAt: { _seconds: 2 } },
+  ]);
+  assert.deepEqual(ordered.map(({ id }) => id), ['new', 'middle', 'old']);
+});
+
 test('ensureCodexDevProfileState deletes rather than writes a publicUsers projection', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const start = source.indexOf('export const ensureCodexDevProfileState');
@@ -65,6 +81,8 @@ test('client routes Codex posts to its isolated collection and supports private 
   const source = await fs.readFile(new URL('../src/services/firebaseClient.js', import.meta.url), 'utf8');
   assert.match(source, /isCodexActor \? 'codexDevPosts' : 'posts'/);
   assert.match(source, /where\('authorId', '==', user\.uid\)/);
+  assert.doesNotMatch(source, /where\('authorId', '==', user\.uid\), orderBy/);
+  assert.match(source, /sortCodexDevPostsNewestFirst\(posts\)/);
   assert.match(source, /user\?\.uid !== userId \|\| !\(await isCodexDevUser\(user\)\)/);
   assert.doesNotMatch(source, /uid === 'codex-dev-user'/);
 });

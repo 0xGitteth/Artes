@@ -46,7 +46,7 @@ import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js'
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
-import { isUploadReusableForActor, selectNearReusableUpload } from './uploadReuseIsolation.js';
+import { isUploadReusableForActor, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -1493,7 +1493,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       appliedTriggers: matchedUpload.data.appliedTriggers || [],
       suggestedTriggers: matchedUpload.data.suggestedTriggers || [],
       forbiddenReasons: matchedUpload.data.forbiddenReasons || [],
-      reviewCaseId: matchedUpload.data.reviewCaseId || null,
+      reviewCaseId: isCodexActor ? null : (matchedUpload.data.reviewCaseId || null),
     };
   }
 
@@ -1758,7 +1758,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let inCooldown = false;
   let reviewCreated = false;
 
-  if (userId && finalForbiddenReasons.length > 0) {
+  if (userId && shouldCreateProductionReviewCase({ isCodexActor, forbiddenReasons: finalForbiddenReasons })) {
     try {
       userModeration = await getUserModeration(userId);
       const cooldownUntil = resolveTimestamp(userModeration?.data?.cooldownUntil);
@@ -1814,7 +1814,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
   }
 
-  canRequestReview = finalForbiddenReasons.length > 0 && !inCooldown && !openReviewCase && !reviewCreated;
+  canRequestReview = !isCodexActor && finalForbiddenReasons.length > 0 && !inCooldown && !openReviewCase && !reviewCreated;
 
   const previousModeratorExample = policyResult.previousModeratorExample;
   const effectiveShouldReview = policyResult.shouldReview;

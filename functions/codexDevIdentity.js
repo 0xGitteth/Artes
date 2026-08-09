@@ -13,6 +13,11 @@ export const isCodexDevUid = (uid, env = process.env) => (
   Boolean(uid) && uid === resolveCodexDevUid(env)
 );
 
+export const isCodexDevPrivateProfile = (uid, profile = {}, env = process.env) => (
+  isCodexDevUid(uid, env)
+  || (profile?.isDevTestUser === true && profile?.devActor === CODEX_DEV_ACTOR)
+);
+
 export const isCodexDevToken = (decoded = {}, env = process.env) => (
   hasCodexDevClaim(decoded) && isCodexDevUid(decoded.uid, env)
 );

@@ -76,9 +76,10 @@ assert.equal(isPublishEligibleUser({ onboardingStep: 4, ageVerified: true, isAdu
 
 const docs = [
   {
-    id: 'codex-dev-user',
-    data: () => ({ onboardingComplete: true, isDevTestUser: true }),
+    id: 'non-default-codex',
+    data: () => ({ onboardingComplete: true, isDevTestUser: true, devActor: 'codex' }),
   },
+  { id: 'codex-dev-user', data: () => ({ onboardingComplete: true }) },
   {
     id: 'eligible_user',
     data: () => ({
@@ -111,7 +112,8 @@ const docs = [
 
 const createFakeDb = () => {
   const publicUsers = new Map([
-    ['codex-dev-user', { displayName: 'Codex', ageVerified: true, isDevTestUser: true }],
+    ['non-default-codex', { displayName: 'Marked Codex', ageVerified: true }],
+    ['codex-dev-user', { displayName: 'Configured Codex', ageVerified: true }],
     ['eligible_user', {
       displayName: 'Stale Eligible User',
       themes: ['Old Theme'],
@@ -181,7 +183,7 @@ const createFakeDb = () => {
 const dryRunDb = createFakeDb();
 const dryRunStats = await runBackfill({ db: dryRunDb, dryRun: true, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(dryRunStats, {
-  scanned: 4,
+  scanned: 5,
   eligible: 2,
   skippedNotEligible: 1,
   wouldWrite: 2,
@@ -189,7 +191,7 @@ assert.deepEqual(dryRunStats, {
   failed: 0,
   legacyPrivateFieldsFound: 5,
   legacyPrivateFieldsDeleted: 0,
-  codexPublicProfilesWouldDelete: 1,
+  codexPublicProfilesWouldDelete: 2,
   codexPublicProfilesDeleted: 0,
 });
 assert.equal(dryRunDb.batchSetCalls, 0, 'dry run must not enqueue writes');
@@ -197,19 +199,20 @@ assert.equal(dryRunDb.batchSetCalls, 0, 'dry run must not enqueue writes');
 const applyDb = createFakeDb();
 const applyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(applyStats, {
-  scanned: 4,
+  scanned: 5,
   eligible: 2,
   skippedNotEligible: 1,
   wouldWrite: 2,
-  written: 3,
+  written: 4,
   failed: 0,
   legacyPrivateFieldsFound: 5,
   legacyPrivateFieldsDeleted: 5,
-  codexPublicProfilesWouldDelete: 1,
-  codexPublicProfilesDeleted: 1,
+  codexPublicProfilesWouldDelete: 2,
+  codexPublicProfilesDeleted: 2,
 });
 assert.equal(applyDb.batchSetCalls, 2, 'apply should enqueue every onboarding-eligible publicUsers write');
 assert.equal(applyDb.publicUsers.has('codex-dev-user'), false, 'apply deletes the legacy Codex projection');
+assert.equal(applyDb.publicUsers.has('non-default-codex'), false, 'persisted private markers identify a non-default Codex actor without env configuration');
 const secondApplyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.equal(secondApplyStats.codexPublicProfilesWouldDelete, 0);
 assert.equal(secondApplyStats.codexPublicProfilesDeleted, 0, 'second apply is idempotent for Codex deletion');

@@ -17,9 +17,10 @@
     "test:backfill-public-users": "node tests/backfillPublicUsersFromUsers.test.mjs",
     "test:rules:storage": "firebase emulators:exec --only firestore,storage \"node tests/storage.profileImages.rules.test.mjs && node tests/storage.uploads.rules.test.mjs\"",
     "reconcile-public-users": "node functions/scripts/reconcilePublicUsersForOnboarding.js",
+    "reconcile-codex-dev-isolation": "node functions/scripts/reconcileCodexDevIsolation.js",
     "test:reconcile-public-users": "node tests/reconcilePublicUsersForOnboarding.test.mjs",
     "test:public-user-publication": "node tests/publicUserPublication.test.mjs && node tests/publicProfileUnpublish.test.mjs && node tests/onboardingResetState.test.mjs && node tests/followCounters.test.mjs",
-    "test:codex-dev-isolation": "node --test tests/codexDevIsolation.test.mjs functions/test/codexDevLogin.test.js"
+    "test:codex-dev-isolation": "node --test tests/codexDevIsolation.test.mjs functions/test/codexDevLogin.test.js && node tests/codexDevLegacyCleanup.test.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",

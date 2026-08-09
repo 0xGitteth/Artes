@@ -25,24 +25,8 @@ export const applyFollowingCreatedCounters = async ({
   if (!relationSnap.exists) return { status: 'missing-relation' };
 
   if (isCodexDevUid(uid) || isCodexDevUid(targetUid)) {
-    const relationData = relationSnap.data() || {};
-    let repaired = null;
-    if (relationData.countersApplied === true) {
-      const ordinaryUid = isCodexDevUid(uid) ? targetUid : uid;
-      const ordinaryRef = db.collection('publicUsers').doc(ordinaryUid);
-      const ordinarySnap = await transaction.get(ordinaryRef);
-      if (ordinarySnap.exists) {
-        const counterField = isCodexDevUid(uid) ? 'fansCount' : 'fanOfCount';
-        const current = Number(ordinarySnap.data()?.[counterField]) || 0;
-        transaction.update(ordinaryRef, {
-          [counterField]: Math.max(0, current - 1),
-          updatedAt: fieldValue.serverTimestamp(),
-        });
-        repaired = counterField;
-      }
-    }
     transaction.delete(relationRef);
-    return { status: 'rejected-test-actor', repaired };
+    return { status: 'rejected-test-actor', repairOnDelete: relationSnap.data()?.countersApplied === true };
   }
 
   const relationData = relationSnap.data() || {};
@@ -96,7 +80,26 @@ export const applyFollowingDeletedCounters = async ({
   fieldValue,
 }) => {
   if (isCodexDevUid(uid) || isCodexDevUid(targetUid)) {
-    return { status: 'skipped-test-actor' };
+    if (relationData.countersApplied !== true) return { status: 'skipped-test-actor' };
+    return db.runTransaction(async (transaction) => {
+      const repairRef = db.collection('codexDevCounterRepairs').doc(`${uid}__${targetUid}`);
+      const repairSnap = await transaction.get(repairRef);
+      if (repairSnap.exists) return { status: 'already-repaired-test-actor' };
+      const ordinaryUid = isCodexDevUid(uid) ? targetUid : uid;
+      const ordinaryRef = db.collection('publicUsers').doc(ordinaryUid);
+      const ordinarySnap = await transaction.get(ordinaryRef);
+      let repaired = null;
+      if (ordinarySnap.exists) {
+        repaired = isCodexDevUid(uid) ? 'fansCount' : 'fanOfCount';
+        const current = Number(ordinarySnap.data()?.[repaired]) || 0;
+        transaction.update(ordinaryRef, {
+          [repaired]: Math.max(0, current - 1),
+          updatedAt: fieldValue.serverTimestamp(),
+        });
+      }
+      transaction.set(repairRef, { uid, targetUid, repaired, repairedAt: fieldValue.serverTimestamp() });
+      return { status: 'repaired-test-actor', repaired };
+    });
   }
   if (relationData.countersApplied !== true) return { status: 'not-applied' };
 

@@ -113,9 +113,12 @@ const codexFollowingResult = await applyFollowingCreatedCounters({
   targetUid: 'target',
   fieldValue,
 });
-assert.equal(codexFollowingResult.repaired, 'fansCount');
-assert.equal(codexFollowingDb.get('publicUsers/target').fansCount, 3);
+assert.equal(codexFollowingResult.repairOnDelete, true);
+assert.equal(codexFollowingDb.get('publicUsers/target').fansCount, 4);
 assert.equal(codexFollowingDb.has(codexFollowingPath), false);
+const codexDeleteRepair = await applyFollowingDeletedCounters({ db: codexFollowingDb, relationData: { countersApplied: true }, uid: 'codex-dev-user', targetUid: 'target', fieldValue });
+assert.equal(codexDeleteRepair.repaired, 'fansCount');
+assert.equal(codexFollowingDb.get('publicUsers/target').fansCount, 3);
 assert.equal((await applyFollowingCreatedCounters({
   db: codexFollowingDb,
   relationRef: codexFollowingDb.ref(codexFollowingPath),
@@ -137,9 +140,13 @@ const ordinaryFollowingCodexResult = await applyFollowingCreatedCounters({
   targetUid: 'codex-dev-user',
   fieldValue,
 });
-assert.equal(ordinaryFollowingCodexResult.repaired, 'fanOfCount');
+assert.equal(ordinaryFollowingCodexResult.repairOnDelete, true);
+const ordinaryDeleteRepair = await applyFollowingDeletedCounters({ db: ordinaryFollowingCodexDb, relationData: { countersApplied: true }, uid: 'fan', targetUid: 'codex-dev-user', fieldValue });
+assert.equal(ordinaryDeleteRepair.repaired, 'fanOfCount');
 assert.equal(ordinaryFollowingCodexDb.get('publicUsers/fan').fanOfCount, 1);
 assert.equal(ordinaryFollowingCodexDb.has('publicUsers/codex-dev-user'), false);
+assert.equal((await applyFollowingDeletedCounters({ db: ordinaryFollowingCodexDb, relationData: { countersApplied: true }, uid: 'fan', targetUid: 'codex-dev-user', fieldValue })).status, 'already-repaired-test-actor');
+assert.equal(ordinaryFollowingCodexDb.get('publicUsers/fan').fanOfCount, 1);
 
 const unappliedCodexDb = createFakeDb([
   ['publicUsers/target', { onboardingComplete: true, fansCount: 4 }],

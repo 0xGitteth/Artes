@@ -30,3 +30,8 @@ export const isCodexDevUser = async (user, { forceRefresh = false } = {}) => {
   const claims = await readTokenClaims(user, forceRefresh);
   return isCodexDevIdentity({ claims, uid: user.uid });
 };
+
+export const sortCodexDevPostsNewestFirst = (posts = []) => {
+  const millis = (value) => value?.toMillis?.() ?? Number(value?.seconds || value?._seconds || 0) * 1000;
+  return [...posts].sort((left, right) => millis(right.createdAt) - millis(left.createdAt));
+};

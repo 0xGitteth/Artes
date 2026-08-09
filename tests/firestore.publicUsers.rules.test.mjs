@@ -9,7 +9,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  orderBy,
   query,
   setDoc,
   Timestamp,
@@ -538,6 +537,8 @@ async function run() {
     const selfWithdrawDb = authedContext(testEnv, 'self_withdraw', { email_verified: true }).firestore();
     const ownerUnverifiedRulesDb = authedContext(testEnv, ownerUid, { email_verified: false, __adultDefaults: false }).firestore();
     const eligibleVoterDb = authedContext(testEnv, 'eligible_voter', { email_verified: true }).firestore();
+
+    await assertFails(updateDoc(doc(ownerDb, 'users', ownerUid), { isDevTestUser: true, devActor: 'codex' }));
 
     for (const uid of ['legacy_step_5', 'legacy_step_10']) {
       await assertSucceeds(setDoc(doc(publicUserDbFor(uid), 'publicUsers', uid), {
@@ -2131,13 +2132,14 @@ async function run() {
     await assertSucceeds(getDocs(query(
       collection(codexDevDb, 'codexDevPosts'),
       where('authorId', '==', 'codex-dev-user'),
-      orderBy('createdAt', 'desc'),
     )));
     await assertFails(getDocs(query(
       collection(ownerDb, 'codexDevPosts'),
       where('authorId', '==', 'codex-dev-user'),
-      orderBy('createdAt', 'desc'),
     )));
+    await assertFails(setDoc(doc(codexDevDb, 'communities', communityId, 'topics', topicId, 'comments', 'codex_visible_denied'), {
+      text: 'Codex must not be visible', authorId: 'codex-dev-user', createdAt: serverTimestamp(),
+    }));
 
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'users', ownerUid), {

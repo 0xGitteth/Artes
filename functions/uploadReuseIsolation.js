@@ -2,6 +2,10 @@ export const isUploadReusableForActor = (upload = {}, isCodexActor = false) => (
   isCodexActor ? upload.testActor === 'codex' : !upload.testActor
 );
 
+export const shouldCreateProductionReviewCase = ({ isCodexActor = false, forbiddenReasons = [] } = {}) => (
+  !isCodexActor && forbiddenReasons.length > 0
+);
+
 export const selectExactReusableUpload = (uploads = [], isCodexActor = false) => (
   uploads.find((upload) => isUploadReusableForActor(upload, isCodexActor)) || null
 );

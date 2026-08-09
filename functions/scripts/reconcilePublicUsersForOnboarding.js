@@ -8,6 +8,8 @@ import {
   buildLegacyPrivateFieldDeletes,
   buildPublicUserBackfillPayload,
 } from './backfillPublicUsersFromUsers.js';
+import { isAvailablePersonalPublicProfile } from '../publicProfileAvailability.js';
+import { isDiditSafetyDeactivatedPrivateProfile } from '../publicProfileUnpublish.js';
 
 export const DEFAULT_PAGE_SIZE = 200;
 export const PRIVATE_FIELDS = LEGACY_PRIVATE_PUBLIC_USER_FIELDS;
@@ -83,6 +85,7 @@ const emptyStats = () => ({
   missingPublicProfiles: 0,
   publicProfilesRestored: 0,
   publicProfilesDeleted: 0,
+  diditSafetyProfilesPreserved: 0,
   orphanPublicProfiles: 0,
   writes: 0,
   deletes: 0,
@@ -110,6 +113,15 @@ const decideUserReconciliation = ({
 
   if (!isOnboardingComplete(userData)) {
     if (!publicExists) return { action: 'none', stats: { incompleteUsers: 1 } };
+    if (
+      isDiditSafetyDeactivatedPrivateProfile(userData)
+      && !isAvailablePersonalPublicProfile(publicData)
+    ) {
+      return {
+        action: 'preserve',
+        stats: { incompleteUsers: 1, diditSafetyProfilesPreserved: 1 },
+      };
+    }
     return {
       action: 'delete',
       stats: { incompleteUsers: 1, publicProfilesDeleted: 1, deletes: 1 },

@@ -161,6 +161,8 @@ const dryRunStats = await reconcile({ db: dryRunDb, pageSize: 1 });
 assert.equal(dryRunStats.privateUsersScanned, 2);
 assert.equal(dryRunStats.writes, 1);
 assert.equal(dryRunStats.deletes, 1);
+assert.equal(dryRunStats.publicProfilesDeleted, 1);
+assert.equal(dryRunStats.diditSafetyProfilesPreserved, 0);
 assert.equal(dryRunStats.orphanPublicProfiles, 1);
 assert.equal(dryRunDb.transactionCalls, 0, 'dry run remains strictly read-only');
 assert.ok(dryRunDb.pageReads.length >= 4, 'both collections are read across bounded pages');
@@ -170,6 +172,8 @@ const applyDb = createFakeDb(users, publicUsers);
 const applyStats = await reconcile({ db: applyDb, apply: true, pageSize: 1, deleteValue: () => DELETE_TOKEN });
 assert.equal(applyStats.writes, 1);
 assert.equal(applyStats.deletes, 1);
+assert.equal(applyStats.publicProfilesDeleted, 1);
+assert.equal(applyStats.diditSafetyProfilesPreserved, 0);
 assert.equal(applyDb.stores.publicUsers.has('pending'), false);
 assert.equal(applyDb.stores.publicUsers.has('done'), true);
 assert.ok(applyDb.transactionCalls >= 2, 'apply decisions use transactions instead of reusable batches');
@@ -208,6 +212,101 @@ assert.equal(cleaned.fansCount, 9, 'server-managed counter is preserved');
 assert.equal(cleaned.createdAt, 1, 'server-managed timestamp is preserved');
 assert.equal(cleaned.onboardingStep, 5, 'legacy string step is normalized');
 
+const diditSafetyPrivateProfile = {
+  onboardingComplete: false,
+  onboardingStep: 2,
+  ageVerified: false,
+  isAdult: false,
+  didit: { status: 'underage' },
+};
+const diditSafetyPublicProfile = {
+  uid: 'didit-safety',
+  onboardingComplete: true,
+  displayName: 'Safety Profile',
+  hidden: true,
+  status: 'inactive',
+  visibility: 'private',
+  publicVisibility: 'private',
+  deactivatedReason: 'underage',
+  fansCount: 7,
+  fanOfCount: 4,
+};
+
+const diditSafetyDryRunDb = createFakeDb(
+  [['didit-safety', diditSafetyPrivateProfile]],
+  [['didit-safety', diditSafetyPublicProfile]],
+);
+const diditSafetyDryRunStats = await reconcile({
+  db: diditSafetyDryRunDb,
+  uid: 'didit-safety',
+  deleteValue: () => DELETE_TOKEN,
+});
+assert.equal(diditSafetyDryRunStats.incompleteUsers, 1);
+assert.equal(diditSafetyDryRunStats.diditSafetyProfilesPreserved, 1);
+assert.equal(diditSafetyDryRunStats.publicProfilesDeleted, 0);
+assert.equal(diditSafetyDryRunStats.writes, 0);
+assert.equal(diditSafetyDryRunStats.deletes, 0);
+assert.equal(diditSafetyDryRunDb.transactionCalls, 0, 'Didit safety dry-run remains read-only');
+assert.deepEqual(
+  diditSafetyDryRunDb.stores.publicUsers.get('didit-safety'),
+  diditSafetyPublicProfile,
+  'dry-run does not alter preserved Didit recovery data',
+);
+
+const diditSafetyApplyDb = createFakeDb(
+  [['didit-safety', diditSafetyPrivateProfile]],
+  [['didit-safety', diditSafetyPublicProfile]],
+);
+const diditSafetyApplyStats = await reconcile({
+  db: diditSafetyApplyDb,
+  apply: true,
+  uid: 'didit-safety',
+  deleteValue: () => DELETE_TOKEN,
+});
+assert.equal(diditSafetyApplyStats.incompleteUsers, 1);
+assert.equal(diditSafetyApplyStats.diditSafetyProfilesPreserved, 1);
+assert.equal(diditSafetyApplyStats.publicProfilesDeleted, 0);
+assert.equal(diditSafetyApplyStats.writes, 0);
+assert.equal(diditSafetyApplyStats.deletes, 0);
+assert.equal(diditSafetyApplyDb.transactionCalls, 1, 'apply rechecks Didit safety state transactionally');
+assert.equal(diditSafetyApplyDb.transactionWrites.length, 0, 'preserving a safety profile performs no write');
+assert.deepEqual(
+  diditSafetyApplyDb.stores.publicUsers.get('didit-safety'),
+  diditSafetyPublicProfile,
+  'preserved safety counters and recovery fields remain unchanged',
+);
+
+const diditStaleVisibleDb = createFakeDb(
+  [['didit-visible', {
+    onboardingComplete: false,
+    onboardingStep: 2,
+    ageVerified: false,
+    isAdult: false,
+    idv: { status: 'underage' },
+  }]],
+  [['didit-visible', {
+    uid: 'didit-visible',
+    onboardingComplete: true,
+    displayName: 'Stale Visible Profile',
+    fansCount: 5,
+  }]],
+);
+const diditStaleVisibleStats = await reconcile({
+  db: diditStaleVisibleDb,
+  apply: true,
+  uid: 'didit-visible',
+  deleteValue: () => DELETE_TOKEN,
+});
+assert.equal(diditStaleVisibleStats.incompleteUsers, 1);
+assert.equal(diditStaleVisibleStats.diditSafetyProfilesPreserved, 0);
+assert.equal(diditStaleVisibleStats.publicProfilesDeleted, 1);
+assert.equal(diditStaleVisibleStats.deletes, 1);
+assert.equal(
+  diditStaleVisibleDb.stores.publicUsers.has('didit-visible'),
+  false,
+  'a stale visible Didit profile is deleted instead of preserved',
+);
+
 const onboardingRaceDb = createFakeDb(
   [['racing', { displayName: 'Pending', onboardingStep: 4, onboardingComplete: false }]],
   [['racing', { onboardingComplete: true, displayName: 'Old public profile' }]],
@@ -229,8 +328,15 @@ const onboardingRaceDb = createFakeDb(
     },
   },
 );
-await reconcile({ db: onboardingRaceDb, apply: true, uid: 'racing', deleteValue: () => DELETE_TOKEN });
+const onboardingRaceStats = await reconcile({
+  db: onboardingRaceDb,
+  apply: true,
+  uid: 'racing',
+  deleteValue: () => DELETE_TOKEN,
+});
 assert.equal(onboardingRaceDb.stores.publicUsers.has('racing'), true, 'a newly valid public profile is not deleted');
+assert.equal(onboardingRaceStats.publicProfilesDeleted, 0);
+assert.equal(onboardingRaceStats.diditSafetyProfilesPreserved, 0);
 assert.equal(
   onboardingRaceDb.transactionWrites.some((write) => write.action === 'delete'),
   false,

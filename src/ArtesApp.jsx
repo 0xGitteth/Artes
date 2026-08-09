@@ -52,6 +52,7 @@ import {
   verifyWebsiteClaimProof,
   createDiditSession,
   refreshDiditSession,
+  resetPersonalOnboardingToIdCheck,
   isModerator,
   ensureSupportThreadExists,
   migrateRemoveGeneralTheme,
@@ -11978,14 +11979,11 @@ function ShadowProfileModal({
     const handleOpenIdCheck = async () => {
       if (!authUser?.uid) return;
       try {
-        await updateUserProfile(authUser.uid, {
-          onboardingStep: 2,
-          onboardingComplete: false,
-        });
+        await resetPersonalOnboardingToIdCheck();
+        if (setView) setView('onboarding');
       } catch (error) {
         console.error('[ShadowProfileModal] Failed to route to ID check', error);
       }
-      if (setView) setView('onboarding');
     };
 
 
@@ -12552,14 +12550,11 @@ function ClaimInvitePage({
   const handleOpenIdCheck = async () => {
     if (!authUser?.uid) return;
     try {
-      await updateUserProfile(authUser.uid, {
-        onboardingStep: 2,
-        onboardingComplete: false,
-      });
+      await resetPersonalOnboardingToIdCheck();
+      if (setView) setView('onboarding');
     } catch (error) {
       console.error('[ClaimInvitePage] Failed to route to ID check', error);
     }
-    if (setView) setView('onboarding');
   };
 
   const handleStartClaim = async () => {

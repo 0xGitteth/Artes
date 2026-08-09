@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url';
+import { cleanPublicStringArray } from '../../src/utils/publicProfileFieldNormalization.js';
 
 const BATCH_LIMIT = 400;
 
@@ -89,9 +90,7 @@ const generateUsername = (displayName, uid) => {
   return `${base.slice(0, maxBaseLength)}${suffix}`;
 };
 
-export const cleanStringArray = (value) => (Array.isArray(value)
-  ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
-  : []);
+export const cleanStringArray = cleanPublicStringArray;
 
 const copyNullableString = (payload, source, field) => {
   if (!(field in source)) return;

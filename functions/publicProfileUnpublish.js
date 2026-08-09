@@ -1,6 +1,5 @@
 import {
   isAvailablePersonalPublicProfile,
-  isPersonalOnboardingComplete,
 } from './publicProfileAvailability.js';
 
 const normalizeStatus = (value) => String(value || '').trim().toLowerCase();
@@ -13,8 +12,11 @@ export const isDiditSafetyDeactivatedPrivateProfile = (profile = {}) => {
     && (diditStatus === 'underage' || idvStatus === 'underage');
 };
 
-export const unpublishIncompletePersonalProfileFromCurrentState = async ({ db, uid }) => {
+export const resetPersonalOnboardingAtomically = async ({ db, uid, onboardingStep = 2 }) => {
   if (!db || !uid) return { status: 'invalid-request' };
+  if (!Number.isInteger(onboardingStep) || onboardingStep < 0 || onboardingStep >= 5) {
+    return { status: 'invalid-reset-state' };
+  }
 
   const privateRef = db.collection('users').doc(uid);
   const publicRef = db.collection('publicUsers').doc(uid);
@@ -24,23 +26,28 @@ export const unpublishIncompletePersonalProfileFromCurrentState = async ({ db, u
     if (!privateSnap.exists) return { status: 'missing-private-profile' };
 
     const privateProfile = privateSnap.data() || {};
-    if (isPersonalOnboardingComplete(privateProfile)) {
-      return { status: 'still-complete' };
-    }
+    const resetProfile = {
+      ...privateProfile,
+      onboardingStep,
+      onboardingComplete: false,
+    };
 
     const publicSnap = await transaction.get(publicRef);
-    if (!publicSnap.exists) return { status: 'already-unpublished' };
+    transaction.set(privateRef, {
+      onboardingStep,
+      onboardingComplete: false,
+    }, { merge: true });
+    if (!publicSnap.exists) return { status: 'reset-already-unpublished' };
 
     const publicProfile = publicSnap.data() || {};
-    if (!isAvailablePersonalPublicProfile(publicProfile)) {
-      return {
-        status: isDiditSafetyDeactivatedPrivateProfile(privateProfile)
-          ? 'preserved-didit-safety-profile'
-          : 'already-unavailable',
-      };
+    if (
+      isDiditSafetyDeactivatedPrivateProfile(resetProfile)
+      && !isAvailablePersonalPublicProfile(publicProfile)
+    ) {
+      return { status: 'reset-preserved-didit-safety-profile' };
     }
 
     transaction.delete(publicRef);
-    return { status: 'unpublished' };
+    return { status: 'reset-unpublished' };
   });
 };

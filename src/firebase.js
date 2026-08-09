@@ -48,11 +48,11 @@ import {
 import {
   canAccessFirestore,
   devLog,
-  isExplicitOnboardingReset,
   isOnboardingComplete,
   normalizeOnboardingWritePatch,
 } from './utils/firestoreGate';
 import { syncPublicProfileFromCurrentPrivate } from './utils/publicProfileSync';
+import { normalizePublicProfileField } from './utils/publicProfileFieldNormalization';
 import {
   AFFILIATION_STATUSES,
   applyAffiliationStatusTransitions,
@@ -413,8 +413,8 @@ export const refreshDiditSession = async (sessionId = null) => {
   return result?.data || null;
 };
 
-const requestIncompletePersonalProfileUnpublish = async () => {
-  const callable = httpsCallable(getFirebaseFunctions(), 'unpublishIncompletePersonalProfile');
+export const resetPersonalOnboardingToIdCheck = async () => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'resetPersonalOnboarding');
   const result = await callable({});
   return result?.data || null;
 };
@@ -630,20 +630,9 @@ const PUBLIC_USER_ALLOWED_FIELDS = [
 
 const sanitizePublicProfileField = (key, value) => {
   if (value === undefined) return undefined;
-  if (key === 'username') return normalizeUsername(value);
-  if (key === 'profileId' || key === 'ownerUid') return value || '';
-  if (key === 'photoURL' || key === 'avatar' || key === 'headerImage') return value || null;
-  if (key === 'displayName' || key === 'bio') return value || '';
-  if (key === 'linkedAgencyStatus' || key === 'linkedCompanyStatus') return String(value || '').trim().toLowerCase() || undefined;
-  if (key === 'headerPosition') return value || 'center';
-  if (key === 'roles' || key === 'themes' || key === 'quickProfilePostIds') {
-    if (!Array.isArray(value)) return [];
-    return value.filter(Boolean);
-  }
-  if (key === 'quickProfilePreviewMode') {
-    return ['latest', 'best', 'manual'].includes(value) ? value : 'latest';
-  }
-  return value;
+  if (key === 'username') return typeof value === 'string' ? normalizeUsername(value) : '';
+  if (key === 'profileId' || key === 'ownerUid') return typeof value === 'string' ? value : '';
+  return normalizePublicProfileField(key, value);
 };
 
 export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
@@ -680,17 +669,17 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
   }
   payload.profileId = uid;
   payload.ownerUid = uid;
-  const normalizedDisplayName = String(data.displayName || '').trim();
-  if (data.displayName !== undefined && normalizedDisplayName) {
+  const normalizedDisplayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
+  if (data.displayName !== undefined) {
     payload.displayName = normalizedDisplayName;
   }
   if (data.username !== undefined) {
-    payload.username = normalizeUsername(data.username);
+    payload.username = sanitizePublicProfileField('username', data.username);
   }
   if (data.photoURL !== undefined || data.avatar !== undefined) {
-    const resolvedAvatar = data.avatar ?? data.photoURL ?? null;
+    const resolvedAvatar = sanitizePublicProfileField('avatar', data.avatar ?? data.photoURL ?? null);
     payload.avatar = resolvedAvatar;
-    payload.photoURL = data.photoURL ?? resolvedAvatar;
+    payload.photoURL = sanitizePublicProfileField('photoURL', data.photoURL ?? resolvedAvatar);
   }
 
   const passthroughFields = [
@@ -729,7 +718,7 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
     payload.username = existingUsername || generateUsername(payload.displayName || existingPublic?.displayName, uid);
   }
 
-  const existingDisplayName = String(existingPublic?.displayName || '').trim();
+  const existingDisplayName = typeof existingPublic?.displayName === 'string' ? existingPublic.displayName.trim() : '';
   if (payload.displayName === undefined && existingDisplayName) {
     payload.displayName = existingDisplayName;
   }
@@ -739,15 +728,15 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
   }
 
   if (payload.avatar === undefined && existingPublic?.avatar !== undefined) {
-    payload.avatar = existingPublic.avatar;
+    payload.avatar = sanitizePublicProfileField('avatar', existingPublic.avatar);
   }
 
   if (payload.photoURL === undefined && existingPublic?.photoURL !== undefined) {
-    payload.photoURL = existingPublic.photoURL;
+    payload.photoURL = sanitizePublicProfileField('photoURL', existingPublic.photoURL);
   }
 
   if (payload.headerImage === undefined && existingPublic?.headerImage !== undefined) {
-    payload.headerImage = existingPublic.headerImage;
+    payload.headerImage = sanitizePublicProfileField('headerImage', existingPublic.headerImage);
   }
 
   if (payload.displayName !== undefined) {
@@ -1293,10 +1282,6 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const shouldSyncPublic = isOnboardingComplete(resultingPrivate);
-  const shouldRequestPublicUnpublish = (
-    !shouldSyncPublic
-    && isExplicitOnboardingReset(safeData)
-  );
   if (!didWriteUser) {
     if (import.meta.env.DEV) {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid: resolvedUid, reason: 'user-write-not-allowed-or-blocked' });
@@ -1341,23 +1326,6 @@ export const updateUserProfile = async (uid, data) => {
         }
       );
       throw new Error('Profiel opslaan mislukt: public profiel kon niet worden bijgewerkt.');
-    }
-  } else if (shouldRequestPublicUnpublish) {
-    try {
-      const unpublishResult = await requestIncompletePersonalProfileUnpublish();
-      if (import.meta.env.DEV) {
-        console.log('[updateUserProfile] PUBLIC UNPUBLISH', {
-          uid: resolvedUid,
-          path: publicDocPath,
-          status: unpublishResult?.status || 'unknown',
-        });
-      }
-    } catch (e) {
-      console.error('[updateUserProfile] PUBLIC UNPUBLISH FAILED', e.code, e.message, {
-        uid: resolvedUid,
-        path: publicDocPath,
-      });
-      throw new Error('Profiel opslaan mislukt: openbaar profiel kon niet worden ingetrokken.');
     }
   }
 

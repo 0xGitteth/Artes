@@ -38,7 +38,7 @@ import {
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
-import { unpublishIncompletePersonalProfileFromCurrentState } from './publicProfileUnpublish.js';
+import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -2215,12 +2215,12 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
   }
 });
 
-export const unpublishIncompletePersonalProfile = onCall({ region: 'europe-west4' }, async (request) => {
+export const resetPersonalOnboarding = onCall({ region: 'europe-west4' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
-  return unpublishIncompletePersonalProfileFromCurrentState({ db, uid });
+  return resetPersonalOnboardingAtomically({ db, uid, onboardingStep: 2 });
 });
 
 export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4', secrets: [codexDevLoginSecret] }, async (req, res) => {

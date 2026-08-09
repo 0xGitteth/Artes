@@ -1,38 +1,32 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import {
-  isOnboardingComplete,
-  normalizeOnboardingWritePatch,
-} from '../src/utils/firestoreGate.js';
+import { normalizeOnboardingWritePatch } from '../src/utils/firestoreGate.js';
 import { isAvailablePersonalPublicProfile } from '../functions/publicProfileAvailability.js';
-import { unpublishIncompletePersonalProfileFromCurrentState } from '../functions/publicProfileUnpublish.js';
+import { resetPersonalOnboardingAtomically } from '../functions/publicProfileUnpublish.js';
 
-const clone = (value) => (value === undefined ? undefined : structuredClone(value));
-
-const createFakeDb = (entries = [], { beforeTransaction = null } = {}) => {
-  const docs = new Map(entries.map(([path, data]) => [path, clone(data)]));
-  const refs = new Map();
-  const ref = (path) => {
-    if (!refs.has(path)) refs.set(path, { path });
-    return refs.get(path);
-  };
-
+const clone = (value) => value === undefined ? undefined : structuredClone(value);
+const createFakeDb = (entries = [], { fail = false } = {}) => {
+  const docs = new Map(entries.map(([path, value]) => [path, clone(value)]));
+  const ref = (path) => ({ path });
   return {
     collection: (name) => ({ doc: (id) => ref(`${name}/${id}`) }),
-    has: (path) => docs.has(path),
     get: (path) => clone(docs.get(path)),
-    put: (path, data) => docs.set(path, clone(data)),
+    has: (path) => docs.has(path),
     runTransaction: async (operation) => {
-      beforeTransaction?.(docs);
-      const deletes = [];
+      const pending = [];
       const result = await operation({
         get: async (documentRef) => ({
           exists: docs.has(documentRef.path),
           data: () => clone(docs.get(documentRef.path)),
         }),
-        delete: (documentRef) => deletes.push(documentRef.path),
+        set: (documentRef, value) => pending.push(['set', documentRef.path, clone(value)]),
+        delete: (documentRef) => pending.push(['delete', documentRef.path]),
       });
-      deletes.forEach((path) => docs.delete(path));
+      if (fail) throw new Error('simulated server failure');
+      pending.forEach(([kind, path, value]) => {
+        if (kind === 'delete') docs.delete(path);
+        else docs.set(path, { ...(docs.get(path) || {}), ...value });
+      });
       return result;
     },
   };
@@ -42,113 +36,52 @@ const uid = 'reset-user';
 const privatePath = `users/${uid}`;
 const publicPath = `publicUsers/${uid}`;
 const managedPath = 'profiles/managed-agency';
-const managedProfile = { ownerUid: uid, type: 'agency', status: 'active', displayName: 'Managed Agency' };
-const completedPrivate = { onboardingComplete: true, onboardingStep: 5 };
-const explicitReset = { onboardingComplete: false, onboardingStep: 2 };
-const normalizedReset = normalizeOnboardingWritePatch(completedPrivate, explicitReset);
-assert.deepEqual(normalizedReset, explicitReset, 'an explicit incomplete state may reset a completed private profile');
-assert.equal(isOnboardingComplete({ ...completedPrivate, ...normalizedReset }), false);
+const completed = { onboardingComplete: true, onboardingStep: 5, displayName: 'Reset User' };
+const visible = { onboardingComplete: true, displayName: 'Reset User', username: 'resetuser' };
+const managed = { type: 'agency', ownerUid: uid, status: 'active' };
 
-const lowerStepOnly = normalizeOnboardingWritePatch(completedPrivate, { onboardingStep: 2 });
-assert.deepEqual(lowerStepOnly, { onboardingStep: 5 }, 'a lower step without an explicit reset remains monotonic');
-
-const publishedProfile = {
-  uid,
-  onboardingComplete: true,
-  displayName: 'Reset User',
-  username: 'resetuser',
-  fansCount: 3,
-};
-const resetDb = createFakeDb([
-  [privatePath, { ...explicitReset, ageVerified: true, isAdult: true }],
-  [publicPath, publishedProfile],
-  [managedPath, managedProfile],
-]);
-const resetResult = await unpublishIncompletePersonalProfileFromCurrentState({ db: resetDb, uid });
-assert.equal(resetResult.status, 'unpublished');
-assert.equal(resetDb.has(publicPath), false, 'ordinary onboarding reset deletes the stale published projection');
-assert.equal(isAvailablePersonalPublicProfile(resetDb.get(publicPath)), false, 'stale public completion cannot remain available');
-assert.deepEqual(resetDb.get(managedPath), managedProfile, 'personal unpublish never touches managed external profiles');
-assert.equal((await unpublishIncompletePersonalProfileFromCurrentState({ db: resetDb, uid })).status, 'already-unpublished');
-
-const recompletedDb = createFakeDb([
-  [privatePath, explicitReset],
-  [publicPath, publishedProfile],
-], {
-  beforeTransaction: (docs) => docs.set(privatePath, { onboardingComplete: true, onboardingStep: '5' }),
-});
-const recompletedResult = await unpublishIncompletePersonalProfileFromCurrentState({ db: recompletedDb, uid });
-assert.equal(recompletedResult.status, 'still-complete');
-assert.deepEqual(recompletedDb.get(publicPath), publishedProfile, 'current re-completion wins over a stale unpublish request');
-
-const diditPublicProfile = {
-  ...publishedProfile,
-  hidden: true,
-  status: 'inactive',
-  visibility: 'private',
-  publicVisibility: 'private',
-  deactivatedReason: 'underage',
-};
-const diditDb = createFakeDb([
-  [privatePath, {
-    ...explicitReset,
-    ageVerified: false,
-    isAdult: false,
-    didit: { status: 'underage' },
-  }],
-  [publicPath, diditPublicProfile],
-]);
-const diditResult = await unpublishIncompletePersonalProfileFromCurrentState({ db: diditDb, uid });
-assert.equal(diditResult.status, 'preserved-didit-safety-profile');
-assert.deepEqual(diditDb.get(publicPath), diditPublicProfile, 'Didit safety profile remains stored for manual recovery only');
-assert.equal(isAvailablePersonalPublicProfile(diditDb.get(publicPath)), false);
-
-const diditStaleVisibleDb = createFakeDb([
-  [privatePath, {
-    ...explicitReset,
-    ageVerified: false,
-    isAdult: false,
-    idv: { status: 'underage' },
-  }],
-  [publicPath, publishedProfile],
-]);
-assert.equal(
-  (await unpublishIncompletePersonalProfileFromCurrentState({ db: diditStaleVisibleDb, uid })).status,
-  'unpublished',
+assert.deepEqual(
+  normalizeOnboardingWritePatch(completed, { onboardingStep: 2 }),
+  { onboardingStep: 5 },
+  'ordinary lower-step writes remain monotonic',
 );
-assert.equal(diditStaleVisibleDb.has(publicPath), false, 'a not-yet-hidden stale Didit projection cannot remain available');
 
-const unavailableDb = createFakeDb([
-  [privatePath, explicitReset],
-  [publicPath, { ...publishedProfile, hidden: true }],
-]);
-assert.equal(
-  (await unpublishIncompletePersonalProfileFromCurrentState({ db: unavailableDb, uid })).status,
-  'already-unavailable',
-);
-assert.equal(unavailableDb.has(publicPath), true, 'an already unavailable safety projection is not blindly deleted');
+const db = createFakeDb([[privatePath, completed], [publicPath, visible], [managedPath, managed]]);
+assert.equal((await resetPersonalOnboardingAtomically({ db, uid })).status, 'reset-unpublished');
+assert.deepEqual(db.get(privatePath), { ...completed, onboardingStep: 2, onboardingComplete: false });
+assert.equal(db.has(publicPath), false, 'the stale visible projection is deleted in the same commit');
+assert.deepEqual(db.get(managedPath), managed, 'managed external profiles are untouched');
+assert.equal((await resetPersonalOnboardingAtomically({ db, uid })).status, 'reset-already-unpublished');
+assert.equal(db.has(publicPath), false, 'repeated reset remains safe');
+
+const failing = createFakeDb([[privatePath, completed], [publicPath, visible]], { fail: true });
+await assert.rejects(resetPersonalOnboardingAtomically({ db: failing, uid }), /simulated server failure/);
+assert.deepEqual(failing.get(privatePath), completed, 'transaction failure commits no private reset');
+assert.deepEqual(failing.get(publicPath), visible, 'transaction failure commits no public deletion');
+
+const missing = createFakeDb([[privatePath, completed]]);
+assert.equal((await resetPersonalOnboardingAtomically({ db: missing, uid })).status, 'reset-already-unpublished');
+assert.equal(missing.get(privatePath).onboardingComplete, false);
+
+const diditPrivate = { ...completed, ageVerified: false, isAdult: false, didit: { status: 'underage' } };
+const diditHidden = { ...visible, hidden: true, status: 'inactive', visibility: 'private' };
+const didit = createFakeDb([[privatePath, diditPrivate], [publicPath, diditHidden]]);
+assert.equal((await resetPersonalOnboardingAtomically({ db: didit, uid })).status, 'reset-preserved-didit-safety-profile');
+assert.deepEqual(didit.get(publicPath), diditHidden);
+assert.equal(isAvailablePersonalPublicProfile(didit.get(publicPath)), false);
+
+const staleDidit = createFakeDb([[privatePath, diditPrivate], [publicPath, visible]]);
+assert.equal((await resetPersonalOnboardingAtomically({ db: staleDidit, uid })).status, 'reset-unpublished');
+assert.equal(staleDidit.has(publicPath), false, 'visible Didit projection is never preserved');
 
 const functionsSource = readFileSync(new URL('../functions/index.js', import.meta.url), 'utf8');
-const callableSource = functionsSource.match(/export const unpublishIncompletePersonalProfile = onCall[\s\S]*?\n\}\);/);
-assert.ok(callableSource, 'authenticated unpublish callable is exported');
-assert.match(callableSource[0], /request\.auth\?\.uid/);
-assert.match(callableSource[0], /unpublishIncompletePersonalProfileFromCurrentState\(\{ db, uid \}\)/);
-
+assert.match(functionsSource, /export const resetPersonalOnboarding = onCall[\s\S]*?request\.auth\?\.uid[\s\S]*?resetPersonalOnboardingAtomically/);
 const firebaseSource = readFileSync(new URL('../src/firebase.js', import.meta.url), 'utf8');
-const updateSource = firebaseSource.match(/export const updateUserProfile = async \(uid, data\) => \{[\s\S]*?\n\};\n\n\/\*\*/)[0];
-assert.match(updateSource, /isExplicitOnboardingReset\(safeData\)/);
-assert.match(updateSource, /requestIncompletePersonalProfileUnpublish\(\)/);
-assert.ok(
-  updateSource.indexOf('safeUserWrite(resolvedUid, updatePayload, authUser)')
-    < updateSource.indexOf('requestIncompletePersonalProfileUnpublish()'),
-  'private reset is committed before the server re-reads state for unpublishing',
-);
-
+assert.match(firebaseSource, /httpsCallable\(getFirebaseFunctions\(\), 'resetPersonalOnboarding'\)/);
+assert.doesNotMatch(firebaseSource, /requestIncompletePersonalProfileUnpublish|unpublishIncompletePersonalProfile/);
 const appSource = readFileSync(new URL('../src/ArtesApp.jsx', import.meta.url), 'utf8');
-const idCheckHandlers = [...appSource.matchAll(/const handleOpenIdCheck = async \(\) => \{[\s\S]*?\n[ \t]+\};/g)];
-assert.equal(idCheckHandlers.length, 2, 'both personal ID-check routing paths remain covered');
-idCheckHandlers.forEach(([handler]) => {
-  assert.match(handler, /updateUserProfile\(authUser\.uid, \{[\s\S]*?onboardingStep: 2,[\s\S]*?onboardingComplete: false/);
-});
+const handlers = [...appSource.matchAll(/const handleOpenIdCheck = async \(\) => \{[\s\S]*?\n[ \t]+\};/g)];
+assert.equal(handlers.length, 2);
+handlers.forEach(([handler]) => assert.match(handler, /await resetPersonalOnboardingToIdCheck\(\)/));
 
 console.log('PASS publicProfileUnpublish.test');

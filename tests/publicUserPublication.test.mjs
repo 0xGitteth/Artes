@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { isOnboardingComplete } from '../src/utils/firestoreGate.js';
 import { isPublishedPersonalUserProfile, isPublicProfileVisible } from '../src/utils/managedProfiles.js';
 import { syncPublicProfileFromCurrentPrivate } from '../src/utils/publicProfileSync.js';
+import { normalizePublicProfileField } from '../src/utils/publicProfileFieldNormalization.js';
 import {
   isAvailablePersonalDmRecipient,
   isAvailablePersonalPublicProfile,
@@ -45,6 +46,17 @@ assert.equal(isLegitimatelyPublishedPersonalProfile({
   privateProfile:{onboardingStep:4,ageVerified:true,isAdult:true},
   publicProfile:{onboardingComplete:true},
 }),false);
+assert.equal(normalizePublicProfileField('photoURL', { legacy: true }), null);
+assert.equal(normalizePublicProfileField('avatar', [1]), null);
+assert.equal(normalizePublicProfileField('headerImage', 42), null);
+assert.deepEqual(normalizePublicProfileField('roles', 'maker'), []);
+assert.deepEqual(normalizePublicProfileField('themes', { legacy: true }), []);
+assert.deepEqual(normalizePublicProfileField('quickProfilePostIds', 7), []);
+assert.equal(normalizePublicProfileField('displayName', { legacy: true }), '');
+assert.equal(normalizePublicProfileField('bio', 7), '');
+assert.equal(normalizePublicProfileField('linkedAgencyStatus', { legacy: true }), undefined);
+assert.equal(normalizePublicProfileField('linkedAgencyId', { legacy: true }), null);
+assert.equal(normalizePublicProfileField('quickProfilePreviewMode', 'broken'), 'latest');
 assert.equal(isLegitimatelyPublishedPersonalProfile({
   privateProfile:{onboardingComplete:true},
   publicProfile:{onboardingComplete:true,hidden:true},

@@ -52,6 +52,7 @@ import {
   verifyWebsiteClaimProof,
   createDiditSession,
   refreshDiditSession,
+  resetPersonalOnboardingToIdCheck,
   isModerator,
   ensureSupportThreadExists,
   migrateRemoveGeneralTheme,
@@ -141,6 +142,11 @@ import {
 import { canShowMoodboardsTab, getMoodboardCoverImages, normalizeMoodboardTitle, resolveMoodboardItemPosts } from './utils/moodboards';
 import { debugAllowed } from './utils/debugAccess';
 import { canAccessFirestore, canStartModeration, devLog, isOnboardingComplete } from './utils/firestoreGate';
+import {
+  hasPendingOnboardingReset,
+  markConfirmedOnboardingReset,
+  reconcileConfirmedOnboardingReset,
+} from './utils/onboardingResetState';
 import { pickPreferredDisplayName, resolvePostAuthorDisplayName } from './utils/profileDisplayName';
 import { resolvePublicDisplayName } from './utils/publicIdentity';
 import {
@@ -2374,7 +2380,7 @@ export default function ArtesApp() {
         theme: profileData.preferences?.theme || 'light',
       },
     };
-    await updateUserProfile(authUser.uid, finalProfile);
+    await updateUserProfile(authUser.uid, finalProfile, { completeOnboarding: true });
 
     // Create support thread for the user after onboarding
     try {
@@ -3270,7 +3276,12 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
       if (typeof window === 'undefined') return new URLSearchParams();
       return new URLSearchParams(window.location.search || '');
     }, []);
-    const [step, setStep] = useState(() => computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady) ?? 1);
+    const [explicitResetPending, setExplicitResetPending] = useState(() => hasPendingOnboardingReset(authUser?.uid));
+    const [step, setStep] = useState(() => (
+      hasPendingOnboardingReset(authUser?.uid)
+        ? 2
+        : computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady) ?? 1
+    ));
     const [roles, setRoles] = useState([]);
     const MATCH_STEP = 1.5;
     const [profileData, setProfileData] = useState(() => ({
@@ -3403,6 +3414,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     }, [authUser, accountCreated]);
 
     useEffect(() => {
+      if (explicitResetPending) {
+        setStep(2);
+        reconcileConfirmedOnboardingReset(authUser?.uid, profile);
+        if (profile?.onboardingComplete === false && Number(profile?.onboardingStep) === 2) {
+          setExplicitResetPending(false);
+        }
+        return;
+      }
       const resolvedStep = computeOnboardingStep(profile, authUser, onboardingQueryParams, authReady);
       if (!resolvedStep) return;
       setStep((prevStep) => {
@@ -3441,7 +3460,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         }
         return resolvedStep;
       });
-    }, [authReady, authUser, onboardingQueryParams, profile]);
+    }, [authReady, authUser, onboardingQueryParams, profile, explicitResetPending]);
 
     useEffect(() => {
       if (step !== 2) return;
@@ -3493,11 +3512,14 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         googleDisplayName,
       });
       if (syncedGoogleProfile && (!includeGoogleDisplayName || syncedGoogleDisplayNameSeed)) return;
+      const shouldInitializeGoogleOnboarding = !isOnboardingComplete(profile);
       const googleSyncPayload = syncedGoogleProfile
         ? {}
         : {
-          onboardingStep: 2,
-          onboardingComplete: false,
+          ...(shouldInitializeGoogleOnboarding ? {
+            onboardingStep: 2,
+            onboardingComplete: false,
+          } : {}),
           email: authUser.email ?? null,
           authProvider: 'google.com',
         };
@@ -3966,15 +3988,19 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
                   throw new Error('Email signup staat uitgeschakeld.');
                 }
                 let createdUser = authUser;
+                let createdNewAccount = false;
                 if (!accountCreated) {
                   createdUser = await onSignup?.(email, password, profileData.displayName);
+                  createdNewAccount = true;
                   setAccountCreated(true);
                 }
                 const uid = createdUser?.uid || authUser?.uid;
                 if (uid) {
                   await updateUserProfile(uid, {
-                    onboardingStep: 2,
-                    onboardingComplete: false,
+                    ...((createdNewAccount || !isOnboardingComplete(profile)) ? {
+                      onboardingStep: 2,
+                      onboardingComplete: false,
+                    } : {}),
                     displayName: profileData.displayName || 'Gebruiker',
                     email: createdUser?.email || email,
                     authProvider: 'password',
@@ -11978,14 +12004,12 @@ function ShadowProfileModal({
     const handleOpenIdCheck = async () => {
       if (!authUser?.uid) return;
       try {
-        await updateUserProfile(authUser.uid, {
-          onboardingStep: 2,
-          onboardingComplete: false,
-        });
+        await resetPersonalOnboardingToIdCheck();
+        markConfirmedOnboardingReset(authUser.uid);
+        if (setView) setView('onboarding');
       } catch (error) {
         console.error('[ShadowProfileModal] Failed to route to ID check', error);
       }
-      if (setView) setView('onboarding');
     };
 
 
@@ -12552,14 +12576,12 @@ function ClaimInvitePage({
   const handleOpenIdCheck = async () => {
     if (!authUser?.uid) return;
     try {
-      await updateUserProfile(authUser.uid, {
-        onboardingStep: 2,
-        onboardingComplete: false,
-      });
+      await resetPersonalOnboardingToIdCheck();
+      markConfirmedOnboardingReset(authUser.uid);
+      if (setView) setView('onboarding');
     } catch (error) {
       console.error('[ClaimInvitePage] Failed to route to ID check', error);
     }
-    if (setView) setView('onboarding');
   };
 
   const handleStartClaim = async () => {

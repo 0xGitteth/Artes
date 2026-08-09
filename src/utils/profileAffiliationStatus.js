@@ -11,14 +11,16 @@ const APPROVED_AFFILIATION_STATUSES = new Set([
   AFFILIATION_STATUSES.VERIFIED,
 ]);
 
-export const normalizeAffiliationStatus = (status) => String(status || '').trim().toLowerCase();
+export const normalizeAffiliationStatus = (status) => (
+  typeof status === 'string' ? status.trim().toLowerCase() : ''
+);
 
 export const isApprovedAffiliationStatus = (status) => (
   APPROVED_AFFILIATION_STATUSES.has(normalizeAffiliationStatus(status))
 );
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
-const normalizeId = (value) => (typeof value === 'string' ? value.trim() : value) || null;
+const normalizeId = (value) => (typeof value === 'string' ? value.trim() || null : null);
 
 const fieldNames = (kind) => ({
   id: kind === 'agency' ? 'linkedAgencyId' : 'linkedCompanyId',
@@ -106,7 +108,8 @@ export const getPublicAffiliationProjectionPatch = ({
 
   const patch = {};
   const id = normalizeId(hasOwn(source, fields.id) ? source?.[fields.id] : existingPublic?.[fields.id]);
-  const name = hasOwn(source, fields.name) ? source?.[fields.name] : (existingPublic?.[fields.name] ?? '');
+  const rawName = hasOwn(source, fields.name) ? source?.[fields.name] : existingPublic?.[fields.name];
+  const name = typeof rawName === 'string' ? rawName : '';
   const status = normalizeAffiliationStatus(hasOwn(source, fields.status) ? source?.[fields.status] : existingPublic?.[fields.status]);
 
   if (hasOwn(source, fields.id)) patch[fields.id] = id;

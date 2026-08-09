@@ -47,12 +47,18 @@ import {
 } from './utils/contributorClaims';
 import {
   canAccessFirestore,
+  authorizeOnboardingWritePatch,
+  buildLegacyArtifactMigrationPatch,
   devLog,
-  isExplicitOnboardingReset,
   isOnboardingComplete,
+  isLegitimateCompletedOnboardingState,
   normalizeOnboardingWritePatch,
 } from './utils/firestoreGate';
 import { syncPublicProfileFromCurrentPrivate } from './utils/publicProfileSync';
+import {
+  normalizePublicProfileField,
+  resolvePublicDisplayName,
+} from './utils/publicProfileFieldNormalization';
 import {
   AFFILIATION_STATUSES,
   applyAffiliationStatusTransitions,
@@ -413,8 +419,8 @@ export const refreshDiditSession = async (sessionId = null) => {
   return result?.data || null;
 };
 
-const requestIncompletePersonalProfileUnpublish = async () => {
-  const callable = httpsCallable(getFirebaseFunctions(), 'unpublishIncompletePersonalProfile');
+export const resetPersonalOnboardingToIdCheck = async () => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'resetPersonalOnboarding');
   const result = await callable({});
   return result?.data || null;
 };
@@ -630,20 +636,9 @@ const PUBLIC_USER_ALLOWED_FIELDS = [
 
 const sanitizePublicProfileField = (key, value) => {
   if (value === undefined) return undefined;
-  if (key === 'username') return normalizeUsername(value);
-  if (key === 'profileId' || key === 'ownerUid') return value || '';
-  if (key === 'photoURL' || key === 'avatar' || key === 'headerImage') return value || null;
-  if (key === 'displayName' || key === 'bio') return value || '';
-  if (key === 'linkedAgencyStatus' || key === 'linkedCompanyStatus') return String(value || '').trim().toLowerCase() || undefined;
-  if (key === 'headerPosition') return value || 'center';
-  if (key === 'roles' || key === 'themes' || key === 'quickProfilePostIds') {
-    if (!Array.isArray(value)) return [];
-    return value.filter(Boolean);
-  }
-  if (key === 'quickProfilePreviewMode') {
-    return ['latest', 'best', 'manual'].includes(value) ? value : 'latest';
-  }
-  return value;
+  if (key === 'username') return typeof value === 'string' ? normalizeUsername(value) : '';
+  if (key === 'profileId' || key === 'ownerUid') return typeof value === 'string' ? value : '';
+  return normalizePublicProfileField(key, value);
 };
 
 export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) => {
@@ -680,17 +675,17 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
   }
   payload.profileId = uid;
   payload.ownerUid = uid;
-  const normalizedDisplayName = String(data.displayName || '').trim();
-  if (data.displayName !== undefined && normalizedDisplayName) {
-    payload.displayName = normalizedDisplayName;
+  const resolvedDisplayName = resolvePublicDisplayName(data.displayName, existingPublic?.displayName);
+  if (resolvedDisplayName) {
+    payload.displayName = resolvedDisplayName;
   }
   if (data.username !== undefined) {
-    payload.username = normalizeUsername(data.username);
+    payload.username = sanitizePublicProfileField('username', data.username);
   }
   if (data.photoURL !== undefined || data.avatar !== undefined) {
-    const resolvedAvatar = data.avatar ?? data.photoURL ?? null;
+    const resolvedAvatar = sanitizePublicProfileField('avatar', data.avatar ?? data.photoURL ?? null);
     payload.avatar = resolvedAvatar;
-    payload.photoURL = data.photoURL ?? resolvedAvatar;
+    payload.photoURL = sanitizePublicProfileField('photoURL', data.photoURL ?? resolvedAvatar);
   }
 
   const passthroughFields = [
@@ -729,25 +724,20 @@ export const buildPublicProfilePayload = (data = {}, uid, existingPublic = {}) =
     payload.username = existingUsername || generateUsername(payload.displayName || existingPublic?.displayName, uid);
   }
 
-  const existingDisplayName = String(existingPublic?.displayName || '').trim();
-  if (payload.displayName === undefined && existingDisplayName) {
-    payload.displayName = existingDisplayName;
-  }
-
   if (payload.displayName === undefined && payload.username !== undefined) {
     delete payload.displayName;
   }
 
   if (payload.avatar === undefined && existingPublic?.avatar !== undefined) {
-    payload.avatar = existingPublic.avatar;
+    payload.avatar = sanitizePublicProfileField('avatar', existingPublic.avatar);
   }
 
   if (payload.photoURL === undefined && existingPublic?.photoURL !== undefined) {
-    payload.photoURL = existingPublic.photoURL;
+    payload.photoURL = sanitizePublicProfileField('photoURL', existingPublic.photoURL);
   }
 
   if (payload.headerImage === undefined && existingPublic?.headerImage !== undefined) {
-    payload.headerImage = existingPublic.headerImage;
+    payload.headerImage = sanitizePublicProfileField('headerImage', existingPublic.headerImage);
   }
 
   if (payload.displayName !== undefined) {
@@ -897,39 +887,47 @@ const logOnboardingWrite = ({ uid, label, patch, prevStep, prevComplete, nextSte
   );
 };
 
-export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = {}) => {
+export const patchUserProfile = async (uid, patch = {}, {
+  label = 'unknown',
+  allowOnboardingCompletion = false,
+} = {}) => {
   if (!uid || !patch || typeof patch !== 'object') return;
   const userRef = doc(getFirebaseDb(), 'users', uid);
-  let nextPatch = { ...patch };
+  let nextPatch = authorizeOnboardingWritePatch(patch, {
+    allowCompletion: allowOnboardingCompletion,
+  });
 
   if (!hasOnboardingWriteKeys(nextPatch)) {
     await setDoc(userRef, nextPatch, { merge: true });
-    return;
+    return nextPatch;
   }
 
-  const snapshot = await getDoc(userRef);
-  const existing = snapshot.exists() ? snapshot.data() : {};
-  const prevStep = toOnboardingStepNumber(existing?.onboardingStep);
-  const prevComplete = isOnboardingComplete(existing);
-  nextPatch = normalizeOnboardingWritePatch(existing, nextPatch);
-  const nextState = { ...existing, ...nextPatch };
-  const nextStep = toOnboardingStepNumber(nextState?.onboardingStep);
-  const nextComplete = isOnboardingComplete(nextState);
+  return runTransaction(getFirebaseDb(), async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+    const existing = snapshot.exists() ? snapshot.data() : {};
+    const prevStep = toOnboardingStepNumber(existing?.onboardingStep);
+    const prevComplete = isOnboardingComplete(existing);
+    nextPatch = normalizeOnboardingWritePatch(existing, nextPatch);
+    const nextState = { ...existing, ...nextPatch };
+    const nextStep = toOnboardingStepNumber(nextState?.onboardingStep);
+    const nextComplete = isOnboardingComplete(nextState);
 
-  logOnboardingWrite({
-    uid,
-    label,
-    patch: nextPatch,
-    prevStep,
-    prevComplete,
-    nextStep,
-    nextComplete,
+    logOnboardingWrite({
+      uid,
+      label,
+      patch: nextPatch,
+      prevStep,
+      prevComplete,
+      nextStep,
+      nextComplete,
+    });
+
+    transaction.set(userRef, nextPatch, { merge: true });
+    return nextPatch;
   });
-
-  await setDoc(userRef, nextPatch, { merge: true });
 };
 
-export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
+export const safeUserWrite = async (uid, patch = {}, userOverride = null, options = {}) => {
   if (!uid || !patch || typeof patch !== 'object') return false;
   const user = userOverride ?? authStateUser;
   const canWrite = Boolean(user?.uid) && user.uid === uid;
@@ -940,7 +938,7 @@ export const safeUserWrite = async (uid, patch = {}, userOverride = null) => {
   }
 
   try {
-    await patchUserProfile(uid, patch, { label: 'safeUserWrite' });
+    await patchUserProfile(uid, patch, { label: 'safeUserWrite', ...options });
     return true;
   } catch (error) {
     if (error?.code === 'permission-denied') {
@@ -1190,7 +1188,7 @@ export const updateUserAffiliationStatus = async ({ targetUid, type, status }) =
   }
 };
 
-export const updateUserProfile = async (uid, data) => {
+export const updateUserProfile = async (uid, data, { completeOnboarding = false } = {}) => {
   const authUser = await waitForAuthReady();
   if (!authUser?.uid) {
     throw new Error('Profiel opslaan mislukt: je bent niet ingelogd of auth is nog niet klaar.');
@@ -1239,6 +1237,11 @@ export const updateUserProfile = async (uid, data) => {
   });
   Object.assign(safeData, affiliationTransition);
 
+  // Ordinary profile writes are never allowed to move completed onboarding
+  // backwards. Explicit resets must use resetPersonalOnboardingToIdCheck so
+  // the private reset and public unpublish happen in one server transaction.
+  Object.assign(safeData, normalizeOnboardingWritePatch(existingPrivate, safeData));
+
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
   const userDocPath = `users/${resolvedUid}`;
   const publicDocPath = `publicUsers/${resolvedUid}`;
@@ -1254,7 +1257,7 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const resultingPrivate = { ...existingPrivate, ...safeData };
-  if (isOnboardingComplete(resultingPrivate)) {
+  if (completeOnboarding && isOnboardingComplete(resultingPrivate)) {
     resultingPrivate.onboardingComplete = true;
     updatePayload.onboardingComplete = true;
   }
@@ -1275,7 +1278,9 @@ export const updateUserProfile = async (uid, data) => {
 
   let didWriteUser = false;
   try {
-    didWriteUser = (await safeUserWrite(resolvedUid, updatePayload, authUser)) === true;
+    didWriteUser = (await safeUserWrite(resolvedUid, updatePayload, authUser, {
+      allowOnboardingCompletion: completeOnboarding,
+    })) === true;
     if (updatePayload.email !== undefined) {
       await setDoc(doc(getFirebaseDb(), 'users', resolvedUid), {
         email: updatePayload.email,
@@ -1293,10 +1298,6 @@ export const updateUserProfile = async (uid, data) => {
   }
 
   const shouldSyncPublic = isOnboardingComplete(resultingPrivate);
-  const shouldRequestPublicUnpublish = (
-    !shouldSyncPublic
-    && isExplicitOnboardingReset(safeData)
-  );
   if (!didWriteUser) {
     if (import.meta.env.DEV) {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid: resolvedUid, reason: 'user-write-not-allowed-or-blocked' });
@@ -1341,23 +1342,6 @@ export const updateUserProfile = async (uid, data) => {
         }
       );
       throw new Error('Profiel opslaan mislukt: public profiel kon niet worden bijgewerkt.');
-    }
-  } else if (shouldRequestPublicUnpublish) {
-    try {
-      const unpublishResult = await requestIncompletePersonalProfileUnpublish();
-      if (import.meta.env.DEV) {
-        console.log('[updateUserProfile] PUBLIC UNPUBLISH', {
-          uid: resolvedUid,
-          path: publicDocPath,
-          status: unpublishResult?.status || 'unknown',
-        });
-      }
-    } catch (e) {
-      console.error('[updateUserProfile] PUBLIC UNPUBLISH FAILED', e.code, e.message, {
-        uid: resolvedUid,
-        path: publicDocPath,
-      });
-      throw new Error('Profiel opslaan mislukt: openbaar profiel kon niet worden ingetrokken.');
     }
   }
 
@@ -1891,36 +1875,39 @@ export const migrateArtifactsUserData = async (user) => {
         console.log('[migrateArtifactsUserData] Creating users/' + user.uid + ' from artifacts', data);
       }
       const privatePatch = { ...data, updatedAt: serverTimestamp() };
-      await patchUserProfile(
+      const persistedPatch = await patchUserProfile(
         user.uid,
         privatePatch,
-        { label: 'migrateArtifactsUserData(create)' },
+        {
+          label: 'migrateArtifactsUserData(create)',
+          allowOnboardingCompletion: isLegitimateCompletedOnboardingState(data),
+        },
       );
-      resultingPrivate = { ...resultingPrivate, ...data };
+      resultingPrivate = { ...resultingPrivate, ...persistedPatch };
       migratedProfile = true;
     } else {
       const existingData = existingProfileSnap.data() || {};
-      const updates = Object.entries(data).reduce((acc, [key, value]) => {
-        if (value === undefined) return acc;
-        const existingValue = existingData[key];
-        if (existingValue === undefined || existingValue === null) {
-          acc[key] = value;
-        }
-        return acc;
-      }, {});
+      const updates = buildLegacyArtifactMigrationPatch(existingData, data);
       if (Object.keys(updates).length) {
         if (import.meta.env.DEV) {
           console.log('[migrateArtifactsUserData] Updating users/' + user.uid + ' from artifacts', updates);
         }
-        await patchUserProfile(
+        const persistedPatch = await patchUserProfile(
           user.uid,
           { ...updates, updatedAt: serverTimestamp() },
-          { label: 'migrateArtifactsUserData(update)' },
+          {
+            label: 'migrateArtifactsUserData(update)',
+            allowOnboardingCompletion: isLegitimateCompletedOnboardingState(data),
+          },
         );
-        resultingPrivate = { ...resultingPrivate, ...updates };
+        resultingPrivate = { ...resultingPrivate, ...persistedPatch };
         migratedProfile = true;
       }
     }
+  }
+  if (migratedProfile) {
+    const persistedPrivateSnap = await getDoc(doc(db, 'users', user.uid));
+    resultingPrivate = persistedPrivateSnap.exists() ? persistedPrivateSnap.data() || {} : {};
   }
   let migratedPublic = false;
   if (publicSnap.exists() && isOnboardingComplete(resultingPrivate)) {

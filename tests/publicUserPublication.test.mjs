@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { isOnboardingComplete } from '../src/utils/firestoreGate.js';
+import {
+  authorizeOnboardingWritePatch,
+  buildLegacyArtifactMigrationPatch,
+  isOnboardingComplete,
+  isLegitimateCompletedOnboardingState,
+  normalizeOnboardingWritePatch,
+} from '../src/utils/firestoreGate.js';
 import { isPublishedPersonalUserProfile, isPublicProfileVisible } from '../src/utils/managedProfiles.js';
 import { syncPublicProfileFromCurrentPrivate } from '../src/utils/publicProfileSync.js';
+import {
+  normalizePublicProfileField,
+  resolvePublicDisplayName,
+} from '../src/utils/publicProfileFieldNormalization.js';
 import {
   isAvailablePersonalDmRecipient,
   isAvailablePersonalPublicProfile,
@@ -45,6 +55,106 @@ assert.equal(isLegitimatelyPublishedPersonalProfile({
   privateProfile:{onboardingStep:4,ageVerified:true,isAdult:true},
   publicProfile:{onboardingComplete:true},
 }),false);
+const staleOrdinarySave = authorizeOnboardingWritePatch({
+  bio: 'Safe unrelated edit',
+  onboardingStep: 5,
+  onboardingComplete: true,
+  onboardingCompletedAt: 'stale-completion-time',
+});
+assert.deepEqual(staleOrdinarySave, { bio: 'Safe unrelated edit' });
+const resetPrivateState = { onboardingStep: 2, onboardingComplete: false, bio: 'Old bio' };
+const afterStaleSave = { ...resetPrivateState, ...staleOrdinarySave };
+assert.deepEqual(afterStaleSave, {
+  onboardingStep: 2,
+  onboardingComplete: false,
+  bio: 'Safe unrelated edit',
+});
+assert.equal(isOnboardingComplete(afterStaleSave), false);
+let staleRaceRepublished = false;
+const staleRaceSync = await syncPublicProfileFromCurrentPrivate({
+  db: {},
+  runTransaction: async (_db, operation) => operation({
+    get: async (ref) => ref === 'private'
+      ? { exists: () => true, data: () => ({ ...afterStaleSave }) }
+      : { exists: () => false, data: () => ({}) },
+    set: () => { staleRaceRepublished = true; },
+  }),
+  privateRef: 'private',
+  publicRef: 'public',
+  isOnboardingComplete,
+  buildWritePayload: () => ({ onboardingComplete: true }),
+});
+assert.equal(staleRaceSync.written, false);
+assert.equal(staleRaceRepublished, false, 'a stale ordinary save cannot recreate publicUsers after reset');
+assert.deepEqual(
+  normalizeOnboardingWritePatch(
+    { onboardingStep: 2, onboardingComplete: false },
+    authorizeOnboardingWritePatch(
+      { onboardingStep: 5, onboardingComplete: true },
+      { allowCompletion: true },
+    ),
+  ),
+  { onboardingStep: 5, onboardingComplete: true },
+  'the explicit completion capability still completes legitimate onboarding',
+);
+const completedArtifact = { onboardingStep: 5, onboardingComplete: true, displayName: 'Legacy' };
+const incompleteArtifact = { onboardingStep: 2, onboardingComplete: false, displayName: 'Legacy' };
+assert.equal(isLegitimateCompletedOnboardingState(completedArtifact), true);
+assert.equal(isLegitimateCompletedOnboardingState(incompleteArtifact), false);
+assert.equal(isLegitimateCompletedOnboardingState({ onboardingStep: 5 }), true);
+assert.deepEqual(
+  authorizeOnboardingWritePatch(completedArtifact, {
+    allowCompletion: isLegitimateCompletedOnboardingState(completedArtifact),
+  }),
+  completedArtifact,
+  'trusted completed artifact migration retains its completion state',
+);
+assert.deepEqual(
+  authorizeOnboardingWritePatch({ ...incompleteArtifact, onboardingComplete: true }, {
+    allowCompletion: isLegitimateCompletedOnboardingState(incompleteArtifact),
+  }),
+  { displayName: 'Legacy' },
+  'an incomplete artifact cannot claim completion or publication eligibility',
+);
+const incompletePersistedUser = { onboardingStep: 2, onboardingComplete: false, bio: 'Current bio' };
+const completedMigrationPatch = buildLegacyArtifactMigrationPatch(incompletePersistedUser, completedArtifact);
+assert.deepEqual(completedMigrationPatch, {
+  onboardingStep: 5,
+  onboardingComplete: true,
+  displayName: 'Legacy',
+});
+const completedPersistedUser = { ...incompletePersistedUser, ...completedMigrationPatch };
+assert.equal(isOnboardingComplete(completedPersistedUser), true, 'completed artifact persists completion before publication');
+assert.deepEqual(
+  buildLegacyArtifactMigrationPatch(completedPersistedUser, completedArtifact),
+  {},
+  'repeated completed artifact migration is idempotent',
+);
+assert.deepEqual(
+  buildLegacyArtifactMigrationPatch(incompletePersistedUser, incompleteArtifact),
+  { displayName: 'Legacy' },
+  'incomplete artifacts cannot overwrite persisted onboarding state or publish',
+);
+assert.deepEqual(
+  authorizeOnboardingWritePatch({ bio: 'Current edit' }),
+  { bio: 'Current edit' },
+  'normal edits on complete and incomplete accounts remain ordinary field patches',
+);
+assert.equal(normalizePublicProfileField('photoURL', { legacy: true }), null);
+assert.equal(normalizePublicProfileField('avatar', [1]), null);
+assert.equal(normalizePublicProfileField('headerImage', 42), null);
+assert.deepEqual(normalizePublicProfileField('roles', 'maker'), []);
+assert.deepEqual(normalizePublicProfileField('themes', { legacy: true }), []);
+assert.deepEqual(normalizePublicProfileField('quickProfilePostIds', 7), []);
+assert.equal(normalizePublicProfileField('displayName', { legacy: true }), '');
+assert.equal(normalizePublicProfileField('bio', 7), '');
+assert.equal(normalizePublicProfileField('linkedAgencyStatus', { legacy: true }), undefined);
+assert.equal(normalizePublicProfileField('linkedAgencyId', { legacy: true }), null);
+assert.equal(normalizePublicProfileField('quickProfilePreviewMode', 'broken'), 'latest');
+assert.equal(resolvePublicDisplayName({ malformed: true }, ' Existing Name '), 'Existing Name');
+assert.equal(resolvePublicDisplayName('', 'Existing Name'), 'Existing Name');
+assert.equal(resolvePublicDisplayName(42, ''), undefined);
+assert.notEqual(String(resolvePublicDisplayName({ malformed: true }, 'Existing Name') || '').toLowerCase(), '');
 assert.equal(isLegitimatelyPublishedPersonalProfile({
   privateProfile:{onboardingComplete:true},
   publicProfile:{onboardingComplete:true,hidden:true},
@@ -52,7 +162,7 @@ assert.equal(isLegitimatelyPublishedPersonalProfile({
 const firebase=fs.readFileSync('src/firebase.js','utf8');
 assert.match(firebase,/if \(!isOnboardingComplete\(resultingProfile\)\) return resultingProfile/);
 assert.match(firebase,/const resultingPrivate = \{ \.\.\.existingPrivate, \.\.\.safeData \}/);
-const updateUserProfile = firebase.match(/export const updateUserProfile = async \(uid, data\) => \{[\s\S]*?\n\};\n\n\/\*\*\n \* One-time backfill/)[0];
+const updateUserProfile = firebase.match(/export const updateUserProfile = async \(uid, data,[\s\S]*?\n\};\n\n\/\*\*\n \* One-time backfill/)[0];
 assert.match(
   updateUserProfile,
   /const shouldSyncPublic = isOnboardingComplete\(resultingPrivate\);/,
@@ -182,6 +292,10 @@ assert.equal(
 );
 const migration = firebase.match(/export const migrateArtifactsUserData = async \(user\) => \{[\s\S]*?\n\};\n\nconst shouldRedirect/)[0];
 assert.match(migration, /await patchUserProfile\(/, 'artifact private migration is awaited');
+assert.match(migration, /allowOnboardingCompletion: isLegitimateCompletedOnboardingState\(data\)/);
+assert.match(migration, /buildLegacyArtifactMigrationPatch\(existingData, data\)/);
+assert.match(migration, /resultingPrivate = \{ \.\.\.resultingPrivate, \.\.\.persistedPatch \}/);
+assert.match(migration, /const persistedPrivateSnap = await getDoc\(doc\(db, 'users', user\.uid\)\)/);
 assert.match(migration, /publicSnap\.exists\(\) && isOnboardingComplete\(resultingPrivate\)/, 'artifact public snapshot uses the resulting private onboarding gate');
 assert.ok(migration.indexOf('await patchUserProfile(') < migration.indexOf('await writePublicUserProfile('), 'private artifact state is persisted before public publication');
 assert.doesNotMatch(migration, /Promise\.all\(migrations\)/, 'private and public migration writes are not parallelized');

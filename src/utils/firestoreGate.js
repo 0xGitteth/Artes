@@ -12,11 +12,34 @@ const toFiniteOnboardingStep = (value) => {
   return Number.isFinite(numeric) ? numeric : null;
 };
 
-export const isExplicitOnboardingReset = (patch = {}) => (
-  patch?.onboardingComplete === false
-  && toFiniteOnboardingStep(patch?.onboardingStep) !== null
-  && toFiniteOnboardingStep(patch?.onboardingStep) < 5
+export const authorizeOnboardingWritePatch = (patch = {}, { allowCompletion = false } = {}) => {
+  const authorized = { ...patch };
+  if (!allowCompletion && authorized.onboardingComplete === true) {
+    delete authorized.onboardingComplete;
+    delete authorized.onboardingStep;
+    delete authorized.onboardingCompletedAt;
+  }
+  return authorized;
+};
+
+export const isLegitimateCompletedOnboardingState = (profile = {}) => (
+  isOnboardingComplete(profile)
 );
+
+export const buildLegacyArtifactMigrationPatch = (existing = {}, source = {}) => {
+  const sourceIsComplete = isLegitimateCompletedOnboardingState(source);
+  const existingIsComplete = isOnboardingComplete(existing);
+  return Object.entries(source).reduce((patch, [key, value]) => {
+    if (value === undefined) return patch;
+    const mayMigrateCompletion = sourceIsComplete
+      && !existingIsComplete
+      && ['onboardingStep', 'onboardingComplete', 'onboardingCompletedAt'].includes(key);
+    if (existing[key] === undefined || existing[key] === null || mayMigrateCompletion) {
+      patch[key] = value;
+    }
+    return patch;
+  }, {});
+};
 
 export const normalizeOnboardingWritePatch = (existing = {}, patch = {}) => {
   const nextPatch = { ...patch };
@@ -26,22 +49,14 @@ export const normalizeOnboardingWritePatch = (existing = {}, patch = {}) => {
 
   const previousStep = toFiniteOnboardingStep(existing?.onboardingStep);
   const requestedStep = hasStep ? toFiniteOnboardingStep(nextPatch.onboardingStep) : null;
-  // Lower onboarding writes stay monotonic unless the caller explicitly pairs
-  // an incomplete step with the false completion marker.
-  const explicitReset = isExplicitOnboardingReset(nextPatch);
-
   if (requestedStep !== null) {
-    nextPatch.onboardingStep = explicitReset
+    nextPatch.onboardingStep = previousStep === null
       ? requestedStep
-      : previousStep === null
-        ? requestedStep
-        : Math.max(previousStep, requestedStep);
+      : Math.max(previousStep, requestedStep);
   }
 
   if (hasComplete) {
-    nextPatch.onboardingComplete = explicitReset
-      ? false
-      : isOnboardingComplete(existing) || nextPatch.onboardingComplete === true;
+    nextPatch.onboardingComplete = isOnboardingComplete(existing) || nextPatch.onboardingComplete === true;
   }
 
   return nextPatch;

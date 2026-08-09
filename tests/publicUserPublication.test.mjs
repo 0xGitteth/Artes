@@ -10,6 +10,19 @@ assert.equal(isPublishedPersonalUserProfile({onboardingStep:5}),false);
 assert.equal(isPublishedPersonalUserProfile({onboardingComplete:true}),true);
 assert.equal(isPublicProfileVisible({type:'agency',status:'active'}),true);
 assert.equal(isPublicProfileVisible({onboardingComplete:false}),false);
+assert.equal(isPublicProfileVisible({onboardingComplete:true}),true);
+assert.equal(isPublicProfileVisible({onboardingComplete:true,hidden:true}),false);
+assert.equal(isPublicProfileVisible({onboardingComplete:true,status:'inactive'}),false);
+assert.equal(isPublicProfileVisible({onboardingComplete:true,visibility:'private'}),false);
+assert.equal(isPublicProfileVisible({onboardingComplete:true,publicVisibility:'private'}),false);
+assert.equal(isPublicProfileVisible({
+  onboardingComplete:true,
+  hidden:true,
+  status:'inactive',
+  visibility:'private',
+  publicVisibility:'private',
+  deactivatedReason:'underage',
+}),false);
 assert.equal(isAvailablePersonalDmRecipient({onboardingComplete:true}),true);
 assert.equal(isAvailablePersonalDmRecipient({onboardingComplete:false}),false);
 assert.equal(isAvailablePersonalDmRecipient({onboardingComplete:true,hidden:true}),false);
@@ -27,6 +40,12 @@ assert.ok(migration.indexOf('await patchUserProfile(') < migration.indexOf('awai
 assert.doesNotMatch(migration, /Promise\.all\(migrations\)/, 'private and public migration writes are not parallelized');
 const chat=fs.readFileSync('src/components/ChatPanel.jsx','utf8');
 assert.match(chat,/filter\(isPublishedPersonalUserProfile\)/);
+const firebaseClient=fs.readFileSync('src/services/firebaseClient.js','utf8');
+const publicReadPaths=firebaseClient.match(/export const subscribeToUsers[\s\S]*?export const seedDemoContent/)[0]
+  + firebaseClient.match(/export const fetchUserIndex[\s\S]*?\n\};/)[0];
+assert.match(publicReadPaths,/filter\(isPublicProfileVisible\)/);
+assert.match(publicReadPaths,/if \(!isPublicProfileVisible\(publicData\)\) return null/);
+assert.doesNotMatch(publicReadPaths,/isPublishedPersonalUserProfile/);
 const fn=fs.readFileSync('functions/index.js','utf8');
 const dmHandler=fn.match(/export const createDmThread = onRequest\([\s\S]*?\n\}\);\n\nexport const createDevCodexToken/)[0];
 assert.match(dmHandler,/!isAvailablePersonalDmRecipient\(recipientPublicSnap\.data\(\)\)/);

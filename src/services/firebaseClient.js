@@ -7,7 +7,7 @@ import {
 } from 'firebase/auth';
 import { canAccessFirestore, devLog, isOnboardingComplete } from '../utils/firestoreGate';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
-import { buildPostAuthorFields, isLegacySetupProfileId, isPublishedPersonalUserProfile, resolvePostAuthorProfile } from '../utils/managedProfiles';
+import { buildPostAuthorFields, isLegacySetupProfileId, isPublicProfileVisible, resolvePostAuthorProfile } from '../utils/managedProfiles';
 import {
   getFirestore,
   collection,
@@ -184,7 +184,7 @@ export const subscribeToUsers = (callback, gate = {}) => {
         profileId: safeData.profileId || resolvedUid,
         ownerUid: safeData.ownerUid || resolvedUid,
       };
-    }).filter(isPublishedPersonalUserProfile)),
+    }).filter(isPublicProfileVisible)),
     (err) => console.error('PUBLICUSERS LISTENER ERROR:', err.code, err.message, 'path=publicUsers')
   );
 };
@@ -310,7 +310,7 @@ export const fetchUserIndex = async (userId, gate = {}) => {
   if (!snapshot.exists()) return null;
 
   const publicData = snapshot.data() || {};
-  if (!isPublishedPersonalUserProfile(publicData)) return null;
+  if (!isPublicProfileVisible(publicData)) return null;
   const { email: _publicEmail, ...safePublicData } = publicData;
   const resolvedPublicData = {
     ...safePublicData,

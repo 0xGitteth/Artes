@@ -5,9 +5,10 @@ import {
   signInWithCustomToken,
   signOut,
 } from 'firebase/auth';
-import { canAccessFirestore, devLog } from '../utils/firestoreGate';
+import { canAccessFirestore, devLog, isOnboardingComplete } from '../utils/firestoreGate';
+import { syncPublicProfileFromCurrentPrivate } from '../utils/publicProfileSync';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
-import { buildPostAuthorFields, isLegacySetupProfileId, resolvePostAuthorProfile } from '../utils/managedProfiles';
+import { buildPostAuthorFields, isLegacySetupProfileId, isPublicProfileVisible, resolvePostAuthorProfile } from '../utils/managedProfiles';
 import {
   getFirestore,
   collection,
@@ -19,6 +20,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  runTransaction,
   writeBatch,
   updateDoc,
   deleteDoc,
@@ -48,25 +50,50 @@ const normalizeUsername = (value) => String(value || '')
   .replace(/[^a-z0-9]+/g, '')
   .slice(0, 20);
 
-const toPublicProfilePayload = (payload = {}, uid) => {
-  const {
-    email,
-    ...rest
-  } = payload || {};
+const PUBLIC_NULLABLE_STRING_FIELDS = [
+  'photoURL', 'avatar', 'headerImage', 'linkedAgencyName', 'linkedCompanyName',
+  'linkedAgencyId', 'linkedCompanyId', 'linkedAgencyLink', 'linkedCompanyLink',
+];
+const PUBLIC_STRING_FIELDS = [
+  'bio', 'headerPosition', 'linkedAgencyStatus', 'linkedCompanyStatus',
+];
+const PUBLIC_ARRAY_FIELDS = ['roles', 'themes', 'quickProfilePostIds'];
+const cleanStringArray = (value) => (Array.isArray(value)
+  ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
+  : []);
 
+const toPublicProfilePayload = (payload = {}, uid) => {
   const publicPayload = {
-    ...rest,
     uid,
     profileId: uid,
     ownerUid: uid,
     updatedAt: serverTimestamp(),
   };
 
-  if (payload?.displayName) {
-    publicPayload.displayNameLower = String(payload.displayName).toLowerCase();
+  if (typeof payload?.displayName === 'string') {
+    publicPayload.displayName = payload.displayName;
+    publicPayload.displayNameLower = payload.displayName.toLowerCase();
   }
-  if (payload?.username) {
+  if (typeof payload?.username === 'string') {
     publicPayload.username = normalizeUsername(payload.username);
+  }
+  PUBLIC_NULLABLE_STRING_FIELDS.forEach((field) => {
+    if (typeof payload?.[field] === 'string' || payload?.[field] === null) {
+      publicPayload[field] = payload[field];
+    }
+  });
+  PUBLIC_STRING_FIELDS.forEach((field) => {
+    if (typeof payload?.[field] === 'string') publicPayload[field] = payload[field];
+  });
+  PUBLIC_ARRAY_FIELDS.forEach((field) => {
+    if (payload?.[field] !== undefined) publicPayload[field] = cleanStringArray(payload[field]);
+  });
+  if (['latest', 'best', 'manual'].includes(payload?.quickProfilePreviewMode)) {
+    publicPayload.quickProfilePreviewMode = payload.quickProfilePreviewMode;
+  }
+  const step = Number(payload?.onboardingStep);
+  if (Number.isInteger(step) && step >= 0 && step <= 10) {
+    publicPayload.onboardingStep = step;
   }
 
   return publicPayload;
@@ -159,7 +186,7 @@ export const subscribeToUsers = (callback, gate = {}) => {
         profileId: safeData.profileId || resolvedUid,
         ownerUid: safeData.ownerUid || resolvedUid,
       };
-    })),
+    }).filter(isPublicProfileVisible)),
     (err) => console.error('PUBLICUSERS LISTENER ERROR:', err.code, err.message, 'path=publicUsers')
   );
 };
@@ -184,19 +211,36 @@ export const createProfile = async (uid, profile) => {
   };
   logFirestoreOp('WRITE', `users/${uid}`, 'createProfile');
   await setDoc(doc(db, 'users', uid), payload);
-  const publicPayload = toPublicProfilePayload(profile, uid);
-  logFirestoreOp('WRITE', `publicUsers/${uid}`, 'createProfile');
-  await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
+  if (isOnboardingComplete(profile)) {
+    const publicPayload = { ...toPublicProfilePayload(profile, uid), onboardingComplete: true };
+    logFirestoreOp('WRITE', `publicUsers/${uid}`, 'createProfile');
+    await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
+  }
 };
 
 // Update is merged into both private and public profile indices.
 // Keep profile preview preferences in sync with UI expectations.
 export const updateProfile = async (uid, payload) => {
+  const privateRef = doc(db, 'users', uid);
+  const publicRef = doc(db, 'publicUsers', uid);
+  const privateSnap = await getDoc(privateRef);
+  const resultingProfile = { ...(privateSnap.exists() ? privateSnap.data() : {}), ...payload };
   logFirestoreOp('UPDATE', `users/${uid}`, 'updateProfile');
-  await setDoc(doc(db, 'users', uid), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
-  const publicPayload = toPublicProfilePayload(payload, uid);
-  logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
-  await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
+  await setDoc(privateRef, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+  if (isOnboardingComplete(resultingProfile)) {
+    logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
+    await syncPublicProfileFromCurrentPrivate({
+      db,
+      runTransaction,
+      privateRef,
+      publicRef,
+      isOnboardingComplete,
+      buildWritePayload: (currentPrivate) => ({
+        ...toPublicProfilePayload(currentPrivate, uid),
+        onboardingComplete: true,
+      }),
+    });
+  }
 };
 
 export const publishPost = async (post) => {
@@ -279,6 +323,7 @@ export const fetchUserIndex = async (userId, gate = {}) => {
   if (!snapshot.exists()) return null;
 
   const publicData = snapshot.data() || {};
+  if (!isPublicProfileVisible(publicData)) return null;
   const { email: _publicEmail, ...safePublicData } = publicData;
   const resolvedPublicData = {
     ...safePublicData,

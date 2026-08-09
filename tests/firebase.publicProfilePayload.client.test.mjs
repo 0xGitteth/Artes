@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../src/firebase.js', import.meta.url), 'utf8');
-const match = source.match(/const buildPublicProfilePayload = \(data = \{}, uid, existingPublic = \{}\) => \{[\s\S]*?\n\};\n\nconst writePublicUserProfile/);
+const match = source.match(/const buildPublicProfilePayload = \(data = \{}, uid, existingPublic = \{}\) => \{[\s\S]*?\n\};\n\n\nconst LEGACY_PUBLIC_IDENTITY_FIELDS/);
 assert.ok(match, 'buildPublicProfilePayload helper exists');
 
 const helper = match[0];

@@ -768,6 +768,16 @@ service cloud.firestore {
     match /publicUsers/{uid} {
       allow read: if true;
       allow create, update: if (isOwner(uid)
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && ((('onboardingComplete' in get(/databases/$(database)/documents/users/$(uid)).data)
+            && get(/databases/$(database)/documents/users/$(uid)).data.onboardingComplete == true)
+          || (('onboardingStep' in get(/databases/$(database)/documents/users/$(uid)).data)
+            && (
+              (get(/databases/$(database)/documents/users/$(uid)).data.onboardingStep is int
+                && get(/databases/$(database)/documents/users/$(uid)).data.onboardingStep >= 5)
+              || get(/databases/$(database)/documents/users/$(uid)).data.onboardingStep in ['5', '6', '7', '8', '9', '10']
+            )))
+        && request.resource.data.onboardingComplete == true
         && onlyKeys([
           'uid',
           'profileId',

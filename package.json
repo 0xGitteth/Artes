@@ -15,7 +15,10 @@
     "test": "npm run test:rules",
     "backfill-public-users": "node functions/scripts/backfillPublicUsersFromUsers.js",
     "test:backfill-public-users": "node tests/backfillPublicUsersFromUsers.test.mjs",
-    "test:rules:storage": "firebase emulators:exec --only firestore,storage \"node tests/storage.profileImages.rules.test.mjs && node tests/storage.uploads.rules.test.mjs\""
+    "test:rules:storage": "firebase emulators:exec --only firestore,storage \"node tests/storage.profileImages.rules.test.mjs && node tests/storage.uploads.rules.test.mjs\"",
+    "reconcile-public-users": "node functions/scripts/reconcilePublicUsersForOnboarding.js",
+    "test:reconcile-public-users": "node tests/reconcilePublicUsersForOnboarding.test.mjs",
+    "test:public-user-publication": "node tests/publicUserPublication.test.mjs && node tests/publicProfileUnpublish.test.mjs && node tests/followCounters.test.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",

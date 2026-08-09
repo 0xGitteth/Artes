@@ -45,7 +45,14 @@ import {
   makeAliasId,
   normalizeAliasValue,
 } from './utils/contributorClaims';
-import { canAccessFirestore, devLog, isOnboardingComplete } from './utils/firestoreGate';
+import {
+  canAccessFirestore,
+  devLog,
+  isExplicitOnboardingReset,
+  isOnboardingComplete,
+  normalizeOnboardingWritePatch,
+} from './utils/firestoreGate';
+import { syncPublicProfileFromCurrentPrivate } from './utils/publicProfileSync';
 import {
   AFFILIATION_STATUSES,
   applyAffiliationStatusTransitions,
@@ -406,6 +413,12 @@ export const refreshDiditSession = async (sessionId = null) => {
   return result?.data || null;
 };
 
+const requestIncompletePersonalProfileUnpublish = async () => {
+  const callable = httpsCallable(getFirebaseFunctions(), 'unpublishIncompletePersonalProfile');
+  const result = await callable({});
+  return result?.data || null;
+};
+
 
 export const createContributorContentRequest = async ({ contributorId, postId, requestType, reason = '' }) => {
   const user = await waitForAuthReady();
@@ -611,6 +624,8 @@ const PUBLIC_USER_ALLOWED_FIELDS = [
   'linkedCompanyLink',
   'quickProfilePreviewMode',
   'quickProfilePostIds',
+  'onboardingComplete',
+  'onboardingStep',
 ];
 
 const sanitizePublicProfileField = (key, value) => {
@@ -783,7 +798,7 @@ const cleanupLegacyPublicIdentityFieldsIfNeeded = async (db, uid, existingPublic
   return true;
 };
 
-const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
+const buildPublicUserWritePayload = (uid, data = {}, existingPublic = {}) => {
   if (!uid) return;
   const payload = buildPublicProfilePayload(data, uid, existingPublic);
   const legacyCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
@@ -810,11 +825,17 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
 
   Object.assign(payload, legacyCleanupPatch);
   
-  const finalPayload = {
+  return {
     uid,
     ...payload,
+    onboardingComplete: true,
     updatedAt: serverTimestamp(),
   };
+};
+
+const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
+  const finalPayload = buildPublicUserWritePayload(uid, data, existingPublic);
+  if (!finalPayload) return;
   
   if (import.meta.env.DEV) {
     console.log('[writePublicUserProfile] Writing to publicUsers/' + uid, finalPayload);
@@ -879,7 +900,7 @@ const logOnboardingWrite = ({ uid, label, patch, prevStep, prevComplete, nextSte
 export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = {}) => {
   if (!uid || !patch || typeof patch !== 'object') return;
   const userRef = doc(getFirebaseDb(), 'users', uid);
-  const nextPatch = { ...patch };
+  let nextPatch = { ...patch };
 
   if (!hasOnboardingWriteKeys(nextPatch)) {
     await setDoc(userRef, nextPatch, { merge: true });
@@ -889,22 +910,11 @@ export const patchUserProfile = async (uid, patch = {}, { label = 'unknown' } = 
   const snapshot = await getDoc(userRef);
   const existing = snapshot.exists() ? snapshot.data() : {};
   const prevStep = toOnboardingStepNumber(existing?.onboardingStep);
-  const prevComplete = existing?.onboardingComplete === true;
-
-  const requestedStep = toOnboardingStepNumber(nextPatch.onboardingStep);
-  let nextStep = prevStep;
-
-  if (requestedStep != null) {
-    nextStep = prevStep == null ? requestedStep : Math.max(prevStep, requestedStep);
-    nextPatch.onboardingStep = nextStep;
-  }
-
-  const requestedComplete = nextPatch.onboardingComplete === true;
-  const nextComplete = prevComplete || requestedComplete;
-
-  if ('onboardingComplete' in nextPatch && nextPatch.onboardingComplete !== nextComplete) {
-    nextPatch.onboardingComplete = nextComplete;
-  }
+  const prevComplete = isOnboardingComplete(existing);
+  nextPatch = normalizeOnboardingWritePatch(existing, nextPatch);
+  const nextState = { ...existing, ...nextPatch };
+  const nextStep = toOnboardingStepNumber(nextState?.onboardingStep);
+  const nextComplete = isOnboardingComplete(nextState);
 
   logOnboardingWrite({
     uid,
@@ -1237,24 +1247,18 @@ export const updateUserProfile = async (uid, data) => {
     updatePayload.email = authUser.email;
   }
 
-  let existingPublic = {};
-  try {
-    const existingPublicSnap = await getDoc(doc(getFirebaseDb(), 'publicUsers', resolvedUid));
-    existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
-  } catch (error) {
-    if (error?.code !== 'permission-denied') {
-      throw error;
-    }
-  }
   // Sanitize before building the public projection so publicUsers cannot keep
   // different theme data than users after Profile Edit saves.
   if (safeData.themes && Array.isArray(safeData.themes)) {
     safeData.themes = sanitizeThemes(safeData.themes);
   }
 
-  const publicPatch = buildPublicProfilePayload(safeData, resolvedUid, existingPublic);
-  const legacyPublicIdentityCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
-  Object.assign(publicPatch, legacyPublicIdentityCleanupPatch);
+  const resultingPrivate = { ...existingPrivate, ...safeData };
+  if (isOnboardingComplete(resultingPrivate)) {
+    resultingPrivate.onboardingComplete = true;
+    updatePayload.onboardingComplete = true;
+  }
+  const publicProjectionPreview = buildPublicProfilePayload(resultingPrivate, resolvedUid);
 
   // Sanitize themes: remove "General" which should never be auto-added
   if (updatePayload.themes && Array.isArray(updatePayload.themes)) {
@@ -1288,7 +1292,11 @@ export const updateUserProfile = async (uid, data) => {
     throw e;
   }
 
-  const shouldSyncPublic = Object.keys(publicPatch).length > 0;
+  const shouldSyncPublic = isOnboardingComplete(resultingPrivate);
+  const shouldRequestPublicUnpublish = (
+    !shouldSyncPublic
+    && isExplicitOnboardingReset(safeData)
+  );
   if (!didWriteUser) {
     if (import.meta.env.DEV) {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid: resolvedUid, reason: 'user-write-not-allowed-or-blocked' });
@@ -1296,18 +1304,30 @@ export const updateUserProfile = async (uid, data) => {
     throw new Error('Profiel opslaan mislukt: private profiel kon niet worden bijgewerkt.');
   }
 
-  if (import.meta.env.DEV) {
-    console.log('[updateUserProfile] PUBLIC WRITE', {
-      uid: resolvedUid,
-      path: publicDocPath,
-      keys: Object.keys(publicPatch).sort(),
-      legacyIdentityCleanupKeys: Object.keys(legacyPublicIdentityCleanupPatch).sort(),
-    });
-  }
-
   if (shouldSyncPublic) {
     try {
-      await writePublicUserProfile(resolvedUid, publicPatch, existingPublic);
+      // Overlapping private merge writes can both succeed. Rebuild the full
+      // projection from transactionally current state so neither caller can
+      // restore unrelated public fields from its stale resultingPrivate copy.
+      const publicWriteResult = await syncPublicProfileFromCurrentPrivate({
+        db: getFirebaseDb(),
+        runTransaction,
+        privateRef: doc(getFirebaseDb(), 'users', resolvedUid),
+        publicRef: doc(getFirebaseDb(), 'publicUsers', resolvedUid),
+        isOnboardingComplete,
+        buildWritePayload: (currentPrivate, currentPublic) => (
+          buildPublicUserWritePayload(resolvedUid, currentPrivate, currentPublic)
+        ),
+      });
+
+      if (import.meta.env.DEV) {
+        console.log('[updateUserProfile] PUBLIC WRITE', {
+          uid: resolvedUid,
+          path: publicDocPath,
+          keys: publicWriteResult.keys,
+          written: publicWriteResult.written,
+        });
+      }
 
     } catch (e) {
       console.error(
@@ -1317,10 +1337,27 @@ export const updateUserProfile = async (uid, data) => {
         {
           uid: resolvedUid,
           path: publicDocPath,
-          keys: Object.keys(publicPatch).sort(),
+          keys: Object.keys(publicProjectionPreview).sort(),
         }
       );
       throw new Error('Profiel opslaan mislukt: public profiel kon niet worden bijgewerkt.');
+    }
+  } else if (shouldRequestPublicUnpublish) {
+    try {
+      const unpublishResult = await requestIncompletePersonalProfileUnpublish();
+      if (import.meta.env.DEV) {
+        console.log('[updateUserProfile] PUBLIC UNPUBLISH', {
+          uid: resolvedUid,
+          path: publicDocPath,
+          status: unpublishResult?.status || 'unknown',
+        });
+      }
+    } catch (e) {
+      console.error('[updateUserProfile] PUBLIC UNPUBLISH FAILED', e.code, e.message, {
+        uid: resolvedUid,
+        path: publicDocPath,
+      });
+      throw new Error('Profiel opslaan mislukt: openbaar profiel kon niet worden ingetrokken.');
     }
   }
 
@@ -1757,6 +1794,9 @@ export const ensureUserProfile = async (user) => {
         return data;
       }
     }
+    const resultingProfile = { ...data, ...updates };
+    if (!isOnboardingComplete(resultingProfile)) return resultingProfile;
+    resultingProfile.onboardingComplete = true;
     const displayName = updates.displayName || data.displayName || '';
     const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
     let existingPublic = {};
@@ -1773,7 +1813,7 @@ export const ensureUserProfile = async (user) => {
       await writePublicUserProfile(
         user.uid,
         {
-          ...data,
+          ...resultingProfile,
           ...(displayName ? { displayName } : {}),
           username,
           photoURL: data.photoURL ?? user.photoURL ?? null,
@@ -1823,19 +1863,6 @@ export const ensureUserProfile = async (user) => {
     }
     return profile;
   }
-  const username = generateUsername(resolvedDisplayName, user.uid);
-  try {
-    await writePublicUserProfile(user.uid, {
-      username,
-      ...(resolvedDisplayName ? { displayName: resolvedDisplayName } : {}),
-      photoURL: user.photoURL ?? null,
-    });
-  } catch (error) {
-    if (!isPermissionDenied(error)) throw error;
-    if (import.meta.env.DEV) {
-      console.log('ensureUserProfile skipped public profile create: permission denied');
-    }
-  }
   return profile;
 };
 
@@ -1849,7 +1876,7 @@ export const migrateArtifactsUserData = async (user) => {
     getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_indices', user.uid)),
     getDoc(doc(db, 'users', user.uid)),
   ]);
-  const migrations = [];
+  let resultingPrivate = existingProfileSnap.exists() ? existingProfileSnap.data() || {} : {};
   let migratedProfile = false;
   if (profileSnap.exists()) {
     const data = profileSnap.data();
@@ -1863,11 +1890,13 @@ export const migrateArtifactsUserData = async (user) => {
       if (import.meta.env.DEV) {
         console.log('[migrateArtifactsUserData] Creating users/' + user.uid + ' from artifacts', data);
       }
-      migrations.push(patchUserProfile(
+      const privatePatch = { ...data, updatedAt: serverTimestamp() };
+      await patchUserProfile(
         user.uid,
-        { ...data, updatedAt: serverTimestamp() },
+        privatePatch,
         { label: 'migrateArtifactsUserData(create)' },
-      ));
+      );
+      resultingPrivate = { ...resultingPrivate, ...data };
       migratedProfile = true;
     } else {
       const existingData = existingProfileSnap.data() || {};
@@ -1883,26 +1912,28 @@ export const migrateArtifactsUserData = async (user) => {
         if (import.meta.env.DEV) {
           console.log('[migrateArtifactsUserData] Updating users/' + user.uid + ' from artifacts', updates);
         }
-        migrations.push(patchUserProfile(
+        await patchUserProfile(
           user.uid,
           { ...updates, updatedAt: serverTimestamp() },
           { label: 'migrateArtifactsUserData(update)' },
-        ));
+        );
+        resultingPrivate = { ...resultingPrivate, ...updates };
         migratedProfile = true;
       }
     }
   }
-  if (publicSnap.exists()) {
+  let migratedPublic = false;
+  if (publicSnap.exists() && isOnboardingComplete(resultingPrivate)) {
     const data = publicSnap.data();
     const existingPublicSnap = await getDoc(doc(db, 'publicUsers', user.uid));
     const existingPublic = existingPublicSnap.exists() ? existingPublicSnap.data() : {};
-    migrations.push(writePublicUserProfile(user.uid, data, existingPublic));
+    await writePublicUserProfile(user.uid, data, existingPublic);
+    migratedPublic = true;
   }
-  if (!migrations.length) return null;
-  await Promise.all(migrations);
+  if (!migratedProfile && !migratedPublic) return null;
   return {
     migratedProfile,
-    migratedPublic: publicSnap.exists(),
+    migratedPublic,
   };
 };
 

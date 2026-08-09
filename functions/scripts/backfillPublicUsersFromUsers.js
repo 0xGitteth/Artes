@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url';
 
 const BATCH_LIMIT = 400;
 
-const PUBLIC_NULLABLE_STRING_FIELDS = [
+export const PUBLIC_NULLABLE_STRING_FIELDS = [
   'photoURL',
   'avatar',
   'headerImage',
@@ -15,7 +15,7 @@ const PUBLIC_NULLABLE_STRING_FIELDS = [
   'linkedCompanyLink',
 ];
 
-const PUBLIC_STRING_ONLY_FIELDS = [
+export const PUBLIC_STRING_ONLY_FIELDS = [
   'bio',
   'headerPosition',
   'linkedAgencyStatus',
@@ -23,7 +23,7 @@ const PUBLIC_STRING_ONLY_FIELDS = [
   'quickProfilePreviewMode',
 ];
 
-const PUBLIC_ARRAY_FIELDS = [
+export const PUBLIC_ARRAY_FIELDS = [
   'roles',
   'themes',
 ];
@@ -38,9 +38,15 @@ export const LEGACY_PRIVATE_PUBLIC_USER_FIELDS = [
   'didit',
   'diditStatus',
   'idv',
+  'idvStatus',
   'ageVerified',
   'ageVerifiedAt',
   'isAdult',
+  'authProvider',
+  'providerData',
+  'authDisplayName',
+  'firebaseDisplayName',
+  'googleDisplayName',
   'preferences',
   'triggerVisibility',
   'moderation',
@@ -83,7 +89,7 @@ const generateUsername = (displayName, uid) => {
   return `${base.slice(0, maxBaseLength)}${suffix}`;
 };
 
-const cleanStringArray = (value) => (Array.isArray(value)
+export const cleanStringArray = (value) => (Array.isArray(value)
   ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
   : []);
 
@@ -103,8 +109,7 @@ const copyStringOnly = (payload, source, field) => {
 
 export const isPublishEligibleUser = (userData = {}) => (
   userData?.onboardingComplete === true
-  && userData?.ageVerified === true
-  && userData?.isAdult === true
+  || Number(userData?.onboardingStep || 0) >= 5
 );
 
 export const getLegacyPrivatePublicUserFields = (publicUserData = {}) => LEGACY_PRIVATE_PUBLIC_USER_FIELDS
@@ -128,6 +133,7 @@ export const buildPublicUserBackfillPayload = (uid, userData = {}, { serverTimes
     displayNameLower: displayName.toLowerCase(),
     roles: cleanStringArray(userData.roles),
     themes: cleanStringArray(userData.themes),
+    onboardingComplete: true,
     updatedAt: serverTimestamp(),
   };
 

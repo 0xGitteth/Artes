@@ -2080,6 +2080,12 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       return;
     }
 
+    const recipientPublicSnap = await db.collection('publicUsers').doc(recipientUid).get();
+    if (!recipientPublicSnap.exists || recipientPublicSnap.data()?.onboardingComplete !== true) {
+      res.status(404).json({ error: 'Profiel is niet beschikbaar.' });
+      return;
+    }
+
     const participantPair = [decoded.uid, recipientUid].sort();
     const dmKey = participantPair.join('_');
     const canonicalThreadId = `dm_${dmKey}`;

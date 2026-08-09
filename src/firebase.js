@@ -611,6 +611,8 @@ const PUBLIC_USER_ALLOWED_FIELDS = [
   'linkedCompanyLink',
   'quickProfilePreviewMode',
   'quickProfilePostIds',
+  'onboardingComplete',
+  'onboardingStep',
 ];
 
 const sanitizePublicProfileField = (key, value) => {
@@ -813,6 +815,7 @@ const writePublicUserProfile = async (uid, data = {}, existingPublic = {}) => {
   const finalPayload = {
     uid,
     ...payload,
+    onboardingComplete: true,
     updatedAt: serverTimestamp(),
   };
   
@@ -1252,7 +1255,12 @@ export const updateUserProfile = async (uid, data) => {
     safeData.themes = sanitizeThemes(safeData.themes);
   }
 
-  const publicPatch = buildPublicProfilePayload(safeData, resolvedUid, existingPublic);
+  const resultingPrivate = { ...existingPrivate, ...safeData };
+  if (isOnboardingComplete(resultingPrivate)) {
+    resultingPrivate.onboardingComplete = true;
+    updatePayload.onboardingComplete = true;
+  }
+  const publicPatch = buildPublicProfilePayload(resultingPrivate, resolvedUid, existingPublic);
   const legacyPublicIdentityCleanupPatch = getLegacyPublicIdentityCleanupPatch(existingPublic);
   Object.assign(publicPatch, legacyPublicIdentityCleanupPatch);
 
@@ -1288,7 +1296,7 @@ export const updateUserProfile = async (uid, data) => {
     throw e;
   }
 
-  const shouldSyncPublic = Object.keys(publicPatch).length > 0;
+  const shouldSyncPublic = isOnboardingComplete(resultingPrivate) && Object.keys(publicPatch).length > 0;
   if (!didWriteUser) {
     if (import.meta.env.DEV) {
       devLog('[firestore-gate]', { action: 'public-write-skip', uid: resolvedUid, reason: 'user-write-not-allowed-or-blocked' });
@@ -1757,6 +1765,9 @@ export const ensureUserProfile = async (user) => {
         return data;
       }
     }
+    const resultingProfile = { ...data, ...updates };
+    if (!isOnboardingComplete(resultingProfile)) return resultingProfile;
+    resultingProfile.onboardingComplete = true;
     const displayName = updates.displayName || data.displayName || '';
     const username = normalizeUsername(data.username) || generateUsername(displayName, user.uid);
     let existingPublic = {};
@@ -1773,7 +1784,7 @@ export const ensureUserProfile = async (user) => {
       await writePublicUserProfile(
         user.uid,
         {
-          ...data,
+          ...resultingProfile,
           ...(displayName ? { displayName } : {}),
           username,
           photoURL: data.photoURL ?? user.photoURL ?? null,
@@ -1822,19 +1833,6 @@ export const ensureUserProfile = async (user) => {
       console.log('ensureUserProfile skipped create: permission denied');
     }
     return profile;
-  }
-  const username = generateUsername(resolvedDisplayName, user.uid);
-  try {
-    await writePublicUserProfile(user.uid, {
-      username,
-      ...(resolvedDisplayName ? { displayName: resolvedDisplayName } : {}),
-      photoURL: user.photoURL ?? null,
-    });
-  } catch (error) {
-    if (!isPermissionDenied(error)) throw error;
-    if (import.meta.env.DEV) {
-      console.log('ensureUserProfile skipped public profile create: permission denied');
-    }
   }
   return profile;
 };

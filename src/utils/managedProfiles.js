@@ -161,6 +161,12 @@ export const isPublicRealManagedProfile = (profile = {}) => {
 
 export const isPublicManagedExternalProfileVisible = ({ profile = {} } = {}) => isPublicRealManagedProfile(profile);
 
+// publicUsers contains personal profiles only. Unlike managed profiles, a
+// personal profile is not published until onboarding has explicitly finished.
+export const isPublishedPersonalUserProfile = (profile = {}) => (
+  Boolean(profile && typeof profile === 'object' && profile.onboardingComplete === true)
+);
+
 export const isPublicProfileVisible = (profile = {}) => {
   if (!profile || typeof profile !== 'object') return false;
   if (profile.hidden === true) return false;
@@ -169,7 +175,8 @@ export const isPublicProfileVisible = (profile = {}) => {
   const visibility = normalizeId(profile.visibility);
   const publicVisibility = normalizeId(profile.publicVisibility);
   if (visibility === 'private' || publicVisibility === 'private') return false;
-  return true;
+  if (isExternalManagedProfile(profile)) return isPublicRealManagedProfile(profile);
+  return isPublishedPersonalUserProfile(profile);
 };
 
 export const isPublicPostVisible = (post = {}) => {

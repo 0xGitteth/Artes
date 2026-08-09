@@ -44,6 +44,8 @@ async function run() {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       await setDoc(doc(db, 'publicUsers', ownerUid), {
+       onboardingComplete: true,
+        onboardingComplete: true,
         uid: ownerUid,
         username: 'owner1',
         displayName: 'Owner One',
@@ -54,6 +56,7 @@ async function run() {
         updatedAt: new Date(),
       });
       await setDoc(doc(db, 'publicUsers', 'legacy_auth_provider_user'), {
+        onboardingComplete: true,
         uid: 'legacy_auth_provider_user',
         username: 'legacyauthprovider',
         displayName: 'Legacy Auth Provider',
@@ -62,6 +65,7 @@ async function run() {
         updatedAt: new Date(),
       });
       await setDoc(doc(db, 'publicUsers', 'legacy_email_auth_user'), {
+        onboardingComplete: true,
         uid: 'legacy_email_auth_user',
         username: 'legacyemailauth',
         displayName: 'Legacy Email Auth',
@@ -71,12 +75,16 @@ async function run() {
         updatedAt: new Date(),
       });
       await setDoc(doc(db, 'publicUsers', 'legacy_cleanup_only_user'), {
+        onboardingComplete: true,
         uid: 'legacy_cleanup_only_user',
         username: 'legacycleanuponly',
         email: 'cleanup-only@example.com',
         authProvider: 'google.com',
         updatedAt: new Date(),
       });
+      for (const completedUid of ['authproviderleak', 'displaylowermissingname', 'displaynamemissinglower', 'legacy_auth_provider_user', 'legacy_cleanup_only_user', 'legacy_email_auth_user', 'ownerusernameonly', 'providerdataleak', 'publicdiditleak', 'publicemailleak', 'publiclegalleak']) {
+        await setDoc(doc(db, 'users', completedUid), { uid: completedUid, onboardingComplete: true });
+      }
       await setDoc(doc(db, 'profiles', 'active_agency_profile'), {
         type: 'agency',
         displayName: 'Active Agency Profile',
@@ -102,6 +110,7 @@ async function run() {
         updatedAt: new Date(),
       });
       await setDoc(doc(db, 'users', ownerUid), {
+        onboardingComplete: true,
         uid: ownerUid,
         displayName: 'Owner One',
         ageVerified: true,
@@ -110,30 +119,35 @@ async function run() {
         idv: { status: 'approved' },
       });
       await setDoc(doc(db, 'users', 'agency_owner'), {
+        onboardingComplete: true,
         uid: 'agency_owner',
         username: 'agencyowner',
         displayName: 'Agency Owner',
         roles: ['agency'],
       });
       await setDoc(doc(db, 'users', 'company_owner'), {
+        onboardingComplete: true,
         uid: 'company_owner',
         username: 'companyowner',
         displayName: 'Company Owner',
         roles: ['company'],
       });
       await setDoc(doc(db, 'users', 'agency_other'), {
+        onboardingComplete: true,
         uid: 'agency_other',
         username: 'agencyother',
         displayName: 'Agency Other',
         roles: ['agency'],
       });
       await setDoc(doc(db, 'users', 'company_other'), {
+        onboardingComplete: true,
         uid: 'company_other',
         username: 'companyother',
         displayName: 'Company Other',
         roles: ['company'],
       });
       await setDoc(doc(db, 'users', 'talent_pending'), {
+        onboardingComplete: true,
         uid: 'talent_pending',
         username: 'talentpending',
         displayName: 'Talent Pending',
@@ -142,6 +156,7 @@ async function run() {
         linkedAgencyStatus: 'pending',
       });
       await setDoc(doc(db, 'users', 'team_pending'), {
+        onboardingComplete: true,
         uid: 'team_pending',
         username: 'teampending',
         displayName: 'Team Pending',
@@ -150,6 +165,7 @@ async function run() {
         linkedCompanyStatus: 'pending',
       });
       await setDoc(doc(db, 'publicUsers', 'talent_pending'), {
+        onboardingComplete: true,
         uid: 'talent_pending',
         username: 'talentpending',
         displayName: 'Talent Pending',
@@ -159,6 +175,7 @@ async function run() {
         linkedAgencyStatus: 'pending',
       });
       await setDoc(doc(db, 'publicUsers', 'team_pending'), {
+        onboardingComplete: true,
         uid: 'team_pending',
         username: 'teampending',
         displayName: 'Team Pending',
@@ -168,6 +185,7 @@ async function run() {
         linkedCompanyStatus: 'pending',
       });
       await setDoc(doc(db, 'users', 'talent_card'), {
+        onboardingComplete: true,
         uid: 'talent_card',
         username: 'talentcard',
         displayName: 'Talent Card',
@@ -176,6 +194,7 @@ async function run() {
         linkedAgencyStatus: 'pending',
       });
       await setDoc(doc(db, 'publicUsers', 'talent_card'), {
+        onboardingComplete: true,
         uid: 'talent_card',
         username: 'talentcard',
         displayName: 'Talent Card',
@@ -185,6 +204,7 @@ async function run() {
         linkedAgencyStatus: 'pending',
       });
       await setDoc(doc(db, 'users', 'team_card'), {
+        onboardingComplete: true,
         uid: 'team_card',
         username: 'teamcard',
         displayName: 'Team Card',
@@ -193,6 +213,7 @@ async function run() {
         linkedCompanyStatus: 'pending',
       });
       await setDoc(doc(db, 'publicUsers', 'team_card'), {
+        onboardingComplete: true,
         uid: 'team_card',
         username: 'teamcard',
         displayName: 'Team Card',
@@ -202,6 +223,7 @@ async function run() {
         linkedCompanyStatus: 'pending',
       });
       await setDoc(doc(db, 'users', 'talent_batch_card'), {
+        onboardingComplete: true,
         uid: 'talent_batch_card',
         username: 'talentbatchcard',
         displayName: 'Talent Batch Card',
@@ -210,6 +232,7 @@ async function run() {
         linkedAgencyStatus: 'pending',
       });
       await setDoc(doc(db, 'publicUsers', 'talent_batch_card'), {
+        onboardingComplete: true,
         uid: 'talent_batch_card',
         username: 'talentbatchcard',
         displayName: 'Talent Batch Card',
@@ -219,6 +242,7 @@ async function run() {
         linkedAgencyStatus: 'pending',
       });
       await setDoc(doc(db, 'users', 'team_batch_card'), {
+        onboardingComplete: true,
         uid: 'team_batch_card',
         username: 'teambatchcard',
         displayName: 'Team Batch Card',
@@ -227,6 +251,7 @@ async function run() {
         linkedCompanyStatus: 'pending',
       });
       await setDoc(doc(db, 'publicUsers', 'team_batch_card'), {
+        onboardingComplete: true,
         uid: 'team_batch_card',
         username: 'teambatchcard',
         displayName: 'Team Batch Card',
@@ -236,6 +261,7 @@ async function run() {
         linkedCompanyStatus: 'pending',
       });
       await setDoc(doc(db, 'users', 'talent_reject'), {
+        onboardingComplete: true,
         uid: 'talent_reject',
         username: 'talentreject',
         displayName: 'Talent Reject',
@@ -244,6 +270,7 @@ async function run() {
         linkedAgencyStatus: 'pending',
       });
       await setDoc(doc(db, 'publicUsers', 'talent_reject'), {
+        onboardingComplete: true,
         uid: 'talent_reject',
         username: 'talentreject',
         displayName: 'Talent Reject',
@@ -253,6 +280,7 @@ async function run() {
         linkedAgencyStatus: 'pending',
       });
       await setDoc(doc(db, 'users', 'team_reject'), {
+        onboardingComplete: true,
         uid: 'team_reject',
         username: 'teamreject',
         displayName: 'Team Reject',
@@ -261,6 +289,7 @@ async function run() {
         linkedCompanyStatus: 'pending',
       });
       await setDoc(doc(db, 'publicUsers', 'team_reject'), {
+        onboardingComplete: true,
         uid: 'team_reject',
         username: 'teamreject',
         displayName: 'Team Reject',
@@ -270,6 +299,7 @@ async function run() {
         linkedCompanyStatus: 'pending',
       });
       await setDoc(doc(db, 'users', 'talent_remove'), {
+        onboardingComplete: true,
         uid: 'talent_remove',
         username: 'talentremove',
         displayName: 'Talent Remove',
@@ -280,6 +310,7 @@ async function run() {
         linkedAgencyApprovedAt: new Date(),
       });
       await setDoc(doc(db, 'publicUsers', 'talent_remove'), {
+        onboardingComplete: true,
         uid: 'talent_remove',
         username: 'talentremove',
         displayName: 'Talent Remove',
@@ -289,6 +320,7 @@ async function run() {
         linkedAgencyStatus: 'approved',
       });
       await setDoc(doc(db, 'users', 'team_remove'), {
+        onboardingComplete: true,
         uid: 'team_remove',
         username: 'teamremove',
         displayName: 'Team Remove',
@@ -299,6 +331,7 @@ async function run() {
         linkedCompanyApprovedAt: new Date(),
       });
       await setDoc(doc(db, 'publicUsers', 'team_remove'), {
+        onboardingComplete: true,
         uid: 'team_remove',
         username: 'teamremove',
         displayName: 'Team Remove',
@@ -308,6 +341,7 @@ async function run() {
         linkedCompanyStatus: 'approved',
       });
       await setDoc(doc(db, 'users', 'self_withdraw'), {
+        onboardingComplete: true,
         uid: 'self_withdraw',
         username: 'selfwithdraw',
         displayName: 'Self Withdraw',
@@ -318,6 +352,7 @@ async function run() {
         linkedAgencyApprovedAt: new Date(),
       });
       await setDoc(doc(db, 'publicUsers', 'self_withdraw'), {
+        onboardingComplete: true,
         uid: 'self_withdraw',
         username: 'selfwithdraw',
         displayName: 'Self Withdraw',
@@ -329,6 +364,7 @@ async function run() {
 
 
       await setDoc(doc(db, 'users', ownerUid, 'following', 'target_a'), {
+        onboardingComplete: true,
         targetUid: 'target_a',
         createdAt: new Date(),
       });
@@ -410,6 +446,7 @@ async function run() {
         createdAt: new Date(),
       });
       await setDoc(doc(db, 'users', 'eligible_voter'), {
+        onboardingComplete: true,
         uid: 'eligible_voter',
         displayName: 'Eligible Voter',
         ageVerified: true,
@@ -855,6 +892,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        onboardingComplete: true,
         uid: 'other_uid',
         username: 'owner1',
         displayName: 'Owner One',
@@ -865,6 +903,7 @@ async function run() {
 
     await assertSucceeds(
       setDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        onboardingComplete: true,
         username: 'owner1',
         displayName: 'Owner No Uid',
         displayNameLower: 'owner no uid',
@@ -875,6 +914,7 @@ async function run() {
 
     await assertSucceeds(
       setDoc(doc(publicUserDbFor('ownerusernameonly'), 'publicUsers', 'ownerusernameonly'), {
+        onboardingComplete: true,
         uid: 'ownerusernameonly',
         profileId: 'ownerusernameonly',
         ownerUid: 'ownerusernameonly',
@@ -885,6 +925,7 @@ async function run() {
 
     await assertSucceeds(
       setDoc(doc(ownerDb, 'publicUsers', ownerUid), {
+        onboardingComplete: true,
         username: 'owner1',
         displayName: 'Owner With Display Name',
         displayNameLower: 'owner with display name',
@@ -894,6 +935,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(publicUserDbFor('displaynamemissinglower'), 'publicUsers', 'displaynamemissinglower'), {
+        onboardingComplete: true,
         username: 'missinglower',
         displayName: 'Missing Lower',
         updatedAt: new Date(),
@@ -902,6 +944,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(publicUserDbFor('displaylowermissingname'), 'publicUsers', 'displaylowermissingname'), {
+        onboardingComplete: true,
         username: 'missingname',
         displayNameLower: 'missing name',
         updatedAt: new Date(),
@@ -910,6 +953,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(publicUserDbFor('publicemailleak'), 'publicUsers', 'publicemailleak'), {
+        onboardingComplete: true,
         username: 'publicemailleak',
         email: 'private@example.com',
         updatedAt: new Date(),
@@ -918,6 +962,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(publicUserDbFor('publiclegalleak'), 'publicUsers', 'publiclegalleak'), {
+        onboardingComplete: true,
         username: 'publiclegalleak',
         legalName: 'Private Legal Name',
         updatedAt: new Date(),
@@ -926,6 +971,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(publicUserDbFor('publicdiditleak'), 'publicUsers', 'publicdiditleak'), {
+        onboardingComplete: true,
         username: 'publicdiditleak',
         didit: { status: 'approved' },
         updatedAt: new Date(),
@@ -934,6 +980,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(publicUserDbFor('providerdataleak'), 'publicUsers', 'providerdataleak'), {
+        onboardingComplete: true,
         username: 'providerdataleak',
         providerData: [{ providerId: 'google.com', displayName: 'Google Name' }],
         updatedAt: new Date(),
@@ -972,6 +1019,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(publicUserDbFor('authproviderleak'), 'publicUsers', 'authproviderleak'), {
+        onboardingComplete: true,
         username: 'authproviderleak',
         authProvider: 'google.com',
         updatedAt: new Date(),
@@ -980,6 +1028,7 @@ async function run() {
 
     await assertFails(
       setDoc(doc(otherDb, 'publicUsers', ownerUid), {
+        onboardingComplete: true,
         username: 'otherowner',
         updatedAt: new Date(),
       }),
@@ -1320,11 +1369,13 @@ async function run() {
     );
     await assertFails(
       setDoc(doc(talentDb, 'publicUsers', 'talent_pending'), {
+        onboardingComplete: true,
         linkedAgencyStatus: 'approved',
       }, { merge: true }),
     );
     await assertSucceeds(
       setDoc(doc(agencyOwnerDb, 'publicUsers', 'talent_pending'), {
+        onboardingComplete: true,
         linkedAgencyId: 'agency_owner',
         linkedAgencyName: 'Agency Owner',
         linkedAgencyStatus: 'approved',
@@ -1344,6 +1395,7 @@ async function run() {
     );
     await assertSucceeds(
       setDoc(doc(agencyOwnerDb, 'publicUsers', 'talent_reject'), {
+        onboardingComplete: true,
         linkedAgencyId: null,
         linkedAgencyName: '',
         linkedAgencyStatus: deleteField(),
@@ -1363,6 +1415,7 @@ async function run() {
     );
     await assertSucceeds(
       setDoc(doc(companyOwnerDb, 'publicUsers', 'team_reject'), {
+        onboardingComplete: true,
         linkedCompanyId: null,
         linkedCompanyName: '',
         linkedCompanyStatus: deleteField(),
@@ -1382,6 +1435,7 @@ async function run() {
     );
     await assertSucceeds(
       setDoc(doc(agencyOwnerDb, 'publicUsers', 'talent_remove'), {
+        onboardingComplete: true,
         linkedAgencyId: null,
         linkedAgencyName: '',
         linkedAgencyStatus: deleteField(),
@@ -1401,6 +1455,7 @@ async function run() {
     );
     await assertSucceeds(
       setDoc(doc(companyOwnerDb, 'publicUsers', 'team_remove'), {
+        onboardingComplete: true,
         linkedCompanyId: null,
         linkedCompanyName: '',
         linkedCompanyStatus: deleteField(),
@@ -1429,6 +1484,7 @@ async function run() {
     );
     await assertSucceeds(
       setDoc(doc(selfWithdrawDb, 'publicUsers', 'self_withdraw'), {
+        onboardingComplete: true,
         username: 'selfwithdraw',
         displayName: 'Self Withdraw',
         displayNameLower: 'self withdraw',

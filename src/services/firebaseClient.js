@@ -5,9 +5,9 @@ import {
   signInWithCustomToken,
   signOut,
 } from 'firebase/auth';
-import { canAccessFirestore, devLog } from '../utils/firestoreGate';
+import { canAccessFirestore, devLog, isOnboardingComplete } from '../utils/firestoreGate';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
-import { buildPostAuthorFields, isLegacySetupProfileId, resolvePostAuthorProfile } from '../utils/managedProfiles';
+import { buildPostAuthorFields, isLegacySetupProfileId, isPublishedPersonalUserProfile, resolvePostAuthorProfile } from '../utils/managedProfiles';
 import {
   getFirestore,
   collection,
@@ -159,7 +159,7 @@ export const subscribeToUsers = (callback, gate = {}) => {
         profileId: safeData.profileId || resolvedUid,
         ownerUid: safeData.ownerUid || resolvedUid,
       };
-    })),
+    }).filter(isPublishedPersonalUserProfile)),
     (err) => console.error('PUBLICUSERS LISTENER ERROR:', err.code, err.message, 'path=publicUsers')
   );
 };
@@ -184,19 +184,25 @@ export const createProfile = async (uid, profile) => {
   };
   logFirestoreOp('WRITE', `users/${uid}`, 'createProfile');
   await setDoc(doc(db, 'users', uid), payload);
-  const publicPayload = toPublicProfilePayload(profile, uid);
-  logFirestoreOp('WRITE', `publicUsers/${uid}`, 'createProfile');
-  await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
+  if (isOnboardingComplete(profile)) {
+    const publicPayload = { ...toPublicProfilePayload(profile, uid), onboardingComplete: true };
+    logFirestoreOp('WRITE', `publicUsers/${uid}`, 'createProfile');
+    await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
+  }
 };
 
 // Update is merged into both private and public profile indices.
 // Keep profile preview preferences in sync with UI expectations.
 export const updateProfile = async (uid, payload) => {
+  const privateSnap = await getDoc(doc(db, 'users', uid));
+  const resultingProfile = { ...(privateSnap.exists() ? privateSnap.data() : {}), ...payload };
   logFirestoreOp('UPDATE', `users/${uid}`, 'updateProfile');
   await setDoc(doc(db, 'users', uid), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
-  const publicPayload = toPublicProfilePayload(payload, uid);
-  logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
-  await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
+  if (isOnboardingComplete(resultingProfile)) {
+    const publicPayload = { ...toPublicProfilePayload(resultingProfile, uid), onboardingComplete: true };
+    logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
+    await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
+  }
 };
 
 export const publishPost = async (post) => {
@@ -279,6 +285,7 @@ export const fetchUserIndex = async (userId, gate = {}) => {
   if (!snapshot.exists()) return null;
 
   const publicData = snapshot.data() || {};
+  if (!isPublishedPersonalUserProfile(publicData)) return null;
   const { email: _publicEmail, ...safePublicData } = publicData;
   const resolvedPublicData = {
     ...safePublicData,

@@ -176,6 +176,7 @@ export const isPublicProfileVisible = (profile = {}) => {
   const publicVisibility = normalizeId(profile.publicVisibility);
   if (visibility === 'private' || publicVisibility === 'private') return false;
   if (isExternalManagedProfile(profile)) return isPublicRealManagedProfile(profile);
+  if (normalizeId(profile.deactivatedReason)) return false;
   return isPublishedPersonalUserProfile(profile);
 };
 

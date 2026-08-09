@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { getFirebaseDbInstance, updateUserAffiliationStatus } from '../firebase';
 import { normalizeSupportMessage } from '../utils/supportChat';
-import { isPublishedPersonalUserProfile } from '../utils/managedProfiles';
+import { isPublicProfileVisible } from '../utils/managedProfiles';
 import {
   AFFILIATION_REQUEST_MESSAGE_TYPE,
   deriveAffiliationRequestCardState,
@@ -115,7 +115,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
           if (merged.has(docSnap.id)) return;
           merged.set(docSnap.id, { uid: docSnap.id, matchType: 'display', ...docSnap.data() });
         });
-        const sorted = Array.from(merged.values()).filter(isPublishedPersonalUserProfile).sort((a, b) => {
+        const sorted = Array.from(merged.values()).filter(isPublicProfileVisible).sort((a, b) => {
           if (a.matchType === b.matchType) return 0;
           return a.matchType === 'username' ? -1 : 1;
         });
@@ -149,7 +149,7 @@ function NewChatModal({ authUser, functionsBase, onClose, onThreadReady }) {
 
   const handleStartChat = async () => {
     if (startingChat) return;
-    if (!selectedUser || !isPublishedPersonalUserProfile(selectedUser) || selectedUser.uid === authUser.uid) return;
+    if (!selectedUser || !isPublicProfileVisible(selectedUser) || selectedUser.uid === authUser.uid) return;
     if (!functionsBase) return;
     setStartingChat(true);
     try {

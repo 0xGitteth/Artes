@@ -3,7 +3,11 @@ import fs from 'node:fs';
 import { isOnboardingComplete } from '../src/utils/firestoreGate.js';
 import { isPublishedPersonalUserProfile, isPublicProfileVisible } from '../src/utils/managedProfiles.js';
 import { syncPublicProfileFromCurrentPrivate } from '../src/utils/publicProfileSync.js';
-import { isAvailablePersonalDmRecipient } from '../functions/publicProfileAvailability.js';
+import {
+  isAvailablePersonalDmRecipient,
+  isAvailablePersonalPublicProfile,
+  isLegitimatelyPublishedPersonalProfile,
+} from '../functions/publicProfileAvailability.js';
 assert.equal(isOnboardingComplete({onboardingComplete:true}),true);
 assert.equal(isOnboardingComplete({onboardingStep:5}),true);
 assert.equal(isOnboardingComplete({ageVerified:true,isAdult:true,onboardingStep:4}),false);
@@ -16,6 +20,7 @@ assert.equal(isPublicProfileVisible({onboardingComplete:true,hidden:true}),false
 assert.equal(isPublicProfileVisible({onboardingComplete:true,status:'inactive'}),false);
 assert.equal(isPublicProfileVisible({onboardingComplete:true,visibility:'private'}),false);
 assert.equal(isPublicProfileVisible({onboardingComplete:true,publicVisibility:'private'}),false);
+assert.equal(isPublicProfileVisible({onboardingComplete:true,deactivatedReason:'underage'}),false);
 assert.equal(isPublicProfileVisible({
   onboardingComplete:true,
   hidden:true,
@@ -31,6 +36,19 @@ assert.equal(isAvailablePersonalDmRecipient({onboardingComplete:true,status:'ina
 assert.equal(isAvailablePersonalDmRecipient({onboardingComplete:true,visibility:'private'}),false);
 assert.equal(isAvailablePersonalDmRecipient({onboardingComplete:true,publicVisibility:'private'}),false);
 assert.equal(isAvailablePersonalDmRecipient({onboardingComplete:true,deactivatedReason:'underage'}),false);
+assert.equal(isAvailablePersonalPublicProfile({onboardingComplete:true,deactivatedReason:'disabled-by-admin'}),false);
+assert.equal(isLegitimatelyPublishedPersonalProfile({
+  privateProfile:{onboardingStep:'5'},
+  publicProfile:{onboardingComplete:true},
+}),true);
+assert.equal(isLegitimatelyPublishedPersonalProfile({
+  privateProfile:{onboardingStep:4,ageVerified:true,isAdult:true},
+  publicProfile:{onboardingComplete:true},
+}),false);
+assert.equal(isLegitimatelyPublishedPersonalProfile({
+  privateProfile:{onboardingComplete:true},
+  publicProfile:{onboardingComplete:true,hidden:true},
+}),false);
 const firebase=fs.readFileSync('src/firebase.js','utf8');
 assert.match(firebase,/if \(!isOnboardingComplete\(resultingProfile\)\) return resultingProfile/);
 assert.match(firebase,/const resultingPrivate = \{ \.\.\.existingPrivate, \.\.\.safeData \}/);
@@ -168,7 +186,10 @@ assert.match(migration, /publicSnap\.exists\(\) && isOnboardingComplete\(resulti
 assert.ok(migration.indexOf('await patchUserProfile(') < migration.indexOf('await writePublicUserProfile('), 'private artifact state is persisted before public publication');
 assert.doesNotMatch(migration, /Promise\.all\(migrations\)/, 'private and public migration writes are not parallelized');
 const chat=fs.readFileSync('src/components/ChatPanel.jsx','utf8');
-assert.match(chat,/filter\(isPublishedPersonalUserProfile\)/);
+const newChatModal=chat.match(/function NewChatModal\([\s\S]*?\n\}\n\nexport default function ChatPanel/)[0];
+assert.match(newChatModal,/filter\(isPublicProfileVisible\)/);
+assert.match(newChatModal,/!isPublicProfileVisible\(selectedUser\)/);
+assert.doesNotMatch(newChatModal,/isPublishedPersonalUserProfile/);
 const firebaseClient=fs.readFileSync('src/services/firebaseClient.js','utf8');
 const publicReadPaths=firebaseClient.match(/export const subscribeToUsers[\s\S]*?export const seedDemoContent/)[0]
   + firebaseClient.match(/export const fetchUserIndex[\s\S]*?\n\};/)[0];
@@ -177,13 +198,18 @@ assert.match(publicReadPaths,/if \(!isPublicProfileVisible\(publicData\)\) retur
 assert.doesNotMatch(publicReadPaths,/isPublishedPersonalUserProfile/);
 const fn=fs.readFileSync('functions/index.js','utf8');
 const dmHandler=fn.match(/export const createDmThread = onRequest\([\s\S]*?\n\}\);\n\nexport const createDevCodexToken/)[0];
-assert.match(dmHandler,/!isAvailablePersonalDmRecipient\(recipientPublicSnap\.data\(\)\)/);
+assert.match(dmHandler,/!isAvailablePersonalPublicProfile\(senderPublicSnap\.data\(\)\)/);
+assert.match(dmHandler,/!isAvailablePersonalPublicProfile\(recipientPublicSnap\.data\(\)\)/);
 assert.ok(
-  dmHandler.indexOf('if (!existingSnap.empty)') < dmHandler.indexOf('const recipientPublicSnap'),
-  'existing DM threads are returned before recipient availability blocks new threads',
+  dmHandler.indexOf('if (!existingSnap.empty)') < dmHandler.indexOf('const [senderPublicSnap'),
+  'existing DM threads are returned before participant availability blocks new threads',
 );
 assert.ok(
-  dmHandler.indexOf('!isAvailablePersonalDmRecipient') < dmHandler.indexOf('await canonicalRef.create'),
+  dmHandler.indexOf('!isAvailablePersonalPublicProfile(senderPublicSnap.data())') < dmHandler.indexOf('await canonicalRef.create'),
+  'sender availability is checked before creating a new DM thread',
+);
+assert.ok(
+  dmHandler.indexOf('!isAvailablePersonalPublicProfile(recipientPublicSnap.data())') < dmHandler.indexOf('await canonicalRef.create'),
   'recipient availability is checked before creating a new DM thread',
 );
 console.log('PASS publicUserPublication.test');

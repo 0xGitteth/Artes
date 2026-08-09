@@ -36,7 +36,8 @@ import {
   shouldExposeCodexDevLoginDiagnostics,
 } from './codexDevLogin.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
-import { isAvailablePersonalDmRecipient } from './publicProfileAvailability.js';
+import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
+import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -2125,16 +2126,21 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       return;
     }
 
-    const recipientPublicSnap = await db.collection('publicUsers').doc(recipientUid).get();
-    if (!recipientPublicSnap.exists || !isAvailablePersonalDmRecipient(recipientPublicSnap.data())) {
+    const [senderPublicSnap, recipientPublicSnap] = await Promise.all([
+      db.collection('publicUsers').doc(decoded.uid).get(),
+      db.collection('publicUsers').doc(recipientUid).get(),
+    ]);
+    if (!senderPublicSnap.exists || !isAvailablePersonalPublicProfile(senderPublicSnap.data())) {
+      res.status(403).json({ error: 'Je profiel is niet beschikbaar.' });
+      return;
+    }
+    if (!recipientPublicSnap.exists || !isAvailablePersonalPublicProfile(recipientPublicSnap.data())) {
       res.status(404).json({ error: 'Profiel is niet beschikbaar.' });
       return;
     }
 
-    const [senderPublic, recipientPublic] = await Promise.all([
-      fetchPublicUser(decoded.uid),
-      fetchPublicUser(recipientUid),
-    ]);
+    const senderPublic = senderPublicSnap.data() || {};
+    const recipientPublic = recipientPublicSnap.data() || {};
     const senderTitle = resolveDisplayTitle(recipientPublic);
     const recipientTitle = resolveDisplayTitle(senderPublic);
     let createdCanonicalThread = false;
@@ -5423,36 +5429,21 @@ export const onFollowingCreated = onDocumentCreated({
     });
   }
 
-  await db.runTransaction(async (transaction) => {
-    const relationSnap = await transaction.get(relationRef);
-    if (!relationSnap.exists) {
-      return;
-    }
-
-    const relationData = relationSnap.data() || {};
-    const createdAt = relationData.createdAt || FieldValue.serverTimestamp();
-    transaction.set(relationRef, {
-      targetUid,
-      fanUid: uid,
-      createdAt,
-    }, { merge: true });
-
-    if (relationData.countersApplied === true) {
-      return;
-    }
-
-    transaction.set(db.collection('publicUsers').doc(targetUid), {
-      fansCount: FieldValue.increment(1),
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-    transaction.set(db.collection('publicUsers').doc(uid), {
-      fanOfCount: FieldValue.increment(1),
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-    transaction.set(relationRef, {
-      countersApplied: true,
-    }, { merge: true });
+  const result = await applyFollowingCreatedCounters({
+    db,
+    relationRef,
+    uid,
+    targetUid,
+    fieldValue: FieldValue,
   });
+  if (result.status === 'rejected-unavailable') {
+    logger.info('Deleting following relation for unavailable personal profile.', {
+      uid,
+      targetUid,
+      fanAvailable: result.fanAvailable,
+      targetAvailable: result.targetAvailable,
+    });
+  }
 });
 
 export const onFollowingDeleted = onDocumentDeleted({
@@ -5475,25 +5466,12 @@ export const onFollowingDeleted = onDocumentDeleted({
     });
   }
 
-  await db.runTransaction(async (transaction) => {
-    const targetRef = db.collection('publicUsers').doc(targetUid);
-    const fanRef = db.collection('publicUsers').doc(uid);
-    const [targetSnap, fanSnap] = await Promise.all([
-      transaction.get(targetRef),
-      transaction.get(fanRef),
-    ]);
-
-    const targetCurrent = Number(targetSnap.data()?.fansCount) || 0;
-    const fanCurrent = Number(fanSnap.data()?.fanOfCount) || 0;
-
-    transaction.set(targetRef, {
-      fansCount: Math.max(0, targetCurrent - 1),
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-    transaction.set(fanRef, {
-      fanOfCount: Math.max(0, fanCurrent - 1),
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+  await applyFollowingDeletedCounters({
+    db,
+    relationData,
+    uid,
+    targetUid,
+    fieldValue: FieldValue,
   });
 });
 

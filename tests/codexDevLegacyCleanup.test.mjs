@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { reconcileCodexDevIsolation } from '../functions/scripts/reconcileCodexDevIsolation.js';
 
 const seed = () => new Map(Object.entries({
-  'users/marked-test': { isDevTestUser: true, devActor: 'codex', onboardingComplete: true },
+  'users/marked-test': { isDevTestUser: true, devActor: 'codex', onboardingComplete: true, contributorId: 'claimed-by-test' },
   'users/real': { onboardingComplete: true },
   'publicUsers/marked-test': { displayName: 'Legacy Codex' },
   'publicUsers/real': { displayName: 'Real' },
@@ -23,11 +23,17 @@ const seed = () => new Map(Object.entries({
   'moderationExamples/real-example': { uploaderUid: 'real' },
   'contributors/test-contributor': { createdByUid: 'marked-test' },
   'contributors/real-contributor': { createdByUid: 'real' },
+  'contributors/claimed-by-test': { createdByUid: 'real', claimedByUid: 'marked-test', status: 'claimed' },
   'contributorAliases/test-alias': { contributorId: 'test-contributor' },
   'contributorAliases/real-alias': { contributorId: 'real-contributor' },
   'claimInvites/test-invite': { contributorId: 'test-contributor', createdByUid: 'marked-test' },
   'claimInvites/test-invite-real-contributor': { contributorId: 'real-contributor', createdByUid: 'marked-test' },
   'claimInvites/real-invite': { contributorId: 'real-contributor', createdByUid: 'real' },
+  'claimRequests/test-claim': { contributorId: 'real-contributor', requestedByUid: 'marked-test', status: 'pending' },
+  'claimVouches/test-claim/votes/voter': { voterUid: 'real', vote: 'yes' },
+  'claimRequests/real-claim': { contributorId: 'real-contributor', requestedByUid: 'real', status: 'pending' },
+  'claimRequests/approved-test-claim': { contributorId: 'claimed-by-test', requestedByUid: 'marked-test', status: 'approved' },
+  'claimVouches/real-claim/votes/voter': { voterUid: 'other', vote: 'yes' },
   'communities/art/topics/topic/comments/test-comment': { authorId: 'marked-test' },
   'communities/art/topics/topic/comments/real-comment': { authorId: 'real' },
   'threads/dm_test_real': { type: 'dm', participantUids: ['marked-test', 'real'] },
@@ -49,6 +55,7 @@ const fakeDb = (docs) => {
     id: path.split('/').at(-1),
     get: async () => ({ exists: docs.has(path), data: () => docs.get(path) }),
     delete: async () => docs.delete(path),
+    set: async (payload, options) => docs.set(path, { ...(options?.merge ? (docs.get(path) || {}) : {}), ...payload }),
     collection: (name) => collectionFor(`${path}/${name}`),
   });
   const snapshots = (prefix, direct = true) => [...docs.entries()]
@@ -71,20 +78,31 @@ const fakeDb = (docs) => {
   };
 };
 
+const fakeBucket = (paths) => ({
+  getFiles: async ({ prefix }) => [[...paths].filter((path) => path.startsWith(prefix)).map((path) => ({ name: path, delete: async () => paths.delete(path) }))],
+});
+
 const dryDocs = seed();
-const dryStats = await reconcileCodexDevIsolation({ db: fakeDb(dryDocs), apply: false, env: {} });
-assert.deepEqual(dryStats, { actors: 1, publicUsers: 1, posts: 1, managedProfiles: 1, communityComments: 1, reviewCases: 2, moderationExamples: 1, contributors: 1, contributorAliases: 1, claimInvites: 2, supportThreads: 1, postComments: 1, postLikes: 1, dmThreads: 1, threadIndexes: 3, deletes: 18 });
+const dryProofs = new Set(['claimProofs/test-claim/marked-test.png', 'claimProofs/real-claim/real.png']);
+const dryStats = await reconcileCodexDevIsolation({ db: fakeDb(dryDocs), bucket: fakeBucket(dryProofs), apply: false, env: {} });
+assert.deepEqual(dryStats, { actors: 1, publicUsers: 1, posts: 1, managedProfiles: 1, communityComments: 1, reviewCases: 2, moderationExamples: 1, contributors: 1, contributorAliases: 1, claimInvites: 2, claimRequests: 2, claimVouches: 1, claimProofObjects: 1, contributorClaimResets: 1, supportThreads: 1, postComments: 1, postLikes: 1, dmThreads: 1, threadIndexes: 3, deletes: 22 });
 assert.equal(dryDocs.has('posts/test-post'), true, 'dry run does not mutate');
+assert.equal(dryProofs.size, 2, 'dry run preserves claim proof objects');
 
 const applyDocs = seed();
-const applyStats = await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), apply: true, env: {} });
-assert.equal(applyStats.deletes, 18);
-for (const removed of ['publicUsers/marked-test', 'posts/test-post', 'posts/test-post/comments/comment', 'posts/real-post/comments/test-engagement', 'posts/real-post/likes/marked-test', 'profiles/test-agency', 'reviewCases/test-review', 'reviewCases/test-report', 'moderationExamples/test-example', 'contributors/test-contributor', 'contributorAliases/test-alias', 'claimInvites/test-invite', 'claimInvites/test-invite-real-contributor', 'communities/art/topics/topic/comments/test-comment', 'threads/dm_test_real', 'users/real/threadIndex/dm_test_real', 'threads/support_marked-test', 'users/marked-test/threadIndex/support_marked-test']) {
+const applyProofs = new Set(dryProofs);
+const applyStats = await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), bucket: fakeBucket(applyProofs), apply: true, env: {} });
+assert.equal(applyStats.deletes, 22);
+for (const removed of ['publicUsers/marked-test', 'posts/test-post', 'posts/test-post/comments/comment', 'posts/real-post/comments/test-engagement', 'posts/real-post/likes/marked-test', 'profiles/test-agency', 'reviewCases/test-review', 'reviewCases/test-report', 'moderationExamples/test-example', 'contributors/test-contributor', 'contributorAliases/test-alias', 'claimInvites/test-invite', 'claimInvites/test-invite-real-contributor', 'claimRequests/test-claim', 'claimRequests/approved-test-claim', 'claimVouches/test-claim/votes/voter', 'communities/art/topics/topic/comments/test-comment', 'threads/dm_test_real', 'users/real/threadIndex/dm_test_real', 'threads/support_marked-test', 'users/marked-test/threadIndex/support_marked-test']) {
   assert.equal(applyDocs.has(removed), false, `${removed} removed`);
 }
-for (const preserved of ['publicUsers/real', 'posts/real-post', 'posts/real-post/comments/real-engagement', 'posts/real-post/likes/real', 'profiles/real-agency', 'reviewCases/real-review', 'moderationExamples/real-example', 'contributors/real-contributor', 'contributorAliases/real-alias', 'claimInvites/real-invite', 'communities/art/topics/topic/comments/real-comment', 'threads/dm_real_other', 'users/real/threadIndex/dm_real_other', 'threads/support_real']) {
+assert.equal(applyDocs.get('contributors/claimed-by-test').status, 'unclaimed');
+assert.equal(applyDocs.get('contributors/claimed-by-test').claimedByUid, null);
+assert.equal(applyDocs.get('users/marked-test').contributorId, null);
+assert.deepEqual([...applyProofs], ['claimProofs/real-claim/real.png']);
+for (const preserved of ['publicUsers/real', 'posts/real-post', 'posts/real-post/comments/real-engagement', 'posts/real-post/likes/real', 'profiles/real-agency', 'reviewCases/real-review', 'moderationExamples/real-example', 'contributors/real-contributor', 'contributorAliases/real-alias', 'claimInvites/real-invite', 'claimRequests/real-claim', 'claimVouches/real-claim/votes/voter', 'communities/art/topics/topic/comments/real-comment', 'threads/dm_real_other', 'users/real/threadIndex/dm_real_other', 'threads/support_real']) {
   assert.equal(applyDocs.has(preserved), true, `${preserved} preserved`);
 }
-assert.equal((await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), apply: true, env: {} })).deletes, 0, 'second apply is idempotent');
+assert.equal((await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), bucket: fakeBucket(applyProofs), apply: true, env: {} })).deletes, 0, 'second apply is idempotent');
 
 console.log('PASS codexDevLegacyCleanup.test');

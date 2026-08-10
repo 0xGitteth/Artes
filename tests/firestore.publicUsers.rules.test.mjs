@@ -1228,6 +1228,9 @@ async function run() {
         proofMetadata: { method: 'vouch', note: 'public proof summary' },
       }),
     );
+    await assertFails(setDoc(doc(codexDevDb, 'claimRequests', 'codex_claim_request_denied'), {
+      claimantUid: 'codex-dev-user', contributorId: 'unclaimed_contributor', status: 'pending', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
     await assertFails(
       setDoc(doc(ownerDb, 'claimRequests', 'approved_claim_request_create'), {
         claimantUid: ownerUid,

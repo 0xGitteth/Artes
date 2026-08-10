@@ -47,6 +47,7 @@ import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
 import { isUploadReusableForActor, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
+import { cleanupCodexDevPostTrees } from './codexTestDataCleanup.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -4238,6 +4239,10 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const contributorId = body?.contributorId || null;
     const inviteToken = body?.inviteToken || null;
@@ -4348,6 +4353,7 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4413,6 +4419,7 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4471,6 +4478,7 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   const token = request.data?.token || null;
   if (!requestId || !token) {
@@ -4597,6 +4605,7 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4815,6 +4824,11 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
     const requestedByUid = requestData?.requestedByUid || null;
     const contributorId = primaryOverride || requestData?.contributorId || null;
 
+    if (isCodexDevUid(requestedByUid)) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
+
     if (!requestedByUid || !contributorId) {
       res.status(400).json({ error: 'Claim request missing contributor or requester' });
       return;
@@ -4903,6 +4917,10 @@ export const getVouchRequests = onRequest({ cors: true, region: 'europe-west4' }
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
     const snapshot = await db.collection('claimRequests')
       .where('status', '==', 'pending')
       .where('eligibleVoterUids', 'array-contains', decoded.uid)
@@ -4982,6 +5000,7 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
     const [
       postsByAuthorIdSnap,
       postsByAuthorUidSnap,
+      codexDevPostsSnap,
       uploadsSnap,
       commentsSnap,
       likesSnap,
@@ -4989,6 +5008,7 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
     ] = await Promise.all([
       db.collection('posts').where('authorId', '==', targetUid).get(),
       db.collection('posts').where('authorUid', '==', targetUid).get(),
+      db.collection('codexDevPosts').where('authorId', '==', targetUid).get(),
       db.collection('uploads').where('userId', '==', targetUid).get(),
       db.collectionGroup('comments').where('authorId', '==', targetUid).get(),
       db.collectionGroup('likes').get(),
@@ -5036,6 +5056,7 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
         comments: commentsRefs.length,
         follows: followsRefs.length,
         posts: postsRefs.length,
+        codexDevPosts: codexDevPostsSnap.size,
         reviewCases: reviewCaseRefs.length,
         uploads: uploadsRefs.length,
       },
@@ -5044,13 +5065,14 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
         comments: commentsRefs.slice(0, 20).map((ref) => ref.path),
         follows: followsRefs.slice(0, 20).map((ref) => ref.path),
         posts: postsRefs.slice(0, 20).map((ref) => ref.path),
+        codexDevPosts: codexDevPostsSnap.docs.slice(0, 20).map((docSnap) => docSnap.ref.path),
         reviewCases: reviewCaseRefs.slice(0, 20).map((ref) => ref.path),
         uploads: uploadsRefs.slice(0, 20).map((ref) => ref.path),
       },
       guard: {
         moderatorEmail: decoded?.email || null,
       },
-      order: ['likes', 'comments', 'follows', 'posts', 'reviewCases', 'uploads'],
+      order: ['likes', 'comments', 'follows', 'posts', 'codexDevPosts', 'reviewCases', 'uploads'],
     };
 
     if (dryRun) {
@@ -5076,6 +5098,10 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
     const postResult = await deleteInBatches(postsRefs);
     deletedCounts.posts = postResult.deleted;
     failures.push(...postResult.failed);
+
+    const codexDevPostResult = await cleanupCodexDevPostTrees({ db, postDocs: codexDevPostsSnap.docs, dryRun });
+    deletedCounts.codexDevPosts = codexDevPostResult.deleted;
+    failures.push(...codexDevPostResult.failed);
 
     const reviewCaseResult = await deleteInBatches(reviewCaseRefs);
     deletedCounts.reviewCases = reviewCaseResult.deleted;
@@ -5104,6 +5130,10 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const requestId = body?.requestId || null;
     const vote = claimVoteOptions.includes(body?.vote) ? body.vote : null;
@@ -5300,6 +5330,10 @@ export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-we
   }
 
   const requestData = requestSnap.data() || {};
+  if (isCodexDevUid(requestData?.requestedByUid)) {
+    logger.warn('Ignoring Codex Dev claim proof upload', { requestId });
+    return;
+  }
   const claimCode = requestData?.claimCode ? String(requestData.claimCode) : null;
   const claimCodeExpiresAt = requestData?.claimCodeExpiresAt instanceof Timestamp
     ? requestData.claimCodeExpiresAt

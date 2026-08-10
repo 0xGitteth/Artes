@@ -10,6 +10,7 @@ import {
 } from '../functions/codexDevIdentity.js';
 import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFirst } from '../src/utils/codexDevIdentity.js';
 import { isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
+import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
 
 test('canonical identity requires the configured uid and both trusted claims', () => {
   const env = { CODEX_DEV_UID: 'isolated-codex' };
@@ -98,4 +99,17 @@ test('production side-effect endpoints reject Codex before shared writes', async
   assert.ok(contributor.indexOf('isCodexDevToken') < contributor.indexOf('db.runTransaction'));
   const invite = section('export const createClaimInvite', 'export const getClaimInvitePreview');
   assert.ok(invite.indexOf('isCodexDevToken') < invite.indexOf('db.runTransaction'));
+  const claim = section('export const createClaimRequest', 'export const startEmailClaimProof');
+  assert.ok(claim.indexOf('isCodexDevToken(decoded)') < claim.indexOf('db.runTransaction'));
+});
+
+test('operational cleanup recursively removes all selected Codex post trees only', async () => {
+  const paths = new Set(['codexDevPosts/one', 'codexDevPosts/one/comments/a', 'codexDevPosts/two', 'codexDevPosts/two/likes/codex', 'posts/ordinary']);
+  const docs = ['codexDevPosts/one', 'codexDevPosts/two'].map((path) => ({ ref: { path } }));
+  const db = { recursiveDelete: async (ref) => [...paths].filter((path) => path === ref.path || path.startsWith(`${ref.path}/`)).forEach((path) => paths.delete(path)) };
+  assert.deepEqual(await cleanupCodexDevPostTrees({ db, postDocs: docs, dryRun: true }), { deleted: 0, failed: [] });
+  assert.equal(paths.has('codexDevPosts/one'), true);
+  assert.deepEqual(await cleanupCodexDevPostTrees({ db, postDocs: docs, dryRun: false }), { deleted: 2, failed: [] });
+  assert.deepEqual([...paths], ['posts/ordinary']);
+  assert.deepEqual(await cleanupCodexDevPostTrees({ db, postDocs: [], dryRun: false }), { deleted: 0, failed: [] });
 });

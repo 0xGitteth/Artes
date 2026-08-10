@@ -13,6 +13,10 @@ const emptyStats = () => ({
   contributors: 0,
   contributorAliases: 0,
   claimInvites: 0,
+  claimRequests: 0,
+  claimVouches: 0,
+  claimProofObjects: 0,
+  contributorClaimResets: 0,
   supportThreads: 0,
   postComments: 0,
   postLikes: 0,
@@ -25,7 +29,7 @@ const uniqueDocs = (docs = []) => [...new Map(docs.map((doc) => [doc.ref?.path |
 
 const queryDocs = async (query) => (await query.get()).docs || [];
 
-export const reconcileCodexDevIsolation = async ({ db, apply = false, env = process.env } = {}) => {
+export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = false, env = process.env } = {}) => {
   if (!db) throw new Error('Firestore db is verplicht.');
   const stats = emptyStats();
   const users = await queryDocs(db.collection('users'));
@@ -85,6 +89,39 @@ export const reconcileCodexDevIsolation = async ({ db, apply = false, env = proc
     for (const invite of uniqueDocs(inviteQueries.flat())) await deleteRef(invite.ref, 'claimInvites');
     for (const contributor of contributors) await deleteRef(contributor.ref, 'contributors', { recursive: true });
 
+    const claimRequests = await queryDocs(db.collection('claimRequests').where('requestedByUid', '==', uid));
+    for (const claimRequest of claimRequests) {
+      const requestData = claimRequest.data() || {};
+      const contributorId = requestData.contributorId || null;
+      if (requestData.status === 'approved' && contributorId) {
+        const contributorRef = db.collection('contributors').doc(contributorId);
+        const contributorSnap = await contributorRef.get();
+        if (contributorSnap.exists && contributorSnap.data()?.claimedByUid === uid) {
+          stats.contributorClaimResets += 1;
+          if (apply) await contributorRef.set({ claimedByUid: null, claimedAt: null, status: 'unclaimed', updatedAt: new Date() }, { merge: true });
+        }
+        const actorRef = db.collection('users').doc(uid);
+        const actorSnap = await actorRef.get();
+        if (apply && actorSnap.exists && actorSnap.data()?.contributorId === contributorId) {
+          await actorRef.set({ contributorId: null, updatedAt: new Date() }, { merge: true });
+        }
+      }
+      const vouchRef = db.collection('claimVouches').doc(claimRequest.id);
+      const [vouchSnap, votesSnap] = await Promise.all([vouchRef.get(), vouchRef.collection('votes').get()]);
+      if (vouchSnap.exists || (votesSnap.docs || []).length > 0) {
+        stats.claimVouches += 1;
+        stats.deletes += 1;
+        if (apply) await db.recursiveDelete(vouchRef);
+      }
+      if (bucket) {
+        const [files] = await bucket.getFiles({ prefix: `claimProofs/${claimRequest.id}/` });
+        stats.claimProofObjects += files.length;
+        stats.deletes += files.length;
+        if (apply) await Promise.all(files.map((file) => file.delete()));
+      }
+      await deleteRef(claimRequest.ref, 'claimRequests', { recursive: true });
+    }
+
     const allComments = await queryDocs(db.collectionGroup('comments').where('authorId', '==', uid));
     for (const comment of allComments.filter((doc) => /^communities\/[^/]+\/topics\/[^/]+\/comments\/[^/]+$/.test(doc.ref.path))) {
       await deleteRef(comment.ref, 'communityComments');
@@ -129,8 +166,9 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const { initializeApp, applicationDefault } = await import('firebase-admin/app');
   const { getFirestore } = await import('firebase-admin/firestore');
+  const { getStorage } = await import('firebase-admin/storage');
   initializeApp({ credential: applicationDefault(), projectId: options.project || process.env.GOOGLE_CLOUD_PROJECT });
-  const stats = await reconcileCodexDevIsolation({ db: getFirestore(), apply: options.apply });
+  const stats = await reconcileCodexDevIsolation({ db: getFirestore(), bucket: getStorage().bucket(), apply: options.apply });
   console.log(options.apply ? 'APPLY' : 'DRY RUN', stats);
 }
 

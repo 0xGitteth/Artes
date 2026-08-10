@@ -716,7 +716,7 @@ service cloud.firestore {
         && isSelfSafeAffiliationStatusWrite())
         || isAgencyApprovalWrite(userId)
         || isCompanyApprovalWrite(userId);
-      allow delete: if isOwner(userId);
+      allow delete: if isOwner(userId) && !isCodexDev();
 
       match /idv/{docId} {
         allow read: if request.auth != null && request.auth.uid == userId;
@@ -913,6 +913,7 @@ service cloud.firestore {
           ))
       );
       allow create: if request.auth != null
+        && !isCodexDev()
         && (
           (request.resource.data.type == 'dm'
             && !isCodexDev()
@@ -940,6 +941,7 @@ service cloud.firestore {
             && request.resource.data.userMessageAllowance <= 1)
         );
       allow update: if request.auth != null
+        && !isCodexDev()
         && !isTestActorThread(threadId)
         && (
           (resource.data.type == 'dm'
@@ -1008,6 +1010,7 @@ service cloud.firestore {
               ))
         );
         allow create: if request.auth != null
+          && !isCodexDev()
           && !isTestActorThread(threadId)
           && (
             (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
@@ -1049,6 +1052,7 @@ service cloud.firestore {
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 2000;
         allow update: if request.auth != null
+          && !isCodexDev()
           && !isTestActorThread(threadId)
           && resource.data.type == 'affiliationRequest'
           && request.resource.data.type == 'affiliationRequest'

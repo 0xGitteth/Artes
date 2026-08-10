@@ -539,6 +539,10 @@ async function run() {
     const eligibleVoterDb = authedContext(testEnv, 'eligible_voter', { email_verified: true }).firestore();
 
     await assertFails(updateDoc(doc(ownerDb, 'users', ownerUid), { isDevTestUser: true, devActor: 'codex' }));
+    await assertFails(deleteDoc(doc(codexDevDb, 'users', 'codex-dev-user')));
+    await assertFails(updateDoc(doc(codexDevDb, 'users', 'codex-dev-user'), { isDevTestUser: false, devActor: 'ordinary' }));
+    await testEnv.withSecurityRulesDisabled(async (context) => setDoc(doc(context.firestore(), 'users', 'deletable_ordinary'), { uid: 'deletable_ordinary' }));
+    await assertSucceeds(deleteDoc(doc(publicUserDbFor('deletable_ordinary'), 'users', 'deletable_ordinary')));
 
     for (const uid of ['legacy_step_5', 'legacy_step_10']) {
       await assertSucceeds(setDoc(doc(publicUserDbFor(uid), 'publicUsers', uid), {

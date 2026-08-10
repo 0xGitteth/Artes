@@ -2546,6 +2546,10 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
     logger.info('sendSupportMessage: Received POST request', { origin: req.get('origin') });
     
     const decoded = await verifyToken(req);
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
+      return;
+    }
     logger.info('sendSupportMessage: Token verified', { uid: decoded.uid });
     
     const body = parseJsonBody(req);
@@ -2678,6 +2682,10 @@ export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, asyn
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev reports are isolated.' });
+      return;
+    }
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const {
@@ -4015,6 +4023,9 @@ export const createTemporaryContributor = onCall({ region: 'europe-west4' }, asy
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
+    throw new HttpsError('permission-denied', 'Codex Dev contributors are isolated');
+  }
 
   const displayName = toContributorString(request.data?.displayName).replace(/\s+/g, ' ').slice(0, 80);
   if (!displayName) {
@@ -4098,6 +4109,9 @@ export const createTemporaryContributor = onCall({ region: 'europe-west4' }, asy
 export const createClaimInvite = onCall({ region: 'europe-west4' }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
+    throw new HttpsError('permission-denied', 'Codex Dev claim invites are isolated');
   }
   const contributorId = request.data?.contributorId || null;
   const postId = request.data?.postId || null;

@@ -86,3 +86,16 @@ test('client routes Codex posts to its isolated collection and supports private 
   assert.match(source, /user\?\.uid !== userId \|\| !\(await isCodexDevUser\(user\)\)/);
   assert.doesNotMatch(source, /uid === 'codex-dev-user'/);
 });
+
+test('production side-effect endpoints reject Codex before shared writes', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const report = section('export const reportPost', 'export const requestUploadReviewCase');
+  assert.ok(report.indexOf('isCodexDevToken(decoded)') < report.indexOf("db.collection('reviewCases').add"));
+  const support = section('export const sendSupportMessage', 'export const reportPost');
+  assert.ok(support.indexOf('isCodexDevToken(decoded)') < support.indexOf('db.runTransaction'));
+  const contributor = section('export const createTemporaryContributor', 'export const createClaimInvite');
+  assert.ok(contributor.indexOf('isCodexDevToken') < contributor.indexOf('db.runTransaction'));
+  const invite = section('export const createClaimInvite', 'export const getClaimInvitePreview');
+  assert.ok(invite.indexOf('isCodexDevToken') < invite.indexOf('db.runTransaction'));
+});

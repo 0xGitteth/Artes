@@ -46,6 +46,9 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
       }
 
       const decoded = await verifyIdToken(req);
+      if (decoded.devCodex === true && decoded.devActor === 'codex') {
+        return res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
+      }
       const uid = decoded.uid;
 
       const threadId = `support_${uid}`;

@@ -10,6 +10,12 @@ const emptyStats = () => ({
   communityComments: 0,
   reviewCases: 0,
   moderationExamples: 0,
+  contributors: 0,
+  contributorAliases: 0,
+  claimInvites: 0,
+  supportThreads: 0,
+  postComments: 0,
+  postLikes: 0,
   dmThreads: 0,
   threadIndexes: 0,
   deletes: 0,
@@ -41,13 +47,20 @@ export const reconcileCodexDevIsolation = async ({ db, apply = false, env = proc
 
     await deleteRef(db.collection('publicUsers').doc(uid), 'publicUsers');
 
-    for (const post of await queryDocs(db.collection('posts').where('authorId', '==', uid))) {
+    const actorPosts = await queryDocs(db.collection('posts').where('authorId', '==', uid));
+    const actorPostIds = new Set(actorPosts.map((post) => post.id));
+    for (const post of actorPosts) {
       await deleteRef(post.ref, 'posts', { recursive: true });
     }
     for (const profile of await queryDocs(db.collection('profiles').where('ownerUid', '==', uid))) {
       await deleteRef(profile.ref, 'managedProfiles', { recursive: true });
     }
-    for (const reviewCase of await queryDocs(db.collection('reviewCases').where('userId', '==', uid))) {
+    const reviewCaseQueries = await Promise.all([
+      queryDocs(db.collection('reviewCases').where('userId', '==', uid)),
+      queryDocs(db.collection('reviewCases').where('reportedByUid', '==', uid)),
+      queryDocs(db.collection('reviewCases').where('createdByUid', '==', uid)),
+    ]);
+    for (const reviewCase of uniqueDocs(reviewCaseQueries.flat())) {
       await deleteRef(reviewCase.ref, 'reviewCases', { recursive: true });
     }
     const exampleQueries = await Promise.all([
@@ -58,9 +71,33 @@ export const reconcileCodexDevIsolation = async ({ db, apply = false, env = proc
       await deleteRef(example.ref, 'moderationExamples', { recursive: true });
     }
 
+    const contributors = await queryDocs(db.collection('contributors').where('createdByUid', '==', uid));
+    const contributorIds = new Set(contributors.map((doc) => doc.id));
+    const aliasQueries = await Promise.all([
+      queryDocs(db.collection('contributorAliases').where('createdByUid', '==', uid)),
+      ...[...contributorIds].map((id) => queryDocs(db.collection('contributorAliases').where('contributorId', '==', id))),
+    ]);
+    const inviteQueries = await Promise.all([
+      queryDocs(db.collection('claimInvites').where('createdByUid', '==', uid)),
+      ...[...contributorIds].map((id) => queryDocs(db.collection('claimInvites').where('contributorId', '==', id))),
+    ]);
+    for (const alias of uniqueDocs(aliasQueries.flat())) await deleteRef(alias.ref, 'contributorAliases');
+    for (const invite of uniqueDocs(inviteQueries.flat())) await deleteRef(invite.ref, 'claimInvites');
+    for (const contributor of contributors) await deleteRef(contributor.ref, 'contributors', { recursive: true });
+
     const allComments = await queryDocs(db.collectionGroup('comments').where('authorId', '==', uid));
     for (const comment of allComments.filter((doc) => /^communities\/[^/]+\/topics\/[^/]+\/comments\/[^/]+$/.test(doc.ref.path))) {
       await deleteRef(comment.ref, 'communityComments');
+    }
+    for (const comment of allComments.filter((doc) => {
+      const match = doc.ref.path.match(/^posts\/([^/]+)\/comments\/[^/]+$/);
+      return match && !actorPostIds.has(match[1]);
+    })) {
+      await deleteRef(comment.ref, 'postComments');
+    }
+    const productionPosts = await queryDocs(db.collection('posts'));
+    for (const post of productionPosts.filter((doc) => doc.data()?.authorId !== uid)) {
+      await deleteRef(post.ref.collection('likes').doc(uid), 'postLikes');
     }
 
     const canonicalThreads = await queryDocs(db.collection('threads').where('participantUids', 'array-contains', uid));
@@ -73,6 +110,11 @@ export const reconcileCodexDevIsolation = async ({ db, apply = false, env = proc
         await deleteRef(db.collection('users').doc(participantUid).collection('threadIndex').doc(thread.id), 'threadIndexes');
       }
       await deleteRef(thread.ref, 'dmThreads', { recursive: true });
+    }
+    for (const thread of await queryDocs(db.collection('threads').where('userUid', '==', uid))) {
+      if (thread.data()?.type !== 'support') continue;
+      await deleteRef(db.collection('users').doc(uid).collection('threadIndex').doc(thread.id), 'threadIndexes');
+      await deleteRef(thread.ref, 'supportThreads', { recursive: true });
     }
   }
   return stats;

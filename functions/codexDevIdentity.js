@@ -15,7 +15,11 @@ export const isCodexDevUid = (uid, env = process.env) => (
 
 export const isCodexDevPrivateProfile = (uid, profile = {}, env = process.env) => (
   isCodexDevUid(uid, env)
-  || (profile?.isDevTestUser === true && profile?.devActor === CODEX_DEV_ACTOR)
+);
+
+// These fields were historically client writable, so they are diagnostics only.
+export const hasCodexDevPrivateMarkers = (profile = {}) => (
+  profile?.isDevTestUser === true && profile?.devActor === CODEX_DEV_ACTOR
 );
 
 export const isCodexDevToken = (decoded = {}, env = process.env) => (

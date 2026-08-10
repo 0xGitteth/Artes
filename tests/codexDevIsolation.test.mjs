@@ -7,10 +7,12 @@ import {
   hasCodexDevClaim,
   isCodexDevToken,
   resolveCodexDevUid,
+  isCodexDevPrivateProfile,
 } from '../functions/codexDevIdentity.js';
 import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFirst } from '../src/utils/codexDevIdentity.js';
 import { isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
+import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
 
 test('canonical identity requires the configured uid and both trusted claims', () => {
   const env = { CODEX_DEV_UID: 'isolated-codex' };
@@ -19,6 +21,18 @@ test('canonical identity requires the configured uid and both trusted claims', (
   assert.equal(isCodexDevToken({ uid: 'isolated-codex', devCodex: true, devActor: CODEX_DEV_ACTOR }, env), true);
   assert.equal(isCodexDevToken({ uid: 'ordinary-user', devCodex: true, devActor: CODEX_DEV_ACTOR }, env), false);
   assert.equal(isCodexDevToken({ uid: 'isolated-codex', devCodex: true }, env), false);
+});
+
+test('historical private markers never establish destructive identity', () => {
+  assert.equal(isCodexDevPrivateProfile('ordinary', { isDevTestUser: true, devActor: 'codex' }, {}), false);
+  assert.equal(isCodexDevPrivateProfile('codex-dev-user', {}, {}), true);
+});
+
+test('reconciliation CLI accepts explicit identity/storage configuration', () => {
+  assert.deepEqual(parseArgs(['--apply', '--uid', 'canonical', '--bucket=test.appspot.com']), {
+    apply: true, skipStorage: false, project: null, uid: 'canonical', bucket: 'test.appspot.com',
+  });
+  assert.equal(parseArgs(['--skip-storage']).skipStorage, true);
 });
 
 test('private capability profile passes onboarding gates without being a public payload', () => {
@@ -101,6 +115,14 @@ test('production side-effect endpoints reject Codex before shared writes', async
   assert.ok(invite.indexOf('isCodexDevToken') < invite.indexOf('db.runTransaction'));
   const claim = section('export const createClaimRequest', 'export const startEmailClaimProof');
   assert.ok(claim.indexOf('isCodexDevToken(decoded)') < claim.indexOf('db.runTransaction'));
+});
+
+test('trusted account lifecycle endpoints reject Codex before destructive work', async () => {
+  const index = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const reset = index.slice(index.indexOf('export const resetPersonalOnboarding'), index.indexOf('export const createDevCodexToken'));
+  assert.ok(reset.indexOf('isCodexDevToken') < reset.indexOf('resetPersonalOnboardingAtomically'));
+  const lifecycle = await fs.readFile(new URL('../functions/accountLifecycle.js', import.meta.url), 'utf8');
+  assert.ok(lifecycle.indexOf('isCodexDevToken(decoded)') < lifecycle.indexOf('userRef.delete()'));
 });
 
 test('operational cleanup recursively removes all selected Codex post trees only', async () => {

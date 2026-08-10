@@ -2196,6 +2196,9 @@ export const resetPersonalOnboarding = onCall({ region: 'europe-west4' }, async 
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevToken({ uid, ...(request.auth?.token || {}) })) {
+    throw new HttpsError('permission-denied', 'Codex Dev identity cannot be reset.');
+  }
   return resetPersonalOnboardingAtomically({ db, uid, onboardingStep: 2 });
 });
 

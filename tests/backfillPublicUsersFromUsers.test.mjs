@@ -184,14 +184,14 @@ const dryRunDb = createFakeDb();
 const dryRunStats = await runBackfill({ db: dryRunDb, dryRun: true, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(dryRunStats, {
   scanned: 5,
-  eligible: 2,
+  eligible: 3,
   skippedNotEligible: 1,
-  wouldWrite: 2,
+  wouldWrite: 3,
   written: 0,
   failed: 0,
-  legacyPrivateFieldsFound: 5,
+  legacyPrivateFieldsFound: 6,
   legacyPrivateFieldsDeleted: 0,
-  codexPublicProfilesWouldDelete: 2,
+  codexPublicProfilesWouldDelete: 1,
   codexPublicProfilesDeleted: 0,
 });
 assert.equal(dryRunDb.batchSetCalls, 0, 'dry run must not enqueue writes');
@@ -200,19 +200,19 @@ const applyDb = createFakeDb();
 const applyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(applyStats, {
   scanned: 5,
-  eligible: 2,
+  eligible: 3,
   skippedNotEligible: 1,
-  wouldWrite: 2,
+  wouldWrite: 3,
   written: 4,
   failed: 0,
-  legacyPrivateFieldsFound: 5,
-  legacyPrivateFieldsDeleted: 5,
-  codexPublicProfilesWouldDelete: 2,
-  codexPublicProfilesDeleted: 2,
+  legacyPrivateFieldsFound: 6,
+  legacyPrivateFieldsDeleted: 6,
+  codexPublicProfilesWouldDelete: 1,
+  codexPublicProfilesDeleted: 1,
 });
-assert.equal(applyDb.batchSetCalls, 2, 'apply should enqueue every onboarding-eligible publicUsers write');
+assert.equal(applyDb.batchSetCalls, 3, 'apply should enqueue every onboarding-eligible publicUsers write');
 assert.equal(applyDb.publicUsers.has('codex-dev-user'), false, 'apply deletes the legacy Codex projection');
-assert.equal(applyDb.publicUsers.has('non-default-codex'), false, 'persisted private markers identify a non-default Codex actor without env configuration');
+assert.equal(applyDb.publicUsers.has('non-default-codex'), true, 'historical markers alone never select an ordinary user destructively');
 const secondApplyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.equal(secondApplyStats.codexPublicProfilesWouldDelete, 0);
 assert.equal(secondApplyStats.codexPublicProfilesDeleted, 0, 'second apply is idempotent for Codex deletion');

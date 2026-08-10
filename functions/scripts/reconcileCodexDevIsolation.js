@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
-import { isCodexDevPrivateProfile } from '../codexDevIdentity.js';
+import { CODEX_DEV_UID_DEFAULT, hasCodexDevPrivateMarkers } from '../codexDevIdentity.js';
 
 const emptyStats = () => ({
   actors: 0,
@@ -22,6 +22,10 @@ const emptyStats = () => ({
   postLikes: 0,
   dmThreads: 0,
   threadIndexes: 0,
+  linkedModerationExamples: 0,
+  claimVotes: 0,
+  claimVoteRequestsRecomputed: 0,
+  manualReviewRequired: [],
   deletes: 0,
 });
 
@@ -29,12 +33,21 @@ const uniqueDocs = (docs = []) => [...new Map(docs.map((doc) => [doc.ref?.path |
 
 const queryDocs = async (query) => (await query.get()).docs || [];
 
-export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = false, env = process.env } = {}) => {
+export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = false, env = process.env, uid = null, uidSource = null, skipStorage = false } = {}) => {
   if (!db) throw new Error('Firestore db is verplicht.');
+  const explicitUid = String(uid || env.CODEX_DEV_UID || '').trim();
+  const source = uidSource || (uid ? 'argument' : (env.CODEX_DEV_UID ? 'CODEX_DEV_UID' : 'default'));
+  const canonicalUid = explicitUid || CODEX_DEV_UID_DEFAULT;
+  if (apply && !explicitUid) throw new Error('--apply requires a trustworthy canonical UID via --uid or CODEX_DEV_UID.');
+  if (apply && !bucket && !skipStorage) throw new Error('--apply requires --bucket/FIREBASE_STORAGE_BUCKET or explicit --skip-storage.');
   const stats = emptyStats();
+  stats.targetUid = canonicalUid;
+  stats.targetUidSource = source;
+  stats.storageInspection = bucket ? 'complete' : (skipStorage ? 'skipped-explicitly' : 'skipped-missing-bucket');
   const users = await queryDocs(db.collection('users'));
-  const actors = users.filter((doc) => isCodexDevPrivateProfile(doc.id, doc.data() || {}, env));
-  stats.actors = actors.length;
+  stats.ambiguousMarkerUids = users.filter((doc) => doc.id !== canonicalUid && hasCodexDevPrivateMarkers(doc.data() || {})).map((doc) => doc.id);
+  const actors = [{ id: canonicalUid }];
+  stats.actors = 1;
 
   for (const actor of actors) {
     const uid = actor.id;
@@ -51,7 +64,10 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
 
     await deleteRef(db.collection('publicUsers').doc(uid), 'publicUsers');
 
-    const actorPosts = await queryDocs(db.collection('posts').where('authorId', '==', uid));
+    const actorPosts = uniqueDocs((await Promise.all([
+      queryDocs(db.collection('posts').where('authorId', '==', uid)),
+      queryDocs(db.collection('posts').where('authorUid', '==', uid)),
+    ])).flat());
     const actorPostIds = new Set(actorPosts.map((post) => post.id));
     for (const post of actorPosts) {
       await deleteRef(post.ref, 'posts', { recursive: true });
@@ -64,14 +80,18 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       queryDocs(db.collection('reviewCases').where('reportedByUid', '==', uid)),
       queryDocs(db.collection('reviewCases').where('createdByUid', '==', uid)),
     ]);
-    for (const reviewCase of uniqueDocs(reviewCaseQueries.flat())) {
+    const reviewCases = uniqueDocs(reviewCaseQueries.flat());
+    const reviewCaseIds = new Set(reviewCases.map((doc) => doc.id));
+    for (const reviewCase of reviewCases) {
       await deleteRef(reviewCase.ref, 'reviewCases', { recursive: true });
     }
     const exampleQueries = await Promise.all([
       queryDocs(db.collection('moderationExamples').where('userId', '==', uid)),
       queryDocs(db.collection('moderationExamples').where('uploaderUid', '==', uid)),
+      ...[...reviewCaseIds].map((id) => queryDocs(db.collection('moderationExamples').where('reviewCaseId', '==', id))),
     ]);
     for (const example of uniqueDocs(exampleQueries.flat())) {
+      if (reviewCaseIds.has(example.data()?.reviewCaseId)) stats.linkedModerationExamples += 1;
       await deleteRef(example.ref, 'moderationExamples', { recursive: true });
     }
 
@@ -122,6 +142,37 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       await deleteRef(claimRequest.ref, 'claimRequests', { recursive: true });
     }
 
+    // Remove the canonical actor's votes on other users' requests. Open requests
+    // are recomputed from remaining vote documents; finalized requests are only
+    // flagged because ownership rollback is not unambiguous.
+    const actorVotes = await queryDocs(db.collectionGroup('votes').where('voterUid', '==', uid));
+    for (const vote of actorVotes.filter((doc) => /^claimVouches\/[^/]+\/votes\/[^/]+$/.test(doc.ref.path))) {
+      const requestId = vote.ref.path.split('/')[1];
+      const requestRef = db.collection('claimRequests').doc(requestId);
+      const requestSnap = await requestRef.get();
+      if (!requestSnap.exists || requestSnap.data()?.requestedByUid === uid) continue;
+      const votesSnap = await db.collection('claimVouches').doc(requestId).collection('votes').get();
+      const remaining = (votesSnap.docs || []).filter((doc) => doc.ref.path !== vote.ref.path);
+      const yesCount = remaining.filter((doc) => doc.data()?.vote === 'yes').length;
+      const noCount = remaining.filter((doc) => doc.data()?.vote === 'no').length;
+      const current = requestSnap.data() || {};
+      const finalized = !['pending', 'needsModeration'].includes(current.status);
+      stats.claimVotes += 1;
+      stats.deletes += 1;
+      stats.claimVoteRequestsRecomputed += 1;
+      if (finalized) stats.manualReviewRequired.push(requestId);
+      if (apply) {
+        await vote.ref.delete();
+        const update = { yesCount, noCount, updatedAt: new Date() };
+        if (!finalized && current.status === 'needsModeration' && current.moderationReason === 'vouch conflict' && !(yesCount && noCount)) {
+          Object.assign(update, { status: 'pending', moderationReason: null });
+        } else if (!finalized && yesCount && noCount) {
+          Object.assign(update, { status: 'needsModeration', moderationReason: 'vouch conflict' });
+        }
+        await requestRef.set(update, { merge: true });
+      }
+    }
+
     const allComments = await queryDocs(db.collectionGroup('comments').where('authorId', '==', uid));
     for (const comment of allComments.filter((doc) => /^communities\/[^/]+\/topics\/[^/]+\/comments\/[^/]+$/.test(doc.ref.path))) {
       await deleteRef(comment.ref, 'communityComments');
@@ -157,9 +208,14 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
   return stats;
 };
 
-const parseArgs = (argv) => ({
+const valueAfter = (argv, flag) => { const index = argv.indexOf(flag); return index >= 0 ? argv[index + 1] || null : null; };
+
+export const parseArgs = (argv) => ({
   apply: argv.includes('--apply'),
+  skipStorage: argv.includes('--skip-storage'),
   project: argv.find((arg) => arg.startsWith('--project='))?.slice('--project='.length) || null,
+  uid: argv.find((arg) => arg.startsWith('--uid='))?.slice('--uid='.length) || valueAfter(argv, '--uid'),
+  bucket: argv.find((arg) => arg.startsWith('--bucket='))?.slice('--bucket='.length) || valueAfter(argv, '--bucket'),
 });
 
 async function main() {
@@ -167,8 +223,12 @@ async function main() {
   const { initializeApp, applicationDefault } = await import('firebase-admin/app');
   const { getFirestore } = await import('firebase-admin/firestore');
   const { getStorage } = await import('firebase-admin/storage');
-  initializeApp({ credential: applicationDefault(), projectId: options.project || process.env.GOOGLE_CLOUD_PROJECT });
-  const stats = await reconcileCodexDevIsolation({ db: getFirestore(), bucket: getStorage().bucket(), apply: options.apply });
+  const bucketName = options.bucket || process.env.FIREBASE_STORAGE_BUCKET || null;
+  const appOptions = { credential: applicationDefault(), projectId: options.project || process.env.GOOGLE_CLOUD_PROJECT };
+  if (bucketName) appOptions.storageBucket = bucketName;
+  initializeApp(appOptions);
+  const bucket = bucketName ? getStorage().bucket(bucketName) : null;
+  const stats = await reconcileCodexDevIsolation({ db: getFirestore(), bucket, apply: options.apply, uid: options.uid, uidSource: options.uid ? '--uid' : null, skipStorage: options.skipStorage });
   console.log(options.apply ? 'APPLY' : 'DRY RUN', stats);
 }
 

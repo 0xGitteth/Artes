@@ -50,6 +50,8 @@ const queryDocs = async (query) => (await query.get()).docs || [];
 const timestampMillis = (value) => value?.toMillis?.()
   ?? Number(value?.seconds ?? value?._seconds ?? value ?? 0) * 1000;
 
+const ACTIVE_ORDINARY_CLAIM_STATUSES = new Set(['pending', 'needsModeration']);
+
 export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = false, env = process.env, uid = null, uidSource = null, skipStorage = false } = {}) => {
   if (!db) throw new Error('Firestore db is verplicht.');
   const explicitUid = String(uid || env.CODEX_DEV_UID || '').trim();
@@ -189,10 +191,26 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       const ordinaryOwnerUid = claimedByUid && claimedByUid !== uid ? claimedByUid : referencedOwner?.id || null;
       const legitimateOwner = Boolean(ordinaryOwnerUid)
         && (ownerSnap?.data()?.contributorId === contributor.id || referencedOwner || data.status === 'claimed');
-      if (legitimateOwner) {
+      const ordinaryClaims = await queryDocs(db.collection('claimRequests').where('contributorId', '==', contributor.id));
+      const activeOrdinaryClaims = ordinaryClaims.filter((claim) => {
+        const claimData = claim.data() || {};
+        return claimData.requestedByUid && claimData.requestedByUid !== uid
+          && ACTIVE_ORDINARY_CLAIM_STATUSES.has(claimData.status);
+      });
+      if (legitimateOwner || activeOrdinaryClaims.length > 0) {
         preservedContributorIds.add(contributor.id);
         stats.preservedContributors += 1;
-        stats.manualReviewRequired.push({ reason: 'codex_created_contributor_claimed_by_real_user', contributorId: contributor.id, claimedByUid: ordinaryOwnerUid, createdByUid: data.createdByUid, status: data.status || null });
+        if (legitimateOwner) {
+          stats.manualReviewRequired.push({ reason: 'codex_created_contributor_claimed_by_real_user', contributorId: contributor.id, claimedByUid: ordinaryOwnerUid, createdByUid: data.createdByUid, status: data.status || null });
+        }
+        if (activeOrdinaryClaims.length > 0) {
+          stats.manualReviewRequired.push({
+            reason: 'codex_created_contributor_with_active_ordinary_claim',
+            contributorId: contributor.id,
+            createdByUid: data.createdByUid,
+            claims: activeOrdinaryClaims.map((claim) => ({ claimRequestId: claim.id, requestedByUid: claim.data()?.requestedByUid, status: claim.data()?.status })),
+          });
+        }
       } else {
         deletableContributors.push(contributor);
       }

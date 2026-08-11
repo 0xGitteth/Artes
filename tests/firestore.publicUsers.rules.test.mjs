@@ -433,6 +433,9 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'contributors', 'codex_claimed_contributor'), {
+        displayName: 'Historical Codex Contributor', status: 'claimed', claimedByUid: 'codex-dev-user', createdAt: new Date(), updatedAt: new Date(),
+      });
       await setDoc(doc(db, 'claimRequests', 'pending_vouch_request'), {
         requestedByUid: ownerUid,
         claimantUid: ownerUid,
@@ -614,6 +617,9 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'threads', 'ordinary_private_dm'), { type: 'dm', participantUids: [ownerUid, otherUid] });
+      await setDoc(doc(db, 'threads', 'ordinary_private_dm', 'messages', 'secret'), { senderUid: ownerUid, text: 'private' });
+      await setDoc(doc(db, 'threads', 'support_other_rules', 'messages', 'secret'), { senderUid: otherUid, text: 'support private' });
     });
 
     await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'owner_text'), {
@@ -745,6 +751,11 @@ async function run() {
     }));
     await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_owner_rules')));
     await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_owner_rules', 'messages', 'owner_support_text')));
+    await assertFails(getDoc(doc(codexDevDb, 'threads', 'ordinary_private_dm')));
+    await assertFails(getDoc(doc(codexDevDb, 'threads', 'ordinary_private_dm', 'messages', 'secret')));
+    await assertFails(getDoc(doc(codexDevDb, 'threads', 'support_other_rules')));
+    await assertFails(getDoc(doc(codexDevDb, 'threads', 'support_other_rules', 'messages', 'secret')));
+    await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'ordinary_private_dm')));
     await assertFails(setDoc(doc(publicDb, 'threads', 'support_owner_rules', 'messages', 'unauth_support_text'), {
       type: 'text',
       senderUid: ownerUid,
@@ -1175,6 +1186,7 @@ async function run() {
         updatedAt: serverTimestamp(),
       }),
     );
+    await assertFails(updateDoc(doc(codexDevDb, 'contributors', 'codex_claimed_contributor'), { bio: 'Codex production edit' }));
     await assertFails(
       setDoc(doc(ownerDb, 'contributors', 'email_contributor_create'), {
         displayName: 'Email Contributor',

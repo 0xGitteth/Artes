@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
 import { CODEX_DEV_UID_DEFAULT, hasCodexDevPrivateMarkers } from '../codexDevIdentity.js';
+import { applyFollowingDeletedCounters } from '../followCounters.js';
+import { FieldValue } from 'firebase-admin/firestore';
 
 const emptyStats = () => ({
   actors: 0,
@@ -13,6 +15,10 @@ const emptyStats = () => ({
   contentRecoveryReviewCases: 0,
   moderationExamples: 0,
   contributors: 0,
+  preservedContributors: 0,
+  incomingFollows: 0,
+  outgoingFollows: 0,
+  followCounterRepairs: 0,
   contributorAliases: 0,
   claimInvites: 0,
   claimRequests: 0,
@@ -172,7 +178,23 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
     }
 
     const contributors = await queryDocs(db.collection('contributors').where('createdByUid', '==', uid));
-    const contributorIds = new Set(contributors.map((doc) => doc.id));
+    const deletableContributors = [];
+    for (const contributor of contributors) {
+      const data = contributor.data() || {};
+      const claimedByUid = data.claimedByUid || null;
+      const ownerSnap = claimedByUid && claimedByUid !== uid ? await db.collection('users').doc(claimedByUid).get() : null;
+      const referencedOwner = users.find((user) => user.id !== uid && user.data()?.contributorId === contributor.id);
+      const ordinaryOwnerUid = claimedByUid && claimedByUid !== uid ? claimedByUid : referencedOwner?.id || null;
+      const legitimateOwner = Boolean(ordinaryOwnerUid)
+        && (ownerSnap?.data()?.contributorId === contributor.id || referencedOwner || data.status === 'claimed');
+      if (legitimateOwner) {
+        stats.preservedContributors += 1;
+        stats.manualReviewRequired.push({ reason: 'codex_created_contributor_claimed_by_real_user', contributorId: contributor.id, claimedByUid: ordinaryOwnerUid, createdByUid: data.createdByUid, status: data.status || null });
+      } else {
+        deletableContributors.push(contributor);
+      }
+    }
+    const contributorIds = new Set(deletableContributors.map((doc) => doc.id));
     const aliasQueries = await Promise.all([
       queryDocs(db.collection('contributorAliases').where('createdByUid', '==', uid)),
       ...[...contributorIds].map((id) => queryDocs(db.collection('contributorAliases').where('contributorId', '==', id))),
@@ -183,7 +205,7 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
     ]);
     for (const alias of uniqueDocs(aliasQueries.flat())) await deleteRef(alias.ref, 'contributorAliases');
     for (const invite of uniqueDocs(inviteQueries.flat())) await deleteRef(invite.ref, 'claimInvites');
-    for (const contributor of contributors) await deleteRef(contributor.ref, 'contributors', { recursive: true });
+    for (const contributor of deletableContributors) await deleteRef(contributor.ref, 'contributors', { recursive: true });
 
     const contentRequestQueries = await Promise.all([
       queryDocs(db.collection('contributorContentRequests').where('requesterUid', '==', uid)),
@@ -191,6 +213,23 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
     ]);
     for (const request of uniqueDocs(contentRequestQueries.flat())) {
       await deleteRef(request.ref, 'contributorContentRequests', { recursive: true });
+    }
+
+    const outgoingFollows = await queryDocs(db.collection('users').doc(uid).collection('following'));
+    const incomingFollows = (await queryDocs(db.collectionGroup('following').where('targetUid', '==', uid)))
+      .filter((doc) => doc.ref.path !== `users/${uid}/following/${doc.id}`);
+    stats.outgoingFollows += outgoingFollows.length;
+    stats.incomingFollows += incomingFollows.length;
+    for (const relation of uniqueDocs([...outgoingFollows, ...incomingFollows])) {
+      const parts = relation.ref.path.split('/');
+      const fanUid = parts[1];
+      const targetUid = relation.data()?.targetUid || relation.id;
+      if (relation.data()?.countersApplied === true) stats.followCounterRepairs += 1;
+      stats.deletes += 1;
+      if (apply) {
+        await applyFollowingDeletedCounters({ db, relationData: relation.data() || {}, uid: fanUid, targetUid, fieldValue: FieldValue, codexUid: uid });
+        await relation.ref.delete();
+      }
     }
 
     const claimRequests = await queryDocs(db.collection('claimRequests').where('requestedByUid', '==', uid));

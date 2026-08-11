@@ -19,3 +19,18 @@ export const selectNearReusableUpload = ({ uploads = [], isCodexActor = false, d
   });
   return best;
 };
+
+export const findReusableAcrossPages = async ({ fetchPage, isCodexActor, select }) => {
+  let cursor = null;
+  let hasMore = true;
+  while (hasMore) {
+    const docs = await fetchPage(cursor);
+    hasMore = docs.length > 0;
+    if (!hasMore) break;
+    const sameScope = docs.filter((doc) => isUploadReusableForActor(doc.data(), isCodexActor));
+    const selected = select(sameScope);
+    if (selected) return selected;
+    cursor = docs.at(-1);
+  }
+  return null;
+};

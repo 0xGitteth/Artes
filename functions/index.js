@@ -46,7 +46,7 @@ import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js'
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
-import { isUploadReusableForActor, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
+import { findReusableAcrossPages, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from './codexTestDataCleanup.js';
 
 const suggestThreshold = 0.45;
@@ -1022,9 +1022,15 @@ const findOpenReviewCase = async (userId) => {
 };
 
 const findExactUpload = async (sha256, { isCodexActor = false } = {}) => {
-  const snapshot = await db.collection('uploads').where('fingerprints.sha256', '==', sha256).limit(25).get();
-  if (snapshot.empty) return null;
-  const doc = snapshot.docs.find((candidate) => isUploadReusableForActor(candidate.data(), isCodexActor));
+  const doc = await findReusableAcrossPages({
+    isCodexActor,
+    fetchPage: async (cursor) => {
+      let query = db.collection('uploads').where('fingerprints.sha256', '==', sha256).limit(25);
+      if (cursor) query = query.startAfter(cursor);
+      return (await query.get()).docs;
+    },
+    select: (docs) => docs[0] || null,
+  });
   if (!doc) return null;
   return { id: doc.id, data: doc.data() };
 };
@@ -1060,17 +1066,19 @@ const findExactModerationExample = async (sha256) => {
 
 const findNearDuplicateUpload = async ({ dhash, dhashPrefix }, { isCodexActor = false } = {}) => {
   if (!dhash) return null;
-  const snapshot = await db
-    .collection('uploads')
-    .where('fingerprints.dhashPrefix', '==', dhashPrefix)
-    .limit(25)
-    .get();
-  if (snapshot.empty) return null;
-  return selectNearReusableUpload({
-    uploads: snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() })),
+  return findReusableAcrossPages({
     isCodexActor,
-    distanceFor: (candidate) => hammingDistance(dhash, candidate?.fingerprints?.dhash),
-    threshold: dhashThreshold,
+    fetchPage: async (cursor) => {
+      let query = db.collection('uploads').where('fingerprints.dhashPrefix', '==', dhashPrefix).limit(25);
+      if (cursor) query = query.startAfter(cursor);
+      return (await query.get()).docs;
+    },
+    select: (docs) => selectNearReusableUpload({
+      uploads: docs.map((doc) => ({ id: doc.id, data: doc.data() })),
+      isCodexActor,
+      distanceFor: (candidate) => hammingDistance(dhash, candidate?.fingerprints?.dhash),
+      threshold: dhashThreshold,
+    }),
   });
 };
 

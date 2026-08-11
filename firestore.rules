@@ -891,7 +891,7 @@ service cloud.firestore {
 
     match /threads/{threadId} {
       allow read: if request.auth != null && !isTestActorThread(threadId) && (
-        isDevAnon()
+        (isDevAnon() && !isCodexDev())
         // eigenaar van support thread
         || (resource.data.type == 'support' && resource.data.userUid == request.auth.uid)
         // moderators mogen alle support threads lezen
@@ -989,7 +989,7 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         allow read: if request.auth != null && !isTestActorThread(threadId) && (
-          isDevAnon()
+          (isDevAnon() && !isCodexDev())
           || isSupportThreadOwner(threadId)
           || (isModerator() && (get(/databases/$(database)/documents/threads/$(threadId)).data.type == "support"
               || threadId.matches("^support_")))
@@ -1223,6 +1223,7 @@ service cloud.firestore {
         && isSafeContributorCreate();
       allow update: if isModerator()
         || (isSignedIn()
+          && !isCodexDev()
           && resource.data.claimedByUid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bio', 'displayName', 'displayNameLower', 'socials'])
           && request.resource.data.claimedByUid == resource.data.claimedByUid

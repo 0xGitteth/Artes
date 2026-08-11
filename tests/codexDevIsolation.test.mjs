@@ -10,7 +10,7 @@ import {
   isCodexDevPrivateProfile,
 } from '../functions/codexDevIdentity.js';
 import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFirst } from '../src/utils/codexDevIdentity.js';
-import { isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
+import { findReusableAcrossPages, isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
 import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
 
@@ -62,6 +62,24 @@ test('upload-result reuse is isolated in both directions', () => {
   const nearCandidates = [{ id: 'test-near', data: codex }, { id: 'ordinary-near', data: ordinary }];
   assert.equal(selectNearReusableUpload({ uploads: nearCandidates, isCodexActor: false, distanceFor: () => 1, threshold: 5 }).id, 'ordinary-near');
   assert.equal(selectNearReusableUpload({ uploads: nearCandidates, isCodexActor: true, distanceFor: () => 1, threshold: 5 }).id, 'test-near');
+});
+
+test('moderation reuse paginates past opposite-scope candidate pages', async () => {
+  const doc = (id, testActor = null) => ({ id, data: () => testActor ? { testActor } : {} });
+  const productionPages = [Array.from({ length: 25 }, (_, i) => doc(`codex-${i}`, 'codex')), [doc('ordinary')]];
+  const foundOrdinary = await findReusableAcrossPages({ isCodexActor: false, fetchPage: async () => productionPages.shift() || [], select: (docs) => docs[0] || null });
+  assert.equal(foundOrdinary.id, 'ordinary');
+  const codexPages = [Array.from({ length: 25 }, (_, i) => doc(`ordinary-${i}`)), [doc('codex-later', 'codex')]];
+  const foundCodex = await findReusableAcrossPages({ isCodexActor: true, fetchPage: async () => codexPages.shift() || [], select: (docs) => docs[0] || null });
+  assert.equal(foundCodex.id, 'codex-later');
+  const nearPages = [Array.from({ length: 25 }, (_, i) => doc(`codex-near-${i}`, 'codex')), [{ id: 'ordinary-near', data: () => ({ fingerprints: { dhash: '0000' } }) }]];
+  const near = await findReusableAcrossPages({
+    isCodexActor: false,
+    fetchPage: async () => nearPages.shift() || [],
+    select: (docs) => selectNearReusableUpload({ uploads: docs.map((entry) => ({ id: entry.id, data: entry.data() })), isCodexActor: false, distanceFor: () => 1, threshold: 5 }),
+  });
+  assert.equal(near.id, 'ordinary-near');
+  assert.equal(await findReusableAcrossPages({ isCodexActor: false, fetchPage: async () => [], select: (docs) => docs[0] }), null);
 });
 
 test('automatic production review cases are suppressed only for Codex', () => {

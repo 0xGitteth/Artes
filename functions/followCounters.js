@@ -78,19 +78,21 @@ export const applyFollowingDeletedCounters = async ({
   uid,
   targetUid,
   fieldValue,
+  codexUid = null,
 }) => {
-  if (isCodexDevUid(uid) || isCodexDevUid(targetUid)) {
+  const isTestUid = (candidate) => codexUid ? candidate === codexUid : isCodexDevUid(candidate);
+  if (isTestUid(uid) || isTestUid(targetUid)) {
     if (relationData.countersApplied !== true) return { status: 'skipped-test-actor' };
     return db.runTransaction(async (transaction) => {
       const repairRef = db.collection('codexDevCounterRepairs').doc(`${uid}__${targetUid}`);
       const repairSnap = await transaction.get(repairRef);
       if (repairSnap.exists) return { status: 'already-repaired-test-actor' };
-      const ordinaryUid = isCodexDevUid(uid) ? targetUid : uid;
+      const ordinaryUid = isTestUid(uid) ? targetUid : uid;
       const ordinaryRef = db.collection('publicUsers').doc(ordinaryUid);
       const ordinarySnap = await transaction.get(ordinaryRef);
       let repaired = null;
       if (ordinarySnap.exists) {
-        repaired = isCodexDevUid(uid) ? 'fansCount' : 'fanOfCount';
+        repaired = isTestUid(uid) ? 'fansCount' : 'fanOfCount';
         const current = Number(ordinarySnap.data()?.[repaired]) || 0;
         transaction.update(ordinaryRef, {
           [repaired]: Math.max(0, current - 1),

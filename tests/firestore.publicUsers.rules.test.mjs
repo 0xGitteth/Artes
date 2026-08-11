@@ -1167,6 +1167,15 @@ async function run() {
       }),
     );
     await assertFails(
+      setDoc(doc(codexDevDb, 'contributors', 'codex_direct_without_creator'), {
+        displayName: 'Codex Direct Contributor',
+        displayNameLower: 'codex direct contributor',
+        status: 'unclaimed',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
       setDoc(doc(ownerDb, 'contributors', 'email_contributor_create'), {
         displayName: 'Email Contributor',
         status: 'unclaimed',

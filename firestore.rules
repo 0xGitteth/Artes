@@ -1219,6 +1219,7 @@ service cloud.firestore {
     match /contributors/{contributorId} {
       allow read: if isSignedIn();
       allow create: if isVerifiedAdultOrDev()
+        && !isCodexDev()
         && isSafeContributorCreate();
       allow update: if isModerator()
         || (isSignedIn()

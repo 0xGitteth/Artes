@@ -9,6 +9,8 @@ const emptyStats = () => ({
   managedProfiles: 0,
   communityComments: 0,
   reviewCases: 0,
+  autoCleanableReviewCases: 0,
+  contentRecoveryReviewCases: 0,
   moderationExamples: 0,
   contributors: 0,
   contributorAliases: 0,
@@ -91,6 +93,23 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
     const reviewCases = uniqueDocs(reviewCaseQueries.flat());
     const reviewCaseIds = new Set(reviewCases.map((doc) => doc.id));
     for (const reviewCase of reviewCases) {
+      const data = reviewCase.data() || {};
+      const isReportCase = data.caseType === 'report'
+        || Boolean(data.reportedPostId || data.reportedPostPath || data.reportedPost);
+      const destructiveReport = isReportCase && data.status === 'approved';
+      if (destructiveReport) {
+        stats.contentRecoveryReviewCases += 1;
+        stats.manualReviewRequired.push({
+          reason: 'codex_report_content_recovery',
+          reviewCaseId: reviewCase.id,
+          reportedPostId: data.reportedPostId || data.reportedPost?.id || null,
+          reportedPostPath: data.reportedPostPath || data.reportedPost?.path || null,
+          affectedUserUid: data.userId || data.reportedPost?.authorId || null,
+          status: data.status,
+        });
+        continue;
+      }
+      stats.autoCleanableReviewCases += 1;
       await deleteRef(reviewCase.ref, 'reviewCases', { recursive: true });
     }
     const exampleQueries = await Promise.all([
@@ -229,10 +248,10 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       if (apply) {
         await vote.ref.delete();
         const update = { yesCount, noCount, updatedAt: new Date() };
-        if (!finalized && current.status === 'needsModeration' && current.moderationReason === 'vouch conflict' && !(yesCount && noCount)) {
-          Object.assign(update, { status: 'pending', moderationReason: null });
+        if (!finalized && current.status === 'needsModeration' && current.statusReason === 'vouch conflict' && !(yesCount && noCount)) {
+          Object.assign(update, { status: 'pending', statusReason: null });
         } else if (!finalized && yesCount && noCount) {
-          Object.assign(update, { status: 'needsModeration', moderationReason: 'vouch conflict' });
+          Object.assign(update, { status: 'needsModeration', statusReason: 'vouch conflict' });
         }
         await requestRef.set(update, { merge: true });
       }

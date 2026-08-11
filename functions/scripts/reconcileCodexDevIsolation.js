@@ -23,6 +23,11 @@ const emptyStats = () => ({
   dmThreads: 0,
   threadIndexes: 0,
   linkedModerationExamples: 0,
+  blockedFingerprintUsers: 0,
+  blockedFingerprints: 0,
+  supportDecisionThreads: 0,
+  supportDecisionMessages: 0,
+  contributorContentRequests: 0,
   claimVotes: 0,
   claimVoteRequestsRecomputed: 0,
   manualReviewRequired: [],
@@ -32,6 +37,9 @@ const emptyStats = () => ({
 const uniqueDocs = (docs = []) => [...new Map(docs.map((doc) => [doc.ref?.path || doc.id, doc])).values()];
 
 const queryDocs = async (query) => (await query.get()).docs || [];
+
+const timestampMillis = (value) => value?.toMillis?.()
+  ?? Number(value?.seconds ?? value?._seconds ?? value ?? 0) * 1000;
 
 export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = false, env = process.env, uid = null, uidSource = null, skipStorage = false } = {}) => {
   if (!db) throw new Error('Firestore db is verplicht.');
@@ -95,6 +103,55 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       await deleteRef(example.ref, 'moderationExamples', { recursive: true });
     }
 
+    // Downstream report cleanup is provenance based: ordinary targets are never
+    // selected by UID, only entries explicitly linked to a proven Codex case.
+    for (const moderation of await queryDocs(db.collection('userModeration'))) {
+      const data = moderation.data() || {};
+      const blocked = Array.isArray(data.blockedFingerprints) ? data.blockedFingerprints : [];
+      const retained = blocked.filter((entry) => !reviewCaseIds.has(entry?.reviewCaseId));
+      const removed = blocked.length - retained.length;
+      if (!removed) continue;
+      stats.blockedFingerprintUsers += 1;
+      stats.blockedFingerprints += removed;
+      stats.deletes += removed;
+      if (apply) await moderation.ref.set({ blockedFingerprints: retained, updatedAt: new Date() }, { merge: true });
+    }
+
+    for (const thread of await queryDocs(db.collection('threads'))) {
+      const threadData = thread.data() || {};
+      if (threadData.type !== 'support') continue;
+      const messagesSnap = await thread.ref.collection('messages').get();
+      const messages = messagesSnap.docs || [];
+      const matching = messages.filter((message) => {
+        const data = message.data() || {};
+        return data.type === 'moderation_decision' && reviewCaseIds.has(data.metadata?.reviewCaseId || data.reviewCaseId);
+      });
+      if (!matching.length) continue;
+      stats.supportDecisionThreads += 1;
+      stats.supportDecisionMessages += matching.length;
+      stats.deletes += matching.length;
+      if (apply) {
+        await Promise.all(matching.map((message) => message.ref.delete()));
+        const removedPaths = new Set(matching.map((message) => message.ref.path));
+        const remaining = messages.filter((message) => !removedPaths.has(message.ref.path))
+          .sort((left, right) => timestampMillis(right.data()?.createdAt) - timestampMillis(left.data()?.createdAt));
+        const latest = remaining[0]?.data() || null;
+        const patch = {
+          lastMessageAt: latest?.createdAt || null,
+          lastSenderUid: latest?.senderUid ?? latest?.senderId ?? null,
+          updatedAt: new Date(),
+        };
+        if ('lastMessageText' in threadData) patch.lastMessageText = latest?.text || latest?.message || '';
+        if ('lastMessagePreview' in threadData) patch.lastMessagePreview = latest?.text || latest?.message || '';
+        await thread.ref.set(patch, { merge: true });
+        if (threadData.userUid) {
+          const indexRef = db.collection('users').doc(threadData.userUid).collection('threadIndex').doc(thread.id);
+          const indexSnap = await indexRef.get();
+          if (indexSnap.exists) await indexRef.set({ lastMessageAt: latest?.createdAt || null }, { merge: true });
+        }
+      }
+    }
+
     const contributors = await queryDocs(db.collection('contributors').where('createdByUid', '==', uid));
     const contributorIds = new Set(contributors.map((doc) => doc.id));
     const aliasQueries = await Promise.all([
@@ -108,6 +165,14 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
     for (const alias of uniqueDocs(aliasQueries.flat())) await deleteRef(alias.ref, 'contributorAliases');
     for (const invite of uniqueDocs(inviteQueries.flat())) await deleteRef(invite.ref, 'claimInvites');
     for (const contributor of contributors) await deleteRef(contributor.ref, 'contributors', { recursive: true });
+
+    const contentRequestQueries = await Promise.all([
+      queryDocs(db.collection('contributorContentRequests').where('requesterUid', '==', uid)),
+      queryDocs(db.collection('contributorContentRequests').where('createdByUid', '==', uid)),
+    ]);
+    for (const request of uniqueDocs(contentRequestQueries.flat())) {
+      await deleteRef(request.ref, 'contributorContentRequests', { recursive: true });
+    }
 
     const claimRequests = await queryDocs(db.collection('claimRequests').where('requestedByUid', '==', uid));
     for (const claimRequest of claimRequests) {

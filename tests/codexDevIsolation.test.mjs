@@ -125,6 +125,14 @@ test('trusted account lifecycle endpoints reject Codex before destructive work',
   assert.ok(lifecycle.indexOf('isCodexDevToken(decoded)') < lifecycle.indexOf('userRef.delete()'));
 });
 
+test('client blocks Codex contributor content requests before production writes', async () => {
+  const source = await fs.readFile(new URL('../src/firebase.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export const createContributorContentRequest');
+  const end = source.indexOf('\n};', start);
+  const implementation = source.slice(start, end);
+  assert.ok(implementation.indexOf('isCodexDevUser(user)') < implementation.indexOf('addDoc('));
+});
+
 test('operational cleanup recursively removes all selected Codex post trees only', async () => {
   const paths = new Set(['codexDevPosts/one', 'codexDevPosts/one/comments/a', 'codexDevPosts/two', 'codexDevPosts/two/likes/codex', 'posts/ordinary']);
   const docs = ['codexDevPosts/one', 'codexDevPosts/two'].map((path) => ({ ref: { path } }));

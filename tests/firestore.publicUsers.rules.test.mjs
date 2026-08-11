@@ -2704,6 +2704,17 @@ async function run() {
       updatedAt: serverTimestamp(),
     }));
 
+    await assertFails(setDoc(doc(codexDevDb, 'contributorContentRequests', 'codex_request'), {
+      contributorId: 'claimed_contributor',
+      postId: 'safe_correction_ok',
+      requestType: 'hide',
+      reason: 'Test traffic must stay isolated.',
+      status: 'pending',
+      requesterUid: 'codex-dev-user',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+
     await assertFails(setDoc(doc(otherDb, 'contributorContentRequests', 'spoofed_request'), {
       contributorId: 'claimed_contributor',
       postId: 'safe_correction_ok',

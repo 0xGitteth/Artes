@@ -1281,6 +1281,7 @@ service cloud.firestore {
 
     match /contributorContentRequests/{requestId} {
       allow create: if isSignedIn()
+        && !isCodexDev()
         && onlyKeys(['contributorId', 'postId', 'requestType', 'reason', 'status', 'requesterUid', 'createdAt', 'updatedAt'])
         && request.resource.data.requesterUid == request.auth.uid
         && request.resource.data.contributorId is string

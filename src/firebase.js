@@ -432,6 +432,9 @@ export const resetPersonalOnboardingToIdCheck = async () => {
 export const createContributorContentRequest = async ({ contributorId, postId, requestType, reason = '' }) => {
   const user = await waitForAuthReady();
   if (!user?.uid) throw new Error('Not signed in');
+  if (await isCodexDevUser(user)) {
+    throw new Error('Codex Dev cannot create production contributor content requests');
+  }
   const allowedTypes = new Set(['remove', 'hide', 'correction']);
   const normalizedType = allowedTypes.has(requestType) ? requestType : 'correction';
   return addDoc(collection(getFirebaseDb(), CLAIMS_COLLECTIONS.contributorContentRequests), {

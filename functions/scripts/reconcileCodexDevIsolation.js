@@ -20,6 +20,7 @@ const emptyStats = () => ({
   outgoingFollows: 0,
   followCounterRepairs: 0,
   contributorAliases: 0,
+  preservedContributorAliases: 0,
   claimInvites: 0,
   claimRequests: 0,
   claimVouches: 0,
@@ -179,6 +180,7 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
 
     const contributors = await queryDocs(db.collection('contributors').where('createdByUid', '==', uid));
     const deletableContributors = [];
+    const preservedContributorIds = new Set();
     for (const contributor of contributors) {
       const data = contributor.data() || {};
       const claimedByUid = data.claimedByUid || null;
@@ -188,6 +190,7 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       const legitimateOwner = Boolean(ordinaryOwnerUid)
         && (ownerSnap?.data()?.contributorId === contributor.id || referencedOwner || data.status === 'claimed');
       if (legitimateOwner) {
+        preservedContributorIds.add(contributor.id);
         stats.preservedContributors += 1;
         stats.manualReviewRequired.push({ reason: 'codex_created_contributor_claimed_by_real_user', contributorId: contributor.id, claimedByUid: ordinaryOwnerUid, createdByUid: data.createdByUid, status: data.status || null });
       } else {
@@ -198,12 +201,18 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
     const aliasQueries = await Promise.all([
       queryDocs(db.collection('contributorAliases').where('createdByUid', '==', uid)),
       ...[...contributorIds].map((id) => queryDocs(db.collection('contributorAliases').where('contributorId', '==', id))),
+      ...[...preservedContributorIds].map((id) => queryDocs(db.collection('contributorAliases').where('contributorId', '==', id))),
     ]);
     const inviteQueries = await Promise.all([
       queryDocs(db.collection('claimInvites').where('createdByUid', '==', uid)),
       ...[...contributorIds].map((id) => queryDocs(db.collection('claimInvites').where('contributorId', '==', id))),
     ]);
-    for (const alias of uniqueDocs(aliasQueries.flat())) await deleteRef(alias.ref, 'contributorAliases');
+    const aliases = uniqueDocs(aliasQueries.flat());
+    const preservedAliases = aliases.filter((alias) => preservedContributorIds.has(alias.data()?.contributorId));
+    stats.preservedContributorAliases += preservedAliases.length;
+    for (const alias of aliases.filter((candidate) => !preservedContributorIds.has(candidate.data()?.contributorId))) {
+      await deleteRef(alias.ref, 'contributorAliases');
+    }
     for (const invite of uniqueDocs(inviteQueries.flat())) await deleteRef(invite.ref, 'claimInvites');
     for (const contributor of deletableContributors) await deleteRef(contributor.ref, 'contributors', { recursive: true });
 

@@ -136,6 +136,47 @@ test('every automatic claim approval path checks persisted claimant registry mem
   }
 });
 
+test('website proof failure persistence cannot recreate or mutate a quarantined claim', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export const verifyWebsiteClaimProof');
+  const end = source.indexOf('export const mergeContributors', start);
+  const implementation = source.slice(start, end);
+  const helperStart = implementation.indexOf('const persistWebsiteProofFailure');
+  const fetchStart = implementation.indexOf('const url = buildWebsiteClaimUrl', helperStart);
+  const helper = implementation.slice(helperStart, fetchStart);
+
+  assert.ok(helper.indexOf('transaction.get(requestRef)') < helper.indexOf('if (!freshRequestSnap.exists) return false'));
+  assert.ok(helper.indexOf('freshData?.requestedByUid !== request.auth.uid') < helper.indexOf('transaction.update(requestRef, updates)'));
+  assert.ok(helper.indexOf("freshData?.status !== 'pending'") < helper.indexOf('transaction.update(requestRef, updates)'));
+  assert.ok(helper.indexOf('isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })')
+    < helper.indexOf('transaction.update(requestRef, updates)'));
+
+  const failureBranches = implementation.slice(fetchStart, implementation.indexOf('let resolvedStatus', fetchStart));
+  assert.equal((failureBranches.match(/persistWebsiteProofFailure\(\{/g) || []).length, 2,
+    'network and invalid-content failures use authoritative persistence');
+  assert.doesNotMatch(failureBranches, /requestRef\.set\(/,
+    'post-fetch failure handling never recreates a missing claim request');
+});
+
+test('publishNow and repairPublished recheck historical registry in the publication transaction', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export const userModerationAction');
+  const end = source.indexOf('export const moderatorDecide', start);
+  const implementation = source.slice(start, end);
+  const publicationEnd = implementation.indexOf("if (action === 'saveDraft')");
+  const publicationStart = implementation.lastIndexOf("action === 'publishNow' || action === 'repairPublished'", publicationEnd);
+  const publication = implementation.slice(publicationStart, publicationEnd);
+  const transactionStart = publication.indexOf('db.runTransaction(async (transaction) =>');
+  const registryGuard = publication.indexOf('isKnownCodexDevActorUid({ db, uid: userId, transaction })', transactionStart);
+
+  assert.notEqual(publicationStart, -1, 'both publication actions use the guarded branch');
+  assert.ok(transactionStart < registryGuard, 'registry is read from the publication transaction snapshot');
+  assert.ok(registryGuard < publication.indexOf('transaction.create(postRef'));
+  assert.ok(registryGuard < publication.indexOf('transaction.set('));
+  assert.match(publication, /collection\(isCodexDevUid\(userId\) \? 'codexDevPosts' : 'posts'\)/,
+    'only current canonical identity selects codexDevPosts');
+});
+
 test('moderateImage derives all quarantine decisions from production-deny identity', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));

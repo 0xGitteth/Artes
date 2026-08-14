@@ -3964,6 +3964,12 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       }
 
       await db.runTransaction(async (transaction) => {
+        if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) {
+          const error = new Error('Codex Dev production publication is isolated');
+          error.status = 403;
+          error.code = 'codex-dev-production-denied';
+          throw error;
+        }
         const postRef = db.collection(isCodexDevUid(userId) ? 'codexDevPosts' : 'posts').doc(uploadId);
         const userRef = db.collection('users').doc(userId);
         const latestUserSnap = await transaction.get(userRef);
@@ -4783,6 +4789,21 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
     throw new HttpsError('failed-precondition', 'Website proof is not initialized');
   }
 
+  const persistWebsiteProofFailure = async (updates) => db.runTransaction(async (transaction) => {
+    const freshRequestSnap = await transaction.get(requestRef);
+    if (!freshRequestSnap.exists) return false;
+    const freshData = freshRequestSnap.data() || {};
+    if (freshData?.requestedByUid !== request.auth.uid) {
+      throw new HttpsError('permission-denied', 'Not allowed to verify website proof');
+    }
+    if (freshData?.status !== 'pending') return false;
+    if (await isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })) {
+      return false;
+    }
+    transaction.update(requestRef, updates);
+    return true;
+  });
+
   const url = buildWebsiteClaimUrl(proofPayload.domain);
   let responseBody = '';
   try {
@@ -4794,7 +4815,7 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
       maxRedirects: websiteProofMaxRedirects,
     });
   } catch (error) {
-    await requestRef.set({
+    await persistWebsiteProofFailure({
       proofData: {
         website: {
           lastCheckedAt: FieldValue.serverTimestamp(),
@@ -4803,7 +4824,7 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
         },
       },
       updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    });
     throw new HttpsError('failed-precondition', 'Website verificatie mislukt.');
   }
 
@@ -4817,7 +4838,7 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
   });
 
   if (!tokenCheck.ok) {
-    await requestRef.set({
+    await persistWebsiteProofFailure({
       proofData: {
         website: {
           lastCheckedAt: FieldValue.serverTimestamp(),
@@ -4827,7 +4848,7 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
         websiteVerified: false,
       },
       updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    });
     const errorMessage = tokenCheck.reason === 'expired'
       ? 'Website token is verlopen.'
       : 'Website token niet gevonden.';

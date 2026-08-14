@@ -6,6 +6,7 @@ import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { isCodexDevForProductionDeny } from "./codexDevIdentity.js";
+import { isKnownCodexDevActorUid } from "./codexDevActorRegistry.js";
 
 if (!getApps().length) initializeApp();
 
@@ -39,21 +40,32 @@ export const deleteOnboardingAccount = onRequest({ region: "europe-west4" }, (re
       if (!uid) {
         return res.status(400).json({ error: "Missing user id" });
       }
+      if (await isKnownCodexDevActorUid({ db, uid })) {
+        return res.status(403).json({ error: "Codex Dev identity cannot be deleted" });
+      }
 
       const userRef = db.collection("users").doc(uid);
       const publicUserRef = db.collection("publicUsers").doc(uid);
-      const userSnapshot = await userRef.get();
-      if (!userSnapshot.exists) {
-        return res.status(404).json({ error: "User profile not found" });
-      }
-      if (userSnapshot.get("onboardingComplete") === true) {
-        return res.status(403).json({ error: "Onboarding already completed" });
-      }
-
-      await Promise.all([
-        userRef.delete().catch(() => null),
-        publicUserRef.delete().catch(() => null),
-      ]);
+      await db.runTransaction(async (transaction) => {
+        if (await isKnownCodexDevActorUid({ db, uid, transaction })) {
+          const error = new Error("Codex Dev identity cannot be deleted");
+          error.status = 403;
+          throw error;
+        }
+        const userSnapshot = await transaction.get(userRef);
+        if (!userSnapshot.exists) {
+          const error = new Error("User profile not found");
+          error.status = 404;
+          throw error;
+        }
+        if (userSnapshot.get("onboardingComplete") === true) {
+          const error = new Error("Onboarding already completed");
+          error.status = 403;
+          throw error;
+        }
+        transaction.delete(userRef);
+        transaction.delete(publicUserRef);
+      });
 
       await auth.deleteUser(uid);
 
@@ -61,7 +73,7 @@ export const deleteOnboardingAccount = onRequest({ region: "europe-west4" }, (re
     } catch (e) {
       logger.error("deleteOnboardingAccount failed", e);
       const message = e?.message || "Unauthorized";
-      return res.status(401).json({ error: message });
+      return res.status(e?.status || 401).json({ error: message });
     }
   });
 });

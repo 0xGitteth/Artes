@@ -42,7 +42,13 @@ import {
   isCodexDevUid,
   resolveCodexDevUid,
 } from './codexDevIdentity.js';
-import { ensureCodexDevActorRegistered, isKnownCodexDevActorUid } from './codexDevActorRegistry.js';
+import {
+  acquireCodexDevMergeFence,
+  assertAndRenewCodexDevMergeFence,
+  ensureCodexDevActorRegistered,
+  isKnownCodexDevActorUid,
+  releaseCodexDevMergeFence,
+} from './codexDevActorRegistry.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
@@ -507,7 +513,11 @@ const buildContributorMergePostUpdate = (postData, primaryContributorId, seconda
   return { changed, updates };
 };
 
-const assertMergeActorAllowed = async ({ transaction, denyActorUid }) => {
+const assertMergeActorAllowed = async ({ transaction, denyActorUid, mergeFenceToken = null }) => {
+  if (denyActorUid && mergeFenceToken) {
+    await assertAndRenewCodexDevMergeFence({ db, uid: denyActorUid, token: mergeFenceToken, transaction });
+    return;
+  }
   if (denyActorUid && await isKnownCodexDevActorUid({ db, uid: denyActorUid, transaction })) {
     const error = new Error('Codex Dev contributor claims are isolated.');
     error.status = 403;
@@ -515,7 +525,7 @@ const assertMergeActorAllowed = async ({ transaction, denyActorUid }) => {
   }
 };
 
-const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId, denyActorUid = null) => {
+const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId, denyActorUid = null, mergeFenceToken = null) => {
   let updatedPosts = 0;
   let lastDoc = null;
   let hasMore = true;
@@ -535,7 +545,7 @@ const updatePostsForContributorMerge = async (primaryContributorId, secondaryCon
     let pageUpdatedPosts = 0;
     await db.runTransaction(async (transaction) => {
       pageUpdatedPosts = 0;
-      await assertMergeActorAllowed({ transaction, denyActorUid });
+      await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
       const freshDocs = [];
       for (const docSnap of snapshot.docs) {
         const freshSnap = await transaction.get(docSnap.ref);
@@ -556,7 +566,7 @@ const updatePostsForContributorMerge = async (primaryContributorId, secondaryCon
   return updatedPosts;
 };
 
-const moveContributorAliases = async (primaryContributorId, secondaryContributorId, denyActorUid = null) => {
+const moveContributorAliases = async (primaryContributorId, secondaryContributorId, denyActorUid = null, mergeFenceToken = null) => {
   let movedAliases = 0;
   let skippedAliases = 0;
   let lastDoc = null;
@@ -579,7 +589,7 @@ const moveContributorAliases = async (primaryContributorId, secondaryContributor
     await db.runTransaction(async (transaction) => {
       pageMovedAliases = 0;
       pageSkippedAliases = 0;
-      await assertMergeActorAllowed({ transaction, denyActorUid });
+      await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
       const freshDocs = [];
       for (const docSnap of snapshot.docs) {
         const freshSnap = await transaction.get(docSnap.ref);
@@ -608,6 +618,7 @@ const mergeContributorsInternal = async ({
   moderatorEmail,
   source,
   denyActorUid = null,
+  mergeFenceToken = null,
 }) => {
   if (!primaryContributorId || !secondaryContributorId) {
     const error = new Error('Missing contributor ids');
@@ -630,11 +641,11 @@ const mergeContributorsInternal = async ({
     throw error;
   }
 
-  const updatedPosts = await updatePostsForContributorMerge(primaryContributorId, secondaryContributorId, denyActorUid);
-  const aliasResult = await moveContributorAliases(primaryContributorId, secondaryContributorId, denyActorUid);
+  const updatedPosts = await updatePostsForContributorMerge(primaryContributorId, secondaryContributorId, denyActorUid, mergeFenceToken);
+  const aliasResult = await moveContributorAliases(primaryContributorId, secondaryContributorId, denyActorUid, mergeFenceToken);
 
   await db.runTransaction(async (transaction) => {
-    await assertMergeActorAllowed({ transaction, denyActorUid });
+    await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
     transaction.set(secondaryRef, {
       status: 'merged',
       mergedInto: primaryContributorId,
@@ -2182,9 +2193,32 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
     const recipientPublic = recipientPublicSnap.data() || {};
     const senderTitle = resolveDisplayTitle(recipientPublic);
     const recipientTitle = resolveDisplayTitle(senderPublic);
-    let createdCanonicalThread = false;
-    try {
-      await canonicalRef.create({
+    const senderIndexRef = db.collection('users').doc(decoded.uid).collection('threadIndex').doc(canonicalThreadId);
+    const recipientIndexRef = db.collection('users').doc(recipientUid).collection('threadIndex').doc(canonicalThreadId);
+    await db.runTransaction(async (transaction) => {
+      const [senderDenied, recipientDenied] = await Promise.all([
+        isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction }),
+        isKnownCodexDevActorUid({ db, uid: recipientUid, transaction }),
+      ]);
+      if (senderDenied || recipientDenied) {
+        const error = new Error('Codex Dev direct messages are isolated.');
+        error.status = 403;
+        throw error;
+      }
+      const existingCanonicalSnap = await transaction.get(canonicalRef);
+      if (existingCanonicalSnap.exists) {
+        const existingData = existingCanonicalSnap.data() || {};
+        const existingParticipants = Array.isArray(existingData?.participantUids)
+          ? [...existingData.participantUids].sort()
+          : [];
+        if (existingData?.type !== 'dm' || !arraysEqual(existingParticipants, participantPair)) {
+          const error = new Error('Canonical DM thread id conflict');
+          error.status = 409;
+          throw error;
+        }
+        return;
+      }
+      transaction.create(canonicalRef, {
         type: 'dm',
         participantUids: [decoded.uid, recipientUid],
         dmKey,
@@ -2194,59 +2228,23 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
         lastMessageText: '',
         lastSenderUid: decoded.uid,
       });
-      createdCanonicalThread = true;
-    } catch (error) {
-      const errorCode = error?.code;
-      const alreadyExists = errorCode === 6 || errorCode === 'already-exists' || errorCode === 'ALREADY_EXISTS';
-      if (!alreadyExists) throw error;
-    }
-
-    if (!createdCanonicalThread) {
-      const postCreateSnap = await canonicalRef.get();
-      const postCreateData = postCreateSnap.exists ? (postCreateSnap.data() || {}) : null;
-      const postCreateParticipants = Array.isArray(postCreateData?.participantUids)
-        ? [...postCreateData.participantUids].sort()
-        : [];
-      const canonicalValid = Boolean(
-        postCreateData
-        && postCreateData?.type === 'dm'
-        && arraysEqual(postCreateParticipants, participantPair)
-      );
-      if (canonicalValid) {
-        res.status(200).json({ threadId: canonicalThreadId });
-        return;
-      }
-      const conflictError = new Error('Canonical DM thread id conflict');
-      conflictError.status = 409;
-      throw conflictError;
-    }
-
-    const threadId = canonicalThreadId;
-
-    await Promise.all([
-      db.collection('users').doc(decoded.uid).collection('threadIndex').doc(threadId).set(
-        {
-          threadId,
+      transaction.set(senderIndexRef, {
+          threadId: canonicalThreadId,
           pinned: false,
           hidden: false,
           displayTitle: senderTitle,
           lastMessageAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      ),
-      db.collection('users').doc(recipientUid).collection('threadIndex').doc(threadId).set(
-        {
-          threadId,
+        }, { merge: true });
+      transaction.set(recipientIndexRef, {
+          threadId: canonicalThreadId,
           pinned: false,
           hidden: false,
           displayTitle: recipientTitle,
           lastMessageAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      ),
-    ]);
+        }, { merge: true });
+    });
 
-    res.status(200).json({ threadId });
+    res.status(200).json({ threadId: canonicalThreadId });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create dm thread' });
@@ -2259,6 +2257,9 @@ export const resetPersonalOnboarding = onCall({ region: 'europe-west4' }, async 
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
   if (isCodexDevForProductionDeny({ uid, ...(request.auth?.token || {}) })) {
+    throw new HttpsError('permission-denied', 'Codex Dev identity cannot be reset.');
+  }
+  if (await isKnownCodexDevActorUid({ db, uid })) {
     throw new HttpsError('permission-denied', 'Codex Dev identity cannot be reset.');
   }
   return resetPersonalOnboardingAtomically({ db, uid, onboardingStep: 2 });
@@ -2634,6 +2635,10 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
       res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
       return;
     }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
+      return;
+    }
     logger.info('sendSupportMessage: Token verified', { uid: decoded.uid });
     
     const body = parseJsonBody(req);
@@ -2654,6 +2659,11 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
 
     const threadRef = db.collection('threads').doc(threadId);
     await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev support traffic is isolated.');
+        error.status = 403;
+        throw error;
+      }
       const threadSnap = await transaction.get(threadRef);
       if (!threadSnap.exists) {
         const error = new Error('Thread not found');
@@ -2738,17 +2748,6 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
         updatedAt: FieldValue.serverTimestamp(),
       });
     });
-
-    await threadRef.set(
-      {
-        hasUserMessage: true,
-        userMaySend: false,
-        userCanSend: false,
-        userMessageAllowance: 0,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
 
     logger.info('sendSupportMessage: Message sent successfully', { uid: decoded.uid });
     res.status(200).json({ ok: true });
@@ -4457,6 +4456,7 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
   if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4494,7 +4494,14 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
   const token = crypto.randomBytes(18).toString('hex');
   const tokenHash = hashEmailProofToken(token);
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + emailProofExpiryMs));
-  await requestRef.set({
+  await db.runTransaction(async (transaction) => {
+    const freshRequestSnap = await transaction.get(requestRef);
+    if (!freshRequestSnap.exists) throw new HttpsError('not-found', 'Claim request not found');
+    const freshData = freshRequestSnap.data() || {};
+    if (freshData?.requestedByUid !== request.auth.uid) throw new HttpsError('permission-denied', 'Not allowed to start email proof');
+    if (await isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    if (freshData?.status !== 'pending') throw new HttpsError('failed-precondition', 'Claim request is not pending');
+    transaction.set(requestRef, {
     proofData: {
       email: {
         email,
@@ -4508,7 +4515,8 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
       emailVerifiedAt: null,
     },
     updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+    }, { merge: true });
+  });
 
   return {
     token,
@@ -4523,6 +4531,7 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
   if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4550,7 +4559,14 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
   const token = crypto.randomBytes(18).toString('hex');
   const tokenHash = hashWebsiteProofToken(token);
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + websiteProofExpiryMs));
-  await requestRef.set({
+  await db.runTransaction(async (transaction) => {
+    const freshRequestSnap = await transaction.get(requestRef);
+    if (!freshRequestSnap.exists) throw new HttpsError('not-found', 'Claim request not found');
+    const freshData = freshRequestSnap.data() || {};
+    if (freshData?.requestedByUid !== request.auth.uid) throw new HttpsError('permission-denied', 'Not allowed to start website proof');
+    if (await isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    if (freshData?.status !== 'pending') throw new HttpsError('failed-precondition', 'Claim request is not pending');
+    transaction.set(requestRef, {
     proofData: {
       website: {
         domain: websiteAlias.domain,
@@ -4565,7 +4581,8 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
       websiteVerifiedAt: null,
     },
     updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+    }, { merge: true });
+  });
 
   const url = buildWebsiteClaimUrl(websiteAlias.domain);
   return {
@@ -4961,18 +4978,21 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
         res.status(400).json({ error: 'Secondary contributor is required for merge' });
         return;
       }
+      const mergeFenceToken = crypto.randomUUID();
+      await acquireCodexDevMergeFence({ db, uid: requestedByUid, token: mergeFenceToken });
       const mergeResult = await mergeContributorsInternal({
         primaryContributorId: contributorId,
         secondaryContributorId,
         moderatorEmail: email,
         source: 'claimRequest',
         denyActorUid: requestedByUid,
+        mergeFenceToken,
       });
       await db.runTransaction(async (transaction) => {
         const freshRequestSnap = await transaction.get(requestRef);
         if (!freshRequestSnap.exists) return;
         const freshRequestedByUid = freshRequestSnap.data()?.requestedByUid || null;
-        await assertMergeActorAllowed({ transaction, denyActorUid: freshRequestedByUid });
+        await assertMergeActorAllowed({ transaction, denyActorUid: freshRequestedByUid, mergeFenceToken });
         transaction.set(db.collection('users').doc(freshRequestedByUid), {
           contributorId,
           updatedAt: FieldValue.serverTimestamp(),
@@ -4987,6 +5007,7 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
           updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
       });
+      await releaseCodexDevMergeFence({ db, uid: requestedByUid, token: mergeFenceToken });
       res.status(200).json({ ok: true, status: 'approved', merge: mergeResult });
       return;
     }

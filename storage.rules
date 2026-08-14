@@ -93,6 +93,7 @@ service firebase.storage {
       allow read: if isActiveManagedProfile(profileId) || isManagedProfileOwner(ownerUid, profileId);
       allow write: if isVerifiedUser()
         && isManagedProfileOwner(ownerUid, profileId)
+        && !isKnownCodexProductionDeniedUid(ownerUid)
         && fileName == 'avatar.jpg'
         && isValidProfileImageUpload(fileName);
     }

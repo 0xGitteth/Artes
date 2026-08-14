@@ -8,6 +8,9 @@ service cloud.firestore {
     match /codexDevActorRegistry/{uid} {
       allow read, write: if false;
     }
+    match /codexDevActorMergeFences/{uid} {
+      allow read, write: if false;
+    }
     function isVerifiedUser() {
       return request.auth != null && request.auth.token.email_verified == true;
     }

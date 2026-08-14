@@ -14,7 +14,12 @@ import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFir
 import { findBestReusableAcrossPages, findReusableAcrossPages, isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
 import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
-import { ensureCodexDevActorRegistered, isKnownCodexDevActorUid } from '../functions/codexDevActorRegistry.js';
+import {
+  acquireCodexDevMergeFence,
+  ensureCodexDevActorRegistered,
+  isKnownCodexDevActorUid,
+  releaseCodexDevMergeFence,
+} from '../functions/codexDevActorRegistry.js';
 
 test('canonical identity requires the configured uid and both trusted claims', () => {
   const env = { CODEX_DEV_UID: 'isolated-codex' };
@@ -38,9 +43,13 @@ test('production denial is broader than strict Codex privilege identity', () => 
 test('historical actor registry is deny-only and ignores spoofed profile markers', async () => {
   const docs = new Map();
   const db = { collection: (collection) => ({ doc: (uid) => ({
+    path: `${collection}/${uid}`,
     get: async () => ({ exists: docs.has(`${collection}/${uid}`) }),
     set: async (data) => docs.set(`${collection}/${uid}`, data),
-  }) }) };
+  }) }), runTransaction: async (callback) => callback({
+    get: (ref) => ref.get(),
+    set: (ref, data) => docs.set(ref.path, data),
+  }) };
   const env = { CODEX_DEV_UID: 'current-codex' };
   assert.equal(await isKnownCodexDevActorUid({ db, uid: 'current-codex', env }), true);
   assert.equal(await isKnownCodexDevActorUid({ db, uid: 'retired-codex', env }), false);
@@ -56,12 +65,41 @@ test('historical actor registry is deny-only and ignores spoofed profile markers
     'private marker data is not consulted');
 });
 
+test('merge-wide fence prevents mid-merge registration and releases after successful completion', async () => {
+  const docs = new Map();
+  const refFor = (path) => ({
+    path,
+    get: async () => ({ exists: docs.has(path), data: () => docs.get(path) }),
+  });
+  const db = {
+    collection: (collection) => ({ doc: (uid) => refFor(`${collection}/${uid}`) }),
+    runTransaction: async (callback) => callback({
+      get: (ref) => ref.get(),
+      set: (ref, data, options) => docs.set(ref.path, { ...(options?.merge ? docs.get(ref.path) || {} : {}), ...data }),
+      delete: (ref) => docs.delete(ref.path),
+    }),
+  };
+  await acquireCodexDevMergeFence({ db, uid: 'merge-user', token: 'merge-token' });
+  await assert.rejects(
+    ensureCodexDevActorRegistered({ db, uid: 'merge-user', now: 1100 }),
+    (error) => error.code === 'codex-merge-fence-active' && error.retryable === true,
+  );
+  assert.equal(docs.has('codexDevActorRegistry/merge-user'), false, 'registration cannot appear halfway through merge');
+  await releaseCodexDevMergeFence({ db, uid: 'merge-user', token: 'merge-token' });
+  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'merge-user', now: 1200 }), true);
+  assert.equal(docs.has('codexDevActorRegistry/merge-user'), true, 'registration succeeds after merge completion');
+});
+
 test('persisted retired actor checks precede all DM and claim mutations', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const createDm = section('export const createDmThread', 'export const createDevCodexToken');
   assert.ok(createDm.indexOf('await isKnownCodexDevActorUid({ db, uid: decoded.uid })') < createDm.indexOf('canonicalRef.get()'));
   assert.ok(createDm.indexOf('await isKnownCodexDevActorUid({ db, uid: recipientUid })') < createDm.indexOf('canonicalRef.get()'));
+  const dmTransaction = createDm.indexOf('db.runTransaction');
+  assert.ok(dmTransaction < createDm.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })'));
+  assert.ok(dmTransaction < createDm.indexOf('transaction.create(canonicalRef'));
+  assert.ok(createDm.indexOf('transaction.create(canonicalRef') < createDm.indexOf('transaction.set(senderIndexRef'));
   const sendDm = section('export const sendDmMessage', 'export const sendSupportMessage');
   assert.match(sendDm, /const codexScanParticipants = \[\.\.\.new Set/);
   assert.match(sendDm, /const authorizedParticipants = \(participantUids \|\| legacyParticipants\)/);
@@ -165,6 +203,26 @@ test('moderation and moderator claim writes serialize registry reads with produc
   assert.match(approve, /denyActorUid: requestedByUid/);
   assert.match(approve, /freshRequestSnap[^]*isKnownCodexDevActorUid\(\{ db, uid: freshRequestedByUid, transaction \}\)/);
   assert.match(source, /assertMergeActorAllowed[^]*updatePostsForContributorMerge[^]*moveContributorAliases/);
+});
+
+test('reviewed actor-owned mutations recheck historical registry before writes', async () => {
+  const index = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const lifecycle = await fs.readFile(new URL('../functions/accountLifecycle.js', import.meta.url), 'utf8');
+  const unpublish = await fs.readFile(new URL('../functions/publicProfileUnpublish.js', import.meta.url), 'utf8');
+  const section = (source, start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const support = section(index, 'export const sendSupportMessage', 'export const reportPost');
+  assert.ok(support.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })') < support.indexOf('transaction.set(messageRef'));
+  for (const [start, end] of [
+    ['export const startEmailClaimProof', 'export const startWebsiteClaimProof'],
+    ['export const startWebsiteClaimProof', 'export const verifyEmailClaimProof'],
+  ]) {
+    const proof = section(index, start, end);
+    assert.ok(proof.indexOf('isKnownCodexDevActorUid({ db, uid: request.auth.uid })') < proof.indexOf('transaction.set(requestRef'));
+    assert.ok(proof.indexOf('requestedByUid !== request.auth.uid') < proof.indexOf('transaction.set(requestRef'));
+  }
+  assert.match(section(index, 'export const resetPersonalOnboarding', 'export const createDevCodexToken'), /isKnownCodexDevActorUid\(\{ db, uid \}\)/);
+  assert.ok(lifecycle.indexOf('isKnownCodexDevActorUid({ db, uid, transaction })') < lifecycle.indexOf('transaction.delete(userRef)'));
+  assert.ok(unpublish.indexOf('isKnownCodexDevActorUid({ db, uid, transaction })') < unpublish.indexOf('transaction.set(privateRef'));
 });
 
 test('historical private markers never establish destructive identity', () => {
@@ -305,7 +363,7 @@ test('trusted account lifecycle endpoints reject Codex before destructive work',
   const reset = index.slice(index.indexOf('export const resetPersonalOnboarding'), index.indexOf('export const createDevCodexToken'));
   assert.ok(reset.indexOf('isCodexDevForProductionDeny') < reset.indexOf('resetPersonalOnboardingAtomically'));
   const lifecycle = await fs.readFile(new URL('../functions/accountLifecycle.js', import.meta.url), 'utf8');
-  assert.ok(lifecycle.indexOf('isCodexDevForProductionDeny(decoded)') < lifecycle.indexOf('userRef.delete()'));
+  assert.ok(lifecycle.indexOf('isCodexDevForProductionDeny(decoded)') < lifecycle.indexOf('transaction.delete(userRef)'));
 });
 
 test('client blocks Codex contributor content requests before production writes', async () => {

@@ -319,11 +319,11 @@ assert.ok(
   'existing DM threads are returned before participant availability blocks new threads',
 );
 assert.ok(
-  dmHandler.indexOf('!isAvailablePersonalPublicProfile(senderPublicSnap.data())') < dmHandler.indexOf('await canonicalRef.create'),
+  dmHandler.indexOf('!isAvailablePersonalPublicProfile(senderPublicSnap.data())') < dmHandler.indexOf('transaction.create(canonicalRef'),
   'sender availability is checked before creating a new DM thread',
 );
 assert.ok(
-  dmHandler.indexOf('!isAvailablePersonalPublicProfile(recipientPublicSnap.data())') < dmHandler.indexOf('await canonicalRef.create'),
+  dmHandler.indexOf('!isAvailablePersonalPublicProfile(recipientPublicSnap.data())') < dmHandler.indexOf('transaction.create(canonicalRef'),
   'recipient availability is checked before creating a new DM thread',
 );
 console.log('PASS publicUserPublication.test');

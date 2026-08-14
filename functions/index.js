@@ -2064,7 +2064,9 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       res.status(400).json({ error: 'Invalid recipientUid' });
       return;
     }
-    if (isCodexDevForProductionDeny(decoded) || await isKnownCodexDevActorUid({ db, uid: recipientUid })) {
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })
+      || await isKnownCodexDevActorUid({ db, uid: recipientUid })) {
       res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
       return;
     }
@@ -2495,23 +2497,27 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
       res.status(403).json({ error: 'Cannot send message to system thread' });
       return;
     }
-    const participants = [...new Set([
-      ...(Array.isArray(threadData?.participantUids) ? threadData.participantUids : []),
-      ...(Array.isArray(threadData?.participants) ? threadData.participants : []),
+    const participantUids = Array.isArray(threadData?.participantUids) ? threadData.participantUids : null;
+    const legacyParticipants = Array.isArray(threadData?.participants) ? threadData.participants : [];
+    const codexScanParticipants = [...new Set([
+      ...(participantUids || []),
+      ...legacyParticipants,
     ].filter((uid) => typeof uid === 'string' && uid))];
-    const knownCodexParticipant = (await Promise.all(participants.map((uid) => (
+    const knownCodexParticipant = (await Promise.all(codexScanParticipants.map((uid) => (
       isKnownCodexDevActorUid({ db, uid })
     )))).some(Boolean);
     if (knownCodexParticipant) {
       res.status(403).json({ error: 'Codex Dev direct messages are retired.' });
       return;
     }
-    if (!participants.includes(decoded.uid)) {
+    const authorizedParticipants = (participantUids || legacyParticipants)
+      .filter((uid) => typeof uid === 'string' && uid);
+    if (!authorizedParticipants.includes(decoded.uid)) {
       res.status(403).json({ error: 'Not a participant' });
       return;
     }
 
-    const publicUsers = await Promise.all(participants.map((uid) => fetchPublicUser(uid)));
+    const publicUsers = await Promise.all(authorizedParticipants.map((uid) => fetchPublicUser(uid)));
     const messageRef = threadRef.collection('messages').doc();
     const now = FieldValue.serverTimestamp();
 
@@ -2533,8 +2539,8 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
         },
         { merge: true }
       ),
-      ...participants.map((uid, index) => {
-        const otherIndex = participants[0] === uid ? 1 : 0;
+      ...authorizedParticipants.map((uid) => {
+        const otherIndex = authorizedParticipants[0] === uid ? 1 : 0;
         const otherPublic = publicUsers[otherIndex] || null;
         return db.collection('users').doc(uid).collection('threadIndex').doc(threadId).set(
           {
@@ -4522,6 +4528,9 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
     throw new HttpsError('not-found', 'Claim request not found');
   }
   const requestData = requestSnap.data() || {};
+  if (await isKnownCodexDevActorUid({ db, uid: requestData?.requestedByUid })) {
+    throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  }
   if (requestData?.requestedByUid !== request.auth.uid) {
     throw new HttpsError('permission-denied', 'Not allowed to verify email proof');
   }
@@ -4572,6 +4581,9 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
     const freshSnap = await transaction.get(requestRef);
     if (!freshSnap.exists) return;
     const data = freshSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+      throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    }
     const updates = {
       'proofData.emailVerified': true,
       'proofData.emailVerifiedAt': FieldValue.serverTimestamp(),
@@ -4650,6 +4662,9 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
       throw new HttpsError('not-found', 'Claim request not found');
     }
     const data = requestSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+      throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    }
     if (data?.requestedByUid !== request.auth.uid) {
       throw new HttpsError('permission-denied', 'Not allowed to verify website proof');
     }
@@ -4741,6 +4756,9 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
     const requestSnap = await transaction.get(requestRef);
     if (!requestSnap.exists) return;
     const data = requestSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+      throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    }
     const updates = {
       'proofData.websiteVerified': true,
       'proofData.websiteVerifiedAt': FieldValue.serverTimestamp(),
@@ -5185,6 +5203,11 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
         throw error;
       }
       const data = requestSnap.data();
+      if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+        const error = new Error('Codex Dev contributor claims are isolated.');
+        error.status = 403;
+        throw error;
+      }
       if (!claimStatuses.includes(data?.status)) {
         const error = new Error('Invalid claim request status');
         error.status = 400;

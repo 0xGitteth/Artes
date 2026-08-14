@@ -47,6 +47,9 @@ test('historical actor registry is deny-only and ignores spoofed profile markers
   assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'retired-codex', now: 123 }), true);
   assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'retired-codex', now: 456 }), false);
   assert.equal(await isKnownCodexDevActorUid({ db, uid: 'retired-codex', env }), true);
+  assert.equal(await isKnownCodexDevActorUid({
+    db, uid: 'retired-codex', env, transaction: { get: (ref) => ref.get() },
+  }), true, 'approval transactions read the same deny-only registry');
   assert.equal(isCodexDevToken({ uid: 'retired-codex', devCodex: true, devActor: 'codex' }, env), false,
     'registry membership cannot grant strict privilege');
   assert.equal(await isKnownCodexDevActorUid({ db, uid: 'spoofed-marker-user', env }), false,
@@ -57,10 +60,15 @@ test('persisted retired actor checks precede all DM and claim mutations', async 
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const createDm = section('export const createDmThread', 'export const createDevCodexToken');
+  assert.ok(createDm.indexOf('await isKnownCodexDevActorUid({ db, uid: decoded.uid })') < createDm.indexOf('canonicalRef.get()'));
   assert.ok(createDm.indexOf('await isKnownCodexDevActorUid({ db, uid: recipientUid })') < createDm.indexOf('canonicalRef.get()'));
   const sendDm = section('export const sendDmMessage', 'export const sendSupportMessage');
-  assert.match(sendDm, /threadData\?\.participantUids/);
-  assert.match(sendDm, /threadData\?\.participants/);
+  assert.match(sendDm, /const codexScanParticipants = \[\.\.\.new Set/);
+  assert.match(sendDm, /const authorizedParticipants = \(participantUids \|\| legacyParticipants\)/);
+  assert.match(sendDm, /codexScanParticipants\.map/);
+  assert.match(sendDm, /!authorizedParticipants\.includes\(decoded\.uid\)/);
+  assert.doesNotMatch(sendDm, /!codexScanParticipants\.includes\(decoded\.uid\)/);
+  assert.match(sendDm, /authorizedParticipants\.map\(\(uid\) =>/);
   const dmDeny = sendDm.indexOf('if (knownCodexParticipant)');
   for (const mutation of ["collection('messages').doc()", 'threadRef.set(', "collection('threadIndex')"]) {
     assert.ok(dmDeny < sendDm.indexOf(mutation), `DM denial precedes ${mutation}`);
@@ -70,6 +78,24 @@ test('persisted retired actor checks precede all DM and claim mutations', async 
   const proof = section('export const verifyClaimProofScreenshot', 'export const onFollowingCreated');
   assert.ok(proof.indexOf('await isKnownCodexDevActorUid') < proof.indexOf('visionClient.textDetection'));
   assert.ok(proof.indexOf('await isKnownCodexDevActorUid') < proof.indexOf("collection('contributors')"));
+});
+
+test('every automatic claim approval path checks persisted claimant registry membership first', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const cases = [
+    ['export const verifyEmailClaimProof', 'export const verifyWebsiteClaimProof'],
+    ['export const verifyWebsiteClaimProof', 'export const mergeContributors'],
+    ['export const submitClaimVouch', 'export const expireClaimRequests'],
+  ];
+  for (const [start, end] of cases) {
+    const implementation = section(start, end);
+    const registryGuard = implementation.indexOf('await isKnownCodexDevActorUid');
+    assert.notEqual(registryGuard, -1, `${start} checks persisted claimant registry`);
+    assert.ok(registryGuard < implementation.indexOf('transaction.update'), `${start} denies before transaction writes`);
+    assert.ok(registryGuard < implementation.indexOf("status: 'approved'"), `${start} denies before approval write`);
+    assert.ok(registryGuard < implementation.indexOf('claimedByUid:'), `${start} denies before ownership write`);
+  }
 });
 
 test('moderateImage derives all quarantine decisions from production-deny identity', async () => {

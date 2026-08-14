@@ -66,7 +66,7 @@ export const acquireCodexDevMergeFence = async ({ db, uid, token, nowMs = Date.n
   });
 };
 
-export const assertAndRenewCodexDevMergeFence = async ({ db, uid, token, transaction, nowMs = Date.now() }) => {
+export const readAndValidateCodexDevMergeFence = async ({ db, uid, token, transaction, nowMs = Date.now() }) => {
   const registryRef = db.collection(CODEX_DEV_ACTOR_REGISTRY_COLLECTION).doc(uid);
   const fenceRef = db.collection(CODEX_DEV_ACTOR_MERGE_FENCES_COLLECTION).doc(uid);
   const [registrySnapshot, fenceSnapshot] = await Promise.all([
@@ -78,6 +78,12 @@ export const assertAndRenewCodexDevMergeFence = async ({ db, uid, token, transac
     error.status = 409;
     throw error;
   }
+  return { fenceRef, nowMs };
+};
+
+export const queueCodexDevMergeFenceRenewal = ({ transaction, validation }) => {
+  if (!validation) return;
+  const { fenceRef, nowMs } = validation;
   transaction.set(fenceRef, { leaseExpiresAtMs: nowMs + MERGE_FENCE_LEASE_MS, updatedAt: new Date(nowMs) }, { merge: true });
 };
 

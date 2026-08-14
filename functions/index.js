@@ -44,9 +44,10 @@ import {
 } from './codexDevIdentity.js';
 import {
   acquireCodexDevMergeFence,
-  assertAndRenewCodexDevMergeFence,
   ensureCodexDevActorRegistered,
   isKnownCodexDevActorUid,
+  queueCodexDevMergeFenceRenewal,
+  readAndValidateCodexDevMergeFence,
   releaseCodexDevMergeFence,
 } from './codexDevActorRegistry.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
@@ -515,14 +516,14 @@ const buildContributorMergePostUpdate = (postData, primaryContributorId, seconda
 
 const assertMergeActorAllowed = async ({ transaction, denyActorUid, mergeFenceToken = null }) => {
   if (denyActorUid && mergeFenceToken) {
-    await assertAndRenewCodexDevMergeFence({ db, uid: denyActorUid, token: mergeFenceToken, transaction });
-    return;
+    return readAndValidateCodexDevMergeFence({ db, uid: denyActorUid, token: mergeFenceToken, transaction });
   }
   if (denyActorUid && await isKnownCodexDevActorUid({ db, uid: denyActorUid, transaction })) {
     const error = new Error('Codex Dev contributor claims are isolated.');
     error.status = 403;
     throw error;
   }
+  return null;
 };
 
 const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId, denyActorUid = null, mergeFenceToken = null) => {
@@ -545,12 +546,13 @@ const updatePostsForContributorMerge = async (primaryContributorId, secondaryCon
     let pageUpdatedPosts = 0;
     await db.runTransaction(async (transaction) => {
       pageUpdatedPosts = 0;
-      await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
+      const fenceValidation = await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
       const freshDocs = [];
       for (const docSnap of snapshot.docs) {
         const freshSnap = await transaction.get(docSnap.ref);
         freshDocs.push({ ref: docSnap.ref, snap: freshSnap });
       }
+      queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation });
       for (const { ref, snap: freshSnap } of freshDocs) {
         if (!freshSnap.exists) continue;
         const { changed, updates } = buildContributorMergePostUpdate(freshSnap.data(), primaryContributorId, secondaryContributorId);
@@ -589,12 +591,13 @@ const moveContributorAliases = async (primaryContributorId, secondaryContributor
     await db.runTransaction(async (transaction) => {
       pageMovedAliases = 0;
       pageSkippedAliases = 0;
-      await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
+      const fenceValidation = await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
       const freshDocs = [];
       for (const docSnap of snapshot.docs) {
         const freshSnap = await transaction.get(docSnap.ref);
         freshDocs.push({ ref: docSnap.ref, snap: freshSnap });
       }
+      queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation });
       for (const { ref, snap: freshSnap } of freshDocs) {
         if (!freshSnap.exists || freshSnap.data()?.contributorId !== secondaryContributorId) {
           pageSkippedAliases += 1;
@@ -645,7 +648,8 @@ const mergeContributorsInternal = async ({
   const aliasResult = await moveContributorAliases(primaryContributorId, secondaryContributorId, denyActorUid, mergeFenceToken);
 
   await db.runTransaction(async (transaction) => {
-    await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
+    const fenceValidation = await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
+    queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation });
     transaction.set(secondaryRef, {
       status: 'merged',
       mergedInto: primaryContributorId,
@@ -4637,8 +4641,25 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
     : new Date(emailProof.tokenExpiresAt).getTime();
   const now = Date.now();
 
+  const persistEmailProofFailure = async (updates) => db.runTransaction(async (transaction) => {
+    const freshRequestSnap = await transaction.get(requestRef);
+    if (!freshRequestSnap.exists) return false;
+    const freshData = freshRequestSnap.data() || {};
+    if (freshData?.requestedByUid !== request.auth.uid) {
+      throw new HttpsError('permission-denied', 'Not allowed to verify email proof');
+    }
+    if (freshData?.status !== 'pending') return false;
+    const freshEmailProof = freshData?.proofData?.email || null;
+    if (!freshEmailProof?.tokenHash || freshEmailProof.tokenHash !== emailProof.tokenHash) return false;
+    if (await isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })) {
+      return false;
+    }
+    transaction.update(requestRef, updates);
+    return true;
+  });
+
   if (!expiresAtMs || Number.isNaN(expiresAtMs) || now > expiresAtMs) {
-    await requestRef.set({
+    await persistEmailProofFailure({
       proofData: {
         email: {
           lastCheckedAt: FieldValue.serverTimestamp(),
@@ -4647,12 +4668,12 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
         emailVerified: false,
       },
       updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    });
     throw new HttpsError('failed-precondition', 'Email token is verlopen.');
   }
 
   if (tokenHash !== emailProof.tokenHash) {
-    await requestRef.set({
+    await persistEmailProofFailure({
       proofData: {
         email: {
           lastCheckedAt: FieldValue.serverTimestamp(),
@@ -4661,7 +4682,7 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
         emailVerified: false,
       },
       updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    });
     throw new HttpsError('failed-precondition', 'Email token is ongeldig.');
   }
 

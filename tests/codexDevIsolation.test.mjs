@@ -18,6 +18,8 @@ import {
   acquireCodexDevMergeFence,
   ensureCodexDevActorRegistered,
   isKnownCodexDevActorUid,
+  queueCodexDevMergeFenceRenewal,
+  readAndValidateCodexDevMergeFence,
   releaseCodexDevMergeFence,
 } from '../functions/codexDevActorRegistry.js';
 
@@ -90,6 +92,59 @@ test('merge-wide fence prevents mid-merge registration and releases after succes
   assert.equal(docs.has('codexDevActorRegistry/merge-user'), true, 'registration succeeds after merge completion');
 });
 
+test('merge fence validation permits all content reads before renewal and merge writes', async () => {
+  for (const contentPaths of [
+    [],
+    ['posts/post-1'],
+    ['contributorAliases/alias-1'],
+    ['posts/post-1', 'contributorAliases/alias-1'],
+  ]) {
+    let writeQueued = false;
+    const reads = [];
+    const writes = [];
+    const snapshots = new Map([
+      ['codexDevActorRegistry/merge-user', { exists: false }],
+      ['codexDevActorMergeFences/merge-user', {
+        exists: true,
+        data: () => ({ token: 'merge-token', leaseExpiresAtMs: 2000 }),
+      }],
+      ...contentPaths.map((path) => [path, { exists: true, data: () => ({ path }) }]),
+    ]);
+    const refFor = (path) => ({ path });
+    const db = { collection: (collection) => ({ doc: (uid) => refFor(`${collection}/${uid}`) }) };
+    const transaction = {
+      get: async (ref) => {
+        assert.equal(writeQueued, false, `read-after-write attempted for ${ref.path}`);
+        reads.push(ref.path);
+        return snapshots.get(ref.path) || { exists: false };
+      },
+      set: (ref) => {
+        writeQueued = true;
+        writes.push(ref.path);
+      },
+      update: (ref) => {
+        writeQueued = true;
+        writes.push(ref.path);
+      },
+    };
+
+    const validation = await readAndValidateCodexDevMergeFence({
+      db, uid: 'merge-user', token: 'merge-token', transaction, nowMs: 1000,
+    });
+    for (const path of contentPaths) await transaction.get(refFor(path));
+    queueCodexDevMergeFenceRenewal({ transaction, validation });
+    for (const path of contentPaths) transaction.update(refFor(path));
+
+    assert.deepEqual(reads.slice(0, 2), [
+      'codexDevActorRegistry/merge-user',
+      'codexDevActorMergeFences/merge-user',
+    ]);
+    assert.deepEqual(reads.slice(2), contentPaths);
+    assert.equal(writes[0], 'codexDevActorMergeFences/merge-user', 'fence renewal is the first queued write');
+    assert.deepEqual(writes.slice(1), contentPaths);
+  }
+});
+
 test('persisted retired actor checks precede all DM and claim mutations', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
@@ -156,6 +211,43 @@ test('website proof failure persistence cannot recreate or mutate a quarantined 
     'network and invalid-content failures use authoritative persistence');
   assert.doesNotMatch(failureBranches, /requestRef\.set\(/,
     'post-fetch failure handling never recreates a missing claim request');
+});
+
+test('email proof failures update only an existing ordinary pending claim transactionally', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export const verifyEmailClaimProof');
+  const end = source.indexOf('export const verifyWebsiteClaimProof', start);
+  const implementation = source.slice(start, end);
+  const helperStart = implementation.indexOf('const persistEmailProofFailure');
+  const failureStart = implementation.indexOf('if (!expiresAtMs', helperStart);
+  const helper = implementation.slice(helperStart, failureStart);
+
+  assert.ok(helper.indexOf('transaction.get(requestRef)') < helper.indexOf('if (!freshRequestSnap.exists) return false'));
+  assert.ok(helper.indexOf('freshData?.requestedByUid !== request.auth.uid') < helper.indexOf('transaction.update(requestRef, updates)'));
+  assert.ok(helper.indexOf("freshData?.status !== 'pending'") < helper.indexOf('transaction.update(requestRef, updates)'));
+  assert.ok(helper.indexOf('freshEmailProof.tokenHash !== emailProof.tokenHash') < helper.indexOf('transaction.update(requestRef, updates)'));
+  assert.ok(helper.indexOf('isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })')
+    < helper.indexOf('transaction.update(requestRef, updates)'));
+
+  const failureBranches = implementation.slice(failureStart, implementation.indexOf('let resolvedStatus', failureStart));
+  assert.equal((failureBranches.match(/persistEmailProofFailure\(\{/g) || []).length, 2,
+    'expired and invalid token failures use guarded persistence');
+  assert.doesNotMatch(failureBranches, /requestRef\.set\(/,
+    'email failure handling cannot recreate a deleted claim request');
+});
+
+test('merge content transactions finish reads before queueing fence renewal', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const postStart = source.indexOf('const updatePostsForContributorMerge');
+  const aliasStart = source.indexOf('const moveContributorAliases', postStart);
+  const mergeStart = source.indexOf('const mergeContributorsInternal', aliasStart);
+  for (const implementation of [source.slice(postStart, aliasStart), source.slice(aliasStart, mergeStart)]) {
+    const contentRead = implementation.indexOf('await transaction.get(docSnap.ref)');
+    const renewal = implementation.indexOf('queueCodexDevMergeFenceRenewal');
+    const contentWrite = implementation.indexOf('transaction.update(ref');
+    assert.ok(contentRead < renewal, 'content reads precede fence renewal');
+    assert.ok(renewal < contentWrite, 'fence renewal precedes merge content writes');
+  }
 });
 
 test('publishNow and repairPublished recheck historical registry in the publication transaction', async () => {

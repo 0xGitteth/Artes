@@ -1409,7 +1409,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const { image, makerTags, themes } = body;
   const includeDebug = process.env.NODE_ENV === 'development' || body?.debug === true;
   const userId = decoded.uid;
-  const isCodexActor = isCodexDevUid(userId);
+  const isCodexActor = isCodexDevForProductionDeny(decoded);
   const parsed = parseImageDataUrl(image);
   if (parsed.error) {
     res.status(400).json({ error: parsed.error });
@@ -1904,7 +1904,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     const uploadPayload = {
       userId: userId || null,
       uploaderUid: userId || null,
-      ...(isCodexDevUid(userId) ? { testActor: CODEX_DEV_ACTOR } : {}),
+      ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
       outcome,
       appliedTriggers: finalAppliedTriggers,
       suggestedTriggers: finalSuggestedTriggers,

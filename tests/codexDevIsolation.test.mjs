@@ -34,6 +34,17 @@ test('production denial is broader than strict Codex privilege identity', () => 
   assert.equal(isCodexDevForProductionDeny({ uid: 'ordinary' }, env), false);
 });
 
+test('moderateImage derives all quarantine decisions from production-deny identity', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));
+  assert.match(moderate, /const isCodexActor = isCodexDevForProductionDeny\(decoded\)/);
+  assert.match(moderate, /isCodexActor \? null : await findExactModerationExample/);
+  assert.match(moderate, /findExactUpload\([^\n]+\{ isCodexActor \}/);
+  assert.match(moderate, /shouldCreateProductionReviewCase\(\{ isCodexActor/);
+  assert.match(moderate, /\.\.\.\(isCodexActor \? \{ testActor: CODEX_DEV_ACTOR \} : \{\}\)/);
+  assert.doesNotMatch(moderate, /isCodexDevUid\(userId\)/);
+});
+
 test('historical private markers never establish destructive identity', () => {
   assert.equal(isCodexDevPrivateProfile('ordinary', { isDevTestUser: true, devActor: 'codex' }, {}), false);
   assert.equal(isCodexDevPrivateProfile('codex-dev-user', {}, {}), true);

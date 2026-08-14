@@ -26,7 +26,7 @@ const createFakeDb = (entries = []) => {
   const docs = new Map(entries.map(([path, data]) => [path, clone(data)]));
   const refs = new Map();
   const ref = (path) => {
-    if (!refs.has(path)) refs.set(path, { path });
+    if (!refs.has(path)) refs.set(path, { path, get: async () => ({ exists: docs.has(path), data: () => clone(docs.get(path)) }) });
     return refs.get(path);
   };
   let transactionCalls = 0;
@@ -145,8 +145,15 @@ const ordinaryDeleteRepair = await applyFollowingDeletedCounters({ db: ordinaryF
 assert.equal(ordinaryDeleteRepair.repaired, 'fanOfCount');
 assert.equal(ordinaryFollowingCodexDb.get('publicUsers/fan').fanOfCount, 1);
 assert.equal(ordinaryFollowingCodexDb.has('publicUsers/codex-dev-user'), false);
-assert.equal((await applyFollowingDeletedCounters({ db: ordinaryFollowingCodexDb, relationData: { countersApplied: true }, uid: 'fan', targetUid: 'codex-dev-user', fieldValue })).status, 'already-repaired-test-actor');
+assert.equal((await applyFollowingDeletedCounters({ db: ordinaryFollowingCodexDb, relationData: { countersApplied: true }, uid: 'fan', targetUid: 'codex-dev-user', fieldValue })).status, 'already-repaired-codex-relation');
 assert.equal(ordinaryFollowingCodexDb.get('publicUsers/fan').fanOfCount, 1);
+
+const retiredCodexDb = createFakeDb([
+  ['publicUsers/target', { fansCount: 3 }],
+  ['codexDevCounterRepairs/retired-codex__target', { repaired: 'fansCount' }],
+]);
+assert.equal((await applyFollowingDeletedCounters({ db: retiredCodexDb, relationData: { countersApplied: true }, uid: 'retired-codex', targetUid: 'target', fieldValue })).status, 'already-repaired-codex-relation');
+assert.equal(retiredCodexDb.get('publicUsers/target').fansCount, 3, 'retired actor trigger cannot decrement after reconciliation marker');
 
 const unappliedCodexDb = createFakeDb([
   ['publicUsers/target', { onboardingComplete: true, fansCount: 4 }],

@@ -81,10 +81,12 @@ export const applyFollowingDeletedCounters = async ({
   codexUid = null,
 }) => {
   const isTestUid = (candidate) => codexUid ? candidate === codexUid : isCodexDevUid(candidate);
+  const repairRef = db.collection('codexDevCounterRepairs').doc(`${uid}__${targetUid}`);
+  const existingRepair = await repairRef.get?.();
+  if (existingRepair?.exists) return { status: 'already-repaired-codex-relation' };
   if (isTestUid(uid) || isTestUid(targetUid)) {
     if (relationData.countersApplied !== true) return { status: 'skipped-test-actor' };
     return db.runTransaction(async (transaction) => {
-      const repairRef = db.collection('codexDevCounterRepairs').doc(`${uid}__${targetUid}`);
       const repairSnap = await transaction.get(repairRef);
       if (repairSnap.exists) return { status: 'already-repaired-test-actor' };
       const ordinaryUid = isTestUid(uid) ? targetUid : uid;

@@ -369,7 +369,7 @@ test('remaining reviewed production callables deny historical registry actors be
   const support = await fs.readFile(new URL('../functions/supportChat.js', import.meta.url), 'utf8');
   const section = (source, start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   for (const [start, end, firstWrite] of [
-    ['export const reportPost', 'export const requestUploadReviewCase', "collection('reviewCases').add"],
+    ['export const reportPost', 'export const requestUploadReviewCase', 'transaction.create(reviewRef'],
     ['export const requestUploadReviewCase', 'export const getModerationExamplesForCase', "collection('reviewCases')"],
     ['export const createTemporaryContributor', 'export const createClaimInvite', 'db.runTransaction'],
     ['export const createClaimInvite', 'export const getClaimInvitePreview', 'db.runTransaction'],
@@ -410,6 +410,38 @@ test('reviewed actor-owned mutations recheck historical registry before writes',
   assert.match(section(index, 'export const resetPersonalOnboarding', 'export const createDevCodexToken'), /isKnownCodexDevActorUid\(\{ db, uid \}\)/);
   assert.ok(lifecycle.indexOf('isKnownCodexDevActorUid({ db, uid, transaction })') < lifecycle.indexOf('transaction.delete(userRef)'));
   assert.ok(unpublish.indexOf('isKnownCodexDevActorUid({ db, uid, transaction })') < unpublish.indexOf('transaction.set(privateRef'));
+});
+
+test('latest historical-registry races are guarded at their final authoritative mutations', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const moderate = section('export const moderateImage', 'export const isModerator');
+  const suppression = moderate.indexOf('uploadSuppressedByHistoricalRegistry = true');
+  const previewDelete = moderate.indexOf("file(persistedPreview.storagePath).delete({ ignoreNotFound: true })");
+  assert.ok(suppression < previewDelete, 'only authoritative historical suppression triggers preview cleanup');
+  assert.match(moderate, /previewCreatedByRequest && persistedPreview\?\.storagePath/);
+
+  const report = section('export const reportPost', 'export const requestUploadReviewCase');
+  assert.ok(report.indexOf('db.runTransaction') < report.indexOf('transaction.create(reviewRef'));
+  assert.ok(report.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })')
+    < report.indexOf('transaction.create(reviewRef'));
+
+  const vouches = section('export const getVouchRequests', 'export const cleanupCodexTestData');
+  assert.ok(vouches.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid })')
+    < vouches.indexOf("collection('claimRequests')"));
+
+  const archive = section('export const archiveDmThread', 'export const dismissSupportThread');
+  assert.ok(archive.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })')
+    < archive.indexOf('transaction.set(indexRef'));
+  assert.match(archive, /transaction\.get\(threadRef\)/);
+  assert.doesNotMatch(archive, /indexRef\.set\(/, 'archive cannot recreate an index outside the transaction');
+
+  const reset = section('export const resetSupportThread', 'export const sendDmMessage');
+  assert.ok(reset.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })')
+    < reset.indexOf('transaction.set(introRef'));
+  assert.ok(reset.indexOf('transaction.get(threadRef)') < reset.indexOf('transaction.update(threadRef'));
+  assert.doesNotMatch(reset, /threadRef\.set\(/, 'support reset cannot recreate a deleted thread');
+  assert.doesNotMatch(reset, /messagesRef\.add\(/, 'intro creation is serialized with thread existence');
 });
 
 test('historical private markers never establish destructive identity', () => {
@@ -529,7 +561,9 @@ test('production side-effect endpoints reject Codex before shared writes', async
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const report = section('export const reportPost', 'export const requestUploadReviewCase');
-  assert.ok(report.indexOf('isCodexDevForProductionDeny(decoded)') < report.indexOf("db.collection('reviewCases').add"));
+  assert.ok(report.indexOf('isCodexDevForProductionDeny(decoded)') < report.indexOf('transaction.create(reviewRef'));
+  assert.ok(report.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })')
+    < report.indexOf('transaction.create(reviewRef'));
   const support = section('export const sendSupportMessage', 'export const reportPost');
   assert.ok(support.indexOf('isCodexDevForProductionDeny(decoded)') < support.indexOf('db.runTransaction'));
   const contributor = section('export const createTemporaryContributor', 'export const createClaimInvite');

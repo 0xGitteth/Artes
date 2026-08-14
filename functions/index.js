@@ -1934,6 +1934,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   };
 
   let persistedPreview = null;
+  let previewCreatedByRequest = false;
   let previewField = null;
   try {
     const matchedPreviewUrl = String(
@@ -1965,6 +1966,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         mimeType: parsed.mimeType,
         userId,
       });
+      previewCreatedByRequest = Boolean(persistedPreview?.storagePath);
       if (persistedPreview?.imageUrl) {
         persistedPreview.previewUrl = persistedPreview.imageUrl;
         previewField = 'imageUrl';
@@ -1997,13 +1999,33 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     };
     const uploadRef = db.collection('uploads').doc();
     let persistedUpload = false;
+    let uploadSuppressedByHistoricalRegistry = false;
     await db.runTransaction(async (transaction) => {
       persistedUpload = false;
-      if (!isCodexActor && await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
+      uploadSuppressedByHistoricalRegistry = false;
+      if (!isCodexActor && await isKnownCodexDevActorUid({ db, uid: userId, transaction })) {
+        uploadSuppressedByHistoricalRegistry = true;
+        return;
+      }
       transaction.create(uploadRef, uploadPayload);
       persistedUpload = true;
     });
     uploadId = persistedUpload ? uploadRef.id : null;
+
+    if (uploadSuppressedByHistoricalRegistry && previewCreatedByRequest && persistedPreview?.storagePath) {
+      try {
+        await admin.storage().bucket().file(persistedPreview.storagePath).delete({ ignoreNotFound: true });
+      } catch (error) {
+        logger.error('Historically quarantined moderation preview cleanup failed.', {
+          uid: userId,
+          storagePath: persistedPreview.storagePath,
+          error: error?.message || String(error),
+        });
+        throw error;
+      }
+      persistedPreview = null;
+      previewField = null;
+    }
 
     if (process.env.NODE_ENV === 'development') {
       logger.debug('Moderation preview linked to upload', {
@@ -2327,6 +2349,11 @@ export const archiveDmThread = onRequest({ cors: true, region: 'europe-west4' },
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const threadId = String(body?.threadId || '').trim();
     if (!threadId) {
@@ -2335,29 +2362,42 @@ export const archiveDmThread = onRequest({ cors: true, region: 'europe-west4' },
     }
 
     const threadRef = db.collection('threads').doc(threadId);
-    const threadSnap = await threadRef.get();
-    if (!threadSnap.exists) {
-      res.status(404).json({ error: 'Thread not found' });
-      return;
-    }
-    const threadData = threadSnap.data() || {};
-    if (threadData?.type !== 'dm') {
-      res.status(400).json({ error: 'Only DM threads can be archived' });
-      return;
-    }
-    const participants = Array.isArray(threadData?.participantUids) ? threadData.participantUids : [];
-    if (!participants.includes(decoded.uid)) {
-      res.status(403).json({ error: 'Not a participant' });
-      return;
-    }
-
     const indexRef = db.collection('users').doc(decoded.uid).collection('threadIndex').doc(threadId);
-    const indexSnap = await indexRef.get();
-    if (indexSnap.exists) {
-      await indexRef.set({ hidden: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    }
+    let indexFound = false;
+    await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev direct messages are isolated.');
+        error.status = 403;
+        throw error;
+      }
+      const [threadSnap, indexSnap] = await Promise.all([
+        transaction.get(threadRef),
+        transaction.get(indexRef),
+      ]);
+      if (!threadSnap.exists) {
+        const error = new Error('Thread not found');
+        error.status = 404;
+        throw error;
+      }
+      const threadData = threadSnap.data() || {};
+      if (threadData?.type !== 'dm') {
+        const error = new Error('Only DM threads can be archived');
+        error.status = 400;
+        throw error;
+      }
+      const participants = Array.isArray(threadData?.participantUids) ? threadData.participantUids : [];
+      if (!participants.includes(decoded.uid)) {
+        const error = new Error('Not a participant');
+        error.status = 403;
+        throw error;
+      }
+      indexFound = indexSnap.exists;
+      if (indexSnap.exists) {
+        transaction.set(indexRef, { hidden: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
+    });
 
-    res.status(200).json({ ok: true, threadId, indexFound: indexSnap.exists });
+    res.status(200).json({ ok: true, threadId, indexFound });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to archive dm thread' });
@@ -2413,6 +2453,11 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const requestedThreadId = String(body?.threadId || '').trim();
     const fallbackThreadId = `support_${decoded.uid}`;
@@ -2484,45 +2529,69 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
       hasMoreMessages = deletesInRound > 0 && snapshot.size === 400;
     }
 
-    if (!keptIntroRef) {
-      await messagesRef.add({
-        text: SUPPORT_INTRO_MESSAGE,
-        type: 'system',
-        senderRole: 'system',
-        senderUid: null,
-        senderId: 'system',
-        senderLabel: 'Artes Moderatie',
-        createdAt: FieldValue.serverTimestamp(),
-      });
-    }
-
-    await threadRef.set({
-      type: 'support',
-      title: 'Artes Moderatie',
-      threadKey: threadData?.threadKey || threadId,
-      userUid,
-      participantUids: [userUid],
-      hasUserMessage: false,
-      lastMessageAt: FieldValue.serverTimestamp(),
-      lastMessagePreview: SUPPORT_INTRO_MESSAGE,
-      unreadForModerator: 0,
-      unreadForUser: 0,
-      userMaySend: true,
-      userCanSend: true,
-      userMessageAllowance: 1,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-
     const indexRef = db.collection('users').doc(userUid).collection('threadIndex').doc(threadId);
-    await indexRef.set({
-      threadId,
-      type: 'support',
-      threadType: 'support',
-      pinned: true,
-      hidden: false,
-      displayTitle: 'Artes Moderatie',
-      lastMessageAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    const introRef = keptIntroRef || messagesRef.doc();
+    await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev support traffic is isolated.');
+        error.status = 403;
+        throw error;
+      }
+      const freshThreadSnap = await transaction.get(threadRef);
+      if (!freshThreadSnap.exists) {
+        const error = new Error('Thread not found');
+        error.status = 404;
+        throw error;
+      }
+      const freshThreadData = freshThreadSnap.data() || {};
+      if (freshThreadData?.type !== 'support' || freshThreadData?.userUid !== userUid) {
+        const error = new Error('Support thread changed during reset');
+        error.status = 409;
+        throw error;
+      }
+      if (freshThreadData.userUid !== decoded.uid && !isModeratorRequest) {
+        const error = new Error('Not authorized to reset this support thread');
+        error.status = 403;
+        throw error;
+      }
+
+      if (!keptIntroRef) {
+        transaction.set(introRef, {
+          text: SUPPORT_INTRO_MESSAGE,
+          type: 'system',
+          senderRole: 'system',
+          senderUid: null,
+          senderId: 'system',
+          senderLabel: 'Artes Moderatie',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+      transaction.update(threadRef, {
+        type: 'support',
+        title: 'Artes Moderatie',
+        threadKey: freshThreadData?.threadKey || threadId,
+        userUid,
+        participantUids: [userUid],
+        hasUserMessage: false,
+        lastMessageAt: FieldValue.serverTimestamp(),
+        lastMessagePreview: SUPPORT_INTRO_MESSAGE,
+        unreadForModerator: 0,
+        unreadForUser: 0,
+        userMaySend: true,
+        userCanSend: true,
+        userMessageAllowance: 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      transaction.set(indexRef, {
+        threadId,
+        type: 'support',
+        threadType: 'support',
+        pinned: true,
+        hidden: false,
+        displayTitle: 'Artes Moderatie',
+        lastMessageAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
 
     res.status(200).json({ ok: true, threadId, resetBy: isOwner ? 'owner' : 'moderator' });
   } catch (error) {
@@ -2854,28 +2923,36 @@ export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, asyn
       displayName: authorName || null,
     });
 
-    const reviewRef = await db.collection('reviewCases').add({
-      caseType: 'report',
-      status: 'inReview',
-      decision: null,
-      userId: authorId || null,
-      ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-      reviewReason: 'reportedPost',
-      reportedPost: {
-        id: postId,
-        imageUrl,
-        title,
-        authorId: authorId || null,
-        authorName: authorName || null,
-      },
-      reportedPostPath: reportedPostPath || null,
-      contributorUids: normalizedContributors,
-      reportedFingerprints,
-      reportedByUid: decoded.uid,
-      reportedByEmail: decoded.email || null,
-      reportedByName: decoded.name || null,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
+    const reviewRef = db.collection('reviewCases').doc();
+    await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev reports are isolated.');
+        error.status = 403;
+        throw error;
+      }
+      transaction.create(reviewRef, {
+        caseType: 'report',
+        status: 'inReview',
+        decision: null,
+        userId: authorId || null,
+        ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
+        reviewReason: 'reportedPost',
+        reportedPost: {
+          id: postId,
+          imageUrl,
+          title,
+          authorId: authorId || null,
+          authorName: authorName || null,
+        },
+        reportedPostPath: reportedPostPath || null,
+        contributorUids: normalizedContributors,
+        reportedFingerprints,
+        reportedByUid: decoded.uid,
+        reportedByEmail: decoded.email || null,
+        reportedByName: decoded.name || null,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
     });
 
     res.status(200).json({ ok: true, reviewCaseId: reviewRef.id });
@@ -5157,6 +5234,10 @@ export const getVouchRequests = onRequest({ cors: true, region: 'europe-west4' }
   try {
     const decoded = await verifyToken(req);
     if (isCodexDevForProductionDeny(decoded)) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
       res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
       return;
     }

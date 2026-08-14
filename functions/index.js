@@ -49,6 +49,7 @@ import {
   queueCodexDevMergeFenceRenewal,
   readAndValidateCodexDevMergeFence,
   releaseCodexDevMergeFence,
+  releaseCodexDevMergeFenceIfUnmutated,
 } from './codexDevActorRegistry.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
@@ -552,14 +553,20 @@ const updatePostsForContributorMerge = async (primaryContributorId, secondaryCon
         const freshSnap = await transaction.get(docSnap.ref);
         freshDocs.push({ ref: docSnap.ref, snap: freshSnap });
       }
-      queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation });
+      const mutationPlans = [];
       for (const { ref, snap: freshSnap } of freshDocs) {
         if (!freshSnap.exists) continue;
         const { changed, updates } = buildContributorMergePostUpdate(freshSnap.data(), primaryContributorId, secondaryContributorId);
         if (!changed) continue;
-        transaction.update(ref, updates);
+        mutationPlans.push({ ref, updates });
         pageUpdatedPosts += 1;
       }
+      queueCodexDevMergeFenceRenewal({
+        transaction,
+        validation: fenceValidation,
+        mutationCommitted: mutationPlans.length > 0,
+      });
+      mutationPlans.forEach(({ ref, updates }) => transaction.update(ref, updates));
     });
     updatedPosts += pageUpdatedPosts;
     lastDoc = snapshot.docs[snapshot.docs.length - 1];
@@ -597,15 +604,21 @@ const moveContributorAliases = async (primaryContributorId, secondaryContributor
         const freshSnap = await transaction.get(docSnap.ref);
         freshDocs.push({ ref: docSnap.ref, snap: freshSnap });
       }
-      queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation });
+      const aliasesToMove = [];
       for (const { ref, snap: freshSnap } of freshDocs) {
         if (!freshSnap.exists || freshSnap.data()?.contributorId !== secondaryContributorId) {
           pageSkippedAliases += 1;
           continue;
         }
-        transaction.update(ref, { contributorId: primaryContributorId });
+        aliasesToMove.push(ref);
         pageMovedAliases += 1;
       }
+      queueCodexDevMergeFenceRenewal({
+        transaction,
+        validation: fenceValidation,
+        mutationCommitted: aliasesToMove.length > 0,
+      });
+      aliasesToMove.forEach((ref) => transaction.update(ref, { contributorId: primaryContributorId }));
     });
     movedAliases += pageMovedAliases;
     skippedAliases += pageSkippedAliases;
@@ -649,7 +662,7 @@ const mergeContributorsInternal = async ({
 
   await db.runTransaction(async (transaction) => {
     const fenceValidation = await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
-    queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation });
+    queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation, mutationCommitted: true });
     transaction.set(secondaryRef, {
       status: 'merged',
       mergedInto: primaryContributorId,
@@ -2573,42 +2586,76 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
     }
 
     const publicUsers = await Promise.all(authorizedParticipants.map((uid) => fetchPublicUser(uid)));
+    const publicUsersByUid = new Map(authorizedParticipants.map((uid, index) => [uid, publicUsers[index] || null]));
     const messageRef = threadRef.collection('messages').doc();
     const now = FieldValue.serverTimestamp();
 
-    await Promise.all([
-      messageRef.set({
+    await db.runTransaction(async (transaction) => {
+      const freshThreadSnap = await transaction.get(threadRef);
+      if (!freshThreadSnap.exists) {
+        const error = new Error('Thread not found');
+        error.status = 404;
+        throw error;
+      }
+      const freshThreadData = freshThreadSnap.data() || {};
+      if (freshThreadData?.type !== 'dm') {
+        const error = new Error('Cannot send message to system thread');
+        error.status = 403;
+        throw error;
+      }
+      const freshParticipantUids = Array.isArray(freshThreadData?.participantUids)
+        ? freshThreadData.participantUids
+        : null;
+      const freshLegacyParticipants = Array.isArray(freshThreadData?.participants)
+        ? freshThreadData.participants
+        : [];
+      const freshCodexScanParticipants = [...new Set([
+        ...(freshParticipantUids || []),
+        ...freshLegacyParticipants,
+      ].filter((uid) => typeof uid === 'string' && uid))];
+      const freshAuthorizedParticipants = (freshParticipantUids || freshLegacyParticipants)
+        .filter((uid) => typeof uid === 'string' && uid);
+      const hasKnownCodexParticipant = (await Promise.all(freshCodexScanParticipants.map((uid) => (
+        isKnownCodexDevActorUid({ db, uid, transaction })
+      )))).some(Boolean);
+      if (hasKnownCodexParticipant) {
+        const error = new Error('Codex Dev direct messages are retired.');
+        error.status = 403;
+        throw error;
+      }
+      if (!freshAuthorizedParticipants.includes(decoded.uid)) {
+        const error = new Error('Not a participant');
+        error.status = 403;
+        throw error;
+      }
+
+      transaction.set(messageRef, {
         senderId: decoded.uid,
         senderUid: decoded.uid,
         senderRole: 'user',
         text,
         type: 'text',
         createdAt: now,
-      }),
-      threadRef.set(
-        {
-          updatedAt: now,
+      });
+      transaction.update(threadRef, {
+        updatedAt: now,
+        lastMessageAt: now,
+        lastMessageText: text,
+        lastSenderUid: decoded.uid,
+      });
+      freshAuthorizedParticipants.forEach((uid) => {
+        const otherUid = freshAuthorizedParticipants.find((participantUid) => participantUid !== uid) || uid;
+        const otherPublic = publicUsersByUid.get(otherUid) || null;
+        const indexRef = db.collection('users').doc(uid).collection('threadIndex').doc(threadId);
+        transaction.set(indexRef, {
+          threadId,
+          pinned: false,
+          hidden: false,
+          displayTitle: resolveDisplayTitle(otherPublic),
           lastMessageAt: now,
-          lastMessageText: text,
-          lastSenderUid: decoded.uid,
-        },
-        { merge: true }
-      ),
-      ...authorizedParticipants.map((uid) => {
-        const otherIndex = authorizedParticipants[0] === uid ? 1 : 0;
-        const otherPublic = publicUsers[otherIndex] || null;
-        return db.collection('users').doc(uid).collection('threadIndex').doc(threadId).set(
-          {
-            threadId,
-            pinned: false,
-            hidden: false,
-            displayTitle: resolveDisplayTitle(otherPublic),
-            lastMessageAt: now,
-          },
-          { merge: true }
-        );
-      }),
-    ]);
+        }, { merge: true });
+      });
+    });
 
     res.status(200).json({ ok: true });
   } catch (error) {
@@ -4660,13 +4707,9 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
 
   if (!expiresAtMs || Number.isNaN(expiresAtMs) || now > expiresAtMs) {
     await persistEmailProofFailure({
-      proofData: {
-        email: {
-          lastCheckedAt: FieldValue.serverTimestamp(),
-          lastCheckResult: 'expired',
-        },
-        emailVerified: false,
-      },
+      'proofData.email.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.email.lastCheckResult': 'expired',
+      'proofData.emailVerified': false,
       updatedAt: FieldValue.serverTimestamp(),
     });
     throw new HttpsError('failed-precondition', 'Email token is verlopen.');
@@ -4674,13 +4717,9 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
 
   if (tokenHash !== emailProof.tokenHash) {
     await persistEmailProofFailure({
-      proofData: {
-        email: {
-          lastCheckedAt: FieldValue.serverTimestamp(),
-          lastCheckResult: 'invalid',
-        },
-        emailVerified: false,
-      },
+      'proofData.email.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.email.lastCheckResult': 'invalid',
+      'proofData.emailVerified': false,
       updatedAt: FieldValue.serverTimestamp(),
     });
     throw new HttpsError('failed-precondition', 'Email token is ongeldig.');
@@ -4837,13 +4876,9 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
     });
   } catch (error) {
     await persistWebsiteProofFailure({
-      proofData: {
-        website: {
-          lastCheckedAt: FieldValue.serverTimestamp(),
-          lastCheckResult: 'fetch_failed',
-          lastCheckMessage: error?.message || 'Fetch failed',
-        },
-      },
+      'proofData.website.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.website.lastCheckResult': 'fetch_failed',
+      'proofData.website.lastCheckMessage': error?.message || 'Fetch failed',
       updatedAt: FieldValue.serverTimestamp(),
     });
     throw new HttpsError('failed-precondition', 'Website verificatie mislukt.');
@@ -4860,14 +4895,10 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
 
   if (!tokenCheck.ok) {
     await persistWebsiteProofFailure({
-      proofData: {
-        website: {
-          lastCheckedAt: FieldValue.serverTimestamp(),
-          lastCheckResult: tokenCheck.reason || 'invalid',
-          lastCheckPreview: String(responseBody || '').trim().slice(0, 200),
-        },
-        websiteVerified: false,
-      },
+      'proofData.website.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.website.lastCheckResult': tokenCheck.reason || 'invalid',
+      'proofData.website.lastCheckPreview': String(responseBody || '').trim().slice(0, 200),
+      'proofData.websiteVerified': false,
       updatedAt: FieldValue.serverTimestamp(),
     });
     const errorMessage = tokenCheck.reason === 'expired'
@@ -5022,36 +5053,57 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
       }
       const mergeFenceToken = crypto.randomUUID();
       await acquireCodexDevMergeFence({ db, uid: requestedByUid, token: mergeFenceToken });
-      const mergeResult = await mergeContributorsInternal({
-        primaryContributorId: contributorId,
-        secondaryContributorId,
-        moderatorEmail: email,
-        source: 'claimRequest',
-        denyActorUid: requestedByUid,
-        mergeFenceToken,
-      });
-      await db.runTransaction(async (transaction) => {
-        const freshRequestSnap = await transaction.get(requestRef);
-        if (!freshRequestSnap.exists) return;
-        const freshRequestedByUid = freshRequestSnap.data()?.requestedByUid || null;
-        await assertMergeActorAllowed({ transaction, denyActorUid: freshRequestedByUid, mergeFenceToken });
-        transaction.set(db.collection('users').doc(freshRequestedByUid), {
-          contributorId,
-          updatedAt: FieldValue.serverTimestamp(),
-        }, { merge: true });
-        transaction.set(requestRef, {
-          status: 'approved',
-          statusReason: null,
-          approvedAt: FieldValue.serverTimestamp(),
-          approvedByEmail: email,
+      try {
+        const mergeResult = await mergeContributorsInternal({
           primaryContributorId: contributorId,
           secondaryContributorId,
-          updatedAt: FieldValue.serverTimestamp(),
-        }, { merge: true });
-      });
-      await releaseCodexDevMergeFence({ db, uid: requestedByUid, token: mergeFenceToken });
-      res.status(200).json({ ok: true, status: 'approved', merge: mergeResult });
-      return;
+          moderatorEmail: email,
+          source: 'claimRequest',
+          denyActorUid: requestedByUid,
+          mergeFenceToken,
+        });
+        await db.runTransaction(async (transaction) => {
+          const freshRequestSnap = await transaction.get(requestRef);
+          if (!freshRequestSnap.exists) {
+            const error = new Error('Claim request disappeared during contributor merge.');
+            error.status = 409;
+            throw error;
+          }
+          const freshRequestedByUid = freshRequestSnap.data()?.requestedByUid || null;
+          const fenceValidation = await assertMergeActorAllowed({
+            transaction,
+            denyActorUid: freshRequestedByUid,
+            mergeFenceToken,
+          });
+          queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation, mutationCommitted: true });
+          transaction.set(db.collection('users').doc(freshRequestedByUid), {
+            contributorId,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+          transaction.set(requestRef, {
+            status: 'approved',
+            statusReason: null,
+            approvedAt: FieldValue.serverTimestamp(),
+            approvedByEmail: email,
+            primaryContributorId: contributorId,
+            secondaryContributorId,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+        });
+        await releaseCodexDevMergeFence({ db, uid: requestedByUid, token: mergeFenceToken });
+        res.status(200).json({ ok: true, status: 'approved', merge: mergeResult });
+        return;
+      } catch (error) {
+        try {
+          await releaseCodexDevMergeFenceIfUnmutated({ db, uid: requestedByUid, token: mergeFenceToken });
+        } catch (releaseError) {
+          logger.error('Failed to inspect merge fence after claim merge failure', {
+            requestId,
+            error: releaseError?.message || String(releaseError),
+          });
+        }
+        throw error;
+      }
     }
 
     await db.runTransaction(async (transaction) => {

@@ -62,7 +62,13 @@ export const acquireCodexDevMergeFence = async ({ db, uid, token, nowMs = Date.n
       error.status = 409;
       throw error;
     }
-    transaction.set(fenceRef, { uid, token, leaseExpiresAtMs: nowMs + MERGE_FENCE_LEASE_MS, updatedAt: new Date(nowMs) });
+    transaction.set(fenceRef, {
+      uid,
+      token,
+      mutationCommitted: false,
+      leaseExpiresAtMs: nowMs + MERGE_FENCE_LEASE_MS,
+      updatedAt: new Date(nowMs),
+    });
   });
 };
 
@@ -81,10 +87,25 @@ export const readAndValidateCodexDevMergeFence = async ({ db, uid, token, transa
   return { fenceRef, nowMs };
 };
 
-export const queueCodexDevMergeFenceRenewal = ({ transaction, validation }) => {
+export const queueCodexDevMergeFenceRenewal = ({ transaction, validation, mutationCommitted = false }) => {
   if (!validation) return;
   const { fenceRef, nowMs } = validation;
-  transaction.set(fenceRef, { leaseExpiresAtMs: nowMs + MERGE_FENCE_LEASE_MS, updatedAt: new Date(nowMs) }, { merge: true });
+  transaction.set(fenceRef, {
+    leaseExpiresAtMs: nowMs + MERGE_FENCE_LEASE_MS,
+    updatedAt: new Date(nowMs),
+    ...(mutationCommitted ? { mutationCommitted: true } : {}),
+  }, { merge: true });
+};
+
+export const releaseCodexDevMergeFenceIfUnmutated = async ({ db, uid, token }) => {
+  const fenceRef = db.collection(CODEX_DEV_ACTOR_MERGE_FENCES_COLLECTION).doc(uid);
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(fenceRef);
+    const fence = snapshot.exists ? snapshot.data() || {} : {};
+    if (!snapshot.exists || fence.token !== token || fence.mutationCommitted === true) return false;
+    transaction.delete(fenceRef);
+    return true;
+  });
 };
 
 export const releaseCodexDevMergeFence = async ({ db, uid, token }) => {

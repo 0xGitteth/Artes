@@ -21,6 +21,7 @@ import {
   queueCodexDevMergeFenceRenewal,
   readAndValidateCodexDevMergeFence,
   releaseCodexDevMergeFence,
+  releaseCodexDevMergeFenceIfUnmutated,
 } from '../functions/codexDevActorRegistry.js';
 
 test('canonical identity requires the configured uid and both trusted claims', () => {
@@ -145,6 +146,44 @@ test('merge fence validation permits all content reads before renewal and merge 
   }
 });
 
+test('merge fence releases only before the first committed production mutation', async () => {
+  const nowMs = Date.now();
+  const docs = new Map();
+  const refFor = (path) => ({ path, get: async () => ({
+    exists: docs.has(path),
+    data: () => docs.get(path),
+  }) });
+  const db = {
+    collection: (collection) => ({ doc: (uid) => refFor(`${collection}/${uid}`) }),
+    runTransaction: async (callback) => callback({
+      get: (ref) => ref.get(),
+      set: (ref, data, options) => docs.set(ref.path, { ...(options?.merge ? docs.get(ref.path) || {} : {}), ...data }),
+      delete: (ref) => docs.delete(ref.path),
+    }),
+  };
+
+  await acquireCodexDevMergeFence({ db, uid: 'pre-mutation', token: 'token-a', nowMs });
+  assert.equal(await releaseCodexDevMergeFenceIfUnmutated({ db, uid: 'pre-mutation', token: 'wrong' }), false);
+  assert.equal(await releaseCodexDevMergeFenceIfUnmutated({ db, uid: 'pre-mutation', token: 'token-a' }), true);
+  assert.equal(docs.has('codexDevActorMergeFences/pre-mutation'), false, 'safe retry is immediate before mutation');
+
+  await acquireCodexDevMergeFence({ db, uid: 'partial-merge', token: 'token-b', nowMs });
+  await db.runTransaction(async (transaction) => {
+    const validation = await readAndValidateCodexDevMergeFence({
+      db, uid: 'partial-merge', token: 'token-b', transaction, nowMs: nowMs + 1,
+    });
+    queueCodexDevMergeFenceRenewal({ transaction, validation, mutationCommitted: true });
+  });
+  assert.equal(await releaseCodexDevMergeFenceIfUnmutated({ db, uid: 'partial-merge', token: 'token-b' }), false);
+  assert.equal(docs.get('codexDevActorMergeFences/partial-merge')?.mutationCommitted, true);
+  await assert.rejects(
+    ensureCodexDevActorRegistered({ db, uid: 'partial-merge', now: 1200 }),
+    (error) => error.code === 'codex-merge-fence-active',
+  );
+  await releaseCodexDevMergeFence({ db, uid: 'partial-merge', token: 'token-b' });
+  assert.equal(docs.has('codexDevActorMergeFences/partial-merge'), false, 'full-success release remains token-safe');
+});
+
 test('persisted retired actor checks precede all DM and claim mutations', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
@@ -161,9 +200,14 @@ test('persisted retired actor checks precede all DM and claim mutations', async 
   assert.match(sendDm, /codexScanParticipants\.map/);
   assert.match(sendDm, /!authorizedParticipants\.includes\(decoded\.uid\)/);
   assert.doesNotMatch(sendDm, /!codexScanParticipants\.includes\(decoded\.uid\)/);
-  assert.match(sendDm, /authorizedParticipants\.map\(\(uid\) =>/);
+  assert.match(sendDm, /freshAuthorizedParticipants\.forEach\(\(uid\) =>/);
+  assert.match(sendDm, /const freshCodexScanParticipants = \[\.\.\.new Set/);
+  assert.match(sendDm, /const freshAuthorizedParticipants = \(freshParticipantUids \|\| freshLegacyParticipants\)/);
+  assert.ok(sendDm.indexOf('transaction.get(threadRef)') < sendDm.indexOf('transaction.set(messageRef'));
+  assert.ok(sendDm.indexOf('isKnownCodexDevActorUid({ db, uid, transaction })') < sendDm.indexOf('transaction.set(messageRef'));
+  assert.doesNotMatch(sendDm, /threadRef\.set\(/, 'a deleted thread cannot be recreated by message sending');
   const dmDeny = sendDm.indexOf('if (knownCodexParticipant)');
-  for (const mutation of ["collection('messages').doc()", 'threadRef.set(', "collection('threadIndex')"]) {
+  for (const mutation of ["collection('messages').doc()", 'transaction.update(threadRef', "collection('threadIndex')"]) {
     assert.ok(dmDeny < sendDm.indexOf(mutation), `DM denial precedes ${mutation}`);
   }
   const approve = section('export const moderatorApproveClaimRequest', 'export const getVouchRequests');
@@ -211,6 +255,11 @@ test('website proof failure persistence cannot recreate or mutate a quarantined 
     'network and invalid-content failures use authoritative persistence');
   assert.doesNotMatch(failureBranches, /requestRef\.set\(/,
     'post-fetch failure handling never recreates a missing claim request');
+  assert.match(failureBranches, /'proofData\.website\.lastCheckedAt'/);
+  assert.match(failureBranches, /'proofData\.website\.lastCheckResult'/);
+  assert.match(failureBranches, /'proofData\.websiteVerified'/);
+  assert.doesNotMatch(failureBranches, /proofData:\s*\{/,
+    'website token configuration and unrelated proof siblings are not replaced');
 });
 
 test('email proof failures update only an existing ordinary pending claim transactionally', async () => {
@@ -234,6 +283,11 @@ test('email proof failures update only an existing ordinary pending claim transa
     'expired and invalid token failures use guarded persistence');
   assert.doesNotMatch(failureBranches, /requestRef\.set\(/,
     'email failure handling cannot recreate a deleted claim request');
+  assert.match(failureBranches, /'proofData\.email\.lastCheckedAt'/);
+  assert.match(failureBranches, /'proofData\.email\.lastCheckResult'/);
+  assert.match(failureBranches, /'proofData\.emailVerified'/);
+  assert.doesNotMatch(failureBranches, /proofData:\s*\{/,
+    'email token configuration and unrelated proof siblings are not replaced');
 });
 
 test('merge content transactions finish reads before queueing fence renewal', async () => {

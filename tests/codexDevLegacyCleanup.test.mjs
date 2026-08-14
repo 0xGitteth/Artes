@@ -159,12 +159,20 @@ assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex
 assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex_created_contributor_with_active_ordinary_claim' && item.contributorId === 'moderation-claim-contributor'), true);
 assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex_approved_merge_claim_recovery' && item.claimRequestId === 'approved-test-merge'), true);
 assert.deepEqual(dryStats.ambiguousMarkerUids, ['suspicious-marker']);
+assert.equal(dryStats.targetUidAlreadyRegistered, false);
+assert.equal(dryStats.applyWouldEnsureRegistration, true);
+assert.equal(dryDocs.has('codexDevActorRegistry/marked-test'), false, 'dry run does not register target');
 assert.equal(dryDocs.has('posts/test-post'), true, 'dry run does not mutate');
 assert.equal(dryProofs.size, 2, 'dry run preserves claim proof objects');
 
 const applyDocs = seed();
 const applyProofs = new Set(dryProofs);
 const applyStats = await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), bucket: fakeBucket(applyProofs), apply: true, env: {}, uid: 'marked-test', skipStorage: false, fieldValue: fakeFieldValue });
+assert.deepEqual(applyDocs.get('codexDevActorRegistry/marked-test'), {
+  uid: 'marked-test', actor: 'codex', productionDenyOnly: true, registeredAt: applyDocs.get('codexDevActorRegistry/marked-test').registeredAt,
+});
+assert.equal(applyStats.targetUidRegistered, true);
+assert.equal(applyDocs.has('codexDevActorRegistry/suspicious-marker'), false, 'ambiguous marker is never registered');
 assert.equal(applyStats.deletes, 40);
 for (const removed of ['publicUsers/marked-test', 'posts/test-post', 'posts/test-managed-post', 'posts/test-post/comments/comment', 'posts/real-post/comments/test-engagement', 'posts/real-post/likes/marked-test', 'profiles/test-agency', 'reviewCases/test-review', 'reviewCases/test-report', 'moderationExamples/test-example', 'moderationExamples/report-linked-example', 'moderationExamples/approved-report-linked-example', 'contributors/test-contributor', 'contributors/test-claimed-by-codex', 'contributors/denied-claim-contributor', 'contributorAliases/test-alias', 'contributorAliases/codex-claimed-test-alias', 'contributorAliases/denied-claim-alias', 'claimInvites/test-invite', 'claimInvites/test-invite-real-contributor', 'contributorContentRequests/test-content-request', 'claimRequests/test-claim', 'claimRequests/approved-test-claim', 'claimVouches/test-claim/votes/voter', 'claimVouches/real-claim/votes/marked-test', 'claimVouches/proof-review-claim/votes/marked-test', 'communities/art/topics/topic/comments/test-comment', 'threads/dm_test_real', 'users/real/threadIndex/dm_test_real', 'threads/support_marked-test', 'users/marked-test/threadIndex/support_marked-test', 'threads/support_real/messages/codex-decision', 'threads/support_real/messages/approved-codex-decision', 'users/marked-test/following/real', 'users/marked-test/following/no-counter', 'users/real/following/marked-test', 'users/other/following/marked-test']) {
   assert.equal(applyDocs.has(removed), false, `${removed} removed`);
@@ -192,13 +200,14 @@ for (const preserved of ['publicUsers/real', 'publicUsers/suspicious-marker', 'p
 }
 const secondStats = await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), bucket: fakeBucket(applyProofs), apply: true, env: {}, uid: 'marked-test', skipStorage: false, fieldValue: fakeFieldValue });
 assert.equal(secondStats.deletes, 0, 'second apply is idempotent');
+assert.equal(secondStats.targetUidAlreadyRegistered, true, 'registration is idempotent');
 assert.equal(secondStats.manualReviewRequired.filter((item) => item.reviewCaseId === 'approved-test-report').length, 1);
 assert.equal(secondStats.manualReviewRequired.filter((item) => item.claimRequestId === 'approved-test-merge').length, 1);
 
 const missingUser = new Map([['publicUsers/canonical-missing-user', { displayName: 'legacy' }]]);
 const missingStats = await reconcileCodexDevIsolation({ db: fakeDb(missingUser), apply: true, uid: 'canonical-missing-user', skipStorage: true });
 assert.equal(missingStats.publicUsers, 1, 'canonical UID cleanup does not require users/{uid}');
-assert.equal(missingUser.size, 0);
+assert.deepEqual([...missingUser.keys()], ['codexDevActorRegistry/canonical-missing-user']);
 await assert.rejects(reconcileCodexDevIsolation({ db: fakeDb(new Map()), apply: true, skipStorage: true, env: {} }), /trustworthy canonical UID/);
 await assert.rejects(reconcileCodexDevIsolation({ db: fakeDb(new Map([['users/canonical/following/real', { targetUid: 'real', countersApplied: true }]])), apply: true, uid: 'canonical', skipStorage: true }), /fieldValue\.serverTimestamp/);
 

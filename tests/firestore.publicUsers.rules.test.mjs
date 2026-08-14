@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
 import {
   assertFails,
   assertSucceeds,
@@ -36,6 +37,7 @@ const authedContext = (env, uid, token = {}) => {
 
 async function run() {
   const rules = await fs.readFile('firestore.rules', 'utf8');
+  assert.match(rules, /match \/codexDevActorRegistry\/\{uid\} \{\s*allow read, write: if false;/);
   const testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: { rules },
@@ -47,6 +49,9 @@ async function run() {
 
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
+      await setDoc(doc(db, 'codexDevActorRegistry', 'retired-codex'), {
+        uid: 'retired-codex', actor: 'codex', productionDenyOnly: true, registeredAt: new Date(),
+      });
       await setDoc(doc(db, 'publicUsers', ownerUid), {
        onboardingComplete: true,
         onboardingComplete: true,
@@ -518,6 +523,8 @@ async function run() {
 
     const publicDb = testEnv.unauthenticatedContext().firestore();
     const ownerDb = authedContext(testEnv, ownerUid, { email_verified: true }).firestore();
+    await assertFails(getDoc(doc(ownerDb, 'codexDevActorRegistry', 'retired-codex')));
+    await assertFails(setDoc(doc(ownerDb, 'codexDevActorRegistry', ownerUid), { uid: ownerUid }));
     const ownerEmailFalseAdultDb = authedContext(testEnv, ownerUid, { email_verified: false, idvVerified: true, isAdult: true }).firestore();
     const ownerEmailOnlyDb = authedContext(testEnv, ownerUid, { email_verified: true, __adultDefaults: false }).firestore();
     const ownerIdvFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: false, isAdult: true }).firestore();

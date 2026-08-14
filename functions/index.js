@@ -42,6 +42,7 @@ import {
   isCodexDevUid,
   resolveCodexDevUid,
 } from './codexDevIdentity.js';
+import { ensureCodexDevActorRegistered, isKnownCodexDevActorUid } from './codexDevActorRegistry.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
@@ -259,6 +260,7 @@ export const ensureCodexDevProfileState = async (uid) => {
   // A test actor has no public projection. Remove the legacy projection that
   // used to leak capability/IDV fields and could make Codex discoverable.
   await publicUserRef.delete();
+  await ensureCodexDevActorRegistered({ db, uid, now });
 };
 
 const buildReportedPostPath = (postId) => {
@@ -2062,7 +2064,7 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       res.status(400).json({ error: 'Invalid recipientUid' });
       return;
     }
-    if (isCodexDevForProductionDeny(decoded) || isCodexDevUid(recipientUid)) {
+    if (isCodexDevForProductionDeny(decoded) || await isKnownCodexDevActorUid({ db, uid: recipientUid })) {
       res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
       return;
     }
@@ -2493,10 +2495,14 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
       res.status(403).json({ error: 'Cannot send message to system thread' });
       return;
     }
-    const participants = Array.isArray(threadData?.participantUids)
-      ? threadData.participantUids
-      : (Array.isArray(threadData?.participants) ? threadData.participants : []);
-    if (participants.some((uid) => isCodexDevUid(uid))) {
+    const participants = [...new Set([
+      ...(Array.isArray(threadData?.participantUids) ? threadData.participantUids : []),
+      ...(Array.isArray(threadData?.participants) ? threadData.participants : []),
+    ].filter((uid) => typeof uid === 'string' && uid))];
+    const knownCodexParticipant = (await Promise.all(participants.map((uid) => (
+      isKnownCodexDevActorUid({ db, uid })
+    )))).some(Boolean);
+    if (knownCodexParticipant) {
       res.status(403).json({ error: 'Codex Dev direct messages are retired.' });
       return;
     }
@@ -4849,7 +4855,7 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
     const requestedByUid = requestData?.requestedByUid || null;
     const contributorId = primaryOverride || requestData?.contributorId || null;
 
-    if (isCodexDevUid(requestedByUid)) {
+    if (await isKnownCodexDevActorUid({ db, uid: requestedByUid })) {
       res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
       return;
     }
@@ -5355,7 +5361,7 @@ export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-we
   }
 
   const requestData = requestSnap.data() || {};
-  if (isCodexDevUid(requestData?.requestedByUid)) {
+  if (await isKnownCodexDevActorUid({ db, uid: requestData?.requestedByUid })) {
     logger.warn('Ignoring Codex Dev claim proof upload', { requestId });
     return;
   }

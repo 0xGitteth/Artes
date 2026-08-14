@@ -2,6 +2,7 @@
 import { fileURLToPath } from 'node:url';
 import { CODEX_DEV_UID_DEFAULT, hasCodexDevPrivateMarkers } from '../codexDevIdentity.js';
 import { applyFollowingDeletedCounters } from '../followCounters.js';
+import { ensureCodexDevActorRegistered, isRegisteredCodexDevActorUid } from '../codexDevActorRegistry.js';
 
 const emptyStats = () => ({
   actors: 0,
@@ -62,6 +63,13 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
   stats.targetUid = canonicalUid;
   stats.targetUidSource = source;
   stats.storageInspection = bucket ? 'complete' : (skipStorage ? 'skipped-explicitly' : 'skipped-missing-bucket');
+  stats.targetUidAlreadyRegistered = await isRegisteredCodexDevActorUid({ db, uid: canonicalUid });
+  stats.applyWouldEnsureRegistration = !apply;
+  stats.targetUidRegistered = stats.targetUidAlreadyRegistered;
+  if (apply) {
+    await ensureCodexDevActorRegistered({ db, uid: canonicalUid });
+    stats.targetUidRegistered = true;
+  }
   const users = await queryDocs(db.collection('users'));
   stats.ambiguousMarkerUids = users.filter((doc) => doc.id !== canonicalUid && hasCodexDevPrivateMarkers(doc.data() || {})).map((doc) => doc.id);
   const actors = [{ id: canonicalUid }];

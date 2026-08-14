@@ -14,6 +14,7 @@ import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFir
 import { findBestReusableAcrossPages, findReusableAcrossPages, isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
 import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
+import { ensureCodexDevActorRegistered, isKnownCodexDevActorUid } from '../functions/codexDevActorRegistry.js';
 
 test('canonical identity requires the configured uid and both trusted claims', () => {
   const env = { CODEX_DEV_UID: 'isolated-codex' };
@@ -32,6 +33,43 @@ test('production denial is broader than strict Codex privilege identity', () => 
   assert.equal(isCodexDevForProductionDeny({ uid: 'new-codex' }, env), true);
   assert.equal(isCodexDevForProductionDeny({ uid: 'old-codex', devCodex: true, devActor: 'codex' }, env), true);
   assert.equal(isCodexDevForProductionDeny({ uid: 'ordinary' }, env), false);
+});
+
+test('historical actor registry is deny-only and ignores spoofed profile markers', async () => {
+  const docs = new Map();
+  const db = { collection: (collection) => ({ doc: (uid) => ({
+    get: async () => ({ exists: docs.has(`${collection}/${uid}`) }),
+    set: async (data) => docs.set(`${collection}/${uid}`, data),
+  }) }) };
+  const env = { CODEX_DEV_UID: 'current-codex' };
+  assert.equal(await isKnownCodexDevActorUid({ db, uid: 'current-codex', env }), true);
+  assert.equal(await isKnownCodexDevActorUid({ db, uid: 'retired-codex', env }), false);
+  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'retired-codex', now: 123 }), true);
+  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'retired-codex', now: 456 }), false);
+  assert.equal(await isKnownCodexDevActorUid({ db, uid: 'retired-codex', env }), true);
+  assert.equal(isCodexDevToken({ uid: 'retired-codex', devCodex: true, devActor: 'codex' }, env), false,
+    'registry membership cannot grant strict privilege');
+  assert.equal(await isKnownCodexDevActorUid({ db, uid: 'spoofed-marker-user', env }), false,
+    'private marker data is not consulted');
+});
+
+test('persisted retired actor checks precede all DM and claim mutations', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  const createDm = section('export const createDmThread', 'export const createDevCodexToken');
+  assert.ok(createDm.indexOf('await isKnownCodexDevActorUid({ db, uid: recipientUid })') < createDm.indexOf('canonicalRef.get()'));
+  const sendDm = section('export const sendDmMessage', 'export const sendSupportMessage');
+  assert.match(sendDm, /threadData\?\.participantUids/);
+  assert.match(sendDm, /threadData\?\.participants/);
+  const dmDeny = sendDm.indexOf('if (knownCodexParticipant)');
+  for (const mutation of ["collection('messages').doc()", 'threadRef.set(', "collection('threadIndex')"]) {
+    assert.ok(dmDeny < sendDm.indexOf(mutation), `DM denial precedes ${mutation}`);
+  }
+  const approve = section('export const moderatorApproveClaimRequest', 'export const getVouchRequests');
+  assert.ok(approve.indexOf('await isKnownCodexDevActorUid') < approve.indexOf("requestData?.status === 'approved'"));
+  const proof = section('export const verifyClaimProofScreenshot', 'export const onFollowingCreated');
+  assert.ok(proof.indexOf('await isKnownCodexDevActorUid') < proof.indexOf('visionClient.textDetection'));
+  assert.ok(proof.indexOf('await isKnownCodexDevActorUid') < proof.indexOf("collection('contributors')"));
 });
 
 test('moderateImage derives all quarantine decisions from production-deny identity', async () => {
@@ -141,6 +179,7 @@ test('ensureCodexDevProfileState deletes rather than writes a publicUsers projec
   const end = source.indexOf('\n};', start) + 3;
   const implementation = source.slice(start, end);
   assert.match(implementation, /publicUserRef\.delete\(\)/);
+  assert.match(implementation, /ensureCodexDevActorRegistered\(\{ db, uid, now \}\)/);
   assert.doesNotMatch(implementation, /publicUserRef\.set\(/);
   for (const privateField of ['ageVerified', 'isAdult', 'didit', 'idv', 'email', 'isDevTestUser']) {
     assert.equal(implementation.includes(`publicPayload.${privateField}`), false);
@@ -172,7 +211,7 @@ test('production side-effect endpoints reject Codex before shared writes', async
   assert.ok(claim.indexOf('isCodexDevForProductionDeny(decoded)') < claim.indexOf('db.runTransaction'));
   const dmMessage = section('export const sendDmMessage', 'export const sendSupportMessage');
   assert.ok(dmMessage.indexOf('isCodexDevForProductionDeny(decoded)') < dmMessage.indexOf("collection('messages').doc()"));
-  assert.ok(dmMessage.indexOf('participants.some((uid) => isCodexDevUid(uid))') < dmMessage.indexOf("collection('messages').doc()"));
+  assert.ok(dmMessage.indexOf('isKnownCodexDevActorUid({ db, uid })') < dmMessage.indexOf("collection('messages').doc()"));
   const moderationAction = section('export const userModerationAction', 'export const moderatorDecide');
   assert.ok(moderationAction.indexOf('isCodexDevForProductionDeny(decoded)') < moderationAction.indexOf("collection('moderationExamples')"));
 });

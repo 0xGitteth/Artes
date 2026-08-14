@@ -23,10 +23,12 @@ service cloud.firestore {
         && request.auth.token.devCodex == true
         && request.auth.token.devActor == 'codex';
     }
+    function isKnownCodexProductionDeniedUid(uid) {
+      return (request.auth != null && request.auth.uid == uid && isCodexDev())
+        || exists(/databases/$(database)/documents/codexDevActorRegistry/$(uid));
+    }
     function isKnownCodexProductionDenied() {
-      return isCodexDev()
-        || (request.auth != null
-          && exists(/databases/$(database)/documents/codexDevActorRegistry/$(request.auth.uid)));
+      return request.auth != null && isKnownCodexProductionDeniedUid(request.auth.uid);
     }
     function isDevAnon() {
       return isCodexDev();
@@ -196,10 +198,16 @@ service cloud.firestore {
       return thread.type == 'dm' && (
         ('participantUids' in thread && thread.participantUids is list
           && thread.participantUids.size() == 2
-          && (isTestActorUid(thread.participantUids[0]) || isTestActorUid(thread.participantUids[1])))
-        || (!('participantUids' in thread) && 'participants' in thread && thread.participants is list
+          && (isTestActorUid(thread.participantUids[0])
+            || isTestActorUid(thread.participantUids[1])
+            || isKnownCodexProductionDeniedUid(thread.participantUids[0])
+            || isKnownCodexProductionDeniedUid(thread.participantUids[1])))
+        || ('participants' in thread && thread.participants is list
           && thread.participants.size() == 2
-          && (isTestActorUid(thread.participants[0]) || isTestActorUid(thread.participants[1])))
+          && (isTestActorUid(thread.participants[0])
+            || isTestActorUid(thread.participants[1])
+            || isKnownCodexProductionDeniedUid(thread.participants[0])
+            || isKnownCodexProductionDeniedUid(thread.participants[1])))
       );
     }
     function isSupportThreadOwner(threadId) {
@@ -931,10 +939,14 @@ service cloud.firestore {
             && request.resource.data.participantUids.size() == 2
             && !isTestActorUid(request.resource.data.participantUids[0])
             && !isTestActorUid(request.resource.data.participantUids[1])
+            && !isKnownCodexProductionDeniedUid(request.resource.data.participantUids[0])
+            && !isKnownCodexProductionDeniedUid(request.resource.data.participantUids[1])
             && (!('participants' in request.resource.data)
               || (
                 request.resource.data.participants is list
                 && request.resource.data.participants.size() == 2
+                && !isKnownCodexProductionDeniedUid(request.resource.data.participants[0])
+                && !isKnownCodexProductionDeniedUid(request.resource.data.participants[1])
                 && request.resource.data.participants.hasAll(request.resource.data.participantUids)
                 && request.resource.data.participantUids.hasAll(request.resource.data.participants)
               ))

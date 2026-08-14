@@ -507,7 +507,15 @@ const buildContributorMergePostUpdate = (postData, primaryContributorId, seconda
   return { changed, updates };
 };
 
-const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId) => {
+const assertMergeActorAllowed = async ({ transaction, denyActorUid }) => {
+  if (denyActorUid && await isKnownCodexDevActorUid({ db, uid: denyActorUid, transaction })) {
+    const error = new Error('Codex Dev contributor claims are isolated.');
+    error.status = 403;
+    throw error;
+  }
+};
+
+const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId, denyActorUid = null) => {
   let updatedPosts = 0;
   let lastDoc = null;
   let hasMore = true;
@@ -524,21 +532,31 @@ const updatePostsForContributorMerge = async (primaryContributorId, secondaryCon
       hasMore = false;
       continue;
     }
-    const batch = db.batch();
-    snapshot.docs.forEach((docSnap) => {
-      const { changed, updates } = buildContributorMergePostUpdate(docSnap.data(), primaryContributorId, secondaryContributorId);
-      if (!changed) return;
-      batch.update(docSnap.ref, updates);
-      updatedPosts += 1;
+    let pageUpdatedPosts = 0;
+    await db.runTransaction(async (transaction) => {
+      pageUpdatedPosts = 0;
+      await assertMergeActorAllowed({ transaction, denyActorUid });
+      const freshDocs = [];
+      for (const docSnap of snapshot.docs) {
+        const freshSnap = await transaction.get(docSnap.ref);
+        freshDocs.push({ ref: docSnap.ref, snap: freshSnap });
+      }
+      for (const { ref, snap: freshSnap } of freshDocs) {
+        if (!freshSnap.exists) continue;
+        const { changed, updates } = buildContributorMergePostUpdate(freshSnap.data(), primaryContributorId, secondaryContributorId);
+        if (!changed) continue;
+        transaction.update(ref, updates);
+        pageUpdatedPosts += 1;
+      }
     });
-    await batch.commit();
+    updatedPosts += pageUpdatedPosts;
     lastDoc = snapshot.docs[snapshot.docs.length - 1];
     hasMore = snapshot.size === 200;
   }
   return updatedPosts;
 };
 
-const moveContributorAliases = async (primaryContributorId, secondaryContributorId) => {
+const moveContributorAliases = async (primaryContributorId, secondaryContributorId, denyActorUid = null) => {
   let movedAliases = 0;
   let skippedAliases = 0;
   let lastDoc = null;
@@ -556,17 +574,28 @@ const moveContributorAliases = async (primaryContributorId, secondaryContributor
       hasMore = false;
       continue;
     }
-    const batch = db.batch();
-    snapshot.docs.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data?.contributorId !== secondaryContributorId) {
-        skippedAliases += 1;
-        return;
+    let pageMovedAliases = 0;
+    let pageSkippedAliases = 0;
+    await db.runTransaction(async (transaction) => {
+      pageMovedAliases = 0;
+      pageSkippedAliases = 0;
+      await assertMergeActorAllowed({ transaction, denyActorUid });
+      const freshDocs = [];
+      for (const docSnap of snapshot.docs) {
+        const freshSnap = await transaction.get(docSnap.ref);
+        freshDocs.push({ ref: docSnap.ref, snap: freshSnap });
       }
-      batch.update(docSnap.ref, { contributorId: primaryContributorId });
-      movedAliases += 1;
+      for (const { ref, snap: freshSnap } of freshDocs) {
+        if (!freshSnap.exists || freshSnap.data()?.contributorId !== secondaryContributorId) {
+          pageSkippedAliases += 1;
+          continue;
+        }
+        transaction.update(ref, { contributorId: primaryContributorId });
+        pageMovedAliases += 1;
+      }
     });
-    await batch.commit();
+    movedAliases += pageMovedAliases;
+    skippedAliases += pageSkippedAliases;
     lastDoc = snapshot.docs[snapshot.docs.length - 1];
     hasMore = snapshot.size === 200;
   }
@@ -578,6 +607,7 @@ const mergeContributorsInternal = async ({
   secondaryContributorId,
   moderatorEmail,
   source,
+  denyActorUid = null,
 }) => {
   if (!primaryContributorId || !secondaryContributorId) {
     const error = new Error('Missing contributor ids');
@@ -600,18 +630,18 @@ const mergeContributorsInternal = async ({
     throw error;
   }
 
-  const updatedPosts = await updatePostsForContributorMerge(primaryContributorId, secondaryContributorId);
-  const aliasResult = await moveContributorAliases(primaryContributorId, secondaryContributorId);
+  const updatedPosts = await updatePostsForContributorMerge(primaryContributorId, secondaryContributorId, denyActorUid);
+  const aliasResult = await moveContributorAliases(primaryContributorId, secondaryContributorId, denyActorUid);
 
-  await secondaryRef.set(
-    {
+  await db.runTransaction(async (transaction) => {
+    await assertMergeActorAllowed({ transaction, denyActorUid });
+    transaction.set(secondaryRef, {
       status: 'merged',
       mergedInto: primaryContributorId,
       mergedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+    }, { merge: true });
+  });
 
   logger.info('Merged contributors', {
     primaryContributorId,
@@ -1786,7 +1816,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         const openCount = Number(userModeration?.data?.openReviewCount ?? 0);
         if (rightsLevel > 0 && openCount < 1) {
           const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-          const reviewRef = await db.collection('reviewCases').add({
+          const reviewRef = db.collection('reviewCases').doc();
+          let persistedOrdinaryReview = false;
+          await db.runTransaction(async (transaction) => {
+            persistedOrdinaryReview = false;
+            if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
+            transaction.create(reviewRef, {
             caseType: 'upload',
             userId,
             status: 'inReview',
@@ -1815,10 +1850,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
             }),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
+            });
+            transaction.set(userModeration.ref, { openReviewCount: 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+            persistedOrdinaryReview = true;
           });
-          reviewCaseId = reviewRef.id;
-          reviewCreated = true;
-          await userModeration.ref.set({ openReviewCount: 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+          if (persistedOrdinaryReview) {
+            reviewCaseId = reviewRef.id;
+            reviewCreated = true;
+          }
         }
       }
     } catch (error) {
@@ -1928,8 +1967,15 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       ...(persistedPreview?.storagePath ? { storagePath: persistedPreview.storagePath } : {}),
       createdAt: FieldValue.serverTimestamp(),
     };
-    const uploadRef = await db.collection('uploads').add(uploadPayload);
-    uploadId = uploadRef.id;
+    const uploadRef = db.collection('uploads').doc();
+    let persistedUpload = false;
+    await db.runTransaction(async (transaction) => {
+      persistedUpload = false;
+      if (!isCodexActor && await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
+      transaction.create(uploadRef, uploadPayload);
+      persistedUpload = true;
+    });
+    uploadId = persistedUpload ? uploadRef.id : null;
 
     if (process.env.NODE_ENV === 'development') {
       logger.debug('Moderation preview linked to upload', {
@@ -1945,7 +1991,9 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   if (reviewCaseId && uploadId) {
     try {
       const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-      await db.collection('reviewCases').doc(reviewCaseId).set(
+      await db.runTransaction(async (transaction) => {
+        if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
+        transaction.set(db.collection('reviewCases').doc(reviewCaseId),
         {
           linkedUploadIds: FieldValue.arrayUnion(uploadId),
           fingerprints: FieldValue.arrayUnion(fingerprints),
@@ -1969,7 +2017,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
-      );
+        );
+      });
     } catch (error) {
       logger.error('Review case koppelen mislukt.', error);
     }
@@ -2721,6 +2770,10 @@ export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, asyn
       res.status(403).json({ error: 'Codex Dev reports are isolated.' });
       return;
     }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev reports are isolated.' });
+      return;
+    }
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const {
@@ -2790,6 +2843,10 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
   try {
     const decoded = await verifyToken(req);
     if (isCodexDevForProductionDeny(decoded)) {
+      res.status(403).json({ error: 'Codex Dev review cases are isolated.' });
+      return;
+    }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
       res.status(403).json({ error: 'Codex Dev review cases are isolated.' });
       return;
     }
@@ -4066,6 +4123,9 @@ export const createTemporaryContributor = onCall({ region: 'europe-west4' }, asy
   if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
     throw new HttpsError('permission-denied', 'Codex Dev contributors are isolated');
   }
+  if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid })) {
+    throw new HttpsError('permission-denied', 'Codex Dev contributors are isolated');
+  }
 
   const displayName = toContributorString(request.data?.displayName).replace(/\s+/g, ' ').slice(0, 80);
   if (!displayName) {
@@ -4151,6 +4211,9 @@ export const createClaimInvite = onCall({ region: 'europe-west4' }, async (reque
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
   if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
+    throw new HttpsError('permission-denied', 'Codex Dev claim invites are isolated');
+  }
+  if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid })) {
     throw new HttpsError('permission-denied', 'Codex Dev claim invites are isolated');
   }
   const contributorId = request.data?.contributorId || null;
@@ -4903,16 +4966,18 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
         secondaryContributorId,
         moderatorEmail: email,
         source: 'claimRequest',
+        denyActorUid: requestedByUid,
       });
-      await db.collection('users').doc(requestedByUid).set(
-        {
+      await db.runTransaction(async (transaction) => {
+        const freshRequestSnap = await transaction.get(requestRef);
+        if (!freshRequestSnap.exists) return;
+        const freshRequestedByUid = freshRequestSnap.data()?.requestedByUid || null;
+        await assertMergeActorAllowed({ transaction, denyActorUid: freshRequestedByUid });
+        transaction.set(db.collection('users').doc(freshRequestedByUid), {
           contributorId,
           updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-      await requestRef.set(
-        {
+        }, { merge: true });
+        transaction.set(requestRef, {
           status: 'approved',
           statusReason: null,
           approvedAt: FieldValue.serverTimestamp(),
@@ -4920,16 +4985,23 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
           primaryContributorId: contributorId,
           secondaryContributorId,
           updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+        }, { merge: true });
+      });
       res.status(200).json({ ok: true, status: 'approved', merge: mergeResult });
       return;
     }
 
     await db.runTransaction(async (transaction) => {
+      const freshRequestSnap = await transaction.get(requestRef);
+      if (!freshRequestSnap.exists) return;
+      const freshRequestedByUid = freshRequestSnap.data()?.requestedByUid || null;
+      if (await isKnownCodexDevActorUid({ db, uid: freshRequestedByUid, transaction })) {
+        const error = new Error('Codex Dev contributor claims are isolated.');
+        error.status = 403;
+        throw error;
+      }
       const contributorRef = db.collection('contributors').doc(contributorId);
-      const claimantRef = db.collection('users').doc(requestedByUid);
+      const claimantRef = db.collection('users').doc(freshRequestedByUid);
       const contributorSnap = await transaction.get(contributorRef);
       if (!contributorSnap.exists) {
         const error = new Error('Contributor not found');
@@ -4941,7 +5013,7 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
         updatedAt: FieldValue.serverTimestamp(),
       });
       transaction.update(contributorRef, {
-        claimedByUid: requestedByUid,
+        claimedByUid: freshRequestedByUid,
         claimedAt: FieldValue.serverTimestamp(),
         status: 'claimed',
         updatedAt: FieldValue.serverTimestamp(),

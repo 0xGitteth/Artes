@@ -6,6 +6,7 @@ import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { isCodexDevForProductionDeny } from "./codexDevIdentity.js";
+import { isKnownCodexDevActorUid } from "./codexDevActorRegistry.js";
 
 if (!getApps().length) initializeApp();
 
@@ -51,6 +52,9 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
         return res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
       }
       const uid = decoded.uid;
+      if (await isKnownCodexDevActorUid({ db, uid })) {
+        return res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
+      }
 
       const threadId = `support_${uid}`;
       const threadRef = db.collection("threads").doc(threadId);

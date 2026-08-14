@@ -14,6 +14,7 @@ const moderatorEmail = 'mod@example.com';
 const uploadPath = `uploads/${ownerUid}/publication.jpg`;
 const claimRequestId = 'claim_request_1';
 const claimProofPath = `claimProofs/${claimRequestId}/${ownerUid}.png`;
+const retiredUid = 'retired_codex_uid';
 const jpegMeta = { contentType: 'image/jpeg' };
 const pngMeta = { contentType: 'image/png' };
 const textMeta = { contentType: 'text/plain' };
@@ -34,6 +35,9 @@ try {
     await setDoc(doc(context.firestore(), 'config', 'moderation'), {
       moderatorEmails: [moderatorEmail],
     });
+    await setDoc(doc(context.firestore(), 'claimRequests', claimRequestId), { requestedByUid: ownerUid, status: 'pending' });
+    await setDoc(doc(context.firestore(), 'codexDevActorRegistry', retiredUid), { uid: retiredUid, productionDenyOnly: true });
+    await setDoc(doc(context.firestore(), 'claimRequests', 'retired_claim'), { requestedByUid: retiredUid, status: 'pending' });
   });
 
   const ownerStorage = testEnv.authenticatedContext(ownerUid, { email_verified: true, email: 'owner@example.com' }).storage();
@@ -43,10 +47,13 @@ try {
     email: moderatorEmail,
   }).storage();
   const unauthedStorage = testEnv.unauthenticatedContext().storage();
+  const retiredStorage = testEnv.authenticatedContext(retiredUid, { email_verified: true }).storage();
 
   await assertSucceeds(
     uploadBytes(ref(ownerStorage, uploadPath), new Blob(['valid-image'], { type: 'image/jpeg' }), jpegMeta),
   );
+  await assertFails(uploadBytes(ref(retiredStorage, `uploads/${retiredUid}/blocked.jpg`), new Blob(['blocked'], { type: 'image/jpeg' }), jpegMeta));
+  await assertFails(uploadBytes(ref(retiredStorage, `claimProofs/retired_claim/${retiredUid}.png`), new Blob(['blocked'], { type: 'image/png' }), pngMeta));
 
   await assertFails(
     uploadBytes(ref(otherStorage, `uploads/${ownerUid}/intrusion.jpg`), new Blob(['hack'], { type: 'image/jpeg' }), jpegMeta),

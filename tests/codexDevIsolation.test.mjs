@@ -131,12 +131,40 @@ test('historical registry blocks claim actors, screenshot races, and production 
 
 test('Firestore production deny helper is registry-backed but grants no Codex privileges', async () => {
   const rules = await fs.readFile(new URL('../firestore.rules', import.meta.url), 'utf8');
-  assert.match(rules, /function isKnownCodexProductionDenied\(\)[^]*codexDevActorRegistry/);
+  assert.match(rules, /function isKnownCodexProductionDeniedUid\(uid\)[^]*codexDevActorRegistry/);
   assert.doesNotMatch(rules, /allow [^;]+: if isKnownCodexProductionDenied\(\)/);
   assert.equal((rules.match(/!isCodexDev\(\)/g) || []).length, 0);
   for (const surface of ['/publicUsers/', '/profiles/', '/posts/', '/following/', '/threads/', '/contributors/', '/claimRequests/']) {
     assert.ok(rules.includes(surface), `${surface} remains covered by production rules`);
   }
+});
+
+test('remaining reviewed production callables deny historical registry actors before writes', async () => {
+  const index = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const support = await fs.readFile(new URL('../functions/supportChat.js', import.meta.url), 'utf8');
+  const section = (source, start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  for (const [start, end, firstWrite] of [
+    ['export const reportPost', 'export const requestUploadReviewCase', "collection('reviewCases').add"],
+    ['export const requestUploadReviewCase', 'export const getModerationExamplesForCase', "collection('reviewCases')"],
+    ['export const createTemporaryContributor', 'export const createClaimInvite', 'db.runTransaction'],
+    ['export const createClaimInvite', 'export const getClaimInvitePreview', 'db.runTransaction'],
+  ]) {
+    const implementation = section(index, start, end);
+    assert.ok(implementation.indexOf('isKnownCodexDevActorUid') < implementation.indexOf(firstWrite), `${start} denies before production writes`);
+  }
+  const ensureSupport = section(support, 'export const ensureSupportThread', 'export const ensureModerationThread');
+  assert.ok(ensureSupport.indexOf('isKnownCodexDevActorUid') < ensureSupport.indexOf('threadRef.get()'));
+});
+
+test('moderation and moderator claim writes serialize registry reads with production mutations', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));
+  assert.match(moderate, /runTransaction[^]*isKnownCodexDevActorUid\(\{ db, uid: userId, transaction \}\)[^]*transaction\.create\(reviewRef/);
+  assert.match(moderate, /runTransaction[^]*!isCodexActor && await isKnownCodexDevActorUid[^]*transaction\.create\(uploadRef/);
+  const approve = source.slice(source.indexOf('export const moderatorApproveClaimRequest'), source.indexOf('export const getVouchRequests'));
+  assert.match(approve, /denyActorUid: requestedByUid/);
+  assert.match(approve, /freshRequestSnap[^]*isKnownCodexDevActorUid\(\{ db, uid: freshRequestedByUid, transaction \}\)/);
+  assert.match(source, /assertMergeActorAllowed[^]*updatePostsForContributorMerge[^]*moveContributorAliases/);
 });
 
 test('historical private markers never establish destructive identity', () => {

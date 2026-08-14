@@ -11,6 +11,7 @@ const ownerUid = 'owner_uid';
 const otherUid = 'other_uid';
 const jpegMeta = { contentType: 'image/jpeg' };
 const managedProfileId = 'managed_profile_1';
+const retiredUid = 'retired_codex_uid';
 
 const testEnv = await initializeTestEnvironment({
   projectId: 'artes-media-app',
@@ -32,16 +33,19 @@ try {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    await setDoc(doc(context.firestore(), 'codexDevActorRegistry', retiredUid), { uid: retiredUid, productionDenyOnly: true });
   });
 
   const ownerStorage = testEnv.authenticatedContext(ownerUid, { email_verified: true }).storage();
   const otherStorage = testEnv.authenticatedContext(otherUid, { email_verified: true }).storage();
   const unauthedStorage = testEnv.unauthenticatedContext().storage();
   const ownerUnverifiedStorage = testEnv.authenticatedContext(ownerUid, { email_verified: false }).storage();
+  const retiredStorage = testEnv.authenticatedContext(retiredUid, { email_verified: true }).storage();
 
   await assertSucceeds(
     uploadBytes(ref(ownerStorage, `profileImages/${ownerUid}/avatar.jpg`), new Blob(['avatar'], { type: 'image/jpeg' }), jpegMeta),
   );
+  await assertFails(uploadBytes(ref(retiredStorage, `profileImages/${retiredUid}/avatar.jpg`), new Blob(['blocked'], { type: 'image/jpeg' }), jpegMeta));
 
   await assertSucceeds(
     uploadBytes(ref(ownerStorage, `profileImages/${ownerUid}/header.jpg`), new Blob(['header'], { type: 'image/jpeg' }), jpegMeta),

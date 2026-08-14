@@ -52,6 +52,9 @@ async function run() {
       await setDoc(doc(db, 'codexDevActorRegistry', 'retired-codex'), {
         uid: 'retired-codex', actor: 'codex', productionDenyOnly: true, registeredAt: new Date(),
       });
+      await setDoc(doc(db, 'codexDevActorRegistry', 'retired-no-profile'), {
+        uid: 'retired-no-profile', actor: 'codex', productionDenyOnly: true, registeredAt: new Date(),
+      });
       await setDoc(doc(db, 'users', 'retired-codex'), {
         uid: 'retired-codex', onboardingComplete: true, onboardingStep: 5,
         ageVerified: true, isAdult: true,
@@ -642,6 +645,9 @@ async function run() {
       });
       await setDoc(doc(db, 'threads', 'ordinary_private_dm'), { type: 'dm', participantUids: [ownerUid, otherUid] });
       await setDoc(doc(db, 'threads', 'retired_codex_dm'), { type: 'dm', participantUids: ['retired-codex', ownerUid] });
+      await setDoc(doc(db, 'threads', 'retired_no_profile_legacy_dm'), {
+        type: 'dm', participants: [ownerUid, 'retired-no-profile'], dmKey: 'owner_1_retired-no-profile',
+      });
       await setDoc(doc(db, 'threads', 'ordinary_private_dm', 'messages', 'secret'), { senderUid: ownerUid, text: 'private' });
       await setDoc(doc(db, 'threads', 'support_other_rules', 'messages', 'secret'), { senderUid: otherUid, text: 'support private' });
     });
@@ -655,6 +661,14 @@ async function run() {
     await assertFails(setDoc(doc(retiredCodexDb, 'threads', 'retired_codex_dm', 'messages', 'blocked_retired_text'), {
       type: 'text', senderUid: 'retired-codex', text: 'Must remain quarantined.', createdAt: serverTimestamp(),
     }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_owner_retired_direct'), {
+      type: 'dm', participantUids: [ownerUid, 'retired-no-profile'], dmKey: 'owner_1_retired-no-profile',
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'retired_no_profile_legacy_dm', 'messages', 'blocked_ordinary_text'), {
+      type: 'text', senderUid: ownerUid, text: 'Must be blocked by registry.', createdAt: serverTimestamp(),
+    }));
+    await assertFails(getDoc(doc(ownerDb, 'threads', 'retired_no_profile_legacy_dm')));
     await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules')));
     await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'owner_text')));
     await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_without_owner_rules', 'messages', 'owner_non_participant_text'), {

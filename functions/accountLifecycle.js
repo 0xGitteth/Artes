@@ -5,7 +5,7 @@ import cors from "cors";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-import { isCodexDevToken } from "./codexDevIdentity.js";
+import { isCodexDevForProductionDeny } from "./codexDevIdentity.js";
 
 if (!getApps().length) initializeApp();
 
@@ -32,7 +32,7 @@ export const deleteOnboardingAccount = onRequest({ region: "europe-west4" }, (re
       }
 
       const decoded = await verifyIdToken(req);
-      if (isCodexDevToken(decoded)) {
+      if (isCodexDevForProductionDeny(decoded)) {
         return res.status(403).json({ error: "Codex Dev identity cannot be deleted" });
       }
       const uid = decoded.uid;

@@ -34,3 +34,17 @@ export const findReusableAcrossPages = async ({ fetchPage, isCodexActor, select 
   }
   return null;
 };
+
+export const findBestReusableAcrossPages = async ({ fetchPage, isCodexActor, selectBest }) => {
+  let cursor = null;
+  let best = null;
+  do {
+    const docs = await fetchPage(cursor);
+    if (!docs.length) break;
+    const pageBest = selectBest(docs.filter((doc) => isUploadReusableForActor(doc.data(), isCodexActor)));
+    if (pageBest && (!best || pageBest.distance < best.distance)) best = pageBest;
+    if (best?.distance === 0) break;
+    cursor = docs.at(-1);
+  } while (cursor);
+  return best;
+};

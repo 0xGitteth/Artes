@@ -5,6 +5,7 @@ import cors from "cors";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { isCodexDevForProductionDeny } from "./codexDevIdentity.js";
 
 if (!getApps().length) initializeApp();
 
@@ -46,7 +47,7 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
       }
 
       const decoded = await verifyIdToken(req);
-      if (decoded.devCodex === true && decoded.devActor === 'codex') {
+      if (isCodexDevForProductionDeny(decoded)) {
         return res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
       }
       const uid = decoded.uid;

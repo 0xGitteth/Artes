@@ -38,7 +38,7 @@ import {
 import {
   CODEX_DEV_ACTOR,
   buildCodexDevPrivateProfile,
-  isCodexDevToken,
+  isCodexDevForProductionDeny,
   isCodexDevUid,
   resolveCodexDevUid,
 } from './codexDevIdentity.js';
@@ -46,7 +46,7 @@ import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js'
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
-import { findReusableAcrossPages, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
+import { findBestReusableAcrossPages, findReusableAcrossPages, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from './codexTestDataCleanup.js';
 
 const suggestThreshold = 0.45;
@@ -1066,14 +1066,14 @@ const findExactModerationExample = async (sha256) => {
 
 const findNearDuplicateUpload = async ({ dhash, dhashPrefix }, { isCodexActor = false } = {}) => {
   if (!dhash) return null;
-  return findReusableAcrossPages({
+  return findBestReusableAcrossPages({
     isCodexActor,
     fetchPage: async (cursor) => {
       let query = db.collection('uploads').where('fingerprints.dhashPrefix', '==', dhashPrefix).limit(25);
       if (cursor) query = query.startAfter(cursor);
       return (await query.get()).docs;
     },
-    select: (docs) => selectNearReusableUpload({
+    selectBest: (docs) => selectNearReusableUpload({
       uploads: docs.map((doc) => ({ id: doc.id, data: doc.data() })),
       isCodexActor,
       distanceFor: (candidate) => hammingDistance(dhash, candidate?.fingerprints?.dhash),
@@ -2062,7 +2062,7 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       res.status(400).json({ error: 'Invalid recipientUid' });
       return;
     }
-    if (isCodexDevToken(decoded) || isCodexDevUid(recipientUid)) {
+    if (isCodexDevForProductionDeny(decoded) || isCodexDevUid(recipientUid)) {
       res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
       return;
     }
@@ -2204,7 +2204,7 @@ export const resetPersonalOnboarding = onCall({ region: 'europe-west4' }, async 
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
-  if (isCodexDevToken({ uid, ...(request.auth?.token || {}) })) {
+  if (isCodexDevForProductionDeny({ uid, ...(request.auth?.token || {}) })) {
     throw new HttpsError('permission-denied', 'Codex Dev identity cannot be reset.');
   }
   return resetPersonalOnboardingAtomically({ db, uid, onboardingStep: 2 });
@@ -2466,7 +2466,7 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
   try {
     const decoded = await verifyToken(req);
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)) {
       res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
       return;
     }
@@ -2568,7 +2568,7 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
     logger.info('sendSupportMessage: Received POST request', { origin: req.get('origin') });
     
     const decoded = await verifyToken(req);
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)) {
       res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
       return;
     }
@@ -2704,7 +2704,7 @@ export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, asyn
   }
   try {
     const decoded = await verifyToken(req);
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)) {
       res.status(403).json({ error: 'Codex Dev reports are isolated.' });
       return;
     }
@@ -2776,7 +2776,7 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
   }
   try {
     const decoded = await verifyToken(req);
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)) {
       res.status(403).json({ error: 'Codex Dev review cases are isolated.' });
       return;
     }
@@ -3637,7 +3637,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const { messageId, uploadId, action, postDraft: postDraftFromBody } = body || {};
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)) {
       res.status(403).json({ error: 'Codex Dev production moderation actions are isolated.' });
       return;
     }
@@ -4049,7 +4049,7 @@ export const createTemporaryContributor = onCall({ region: 'europe-west4' }, asy
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
-  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
     throw new HttpsError('permission-denied', 'Codex Dev contributors are isolated');
   }
 
@@ -4136,7 +4136,7 @@ export const createClaimInvite = onCall({ region: 'europe-west4' }, async (reque
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
-  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
     throw new HttpsError('permission-denied', 'Codex Dev claim invites are isolated');
   }
   const contributorId = request.data?.contributorId || null;
@@ -4264,7 +4264,7 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
   }
   try {
     const decoded = await verifyToken(req);
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)) {
       res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
       return;
     }
@@ -4378,7 +4378,7 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
-  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4444,7 +4444,7 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
-  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4503,7 +4503,7 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
-  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   const token = request.data?.token || null;
   if (!requestId || !token) {
@@ -4630,7 +4630,7 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
-  if (isCodexDevToken({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4942,7 +4942,7 @@ export const getVouchRequests = onRequest({ cors: true, region: 'europe-west4' }
   }
   try {
     const decoded = await verifyToken(req);
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)) {
       res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
       return;
     }
@@ -5155,7 +5155,7 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
   }
   try {
     const decoded = await verifyToken(req);
-    if (isCodexDevToken(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)) {
       res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
       return;
     }

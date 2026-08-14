@@ -6,11 +6,12 @@ import {
   buildCodexDevPrivateProfile,
   hasCodexDevClaim,
   isCodexDevToken,
+  isCodexDevForProductionDeny,
   resolveCodexDevUid,
   isCodexDevPrivateProfile,
 } from '../functions/codexDevIdentity.js';
 import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFirst } from '../src/utils/codexDevIdentity.js';
-import { findReusableAcrossPages, isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
+import { findBestReusableAcrossPages, findReusableAcrossPages, isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
 import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
 
@@ -21,6 +22,16 @@ test('canonical identity requires the configured uid and both trusted claims', (
   assert.equal(isCodexDevToken({ uid: 'isolated-codex', devCodex: true, devActor: CODEX_DEV_ACTOR }, env), true);
   assert.equal(isCodexDevToken({ uid: 'ordinary-user', devCodex: true, devActor: CODEX_DEV_ACTOR }, env), false);
   assert.equal(isCodexDevToken({ uid: 'isolated-codex', devCodex: true }, env), false);
+});
+
+test('production denial is broader than strict Codex privilege identity', () => {
+  const env = { CODEX_DEV_UID: 'new-codex' };
+  assert.equal(isCodexDevToken({ uid: 'new-codex', devCodex: true, devActor: 'codex' }, env), true);
+  assert.equal(isCodexDevToken({ uid: 'new-codex' }, env), false);
+  assert.equal(isCodexDevToken({ uid: 'old-codex', devCodex: true, devActor: 'codex' }, env), false);
+  assert.equal(isCodexDevForProductionDeny({ uid: 'new-codex' }, env), true);
+  assert.equal(isCodexDevForProductionDeny({ uid: 'old-codex', devCodex: true, devActor: 'codex' }, env), true);
+  assert.equal(isCodexDevForProductionDeny({ uid: 'ordinary' }, env), false);
 });
 
 test('historical private markers never establish destructive identity', () => {
@@ -82,6 +93,21 @@ test('moderation reuse paginates past opposite-scope candidate pages', async () 
   assert.equal(await findReusableAcrossPages({ isCodexActor: false, fetchPage: async () => [], select: (docs) => docs[0] }), null);
 });
 
+test('near reuse chooses the globally closest same-scope candidate', async () => {
+  const doc = (id, distance, testActor = null) => ({ id, distance, data: () => testActor ? { testActor } : {} });
+  const run = async (pages, isCodexActor = false) => findBestReusableAcrossPages({
+    isCodexActor,
+    fetchPage: async () => pages.shift() || [],
+    selectBest: (docs) => docs.reduce((best, entry) => (!best || entry.distance < best.distance ? entry : best), null),
+  });
+  assert.equal((await run([[doc('six', 6)], [doc('one', 1)]])).id, 'one');
+  assert.equal((await run([[doc('first-one', 1)], [doc('six', 6)]])).id, 'first-one');
+  assert.equal((await run([[doc('first', 2)], [doc('equal', 2)]])).id, 'first');
+  assert.equal((await run([[doc('codex', 0, 'codex')], [doc('ordinary', 1)]])).id, 'ordinary');
+  assert.equal((await run([[doc('ordinary', 1)], [doc('zero', 0, 'codex')]], true)).id, 'zero');
+  assert.equal(await run([[doc('codex-only', 1, 'codex')]]), null);
+});
+
 test('automatic production review cases are suppressed only for Codex', () => {
   const forbiddenReasons = [{ trigger: 'test' }];
   assert.equal(shouldCreateProductionReviewCase({ isCodexActor: true, forbiddenReasons }), false);
@@ -124,28 +150,28 @@ test('production side-effect endpoints reject Codex before shared writes', async
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const report = section('export const reportPost', 'export const requestUploadReviewCase');
-  assert.ok(report.indexOf('isCodexDevToken(decoded)') < report.indexOf("db.collection('reviewCases').add"));
+  assert.ok(report.indexOf('isCodexDevForProductionDeny(decoded)') < report.indexOf("db.collection('reviewCases').add"));
   const support = section('export const sendSupportMessage', 'export const reportPost');
-  assert.ok(support.indexOf('isCodexDevToken(decoded)') < support.indexOf('db.runTransaction'));
+  assert.ok(support.indexOf('isCodexDevForProductionDeny(decoded)') < support.indexOf('db.runTransaction'));
   const contributor = section('export const createTemporaryContributor', 'export const createClaimInvite');
-  assert.ok(contributor.indexOf('isCodexDevToken') < contributor.indexOf('db.runTransaction'));
+  assert.ok(contributor.indexOf('isCodexDevForProductionDeny') < contributor.indexOf('db.runTransaction'));
   const invite = section('export const createClaimInvite', 'export const getClaimInvitePreview');
-  assert.ok(invite.indexOf('isCodexDevToken') < invite.indexOf('db.runTransaction'));
+  assert.ok(invite.indexOf('isCodexDevForProductionDeny') < invite.indexOf('db.runTransaction'));
   const claim = section('export const createClaimRequest', 'export const startEmailClaimProof');
-  assert.ok(claim.indexOf('isCodexDevToken(decoded)') < claim.indexOf('db.runTransaction'));
+  assert.ok(claim.indexOf('isCodexDevForProductionDeny(decoded)') < claim.indexOf('db.runTransaction'));
   const dmMessage = section('export const sendDmMessage', 'export const sendSupportMessage');
-  assert.ok(dmMessage.indexOf('isCodexDevToken(decoded)') < dmMessage.indexOf("collection('messages').doc()"));
+  assert.ok(dmMessage.indexOf('isCodexDevForProductionDeny(decoded)') < dmMessage.indexOf("collection('messages').doc()"));
   assert.ok(dmMessage.indexOf('participants.some((uid) => isCodexDevUid(uid))') < dmMessage.indexOf("collection('messages').doc()"));
   const moderationAction = section('export const userModerationAction', 'export const moderatorDecide');
-  assert.ok(moderationAction.indexOf('isCodexDevToken(decoded)') < moderationAction.indexOf("collection('moderationExamples')"));
+  assert.ok(moderationAction.indexOf('isCodexDevForProductionDeny(decoded)') < moderationAction.indexOf("collection('moderationExamples')"));
 });
 
 test('trusted account lifecycle endpoints reject Codex before destructive work', async () => {
   const index = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const reset = index.slice(index.indexOf('export const resetPersonalOnboarding'), index.indexOf('export const createDevCodexToken'));
-  assert.ok(reset.indexOf('isCodexDevToken') < reset.indexOf('resetPersonalOnboardingAtomically'));
+  assert.ok(reset.indexOf('isCodexDevForProductionDeny') < reset.indexOf('resetPersonalOnboardingAtomically'));
   const lifecycle = await fs.readFile(new URL('../functions/accountLifecycle.js', import.meta.url), 'utf8');
-  assert.ok(lifecycle.indexOf('isCodexDevToken(decoded)') < lifecycle.indexOf('userRef.delete()'));
+  assert.ok(lifecycle.indexOf('isCodexDevForProductionDeny(decoded)') < lifecycle.indexOf('userRef.delete()'));
 });
 
 test('client blocks Codex contributor content requests before production writes', async () => {

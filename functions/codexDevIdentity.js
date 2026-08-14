@@ -26,6 +26,10 @@ export const isCodexDevToken = (decoded = {}, env = process.env) => (
   hasCodexDevClaim(decoded) && isCodexDevUid(decoded.uid, env)
 );
 
+export const isCodexDevForProductionDeny = (decoded = {}, env = process.env) => (
+  hasCodexDevClaim(decoded) || isCodexDevUid(decoded.uid, env)
+);
+
 export const buildCodexDevPrivateProfile = ({ uid, now, exists = false }) => ({
   uid,
   displayName: 'Codex',

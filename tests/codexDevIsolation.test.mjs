@@ -101,12 +101,42 @@ test('every automatic claim approval path checks persisted claimant registry mem
 test('moderateImage derives all quarantine decisions from production-deny identity', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));
-  assert.match(moderate, /const isCodexActor = isCodexDevForProductionDeny\(decoded\)/);
+  assert.match(moderate, /const isCodexActor = isCodexDevForProductionDeny\(decoded\)\s*\|\| await isKnownCodexDevActorUid/);
   assert.match(moderate, /isCodexActor \? null : await findExactModerationExample/);
   assert.match(moderate, /findExactUpload\([^\n]+\{ isCodexActor \}/);
   assert.match(moderate, /shouldCreateProductionReviewCase\(\{ isCodexActor/);
   assert.match(moderate, /\.\.\.\(isCodexActor \? \{ testActor: CODEX_DEV_ACTOR \} : \{\}\)/);
   assert.doesNotMatch(moderate, /isCodexDevUid\(userId\)/);
+});
+
+test('historical registry blocks claim actors, screenshot races, and production publication paths', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+  for (const [start, end] of [
+    ['export const createClaimRequest', 'export const startEmailClaimProof'],
+    ['export const submitClaimVouch', 'export const expireClaimRequests'],
+    ['export const userModerationAction', 'export const moderatorDecide'],
+  ]) {
+    const implementation = section(start, end);
+    assert.ok(implementation.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid })') < implementation.indexOf('db.runTransaction'), `${start} denies historical caller before shared writes`);
+  }
+  const screenshot = section('export const verifyClaimProofScreenshot', 'export const onFollowingCreated');
+  const transactionStart = screenshot.indexOf('db.runTransaction');
+  const transactionalGuard = screenshot.indexOf('isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })');
+  assert.ok(transactionStart < transactionalGuard);
+  assert.ok(transactionalGuard < screenshot.indexOf('transaction.set(requestRef'));
+  assert.ok(transactionalGuard < screenshot.indexOf('transaction.update(contributorRef'));
+  assert.match(section('export const userModerationAction', 'export const moderatorDecide'), /collection\(isCodexDevUid\(userId\) \? 'codexDevPosts' : 'posts'\)/);
+});
+
+test('Firestore production deny helper is registry-backed but grants no Codex privileges', async () => {
+  const rules = await fs.readFile(new URL('../firestore.rules', import.meta.url), 'utf8');
+  assert.match(rules, /function isKnownCodexProductionDenied\(\)[^]*codexDevActorRegistry/);
+  assert.doesNotMatch(rules, /allow [^;]+: if isKnownCodexProductionDenied\(\)/);
+  assert.equal((rules.match(/!isCodexDev\(\)/g) || []).length, 0);
+  for (const surface of ['/publicUsers/', '/profiles/', '/posts/', '/following/', '/threads/', '/contributors/', '/claimRequests/']) {
+    assert.ok(rules.includes(surface), `${surface} remains covered by production rules`);
+  }
 });
 
 test('historical private markers never establish destructive identity', () => {

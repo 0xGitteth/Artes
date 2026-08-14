@@ -1411,7 +1411,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const { image, makerTags, themes } = body;
   const includeDebug = process.env.NODE_ENV === 'development' || body?.debug === true;
   const userId = decoded.uid;
-  const isCodexActor = isCodexDevForProductionDeny(decoded);
+  const isCodexActor = isCodexDevForProductionDeny(decoded)
+    || await isKnownCodexDevActorUid({ db, uid: decoded.uid });
   const parsed = parseImageDataUrl(image);
   if (parsed.error) {
     res.status(400).json({ error: parsed.error });
@@ -3649,7 +3650,8 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const { messageId, uploadId, action, postDraft: postDraftFromBody } = body || {};
-    if (isCodexDevForProductionDeny(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
       res.status(403).json({ error: 'Codex Dev production moderation actions are isolated.' });
       return;
     }
@@ -4276,7 +4278,8 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
   }
   try {
     const decoded = await verifyToken(req);
-    if (isCodexDevForProductionDeny(decoded)) {
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
       res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
       return;
     }
@@ -5183,6 +5186,10 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
       res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
       return;
     }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const requestId = body?.requestId || null;
     const vote = claimVoteOptions.includes(body?.vote) ? body.vote : null;
@@ -5424,29 +5431,32 @@ export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-we
   const isWithinExpiry = Boolean(claimCodeExpiresAt && claimCodeExpiresAt.toMillis() >= Date.now());
   const screenshotVerified = Boolean(codeMatch && handleMatch && isWithinExpiry);
 
-  await requestRef.set({
-    proofData: {
-      screenshotVerified,
-      screenshotVerifiedAt: FieldValue.serverTimestamp(),
-      screenshotStoragePath: name,
-      screenshotClaimCodeMatched: codeMatch,
-      screenshotHandleMatched: handleMatch,
-      screenshotHandleChecked: handleChecked,
-      screenshotExpired: !isWithinExpiry,
-      screenshotTextPreview: extractedText.slice(0, 300),
-    },
-    updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+  await db.runTransaction(async (transaction) => {
+    const freshSnap = await transaction.get(requestRef);
+    if (!freshSnap.exists) return;
+    const data = freshSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+      logger.warn('Ignoring newly registered Codex Dev claim proof upload', { requestId });
+      return;
+    }
+    transaction.set(requestRef, {
+      proofData: {
+        screenshotVerified,
+        screenshotVerifiedAt: FieldValue.serverTimestamp(),
+        screenshotStoragePath: name,
+        screenshotClaimCodeMatched: codeMatch,
+        screenshotHandleMatched: handleMatch,
+        screenshotHandleChecked: handleChecked,
+        screenshotExpired: !isWithinExpiry,
+        screenshotTextPreview: extractedText.slice(0, 300),
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
 
-  const shouldAutoResolve = requestData?.status === 'pending' && Number(requestData?.yesCount || 0) >= 1;
-  if (shouldAutoResolve) {
-    const mode = requestData?.mode === 'merge' ? 'merge' : 'link';
-    if (screenshotVerified && mode === 'link' && Number(requestData?.noCount || 0) < 1) {
-      await db.runTransaction(async (transaction) => {
-        const freshSnap = await transaction.get(requestRef);
-        if (!freshSnap.exists) return;
-        const data = freshSnap.data() || {};
-        if (data?.status !== 'pending') return;
+    const shouldAutoResolve = data?.status === 'pending' && Number(data?.yesCount || 0) >= 1;
+    if (!shouldAutoResolve) return;
+    const mode = data?.mode === 'merge' ? 'merge' : 'link';
+    if (screenshotVerified && mode === 'link' && Number(data?.noCount || 0) < 1) {
         const contributorIdInner = data?.contributorId || null;
         const requestedByUid = data?.requestedByUid || null;
         if (!contributorIdInner || !requestedByUid) return;
@@ -5468,15 +5478,14 @@ export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-we
           approvedAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
-      });
     } else {
-      await requestRef.set({
+      transaction.set(requestRef, {
         status: 'needsModeration',
         statusReason: screenshotVerified ? 'manual review required' : 'screenshot required',
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
     }
-  }
+  });
 
   try {
     const retentionDate = new Date(Date.now() + claimProofRetentionMs);

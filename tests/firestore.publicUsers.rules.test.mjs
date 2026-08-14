@@ -52,6 +52,10 @@ async function run() {
       await setDoc(doc(db, 'codexDevActorRegistry', 'retired-codex'), {
         uid: 'retired-codex', actor: 'codex', productionDenyOnly: true, registeredAt: new Date(),
       });
+      await setDoc(doc(db, 'users', 'retired-codex'), {
+        uid: 'retired-codex', onboardingComplete: true, onboardingStep: 5,
+        ageVerified: true, isAdult: true,
+      });
       await setDoc(doc(db, 'publicUsers', ownerUid), {
        onboardingComplete: true,
         onboardingComplete: true,
@@ -531,6 +535,7 @@ async function run() {
     const ownerAdultFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: true, isAdult: false }).firestore();
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
     const codexDevDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, devActor: 'codex', email_verified: false }).firestore();
+    const retiredCodexDb = authedContext(testEnv, 'retired-codex', { email_verified: true, idvVerified: true, isAdult: true }).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
     const publicUserDbFor = (uid) => authedContext(testEnv, uid, { email_verified: true }).firestore();
     const moderatorDb = authedContext(testEnv, 'mod_1', { email_verified: true, email: 'mod_1@example.com' }).firestore();
@@ -551,6 +556,17 @@ async function run() {
     await assertFails(updateDoc(doc(ownerDb, 'users', ownerUid), { isDevTestUser: true, devActor: 'codex' }));
     await assertFails(deleteDoc(doc(codexDevDb, 'users', 'codex-dev-user')));
     await assertFails(updateDoc(doc(codexDevDb, 'users', 'codex-dev-user'), { isDevTestUser: false, devActor: 'ordinary' }));
+    await assertFails(setDoc(doc(retiredCodexDb, 'publicUsers', 'retired-codex'), {
+      uid: 'retired-codex', profileId: 'retired-codex', ownerUid: 'retired-codex',
+      username: 'retiredcodex', onboardingComplete: true,
+    }));
+    await assertFails(setDoc(doc(retiredCodexDb, 'profiles', 'retired-codex-agency'), {
+      ownerUid: 'retired-codex', type: 'agency', status: 'active', displayName: 'Retired actor agency',
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(retiredCodexDb, 'users', 'retired-codex', 'following', ownerUid), {
+      targetUid: ownerUid, createdAt: serverTimestamp(),
+    }));
     await testEnv.withSecurityRulesDisabled(async (context) => setDoc(doc(context.firestore(), 'users', 'deletable_ordinary'), { uid: 'deletable_ordinary' }));
     await assertSucceeds(deleteDoc(doc(publicUserDbFor('deletable_ordinary'), 'users', 'deletable_ordinary')));
 
@@ -625,6 +641,7 @@ async function run() {
         updatedAt: new Date(),
       });
       await setDoc(doc(db, 'threads', 'ordinary_private_dm'), { type: 'dm', participantUids: [ownerUid, otherUid] });
+      await setDoc(doc(db, 'threads', 'retired_codex_dm'), { type: 'dm', participantUids: ['retired-codex', ownerUid] });
       await setDoc(doc(db, 'threads', 'ordinary_private_dm', 'messages', 'secret'), { senderUid: ownerUid, text: 'private' });
       await setDoc(doc(db, 'threads', 'support_other_rules', 'messages', 'secret'), { senderUid: otherUid, text: 'support private' });
     });
@@ -634,6 +651,9 @@ async function run() {
       senderUid: ownerUid,
       text: 'Allowed DM message from a participant.',
       createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(retiredCodexDb, 'threads', 'retired_codex_dm', 'messages', 'blocked_retired_text'), {
+      type: 'text', senderUid: 'retired-codex', text: 'Must remain quarantined.', createdAt: serverTimestamp(),
     }));
     await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules')));
     await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'owner_text')));
@@ -1184,6 +1204,19 @@ async function run() {
         mergedInto: null,
       }),
     );
+    await assertFails(setDoc(doc(retiredCodexDb, 'contributors', 'retired_codex_contributor'), {
+      displayName: 'Retired Codex Contributor',
+      displayNameLower: 'retired codex contributor',
+      roles: ['photographer'],
+      socials: { instagram: 'retiredcodex' },
+      status: 'unclaimed',
+      createdByUid: 'retired-codex',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      source: 'client',
+      claimedByUid: null,
+      mergedInto: null,
+    }));
     await assertFails(
       setDoc(doc(codexDevDb, 'contributors', 'codex_direct_without_creator'), {
         displayName: 'Codex Direct Contributor',

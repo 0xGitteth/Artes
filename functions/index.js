@@ -2466,6 +2466,10 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const threadId = body?.threadId;
     const text = String(body?.text || '').trim();
@@ -2489,7 +2493,13 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
       res.status(403).json({ error: 'Cannot send message to system thread' });
       return;
     }
-    const participants = Array.isArray(threadData?.participantUids) ? threadData.participantUids : [];
+    const participants = Array.isArray(threadData?.participantUids)
+      ? threadData.participantUids
+      : (Array.isArray(threadData?.participants) ? threadData.participants : []);
+    if (participants.some((uid) => isCodexDevUid(uid))) {
+      res.status(403).json({ error: 'Codex Dev direct messages are retired.' });
+      return;
+    }
     if (!participants.includes(decoded.uid)) {
       res.status(403).json({ error: 'Not a participant' });
       return;
@@ -3627,6 +3637,10 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const { messageId, uploadId, action, postDraft: postDraftFromBody } = body || {};
+    if (isCodexDevToken(decoded)) {
+      res.status(403).json({ error: 'Codex Dev production moderation actions are isolated.' });
+      return;
+    }
     if (!uploadId || !action || (requiresMessageIdForAction(action) && !messageId)) {
       res.status(400).json({ error: 'uploadId and action are required (messageId required for this action)' });
       return;

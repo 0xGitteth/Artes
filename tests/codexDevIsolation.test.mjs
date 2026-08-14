@@ -133,6 +133,11 @@ test('production side-effect endpoints reject Codex before shared writes', async
   assert.ok(invite.indexOf('isCodexDevToken') < invite.indexOf('db.runTransaction'));
   const claim = section('export const createClaimRequest', 'export const startEmailClaimProof');
   assert.ok(claim.indexOf('isCodexDevToken(decoded)') < claim.indexOf('db.runTransaction'));
+  const dmMessage = section('export const sendDmMessage', 'export const sendSupportMessage');
+  assert.ok(dmMessage.indexOf('isCodexDevToken(decoded)') < dmMessage.indexOf("collection('messages').doc()"));
+  assert.ok(dmMessage.indexOf('participants.some((uid) => isCodexDevUid(uid))') < dmMessage.indexOf("collection('messages').doc()"));
+  const moderationAction = section('export const userModerationAction', 'export const moderatorDecide');
+  assert.ok(moderationAction.indexOf('isCodexDevToken(decoded)') < moderationAction.indexOf("collection('moderationExamples')"));
 });
 
 test('trusted account lifecycle endpoints reject Codex before destructive work', async () => {

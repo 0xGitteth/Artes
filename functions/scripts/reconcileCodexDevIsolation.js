@@ -262,6 +262,19 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
     const claimRequests = await queryDocs(db.collection('claimRequests').where('requestedByUid', '==', uid));
     for (const claimRequest of claimRequests) {
       const requestData = claimRequest.data() || {};
+      const approvedMerge = requestData.mode === 'merge' && requestData.status === 'approved';
+      if (approvedMerge) {
+        stats.manualReviewRequired.push({
+          reason: 'codex_approved_merge_claim_recovery',
+          claimRequestId: claimRequest.id,
+          requestedByUid: uid,
+          primaryContributorId: requestData.primaryContributorId || requestData.contributorId || null,
+          secondaryContributorId: requestData.secondaryContributorId || null,
+          status: requestData.status,
+          mode: requestData.mode,
+        });
+        continue;
+      }
       const contributorId = requestData.contributorId || null;
       if (requestData.status === 'approved' && contributorId) {
         const contributorRef = db.collection('contributors').doc(contributorId);

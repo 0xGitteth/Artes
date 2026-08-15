@@ -209,6 +209,31 @@ assert.equal(codexApplyDb.stores.publicUsers.has('retired-with-public'), false);
 assert.equal(codexApplyDb.stores.publicUsers.has('codex-dev-user'), false);
 assert.equal(codexApplyDb.stores.publicUsers.has('spoofed-markers'), true);
 
+const actorOrphans = [
+  ['retired-orphan', { onboardingComplete: true, displayName: 'Retired orphan' }],
+  ['codex-dev-user', { onboardingComplete: true, displayName: 'Current Codex orphan' }],
+  ['ordinary-orphan', { onboardingComplete: true, displayName: 'Ordinary orphan' }],
+];
+const orphanDryRunDb = createFakeDb([], actorOrphans, { registeredCodexUids: ['retired-orphan'] });
+const orphanDryRunStats = await reconcile({ db: orphanDryRunDb, pageSize: 10 });
+assert.equal(orphanDryRunStats.publicProfilesDeleted, 2, 'dry run reports both registry-denied orphan projections');
+assert.equal(orphanDryRunStats.deletes, 2);
+assert.equal(orphanDryRunStats.orphanPublicProfiles, 1, 'ordinary orphan retention is unchanged');
+assert.equal(orphanDryRunDb.transactionCalls, 0, 'orphan dry run remains read-only');
+assert.equal(orphanDryRunDb.transactionWrites.length, 0);
+assert.equal(orphanDryRunDb.stores.publicUsers.size, 3);
+
+const orphanApplyDb = createFakeDb([], actorOrphans, { registeredCodexUids: ['retired-orphan'] });
+const orphanApplyStats = await reconcile({ db: orphanApplyDb, apply: true, pageSize: 10 });
+assert.equal(orphanApplyStats.publicProfilesDeleted, 2);
+assert.equal(orphanApplyDb.stores.publicUsers.has('retired-orphan'), false);
+assert.equal(orphanApplyDb.stores.publicUsers.has('codex-dev-user'), false);
+assert.equal(
+  orphanApplyDb.stores.publicUsers.has('ordinary-orphan'),
+  true,
+  'ordinary orphan remains when deleteOrphans is false',
+);
+
 const cleanupDb = createFakeDb(
   [['done', { displayName: 'Current', onboardingStep: '5', roles: ['maker'], themes: [] }]],
   [['done', {

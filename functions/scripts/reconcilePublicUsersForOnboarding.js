@@ -217,9 +217,18 @@ const inspectDiscoveredPublicProfile = async ({
   const userRef = db.collection('users').doc(discoveredSnap.id);
   const publicRef = db.collection('publicUsers').doc(discoveredSnap.id);
 
-  if (!apply || !deleteOrphans) {
-    const privateSnap = await userRef.get();
+  if (!apply) {
+    const [privateSnap, productionDenied] = await Promise.all([
+      userRef.get(),
+      isKnownCodexDevActorUid({ db, uid: discoveredSnap.id }),
+    ]);
     if (privateSnap.exists) return { action: 'none', stats: {} };
+    if (productionDenied) {
+      return {
+        action: 'delete',
+        stats: { testActorsSkipped: 1, publicProfilesDeleted: 1, deletes: 1 },
+      };
+    }
     return {
       action: 'none',
       stats: {
@@ -230,9 +239,22 @@ const inspectDiscoveredPublicProfile = async ({
   }
 
   return db.runTransaction(async (transaction) => {
-    const currentPrivateSnap = await transaction.get(userRef);
-    const currentPublicSnap = await transaction.get(publicRef);
-    if (currentPrivateSnap.exists || !currentPublicSnap.exists) return { action: 'none', stats: {} };
+    const [currentPrivateSnap, currentPublicSnap, productionDenied] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(publicRef),
+      isKnownCodexDevActorUid({ db, uid: discoveredSnap.id, transaction }),
+    ]);
+    if (currentPrivateSnap.exists) return { action: 'none', stats: {} };
+    if (productionDenied) {
+      if (!currentPublicSnap.exists) return { action: 'none', stats: { testActorsSkipped: 1 } };
+      transaction.delete(publicRef);
+      return {
+        action: 'delete',
+        stats: { testActorsSkipped: 1, publicProfilesDeleted: 1, deletes: 1 },
+      };
+    }
+    if (!currentPublicSnap.exists) return { action: 'none', stats: {} };
+    if (!deleteOrphans) return { action: 'none', stats: { orphanPublicProfiles: 1 } };
     transaction.delete(publicRef);
     return {
       action: 'delete',

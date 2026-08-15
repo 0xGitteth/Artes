@@ -118,7 +118,8 @@ const docs = [
   },
 ];
 
-const createFakeDb = () => {
+const createFakeDb = ({ beforeFirstTransaction = null } = {}) => {
+  const users = new Map(docs.map((snap) => [snap.id, snap.data()]));
   const publicUsers = new Map([
     ['retired-registered-public', { displayName: 'Retired Public' }],
     ['non-default-codex', { displayName: 'Marked Codex', ageVerified: true }],
@@ -136,6 +137,7 @@ const createFakeDb = () => {
   const queuedWrites = [];
   const registry = new Set(['retired-registered-no-public', 'retired-registered-public']);
   let batchSetCalls = 0;
+  let transactionCalls = 0;
 
   const makePublicRef = (id) => ({
     id,
@@ -148,18 +150,58 @@ const createFakeDb = () => {
       };
     },
   });
+  const makeRef = (name, id) => ({ id, path: `${name}/${id}` });
+  const makeSnap = (name, id) => {
+    const store = name === 'users' ? users : name === 'publicUsers' ? publicUsers : registry;
+    const value = store instanceof Set ? undefined : store.get(id);
+    return {
+      id,
+      exists: store instanceof Set ? store.has(id) : value !== undefined,
+      data: () => ({ ...(value || {}) }),
+    };
+  };
 
   return {
     get batchSetCalls() { return batchSetCalls; },
     get queuedWrites() { return queuedWrites; },
     get publicUsers() { return publicUsers; },
+    get transactionCalls() { return transactionCalls; },
+    get registry() { return registry; },
     collection: (name) => {
-      if (name === 'users') return { get: async () => ({ docs }) };
+      if (name === 'users') return { get: async () => ({ docs }), doc: (id) => makeRef(name, id) };
       if (name === 'publicUsers') return { doc: makePublicRef };
       if (name === 'codexDevActorRegistry') return {
-        doc: (id) => ({ get: async () => ({ exists: registry.has(id) }) }),
+        doc: (id) => ({ path: `${name}/${id}`, get: async () => ({ exists: registry.has(id) }) }),
       };
       throw new Error(`Unexpected collection ${name}`);
+    },
+    runTransaction: async (callback) => {
+      transactionCalls += 1;
+      if (transactionCalls === 1 && beforeFirstTransaction) await beforeFirstTransaction({ registry, publicUsers, users });
+      const pending = [];
+      const transaction = {
+        get: async (ref) => {
+          assert.equal(pending.length, 0, 'all authoritative backfill reads precede writes');
+          return makeSnap(...ref.path.split('/'));
+        },
+        set: (ref, payload, options) => pending.push({ ref, payload, options }),
+        delete: (ref) => pending.push({ ref, delete: true }),
+      };
+      const result = await callback(transaction);
+      pending.forEach((write) => {
+        queuedWrites.push(write);
+        if (write.delete) publicUsers.delete(write.ref.id);
+        else {
+          const existing = publicUsers.get(write.ref.id) || {};
+          const next = { ...existing };
+          Object.entries(write.payload).forEach(([key, value]) => {
+            if (value === '__DELETE__') delete next[key];
+            else next[key] = value;
+          });
+          publicUsers.set(write.ref.id, next);
+        }
+      });
+      return result;
     },
     batch: () => {
       const pending = [];
@@ -224,7 +266,8 @@ assert.deepEqual(applyStats, {
   codexPublicProfilesWouldDelete: 2,
   codexPublicProfilesDeleted: 2,
 });
-assert.equal(applyDb.batchSetCalls, 3, 'apply should enqueue every onboarding-eligible publicUsers write');
+assert.equal(applyDb.batchSetCalls, 0, 'publication writes use transactions rather than a stale write batch');
+assert.equal(applyDb.transactionCalls, 3, 'each eligible publication decision is authoritative in its own transaction');
 assert.equal(applyDb.publicUsers.has('codex-dev-user'), false, 'apply deletes the legacy Codex projection');
 assert.equal(applyDb.publicUsers.has('retired-registered-public'), false, 'apply deletes a retired registered Codex projection');
 assert.equal(applyDb.publicUsers.has('retired-registered-no-public'), false, 'apply never publishes a retired registered Codex actor');
@@ -232,6 +275,19 @@ assert.equal(applyDb.publicUsers.has('non-default-codex'), true, 'historical mar
 const secondApplyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.equal(secondApplyStats.codexPublicProfilesWouldDelete, 0);
 assert.equal(secondApplyStats.codexPublicProfilesDeleted, 0, 'second apply is idempotent for Codex deletion');
+
+const registryRaceDb = createFakeDb({
+  beforeFirstTransaction: ({ registry, publicUsers }) => {
+    registry.add('non-default-codex');
+    publicUsers.delete('non-default-codex');
+  },
+});
+await runBackfill({ db: registryRaceDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
+assert.equal(
+  registryRaceDb.publicUsers.has('non-default-codex'),
+  false,
+  'registration after the early check cannot be overwritten by a stale backfill publication',
+);
 
 const writtenPayload = applyDb.queuedWrites.find((write) => write.ref.id === 'eligible_user').payload;
 for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {

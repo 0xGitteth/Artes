@@ -187,6 +187,17 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       }
     }
 
+    const claimRequests = await queryDocs(db.collection('claimRequests').where('requestedByUid', '==', uid));
+    const approvedMergeRecoveryContributorIds = new Set();
+    for (const claimRequest of claimRequests) {
+      const requestData = claimRequest.data() || {};
+      if (requestData.mode !== 'merge' || requestData.status !== 'approved') continue;
+      const primaryContributorId = requestData.primaryContributorId || requestData.contributorId || null;
+      const secondaryContributorId = requestData.secondaryContributorId || null;
+      if (primaryContributorId) approvedMergeRecoveryContributorIds.add(primaryContributorId);
+      if (secondaryContributorId) approvedMergeRecoveryContributorIds.add(secondaryContributorId);
+    }
+
     const contributors = await queryDocs(db.collection('contributors').where('createdByUid', '==', uid));
     const deletableContributors = [];
     const preservedContributorIds = new Set();
@@ -204,7 +215,8 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
         return claimData.requestedByUid && claimData.requestedByUid !== uid
           && ACTIVE_ORDINARY_CLAIM_STATUSES.has(claimData.status);
       });
-      if (legitimateOwner || activeOrdinaryClaims.length > 0) {
+      const requiredForApprovedMergeRecovery = approvedMergeRecoveryContributorIds.has(contributor.id);
+      if (legitimateOwner || activeOrdinaryClaims.length > 0 || requiredForApprovedMergeRecovery) {
         preservedContributorIds.add(contributor.id);
         stats.preservedContributors += 1;
         if (legitimateOwner) {
@@ -267,7 +279,6 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       }
     }
 
-    const claimRequests = await queryDocs(db.collection('claimRequests').where('requestedByUid', '==', uid));
     for (const claimRequest of claimRequests) {
       const requestData = claimRequest.data() || {};
       const approvedMerge = requestData.mode === 'merge' && requestData.status === 'approved';

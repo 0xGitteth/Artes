@@ -14,6 +14,7 @@ import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFir
 import { findBestReusableAcrossPages, findReusableAcrossPages, isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
 import { createClaimInviteAtomically } from '../functions/claimInviteTransaction.js';
+import { runUserModerationActionMutation } from '../functions/userModerationActionIsolation.js';
 import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
 import {
   acquireCodexDevMergeFence,
@@ -344,23 +345,28 @@ test('merge content transactions finish reads before queueing fence renewal', as
   }
 });
 
-test('publishNow and repairPublished recheck historical registry in the publication transaction', async () => {
-  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+test('publishNow and repairPublished recheck historical registry in the authoritative mutation transaction', async () => {
+  const [source, helper] = await Promise.all([
+    fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../functions/userModerationActionIsolation.js', import.meta.url), 'utf8'),
+  ]);
   const start = source.indexOf('export const userModerationAction');
   const end = source.indexOf('export const moderatorDecide', start);
   const implementation = source.slice(start, end);
-  const publicationEnd = implementation.indexOf("if (action === 'saveDraft')");
-  const publicationStart = implementation.lastIndexOf("action === 'publishNow' || action === 'repairPublished'", publicationEnd);
-  const publication = implementation.slice(publicationStart, publicationEnd);
-  const transactionStart = publication.indexOf('db.runTransaction(async (transaction) =>');
-  const registryGuard = publication.indexOf('isKnownCodexDevActorUid({ db, uid: userId, transaction })', transactionStart);
 
-  assert.notEqual(publicationStart, -1, 'both publication actions use the guarded branch');
-  assert.ok(transactionStart < registryGuard, 'registry is read from the publication transaction snapshot');
-  assert.ok(registryGuard < publication.indexOf('transaction.create(postRef'));
-  assert.ok(registryGuard < publication.indexOf('transaction.set('));
-  assert.match(publication, /collection\(isCodexDevUid\(userId\) \? 'codexDevPosts' : 'posts'\)/,
-    'only current canonical identity selects codexDevPosts');
+  assert.match(implementation, /await runUserModerationActionMutation\(\{[\s\S]*uid: userId,[\s\S]*isKnownCodexDevActorUid,[\s\S]*mutate: async \(transaction\) =>/);
+  assert.match(implementation, /collection\(isCodexDevUid\(userId\) \? 'codexDevPosts' : 'posts'\)/,
+    'defense in depth keeps canonical Codex publication out of production posts');
+  assert.match(implementation, /transaction\.create\(postRef/);
+  assert.match(implementation, /transaction\.set\(\s*uploadRef/);
+
+  const transactionStart = helper.indexOf('db.runTransaction(async (transaction) =>');
+  const registryGuard = helper.indexOf('isKnownCodexDevActorUid({ db, uid, transaction })', transactionStart);
+  const mutationCallback = helper.indexOf('return mutate(transaction)', registryGuard);
+  assert.ok(transactionStart !== -1 && transactionStart < registryGuard,
+    'shared helper reads registry from the transaction snapshot');
+  assert.ok(registryGuard < mutationCallback,
+    'registry denial is evaluated before the action mutation callback can queue writes');
 });
 
 test('moderateImage derives all quarantine decisions from production-deny identity', async () => {
@@ -741,4 +747,111 @@ test('operational cleanup recursively removes all selected Codex post trees only
   assert.deepEqual(await cleanupCodexDevPostTrees({ db, postDocs: docs, dryRun: false }), { deleted: 2, failed: [] });
   assert.deepEqual([...paths], ['posts/ordinary']);
   assert.deepEqual(await cleanupCodexDevPostTrees({ db, postDocs: [], dryRun: false }), { deleted: 0, failed: [] });
+});
+
+
+test('userModerationAction guarded mutation retries into quarantine with zero committed writes', async () => {
+  const shapes = new Map([
+    ['correction', ['uploads/u', 'moderationExamples/e']],
+    ['prompt', ['uploads/u', 'threads/t/messages/m', 'threads/t']],
+    ['discard', ['uploads/u', 'reviewCases/r', 'threads/t/messages/m', 'threads/t']],
+    ['saveDraft', ['users/u/drafts/d', 'uploads/u', 'threads/t/messages/m', 'threads/t']],
+    ['dismiss', ['threads/t/messages/m', 'threads/t']],
+    ['publish', ['posts/u', 'uploads/u', 'threads/t/messages/m', 'threads/t']],
+  ]);
+
+  for (const [name, paths] of shapes) {
+    let denied = false;
+    const committed = [];
+    let attempts = 0;
+    const makeTransaction = (queued) => ({
+      set: (ref) => queued.push(ref.path),
+      create: (ref) => queued.push(ref.path),
+      update: (ref) => queued.push(ref.path),
+    });
+    const db = {
+      runTransaction: async (callback) => {
+        attempts += 1;
+        const firstQueued = [];
+        await callback(makeTransaction(firstQueued));
+        // Simulate Firestore detecting a concurrent registry write at commit:
+        // first-attempt writes are discarded and the callback is retried.
+        denied = true;
+        attempts += 1;
+        const retryQueued = [];
+        await callback(makeTransaction(retryQueued));
+        committed.push(...retryQueued);
+      },
+    };
+    const isKnown = async () => denied;
+    await assert.rejects(
+      runUserModerationActionMutation({
+        db,
+        uid: 'ordinary-becoming-codex',
+        isKnownCodexDevActorUid: isKnown,
+        mutate: async (transaction) => {
+          paths.forEach((path) => transaction.set({ path }, {}));
+        },
+      }),
+      (error) => error.status === 403 && error.code === 'codex-dev-production-denied',
+      name,
+    );
+    assert.equal(attempts, 2, name + ' retried after concurrent registry registration');
+    assert.deepEqual(committed, [], name + ' commits zero writes after quarantine');
+  }
+});
+
+test('userModerationAction guarded mutation allows an ordinary transaction and denies an already registered actor before mutate', async () => {
+  const committed = [];
+  const ordinaryDb = {
+    runTransaction: async (callback) => {
+      const queued = [];
+      const result = await callback({ set: (ref) => queued.push(ref.path) });
+      committed.push(...queued);
+      return result;
+    },
+  };
+  await runUserModerationActionMutation({
+    db: ordinaryDb,
+    uid: 'ordinary',
+    isKnownCodexDevActorUid: async () => false,
+    mutate: async (transaction) => transaction.set({ path: 'uploads/ordinary' }, {}),
+  });
+  assert.deepEqual(committed, ['uploads/ordinary']);
+
+  let mutateCalls = 0;
+  const deniedDb = { runTransaction: async (callback) => callback({}) };
+  await assert.rejects(
+    runUserModerationActionMutation({
+      db: deniedDb,
+      uid: 'retired-codex',
+      isKnownCodexDevActorUid: async () => true,
+      mutate: async () => { mutateCalls += 1; },
+    }),
+    (error) => error.status === 403 && error.code === 'codex-dev-production-denied',
+  );
+  assert.equal(mutateCalls, 0);
+});
+
+test('userModerationAction has one authoritative transaction boundary and no direct Firestore writes afterward', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export const userModerationAction');
+  const end = source.indexOf('export const getContributorByAliasCallable', start);
+  assert.ok(start >= 0 && end > start);
+  const section = source.slice(start, end);
+  assert.match(section, /runUserModerationActionMutation\(\{/);
+  assert.doesNotMatch(section, /\b(?:uploadRef|messageRef|threadRef|draftRef)\.set\(/);
+  assert.doesNotMatch(section, /db\.collection\('moderationExamples'\)\.doc\([^\n]+\)\.set\(/);
+  assert.match(section, /transaction\.set\(threadRef, \{ updatedAt:/);
+  assert.match(section, /transaction\.set\(correctionPlan\.moderationExampleRef/);
+  assert.match(section, /transaction\.set\(draftRef/);
+  assert.match(section, /transaction\.create\(postRef/);
+  const lastRead = section.lastIndexOf('transaction.get(');
+  const writeIndexes = [
+    section.indexOf('transaction.set('),
+    section.indexOf('transaction.create('),
+    section.indexOf('transaction.update('),
+  ].filter((index) => index >= 0);
+  assert.ok(writeIndexes.length > 0);
+  assert.ok(lastRead >= 0 && lastRead < Math.min(...writeIndexes), 'all transaction reads precede every queued write');
 });

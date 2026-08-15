@@ -1117,12 +1117,17 @@ service cloud.firestore {
     }
 
     match /reviewCases/{reviewCaseId} {
-      allow read: if isDevAnon() || isModerator() || (request.auth != null && request.auth.uid == resource.data.userId);
+      allow read: if !isKnownCodexProductionDenied() && (isModerator() || (request.auth != null && request.auth.uid == resource.data.userId));
       allow create, update, delete: if false;
     }
 
     match /uploads/{uploadId} {
-      allow read: if isDevAnon() || isModerator() || (request.auth != null && request.auth.uid == resource.data.userId);
+      allow read: if (!isKnownCodexProductionDenied()
+          && (isModerator() || (request.auth != null && request.auth.uid == resource.data.userId)))
+        || (isCodexDev()
+          && request.auth.uid == resource.data.userId
+          && ('testActor' in resource.data)
+          && resource.data.testActor == 'codex');
       allow create, update, delete: if false;
     }
 

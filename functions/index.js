@@ -20,6 +20,7 @@ import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.j
 import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
+import { runUserModerationActionMutation } from './userModerationActionIsolation.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
 import {
   fetchModerationExamplesForFingerprints,
@@ -3879,11 +3880,19 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       res.status(400).json({ error: 'Invalid action' });
       return;
     }
+
     const userId = decoded.uid;
-    const threadId = `support_${userId}`;
+    const threadId = 'support_' + userId;
     const threadRef = db.collection('threads').doc(threadId);
     const messageRef = action === 'repairPublished' || !messageId ? null : threadRef.collection('messages').doc(messageId);
     const uploadRef = db.collection('uploads').doc(uploadId);
+    const userRef = db.collection('users').doc(userId);
+    const postRef = action === 'publishNow' || action === 'repairPublished'
+      ? db.collection(isCodexDevUid(userId) ? 'codexDevPosts' : 'posts').doc(uploadId)
+      : null;
+    const draftRef = action === 'saveDraft'
+      ? userRef.collection('drafts').doc()
+      : null;
 
     const [messageSnap, uploadSnap] = await Promise.all([
       messageRef ? messageRef.get() : Promise.resolve(null),
@@ -3899,7 +3908,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     }
 
     const message = messageSnap?.data?.() || null;
-    const upload = uploadSnap.data();
+    const upload = uploadSnap.data() || {};
     const uploadOwnerId = upload?.userId || upload?.ownerUid || upload?.userUid || null;
     if (uploadOwnerId !== userId) {
       res.status(403).json({ error: 'Not authorized for this action' });
@@ -3910,8 +3919,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       return;
     }
 
-    const isApprovedOrLegacyPublished = canPublishUpload(upload);
-    if ((action === 'publishNow' || action === 'repairPublished') && !isApprovedOrLegacyPublished) {
+    if ((action === 'publishNow' || action === 'repairPublished') && !canPublishUpload(upload)) {
       res.status(409).json({ error: 'Upload is not approved' });
       return;
     }
@@ -3923,325 +3931,327 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       res.status(409).json({ error: 'Upload is not approved' });
       return;
     }
-    const currentPublicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
-    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && currentPublicationStatus === 'published') {
+    const initialPublicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
+    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && initialPublicationStatus === 'published') {
       res.status(409).json({ error: 'Upload is already published' });
       return;
     }
-
-    if (action === 'markPublicationPromptOpened') {
-      await uploadRef.set({
-        publicationPromptOpenedAt: FieldValue.serverTimestamp(),
-        publicationPromptOpenedByUid: userId,
-        publicationPromptDismissedAt: FieldValue.serverTimestamp(),
-        publicationPromptDismissedByUid: userId,
-      }, { merge: true });
-
-      if (messageRef) {
-        await messageRef.set({ unread: false }, { merge: true });
-      }
-    }
-
-    if (action === 'discardApprovedUpload') {
-      await db.runTransaction(async (transaction) => {
-        const latestUploadSnap = await transaction.get(uploadRef);
-        if (!latestUploadSnap.exists) {
-          const error = new Error('Upload not found');
-          error.status = 404;
-          throw error;
-        }
-        const latestUpload = latestUploadSnap.data() || {};
-        const latestOwnerId = latestUpload?.userId || latestUpload?.ownerUid || latestUpload?.userUid || null;
-        if (latestOwnerId !== userId) {
-          const error = new Error('Not authorized for this action');
-          error.status = 403;
-          throw error;
-        }
-        if (String(latestUpload?.publicationStatus || latestUpload?.publishStatus || '').trim() === 'published') {
-          const error = new Error('Upload is already published');
-          error.status = 409;
-          throw error;
-        }
-        if (latestUpload?.reviewStatus !== 'approved') {
-          const error = new Error('Upload is not approved');
-          error.status = 409;
-          throw error;
-        }
-
-        transaction.set(uploadRef, {
-          publicationStatus: 'discarded',
-          publishStatus: 'discarded',
-          discardedAt: FieldValue.serverTimestamp(),
-          discardedByUid: userId,
-          publicationPromptDismissedAt: FieldValue.serverTimestamp(),
-          publicationPromptDismissedByUid: userId,
-        }, { merge: true });
-
-        const reviewCaseId = latestUpload?.reviewCaseId || null;
-        if (reviewCaseId) {
-          transaction.set(db.collection('reviewCases').doc(reviewCaseId), {
-            userPublicationStatus: 'discarded',
-            userDiscardedAt: FieldValue.serverTimestamp(),
-            userDiscardedByUid: userId,
-          }, { merge: true });
-        }
-      });
-
-      if (messageRef) {
-        await messageRef.set({
-          unread: false,
-          resolved: true,
-          resolvedAt: FieldValue.serverTimestamp(),
-        }, { merge: true });
-      }
-    }
-
     if (action === 'acceptCorrection' || action === 'rejectCorrection') {
       const validation = validateUploaderCorrectionAction({ action, upload, userId });
       if (!validation.ok) {
         res.status(validation.status || 400).json({ error: validation.error });
         return;
       }
-      const { correctedTaxonomy } = validation;
-      const reviewCaseId = upload?.reviewCaseId || null;
-      const moderationExampleId = `${reviewCaseId || uploadId}_uploaderCorrection`;
-      const nextCorrection = {
-        ...(upload?.correction && typeof upload.correction === 'object' ? upload.correction : {}),
-        suggestedThemes: correctedTaxonomy.themes,
-        suggestedTriggers: correctedTaxonomy.triggers,
-      };
-      if (action === 'acceptCorrection') {
-        nextCorrection.userAcceptedAt = FieldValue.serverTimestamp();
-        nextCorrection.userRejectedAt = null;
-        nextCorrection.requiresModeratorReview = false;
-        nextCorrection.publishBlocked = false;
-        nextCorrection.finalAcceptedThemes = correctedTaxonomy.themes;
-        nextCorrection.finalAcceptedTriggers = correctedTaxonomy.triggers;
-      } else {
-        nextCorrection.userRejectedAt = FieldValue.serverTimestamp();
-        nextCorrection.requiresModeratorReview = true;
-        nextCorrection.publishBlocked = true;
-        nextCorrection.reviewRequestedAt = FieldValue.serverTimestamp();
-      }
-
-      await uploadRef.set({
-        correctedTaxonomy,
-        uploaderCorrectionResponse: action === 'acceptCorrection'
-          ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
-          : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
-        correction: nextCorrection,
-        publicationStatus: action === 'acceptCorrection' ? 'correction_accepted' : 'user_disagreed',
-        reviewStatus: action === 'acceptCorrection' ? 'approved' : 'needs_user_correction',
-        requiresUploaderAcceptance: action === 'acceptCorrection' ? false : true,
-        ...(action === 'acceptCorrection' ? {
-          postDraft: {
-            ...(upload?.postDraft || {}),
-            styles: correctedTaxonomy.themes,
-            makerTags: correctedTaxonomy.triggers,
-            appliedTriggers: correctedTaxonomy.triggers,
-          },
-        } : {}),
-      }, { merge: true });
-
-      const correctionActionName = action === 'acceptCorrection' ? 'acceptCorrection' : 'rejectCorrection';
-      const correctionExamplePayload = buildCommonModerationExample({
-        source: 'userModerationAction',
-        uploadId,
-        reviewCaseId,
-        postId: uploadId,
-        uploaderUid: userId,
-        fingerprints: upload?.fingerprints || null,
-        uploadData: upload || {},
-        reviewData: {},
-        aiResult: upload?.aiResult || {},
-        moderationSignals: upload?.moderationSignals || {},
-        correctionSnapshot: {
-          originalSelectedThemes: Array.isArray(upload?.postDraft?.styles) ? upload.postDraft.styles : [],
-          originalSelectedTriggers: Array.isArray(upload?.postDraft?.makerTags) ? upload.postDraft.makerTags : [],
-          finalAcceptedThemes: action === 'acceptCorrection' ? correctedTaxonomy.themes : [],
-          finalAcceptedTriggers: action === 'acceptCorrection' ? correctedTaxonomy.triggers : [],
-        },
-        decision: null,
-        policyDecisionOutcome: upload?.aiResult?.outcome || null,
-        moderatorDecision: {
-          action: correctionActionName,
-          priorAction: upload?.moderatorDecision?.action || null,
-          reasonCode: upload?.moderatorDecision?.reasonCode || null,
-          correctedTaxonomy,
-        },
-        uploaderCorrectionResponse: action === 'acceptCorrection'
-          ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
-          : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
-        userCorrectionAction: {
-          acceptedCorrection: action === 'acceptCorrection',
-          rejectedCorrection: action === 'rejectCorrection',
-          requestedReview: action === 'rejectCorrection',
-          timestamp: FieldValue.serverTimestamp(),
-        },
-        nowFactory: () => FieldValue.serverTimestamp(),
-      });
-
-      await db.collection('moderationExamples').doc(moderationExampleId).set(correctionExamplePayload, { merge: true });
     }
 
+    let resolvedAuthorProfile = null;
     if (action === 'publishNow' || action === 'repairPublished') {
-      const postDraft = {
+      const initialPostDraft = {
         ...(upload?.postDraft || {}),
         ...(postDraftFromBody && typeof postDraftFromBody === 'object' ? postDraftFromBody : {}),
       };
-      const normalizedTitle = String(postDraft?.title || upload?.title || upload?.caption || '').trim();
-      const normalizedDescription = String(postDraft?.description || postDraft?.caption || upload?.description || upload?.caption || '').trim();
-      const normalizedImageUrl = String(postDraft?.imageUrl || upload?.imageUrl || upload?.imageRef || '').trim();
-      const normalizedStyles = Array.isArray(postDraft?.styles)
-        ? postDraft.styles.filter(Boolean)
-        : Array.isArray(postDraft?.themes)
-          ? postDraft.themes.filter(Boolean)
-          : [];
-      const normalizedMakerTags = Array.isArray(postDraft?.makerTags)
-        ? postDraft.makerTags.filter(Boolean)
-        : Array.isArray(upload?.makerTags)
-          ? upload.makerTags.filter(Boolean)
-          : [];
-      const normalizedAppliedTriggers = Array.isArray(postDraft?.appliedTriggers)
-        ? postDraft.appliedTriggers.filter(Boolean)
-        : Array.isArray(upload?.appliedTriggers)
-          ? upload.appliedTriggers.filter(Boolean)
-          : [];
-      const normalizedCredits = Array.isArray(postDraft?.credits)
-        ? postDraft.credits.filter(Boolean)
-        : Array.isArray(postDraft?.contributors)
-          ? postDraft.contributors.filter(Boolean)
-          : [];
-      const requestedAuthorProfileId = postDraft?.authorProfileId || upload?.postDraft?.authorProfileId || upload?.authorProfileId || userId;
-      const resolvedAuthorProfile = await resolveAuthorProfileForUid(userId, requestedAuthorProfileId);
-      const normalizedAuthorName = String(postDraft?.authorName || resolvedAuthorProfile.displayName || upload?.authorName || '').trim();
-      const normalizedAuthorRole = String(postDraft?.authorRole || upload?.authorRole || '').trim();
-      const normalizedIsChallenge = Boolean(postDraft?.isChallenge || upload?.isChallenge);
+      const requestedAuthorProfileId = initialPostDraft?.authorProfileId || upload?.authorProfileId || userId;
+      resolvedAuthorProfile = await resolveAuthorProfileForUid(userId, requestedAuthorProfileId);
+    }
 
-      if (!normalizedImageUrl) {
-        res.status(400).json({ error: 'Cannot publish upload without imageUrl' });
-        return;
-      }
+    await runUserModerationActionMutation({
+      db,
+      uid: userId,
+      isKnownCodexDevActorUid,
+      mutate: async (transaction) => {
+        const [latestUploadSnap, latestMessageSnap, latestUserSnap, latestPostSnap] = await Promise.all([
+          transaction.get(uploadRef),
+          messageRef ? transaction.get(messageRef) : Promise.resolve(null),
+          postRef ? transaction.get(userRef) : Promise.resolve(null),
+          postRef ? transaction.get(postRef) : Promise.resolve(null),
+        ]);
 
-      await db.runTransaction(async (transaction) => {
-        if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) {
-          const error = new Error('Codex Dev production publication is isolated');
-          error.status = 403;
-          error.code = 'codex-dev-production-denied';
-          throw error;
-        }
-        const postRef = db.collection(isCodexDevUid(userId) ? 'codexDevPosts' : 'posts').doc(uploadId);
-        const userRef = db.collection('users').doc(userId);
-        const latestUserSnap = await transaction.get(userRef);
-        const publishDecision = getUserPublicPostPublishDecision(latestUserSnap.exists ? latestUserSnap.data() : null);
-        if (!publishDecision.allowed) {
-          const error = new Error(publishDecision.code);
-          error.status = 403;
-          error.code = publishDecision.code;
-          throw error;
-        }
-        const latestUploadSnap = await transaction.get(uploadRef);
         if (!latestUploadSnap.exists) {
           const error = new Error('Upload not found');
           error.status = 404;
           throw error;
         }
+        if (messageRef && !latestMessageSnap?.exists) {
+          const error = new Error('Message not found');
+          error.status = 404;
+          throw error;
+        }
+
         const latestUpload = latestUploadSnap.data() || {};
+        const latestMessage = latestMessageSnap?.data?.() || null;
         const latestOwnerId = latestUpload?.userId || latestUpload?.ownerUid || latestUpload?.userUid || null;
         if (latestOwnerId !== userId) {
           const error = new Error('Not authorized for this action');
           error.status = 403;
           throw error;
         }
-        const latestApprovedOrLegacyPublished = canPublishUpload(latestUpload);
-        if (!latestApprovedOrLegacyPublished) {
+        if (messageRef && latestMessage?.metadata?.uploadId !== uploadId) {
+          const error = new Error('Not authorized for this action');
+          error.status = 403;
+          throw error;
+        }
+
+        const latestPublicationStatus = String(latestUpload?.publicationStatus || latestUpload?.publishStatus || '').trim();
+        if ((action === 'publishNow' || action === 'repairPublished') && !canPublishUpload(latestUpload)) {
           const error = new Error('Upload is not approved');
           error.status = 409;
           throw error;
         }
-
-        const postSnap = await transaction.get(postRef);
-        if (!postSnap.exists) {
-          transaction.create(postRef, {
-            title: normalizedTitle || 'Untitled',
-            description: normalizedDescription || '',
-            imageUrl: normalizedImageUrl,
-            authorId: userId,
-            authorUid: userId,
-            authorProfileId: resolvedAuthorProfile.profileId,
-            authorOwnerUid: userId,
-            authorName: normalizedAuthorName || null,
-            authorRole: normalizedAuthorRole || null,
-            styles: normalizedStyles,
-            makerTags: normalizedMakerTags,
-            appliedTriggers: normalizedAppliedTriggers,
-            triggers: normalizedAppliedTriggers,
-            outcome: latestUpload?.outcome || 'allowed',
-            forbiddenReasons: Array.isArray(latestUpload?.forbiddenReasons) ? latestUpload.forbiddenReasons : [],
-            reviewCaseId: latestUpload?.reviewCaseId || null,
-            credits: normalizedCredits,
-            likes: 0,
-            isChallenge: normalizedIsChallenge,
-            ...(isCodexDevUid(userId) ? { testActor: CODEX_DEV_ACTOR } : {}),
-            createdAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
+        if (action === 'saveDraft' && latestUpload?.reviewStatus !== 'approved') {
+          const error = new Error('Upload is not approved');
+          error.status = 409;
+          throw error;
+        }
+        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && latestUpload?.reviewStatus !== 'approved') {
+          const error = new Error('Upload is not approved');
+          error.status = 409;
+          throw error;
+        }
+        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && latestPublicationStatus === 'published') {
+          const error = new Error('Upload is already published');
+          error.status = 409;
+          throw error;
         }
 
-        transaction.set(
-          uploadRef,
-          {
-            ...(isCodexDevUid(userId) ? { testActor: CODEX_DEV_ACTOR } : {}),
+        let correctionPlan = null;
+        if (action === 'acceptCorrection' || action === 'rejectCorrection') {
+          const validation = validateUploaderCorrectionAction({ action, upload: latestUpload, userId });
+          if (!validation.ok) {
+            const error = new Error(validation.error);
+            error.status = validation.status || 400;
+            throw error;
+          }
+          const { correctedTaxonomy } = validation;
+          const reviewCaseId = latestUpload?.reviewCaseId || null;
+          const nextCorrection = {
+            ...(latestUpload?.correction && typeof latestUpload.correction === 'object' ? latestUpload.correction : {}),
+            suggestedThemes: correctedTaxonomy.themes,
+            suggestedTriggers: correctedTaxonomy.triggers,
+          };
+          if (action === 'acceptCorrection') {
+            nextCorrection.userAcceptedAt = FieldValue.serverTimestamp();
+            nextCorrection.userRejectedAt = null;
+            nextCorrection.requiresModeratorReview = false;
+            nextCorrection.publishBlocked = false;
+            nextCorrection.finalAcceptedThemes = correctedTaxonomy.themes;
+            nextCorrection.finalAcceptedTriggers = correctedTaxonomy.triggers;
+          } else {
+            nextCorrection.userRejectedAt = FieldValue.serverTimestamp();
+            nextCorrection.requiresModeratorReview = true;
+            nextCorrection.publishBlocked = true;
+            nextCorrection.reviewRequestedAt = FieldValue.serverTimestamp();
+          }
+          const correctionActionName = action === 'acceptCorrection' ? 'acceptCorrection' : 'rejectCorrection';
+          const moderationExampleId = (reviewCaseId || uploadId) + '_uploaderCorrection';
+          correctionPlan = {
+            correctedTaxonomy,
+            nextCorrection,
+            moderationExampleRef: db.collection('moderationExamples').doc(moderationExampleId),
+            moderationExamplePayload: buildCommonModerationExample({
+              source: 'userModerationAction',
+              uploadId,
+              reviewCaseId,
+              postId: uploadId,
+              uploaderUid: userId,
+              fingerprints: latestUpload?.fingerprints || null,
+              uploadData: latestUpload,
+              reviewData: {},
+              aiResult: latestUpload?.aiResult || {},
+              moderationSignals: latestUpload?.moderationSignals || {},
+              correctionSnapshot: {
+                originalSelectedThemes: Array.isArray(latestUpload?.postDraft?.styles) ? latestUpload.postDraft.styles : [],
+                originalSelectedTriggers: Array.isArray(latestUpload?.postDraft?.makerTags) ? latestUpload.postDraft.makerTags : [],
+                finalAcceptedThemes: action === 'acceptCorrection' ? correctedTaxonomy.themes : [],
+                finalAcceptedTriggers: action === 'acceptCorrection' ? correctedTaxonomy.triggers : [],
+              },
+              decision: null,
+              policyDecisionOutcome: latestUpload?.aiResult?.outcome || null,
+              moderatorDecision: {
+                action: correctionActionName,
+                priorAction: latestUpload?.moderatorDecision?.action || null,
+                reasonCode: latestUpload?.moderatorDecision?.reasonCode || null,
+                correctedTaxonomy,
+              },
+              uploaderCorrectionResponse: action === 'acceptCorrection'
+                ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
+                : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
+              userCorrectionAction: {
+                acceptedCorrection: action === 'acceptCorrection',
+                rejectedCorrection: action === 'rejectCorrection',
+                requestedReview: action === 'rejectCorrection',
+                timestamp: FieldValue.serverTimestamp(),
+              },
+              nowFactory: () => FieldValue.serverTimestamp(),
+            }),
+          };
+        }
+
+        let publicationPlan = null;
+        if (postRef) {
+          const publishDecision = getUserPublicPostPublishDecision(latestUserSnap?.exists ? latestUserSnap.data() : null);
+          if (!publishDecision.allowed) {
+            const error = new Error(publishDecision.code);
+            error.status = 403;
+            error.code = publishDecision.code;
+            throw error;
+          }
+          const postDraft = {
+            ...(latestUpload?.postDraft || {}),
+            ...(postDraftFromBody && typeof postDraftFromBody === 'object' ? postDraftFromBody : {}),
+          };
+          const normalizedImageUrl = String(postDraft?.imageUrl || latestUpload?.imageUrl || latestUpload?.imageRef || '').trim();
+          if (!normalizedImageUrl) {
+            const error = new Error('Cannot publish upload without imageUrl');
+            error.status = 400;
+            throw error;
+          }
+          publicationPlan = {
+            title: String(postDraft?.title || latestUpload?.title || latestUpload?.caption || '').trim(),
+            description: String(postDraft?.description || postDraft?.caption || latestUpload?.description || latestUpload?.caption || '').trim(),
+            imageUrl: normalizedImageUrl,
+            styles: Array.isArray(postDraft?.styles)
+              ? postDraft.styles.filter(Boolean)
+              : Array.isArray(postDraft?.themes) ? postDraft.themes.filter(Boolean) : [],
+            makerTags: Array.isArray(postDraft?.makerTags)
+              ? postDraft.makerTags.filter(Boolean)
+              : Array.isArray(latestUpload?.makerTags) ? latestUpload.makerTags.filter(Boolean) : [],
+            appliedTriggers: Array.isArray(postDraft?.appliedTriggers)
+              ? postDraft.appliedTriggers.filter(Boolean)
+              : Array.isArray(latestUpload?.appliedTriggers) ? latestUpload.appliedTriggers.filter(Boolean) : [],
+            credits: Array.isArray(postDraft?.credits)
+              ? postDraft.credits.filter(Boolean)
+              : Array.isArray(postDraft?.contributors) ? postDraft.contributors.filter(Boolean) : [],
+            authorName: String(postDraft?.authorName || resolvedAuthorProfile?.displayName || latestUpload?.authorName || '').trim(),
+            authorRole: String(postDraft?.authorRole || latestUpload?.authorRole || '').trim(),
+            isChallenge: Boolean(postDraft?.isChallenge || latestUpload?.isChallenge),
+          };
+        }
+
+        // No transaction reads are allowed below this line.
+        if (action === 'markPublicationPromptOpened') {
+          transaction.set(uploadRef, {
+            publicationPromptOpenedAt: FieldValue.serverTimestamp(),
+            publicationPromptOpenedByUid: userId,
+            publicationPromptDismissedAt: FieldValue.serverTimestamp(),
+            publicationPromptDismissedByUid: userId,
+          }, { merge: true });
+          if (messageRef) transaction.set(messageRef, { unread: false }, { merge: true });
+        }
+
+        if (action === 'discardApprovedUpload') {
+          transaction.set(uploadRef, {
+            publicationStatus: 'discarded',
+            publishStatus: 'discarded',
+            discardedAt: FieldValue.serverTimestamp(),
+            discardedByUid: userId,
+            publicationPromptDismissedAt: FieldValue.serverTimestamp(),
+            publicationPromptDismissedByUid: userId,
+          }, { merge: true });
+          const reviewCaseId = latestUpload?.reviewCaseId || null;
+          if (reviewCaseId) {
+            transaction.set(db.collection('reviewCases').doc(reviewCaseId), {
+              userPublicationStatus: 'discarded',
+              userDiscardedAt: FieldValue.serverTimestamp(),
+              userDiscardedByUid: userId,
+            }, { merge: true });
+          }
+          if (messageRef) {
+            transaction.set(messageRef, {
+              unread: false,
+              resolved: true,
+              resolvedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+        }
+
+        if (correctionPlan) {
+          transaction.set(uploadRef, {
+            correctedTaxonomy: correctionPlan.correctedTaxonomy,
+            uploaderCorrectionResponse: action === 'acceptCorrection'
+              ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
+              : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
+            correction: correctionPlan.nextCorrection,
+            publicationStatus: action === 'acceptCorrection' ? 'correction_accepted' : 'user_disagreed',
+            reviewStatus: action === 'acceptCorrection' ? 'approved' : 'needs_user_correction',
+            requiresUploaderAcceptance: action !== 'acceptCorrection',
+            ...(action === 'acceptCorrection' ? {
+              postDraft: {
+                ...(latestUpload?.postDraft || {}),
+                styles: correctionPlan.correctedTaxonomy.themes,
+                makerTags: correctionPlan.correctedTaxonomy.triggers,
+                appliedTriggers: correctionPlan.correctedTaxonomy.triggers,
+              },
+            } : {}),
+          }, { merge: true });
+          transaction.set(correctionPlan.moderationExampleRef, correctionPlan.moderationExamplePayload, { merge: true });
+        }
+
+        if (publicationPlan) {
+          if (!latestPostSnap?.exists) {
+            transaction.create(postRef, {
+              title: publicationPlan.title || 'Untitled',
+              description: publicationPlan.description || '',
+              imageUrl: publicationPlan.imageUrl,
+              authorId: userId,
+              authorUid: userId,
+              authorProfileId: resolvedAuthorProfile.profileId,
+              authorOwnerUid: userId,
+              authorName: publicationPlan.authorName || null,
+              authorRole: publicationPlan.authorRole || null,
+              styles: publicationPlan.styles,
+              makerTags: publicationPlan.makerTags,
+              appliedTriggers: publicationPlan.appliedTriggers,
+              triggers: publicationPlan.appliedTriggers,
+              outcome: latestUpload?.outcome || 'allowed',
+              forbiddenReasons: Array.isArray(latestUpload?.forbiddenReasons) ? latestUpload.forbiddenReasons : [],
+              reviewCaseId: latestUpload?.reviewCaseId || null,
+              credits: publicationPlan.credits,
+              likes: 0,
+              isChallenge: publicationPlan.isChallenge,
+              createdAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          }
+          transaction.set(uploadRef, {
             publicationStatus: 'published',
             publishedAt: FieldValue.serverTimestamp(),
             postId: uploadId,
-          },
-          { merge: true }
-        );
-      });
+          }, { merge: true });
+          if (messageRef) {
+            transaction.set(messageRef, {
+              unread: false,
+              resolved: true,
+              resolvedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+        }
 
-      if (messageRef) {
-        await messageRef.set(
-          {
+        if (action === 'saveDraft') {
+          transaction.set(draftRef, {
+            uploadId,
+            storagePath: latestUpload?.storagePath || null,
+            imageRef: latestUpload?.imageRef || null,
+            caption: latestUpload?.caption || null,
+            tags: latestUpload?.tags || null,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            status: 'draft',
+          });
+          transaction.set(uploadRef, { publicationStatus: 'draft' }, { merge: true });
+          transaction.set(messageRef, {
             unread: false,
             resolved: true,
             resolvedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
-    }
+          }, { merge: true });
+        }
 
-    if (action === 'saveDraft') {
-      const draftRef = db.collection('users').doc(userId).collection('drafts').doc();
-      await Promise.all([
-        draftRef.set({
-          uploadId,
-          storagePath: upload?.storagePath || null,
-          imageRef: upload?.imageRef || null,
-          caption: upload?.caption || null,
-          tags: upload?.tags || null,
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-          status: 'draft',
-        }),
-        uploadRef.set({ publicationStatus: 'draft' }, { merge: true }),
-        messageRef.set(
-          {
-            unread: false,
-            resolved: true,
-            resolvedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        ),
-      ]);
-    }
+        if (action === 'dismiss') {
+          transaction.set(messageRef, { unread: false }, { merge: true });
+        }
 
-    if (action === 'dismiss') {
-      await messageRef.set({ unread: false }, { merge: true });
-    }
-
-    await threadRef.set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(threadRef, { updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      },
+    });
 
     res.status(200).json({ ok: true });
   } catch (error) {

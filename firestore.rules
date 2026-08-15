@@ -11,6 +11,9 @@ service cloud.firestore {
     match /codexDevActorMergeFences/{uid} {
       allow read, write: if false;
     }
+    match /codexDevActorLifecycleFences/{uid} {
+      allow read, write: if false;
+    }
     function isVerifiedUser() {
       return request.auth != null && request.auth.token.email_verified == true;
     }
@@ -1277,7 +1280,7 @@ service cloud.firestore {
         && hasClaimEligibility(request.auth.uid)
         && isSafeClaimRequestCreate();
       allow read: if isModerator()
-        || isClaimRequester(resource.data);
+        || (!isKnownCodexProductionDenied() && isClaimRequester(resource.data));
       allow update: if isModerator()
         && request.resource.data.diff(resource.data).changedKeys().hasOnly(['status']);
       allow delete: if false;
@@ -1286,15 +1289,17 @@ service cloud.firestore {
     match /claimVouches/{vouchId} {
       allow create: if false;
       allow read: if isModerator()
-        || (isSignedIn() && request.auth.uid == resource.data.voterUid)
-        || isClaimRequester(get(/databases/$(database)/documents/claimRequests/$(resource.data.claimRequestId)).data);
+        || (!isKnownCodexProductionDenied()
+          && ((isSignedIn() && request.auth.uid == resource.data.voterUid)
+            || isClaimRequester(get(/databases/$(database)/documents/claimRequests/$(resource.data.claimRequestId)).data)));
       allow update, delete: if false;
 
       match /votes/{voteId} {
         allow create: if false;
         allow read: if isModerator()
-          || (isSignedIn() && request.auth.uid == resource.data.voterUid)
-          || isClaimRequester(get(/databases/$(database)/documents/claimRequests/$(vouchId)).data);
+          || (!isKnownCodexProductionDenied()
+            && ((isSignedIn() && request.auth.uid == resource.data.voterUid)
+              || isClaimRequester(get(/databases/$(database)/documents/claimRequests/$(vouchId)).data)));
         allow update, delete: if false;
       }
     }

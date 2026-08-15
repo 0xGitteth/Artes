@@ -16,12 +16,15 @@ import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
 import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
 import {
   acquireCodexDevMergeFence,
+  acquireCodexDevLifecycleFence,
   ensureCodexDevActorRegistered,
   isKnownCodexDevActorUid,
   queueCodexDevMergeFenceRenewal,
   readAndValidateCodexDevMergeFence,
+  readAndValidateCodexDevLifecycleFence,
   releaseCodexDevMergeFence,
   releaseCodexDevMergeFenceIfUnmutated,
+  releaseCodexDevLifecycleFence,
 } from '../functions/codexDevActorRegistry.js';
 
 test('canonical identity requires the configured uid and both trusted claims', () => {
@@ -182,6 +185,42 @@ test('merge fence releases only before the first committed production mutation',
   );
   await releaseCodexDevMergeFence({ db, uid: 'partial-merge', token: 'token-b' });
   assert.equal(docs.has('codexDevActorMergeFences/partial-merge'), false, 'full-success release remains token-safe');
+});
+
+test('account lifecycle fence blocks registration through Auth deletion and releases token-safely', async () => {
+  const nowMs = Date.now();
+  const docs = new Map();
+  const refFor = (path) => ({ path, get: async () => ({
+    exists: docs.has(path), data: () => docs.get(path),
+  }) });
+  const db = {
+    collection: (collection) => ({ doc: (uid) => refFor(`${collection}/${uid}`) }),
+    runTransaction: async (callback) => callback({
+      get: (ref) => ref.get(),
+      set: (ref, data, options) => docs.set(ref.path, { ...(options?.merge ? docs.get(ref.path) || {} : {}), ...data }),
+      delete: (ref) => docs.delete(ref.path),
+    }),
+  };
+
+  await acquireCodexDevLifecycleFence({ db, uid: 'deleting-user', token: 'delete-token', nowMs });
+  assert.equal(docs.get('codexDevActorLifecycleFences/deleting-user')?.operation, 'deleteOnboardingAccount');
+  await assert.rejects(
+    ensureCodexDevActorRegistered({ db, uid: 'deleting-user' }),
+    (error) => error.code === 'codex-lifecycle-fence-active' && error.retryable === true,
+  );
+  await db.runTransaction((transaction) => readAndValidateCodexDevLifecycleFence({
+    db, uid: 'deleting-user', token: 'delete-token', transaction, nowMs: nowMs + 1,
+  }));
+  assert.equal(await releaseCodexDevLifecycleFence({ db, uid: 'deleting-user', token: 'wrong-token' }), false);
+  assert.equal(await releaseCodexDevLifecycleFence({ db, uid: 'deleting-user', token: 'delete-token' }), true);
+  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'deleting-user' }), true,
+    'registration resumes only after the destructive lifecycle operation ends');
+
+  docs.set('codexDevActorLifecycleFences/expired-user', {
+    uid: 'expired-user', operation: 'deleteOnboardingAccount', token: 'expired', leaseExpiresAtMs: nowMs - 1,
+  });
+  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'expired-user' }), true,
+    'an expired lifecycle fence cannot block recovery forever');
 });
 
 test('persisted retired actor checks precede all DM and claim mutations', async () => {
@@ -597,6 +636,10 @@ test('trusted account lifecycle endpoints reject Codex before destructive work',
   assert.ok(reset.indexOf('isCodexDevForProductionDeny') < reset.indexOf('resetPersonalOnboardingAtomically'));
   const lifecycle = await fs.readFile(new URL('../functions/accountLifecycle.js', import.meta.url), 'utf8');
   assert.ok(lifecycle.indexOf('isCodexDevForProductionDeny(decoded)') < lifecycle.indexOf('transaction.delete(userRef)'));
+  assert.ok(lifecycle.indexOf('acquireCodexDevLifecycleFence') < lifecycle.indexOf('transaction.delete(userRef)'));
+  assert.ok(lifecycle.indexOf('readAndValidateCodexDevLifecycleFence') < lifecycle.indexOf('transaction.delete(userRef)'));
+  assert.ok(lifecycle.indexOf('transaction.delete(userRef)') < lifecycle.indexOf('auth.deleteUser(uid)'));
+  assert.ok(lifecycle.indexOf('auth.deleteUser(uid)') < lifecycle.indexOf('await releaseCodexDevLifecycleFence'));
 });
 
 test('client blocks Codex contributor content requests before production writes', async () => {

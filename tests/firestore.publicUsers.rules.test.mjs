@@ -38,6 +38,7 @@ const authedContext = (env, uid, token = {}) => {
 async function run() {
   const rules = await fs.readFile('firestore.rules', 'utf8');
   assert.match(rules, /match \/codexDevActorRegistry\/\{uid\} \{\s*allow read, write: if false;/);
+  assert.match(rules, /match \/codexDevActorLifecycleFences\/\{uid\} \{\s*allow read, write: if false;/);
   const testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: { rules },
@@ -465,6 +466,12 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'claimRequests', 'preserved_retired_claim'), {
+        requestedByUid: 'retired-codex', contributorId: 'unclaimed_contributor', status: 'approved', mode: 'merge',
+      });
+      await setDoc(doc(db, 'claimRequests', 'current_codex_claim'), {
+        requestedByUid: 'codex-dev-user', contributorId: 'unclaimed_contributor', status: 'pending',
+      });
       await setDoc(doc(db, 'claimVouches', 'pending_vouch_request'), {
         claimRequestId: 'pending_vouch_request',
         voterUid: 'eligible_voter',
@@ -484,6 +491,12 @@ async function run() {
         vote: 'yes',
         status: 'submitted',
         createdAt: new Date(),
+      });
+      await setDoc(doc(db, 'claimVouches', 'preserved_retired_claim'), {
+        claimRequestId: 'preserved_retired_claim', voterUid: 'retired-codex', vote: 'yes',
+      });
+      await setDoc(doc(db, 'claimVouches', 'preserved_retired_claim', 'votes', 'retired-codex'), {
+        claimRequestId: 'preserved_retired_claim', voterUid: 'retired-codex', vote: 'yes',
       });
       await setDoc(doc(db, 'users', 'eligible_voter'), {
         onboardingComplete: true,
@@ -532,6 +545,8 @@ async function run() {
     const ownerDb = authedContext(testEnv, ownerUid, { email_verified: true }).firestore();
     await assertFails(getDoc(doc(ownerDb, 'codexDevActorRegistry', 'retired-codex')));
     await assertFails(setDoc(doc(ownerDb, 'codexDevActorRegistry', ownerUid), { uid: ownerUid }));
+    await assertFails(getDoc(doc(ownerDb, 'codexDevActorLifecycleFences', ownerUid)));
+    await assertFails(setDoc(doc(ownerDb, 'codexDevActorLifecycleFences', ownerUid), { uid: ownerUid }));
     const ownerEmailFalseAdultDb = authedContext(testEnv, ownerUid, { email_verified: false, idvVerified: true, isAdult: true }).firestore();
     const ownerEmailOnlyDb = authedContext(testEnv, ownerUid, { email_verified: true, __adultDefaults: false }).firestore();
     const ownerIdvFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: false, isAdult: true }).firestore();
@@ -1382,6 +1397,9 @@ async function run() {
     await assertSucceeds(
       getDoc(doc(moderatorDb, 'claimRequests', 'pending_vouch_request')),
     );
+    await assertFails(getDoc(doc(retiredCodexDb, 'claimRequests', 'preserved_retired_claim')));
+    await assertFails(getDoc(doc(codexDevDb, 'claimRequests', 'current_codex_claim')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'claimRequests', 'preserved_retired_claim')));
     await assertFails(
       getDoc(doc(otherDb, 'claimRequests', 'pending_vouch_request')),
     );
@@ -1441,6 +1459,10 @@ async function run() {
     await assertSucceeds(
       getDoc(doc(ownerDb, 'claimVouches', 'pending_vouch_request')),
     );
+    await assertFails(getDoc(doc(retiredCodexDb, 'claimVouches', 'preserved_retired_claim')));
+    await assertFails(getDoc(doc(retiredCodexDb, 'claimVouches', 'preserved_retired_claim', 'votes', 'retired-codex')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'claimVouches', 'preserved_retired_claim')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'claimVouches', 'preserved_retired_claim', 'votes', 'retired-codex')));
     await assertFails(
       updateDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter'), {
         vote: 'no',

@@ -13,6 +13,7 @@ import {
 import { isCodexDevIdentity as isClientCodexIdentity, sortCodexDevPostsNewestFirst } from '../src/utils/codexDevIdentity.js';
 import { findBestReusableAcrossPages, findReusableAcrossPages, isUploadReusableForActor, selectExactReusableUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from '../functions/uploadReuseIsolation.js';
 import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
+import { createClaimInviteAtomically } from '../functions/claimInviteTransaction.js';
 import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
 import {
   acquireCodexDevMergeFence,
@@ -430,7 +431,7 @@ test('remaining reviewed production callables deny historical registry actors be
     ['export const reportPost', 'export const requestUploadReviewCase', 'transaction.create(reviewRef'],
     ['export const requestUploadReviewCase', 'export const getModerationExamplesForCase', "collection('reviewCases')"],
     ['export const createTemporaryContributor', 'export const createClaimInvite', 'db.runTransaction'],
-    ['export const createClaimInvite', 'export const getClaimInvitePreview', 'db.runTransaction'],
+    ['export const createClaimInvite', 'export const getClaimInvitePreview', 'createClaimInviteAtomically'],
   ]) {
     const implementation = section(index, start, end);
     assert.ok(implementation.indexOf('isKnownCodexDevActorUid') < implementation.indexOf(firstWrite), `${start} denies before production writes`);
@@ -642,7 +643,7 @@ test('production side-effect endpoints reject Codex before shared writes', async
   const contributor = section('export const createTemporaryContributor', 'export const createClaimInvite');
   assert.ok(contributor.indexOf('isCodexDevForProductionDeny') < contributor.indexOf('db.runTransaction'));
   const invite = section('export const createClaimInvite', 'export const getClaimInvitePreview');
-  assert.ok(invite.indexOf('isCodexDevForProductionDeny') < invite.indexOf('db.runTransaction'));
+  assert.ok(invite.indexOf('isCodexDevForProductionDeny') < invite.indexOf('createClaimInviteAtomically'));
   const claim = section('export const createClaimRequest', 'export const startEmailClaimProof');
   assert.ok(claim.indexOf('isCodexDevForProductionDeny(decoded)') < claim.indexOf('db.runTransaction'));
   const dmMessage = section('export const sendDmMessage', 'export const sendSupportMessage');
@@ -650,6 +651,65 @@ test('production side-effect endpoints reject Codex before shared writes', async
   assert.ok(dmMessage.indexOf('isKnownCodexDevActorUid({ db, uid })') < dmMessage.indexOf("collection('messages').doc()"));
   const moderationAction = section('export const userModerationAction', 'export const moderatorDecide');
   assert.ok(moderationAction.indexOf('isCodexDevForProductionDeny(decoded)') < moderationAction.indexOf("collection('moderationExamples')"));
+});
+
+test('claim invite transaction rechecks registry before all invite-side writes', async () => {
+  const stores = {
+    codexDevActorRegistry: new Map(),
+    claimInviteRateLimits: new Map(),
+    claimInvites: new Map(),
+  };
+  const operations = [];
+  const ref = (collection, id) => ({ collection, id });
+  const db = {
+    collection: (collection) => ({ doc: (id) => ref(collection, id) }),
+    runTransaction: async (callback) => {
+      // Models registration committing after the endpoint preflight and before
+      // the authoritative transaction begins.
+      stores.codexDevActorRegistry.set('racing-user', { productionDenyOnly: true });
+      const pending = [];
+      const transaction = {
+        get: async (documentRef) => {
+          assert.equal(pending.length, 0, 'transaction reads must precede writes');
+          operations.push(`read:${documentRef.collection}`);
+          const value = stores[documentRef.collection].get(documentRef.id);
+          return { exists: value !== undefined, data: () => value };
+        },
+        set: (documentRef, data) => {
+          operations.push(`write:${documentRef.collection}`);
+          pending.push({ documentRef, data });
+        },
+      };
+      const result = await callback(transaction);
+      pending.forEach(({ documentRef, data }) => stores[documentRef.collection].set(documentRef.id, data));
+      return result;
+    },
+  };
+  const run = (uid, token = uid) => createClaimInviteAtomically({
+    db,
+    uid,
+    rateRef: ref('claimInviteRateLimits', uid),
+    inviteRef: ref('claimInvites', token),
+    inviteData: { createdByUid: uid },
+    todayKey: '2026-08-15',
+    rateLimitPerDay: 2,
+    serverTimestamp: () => 'timestamp',
+    createError: (code, message) => Object.assign(new Error(message), { code }),
+  });
+
+  await assert.rejects(() => run('racing-user'), { code: 'permission-denied' });
+  assert.equal(stores.claimInvites.size, 0, 'registration race creates no invite');
+  assert.equal(stores.claimInviteRateLimits.size, 0, 'registration race consumes no rate limit');
+  assert.deepEqual(operations, ['read:claimInviteRateLimits', 'read:codexDevActorRegistry']);
+
+  stores.codexDevActorRegistry.delete('racing-user');
+  await run('ordinary-user', 'ordinary-one');
+  assert.equal(stores.claimInvites.has('ordinary-one'), true, 'ordinary invite creation is preserved');
+  assert.equal(stores.claimInviteRateLimits.get('ordinary-user').count, 1);
+  await run('ordinary-user', 'ordinary-two');
+  await assert.rejects(() => run('ordinary-user', 'ordinary-three'), { code: 'resource-exhausted' });
+  assert.equal(stores.claimInvites.has('ordinary-three'), false, 'rate limiting remains atomic');
+  assert.equal(stores.claimInviteRateLimits.get('ordinary-user').count, 2);
 });
 
 test('trusted account lifecycle endpoints reject Codex before destructive work', async () => {

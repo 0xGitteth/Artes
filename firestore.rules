@@ -733,12 +733,13 @@ service cloud.firestore {
         && noServerManagedUserFieldWrites()
         && isSelfSafeAffiliationStatusWrite();
       // Update must keep server-managed/sensitive fields client-immutable as well.
-      allow update: if (isOwner(userId)
-        && noClientGateFieldWrites()
-        && noServerManagedUserFieldWrites()
-        && isSelfSafeAffiliationStatusWrite())
-        || isAgencyApprovalWrite(userId)
-        || isCompanyApprovalWrite(userId);
+      allow update: if !isKnownCodexProductionDenied()
+        && ((isOwner(userId)
+          && noClientGateFieldWrites()
+          && noServerManagedUserFieldWrites()
+          && isSelfSafeAffiliationStatusWrite())
+          || isAgencyApprovalWrite(userId)
+          || isCompanyApprovalWrite(userId));
       allow delete: if isOwner(userId) && !isKnownCodexProductionDenied();
 
       match /idv/{docId} {
@@ -817,8 +818,8 @@ service cloud.firestore {
 
     match /publicUsers/{uid} {
       allow read: if true;
-      allow create, update: if (isOwner(uid)
-        && !isKnownCodexProductionDenied()
+      allow create, update: if !isKnownCodexProductionDenied()
+        && ((isOwner(uid)
         && exists(/databases/$(database)/documents/users/$(uid))
         && ((('onboardingComplete' in get(/databases/$(database)/documents/users/$(uid)).data)
             && get(/databases/$(database)/documents/users/$(uid)).data.onboardingComplete == true)
@@ -907,8 +908,8 @@ service cloud.firestore {
         && isSelfSafePublicAffiliationStatusWrite()
         && (!('linkedAgencyLink' in request.resource.data) || request.resource.data.linkedAgencyLink is string || request.resource.data.linkedAgencyLink == null)
         && (!('linkedCompanyLink' in request.resource.data) || request.resource.data.linkedCompanyLink is string || request.resource.data.linkedCompanyLink == null))
-        || isAgencyPublicApprovalWrite(uid)
-        || isCompanyPublicApprovalWrite(uid);
+          || isAgencyPublicApprovalWrite(uid)
+          || isCompanyPublicApprovalWrite(uid));
       allow delete: if false;
     }
 

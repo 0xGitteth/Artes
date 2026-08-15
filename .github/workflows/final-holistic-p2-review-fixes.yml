@@ -25,6 +25,7 @@ jobs:
           java-version: '21'
       - run: npm ci
       - run: npm --prefix functions ci
+      - run: node scripts/repairFinalHolisticP2Patcher.mjs
       - run: node scripts/applyFinalHolisticReviewP2Fixes.mjs
       - run: node --check functions/supportChat.js
       - run: node --check functions/codexDevActorRegistry.js
@@ -41,6 +42,7 @@ jobs:
       - run: git diff --check
       - name: Commit validated fixes and remove temporary automation
         run: |
+          rm scripts/repairFinalHolisticP2Patcher.mjs
           rm scripts/applyFinalHolisticReviewP2Fixes.mjs
           rm .github/workflows/final-holistic-p2-review-fixes.yml
           git config user.name "chatgpt-codex-connector[bot]"

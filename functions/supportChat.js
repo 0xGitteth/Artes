@@ -19,22 +19,17 @@ const auth = getAuth();
 const db = getFirestore();
 const corsHandler = cors({ origin: true });
 
-const SUPPORT_FENCE_RETRY_DELAYS_MS = [25, 50, 100, 200, 400, 800, 1600];
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 async function acquireSupportThreadLifecycleFence({ uid, token }) {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      await acquireCodexDevLifecycleFence({
-        db, uid, token, operation: 'ensureSupportThread',
-      });
-      return;
-    } catch (error) {
-      const sameOperationContention = error?.code === 'codex-lifecycle-fence-active'
-        && error?.operation === 'ensureSupportThread';
-      if (!sameOperationContention || attempt >= SUPPORT_FENCE_RETRY_DELAYS_MS.length) throw error;
-      await sleep(SUPPORT_FENCE_RETRY_DELAYS_MS[attempt]);
-    }
+  try {
+    await acquireCodexDevLifecycleFence({
+      db, uid, token, operation: 'ensureSupportThread',
+    });
+    return true;
+  } catch (error) {
+    const sameOperationContention = error?.code === 'codex-lifecycle-fence-active'
+      && error?.operation === 'ensureSupportThread';
+    if (sameOperationContention) return false;
+    throw error;
   }
 }
 
@@ -80,10 +75,13 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
         return res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
       }
 
-      const lifecycleToken = randomUUID();
-      await acquireSupportThreadLifecycleFence({ uid, token: lifecycleToken });
-      try {
       const threadId = `support_${uid}`;
+      const lifecycleToken = randomUUID();
+      const ownsLifecycleFence = await acquireSupportThreadLifecycleFence({ uid, token: lifecycleToken });
+      if (!ownsLifecycleFence) {
+        return res.status(200).json({ ok: true, threadId, pending: true });
+      }
+      try {
       const threadRef = db.collection("threads").doc(threadId);
       const indexRef = db.collection("users").doc(uid).collection("threadIndex").doc(threadId);
 

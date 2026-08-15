@@ -180,17 +180,23 @@ test('lifecycle fence contention exposes operation metadata for safe same-operat
     && error.retryable === true);
 });
 
-test('support ensure retries only same-operation contention and preserves non-auth error status', async () => {
+test('support ensure treats same-operation contention as idempotent success and preserves non-auth error status', async () => {
   const source = await fs.readFile(new URL('../functions/supportChat.js', import.meta.url), 'utf8');
   assert.match(source, /sameOperationContention = error\?\.code === 'codex-lifecycle-fence-active'[\s\S]*?error\?\.operation === 'ensureSupportThread'/);
-  assert.match(source, /SUPPORT_FENCE_RETRY_DELAYS_MS\[attempt\]/);
+  assert.match(source, /if \(sameOperationContention\) return false/);
+  assert.match(source, /if \(!ownsLifecycleFence\) \{[\s\S]*?status\(200\)\.json\(\{ ok: true, threadId, pending: true \}\)/);
+  assert.doesNotMatch(source, /SUPPORT_FENCE_RETRY_DELAYS_MS/);
   assert.match(source, /Number\.isInteger\(e\?\.status\) \? e\.status : 401/);
 });
 
 test('reconcile uses bounded transactions, fresh destructive rechecks, and position-safe moodboard covers', async () => {
   const source = await fs.readFile(new URL('../functions/scripts/reconcileCodexDevIsolation.js', import.meta.url), 'utf8');
   assert.match(source, /MOODBOARD_REPAIR_TRANSACTION_ITEM_LIMIT = 400/);
-  assert.match(source, /clearAffiliationsIfStillCodex[\s\S]*?transaction\.get\(ref\)[\s\S]*?buildAffiliationClearPatch\(snapshot\.data\(\)/);
+  assert.match(source, /clearAffiliationsIfStillCodex[\s\S]*?transaction\.get\(ref\)[\s\S]*?buildPrivateAffiliationClearPatch/);
+  assert.match(source, /buildPublicAffiliationClearPatch[\s\S]*?fieldValue\?\.delete/);
+  assert.match(source, /persistCodexCleanupProvenance[\s\S]*?cleanupManagedProfileIds[\s\S]*?cleanupPostIds/);
+  assert.match(source, /legacyManagedProfileIds[\s\S]*?legacyPostIds/);
+  assert.doesNotMatch(source, /collectionGroup\('items'\)/);
   assert.match(source, /matchingItems = chunk\.filter[\s\S]*?snapshot\?\.exists && isCodexMoodboardItem/);
   assert.match(source, /nextCoverImageUrls\.push\(typeof currentCoverImageUrls\[index\] === 'string' \? currentCoverImageUrls\[index\] : ''\)/);
 });

@@ -2,6 +2,16 @@ import assert from 'node:assert/strict';
 import { reconcileCodexDevIsolation } from '../functions/scripts/reconcileCodexDevIsolation.js';
 
 const noModeratorAuth = { getUser: async () => ({ email: null }) };
+const DELETE_FIELD = Symbol('DELETE_FIELD');
+
+const applyPayload = (current = {}, payload = {}, merge = true) => {
+  const next = merge ? { ...current } : {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === DELETE_FIELD) delete next[key];
+    else next[key] = value;
+  }
+  return next;
+};
 
 const seed = () => new Map(Object.entries({
   'users/marked-test': { isDevTestUser: true, devActor: 'codex', onboardingComplete: true, contributorId: 'claimed-by-test' },
@@ -111,7 +121,7 @@ const fakeDb = (docs) => {
     id: path.split('/').at(-1),
     get: async () => ({ exists: docs.has(path), data: () => docs.get(path) }),
     delete: async () => docs.delete(path),
-    set: async (payload, options) => docs.set(path, { ...(options?.merge ? (docs.get(path) || {}) : {}), ...payload }),
+    set: async (payload, options) => docs.set(path, applyPayload(docs.get(path) || {}, payload, options?.merge === true)),
     collection: (name) => collectionFor(`${path}/${name}`),
   });
   const snapshots = (prefix, direct = true) => [...docs.entries()]
@@ -140,8 +150,8 @@ const fakeDb = (docs) => {
       const result = await callback({
         get: async (ref) => ref.get(),
         delete: (ref) => pending.push(() => docs.delete(ref.path)),
-        update: (ref, payload) => pending.push(() => docs.set(ref.path, { ...(docs.get(ref.path) || {}), ...payload })),
-        set: (ref, payload, options) => pending.push(() => docs.set(ref.path, { ...(options?.merge ? (docs.get(ref.path) || {}) : {}), ...payload })),
+        update: (ref, payload) => pending.push(() => docs.set(ref.path, applyPayload(docs.get(ref.path) || {}, payload, true))),
+        set: (ref, payload, options) => pending.push(() => docs.set(ref.path, applyPayload(docs.get(ref.path) || {}, payload, options?.merge === true))),
       });
       if (pending.length > 500) throw new Error(`fake Firestore transaction write limit exceeded: ${pending.length}`);
       pending.forEach((apply) => apply());
@@ -153,7 +163,7 @@ const fakeDb = (docs) => {
 const fakeBucket = (paths) => ({
   getFiles: async ({ prefix }) => [[...paths].filter((path) => path.startsWith(prefix)).map((path) => ({ name: path, delete: async () => paths.delete(path) }))],
 });
-const fakeFieldValue = { serverTimestamp: () => 'SERVER_TIMESTAMP' };
+const fakeFieldValue = { serverTimestamp: () => 'SERVER_TIMESTAMP', delete: () => DELETE_FIELD };
 
 const dryDocs = seed();
 const dryProofs = new Set(['claimProofs/test-claim/marked-test.png', 'claimProofs/real-claim/real.png']);
@@ -193,9 +203,11 @@ assert.equal(dryProofs.size, 2, 'dry run preserves claim proof objects');
 const applyDocs = seed();
 const applyProofs = new Set(dryProofs);
 const applyStats = await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), bucket: fakeBucket(applyProofs), apply: true, auth: noModeratorAuth, env: {}, uid: 'marked-test', skipStorage: false, fieldValue: fakeFieldValue });
-assert.deepEqual(applyDocs.get('codexDevActorRegistry/marked-test'), {
-  uid: 'marked-test', actor: 'codex', productionDenyOnly: true, registeredAt: applyDocs.get('codexDevActorRegistry/marked-test').registeredAt,
-});
+assert.equal(applyDocs.get('codexDevActorRegistry/marked-test').uid, 'marked-test');
+assert.equal(applyDocs.get('codexDevActorRegistry/marked-test').actor, 'codex');
+assert.equal(applyDocs.get('codexDevActorRegistry/marked-test').productionDenyOnly, true);
+assert.deepEqual(applyDocs.get('codexDevActorRegistry/marked-test').cleanupManagedProfileIds, ['test-agency']);
+assert.deepEqual(applyDocs.get('codexDevActorRegistry/marked-test').cleanupPostIds, ['test-managed-post', 'test-post']);
 assert.equal(applyStats.targetUidRegistered, true);
 assert.equal(applyDocs.has('codexDevActorRegistry/suspicious-marker'), false, 'ambiguous marker is never registered');
 assert.equal(applyStats.deletes, 42);
@@ -220,17 +232,25 @@ assert.equal(applyDocs.get('claimRequests/proof-review-claim').status, 'needsMod
 assert.equal(applyDocs.get('claimRequests/proof-review-claim').statusReason, 'proof required');
 assert.equal(applyDocs.get('publicUsers/real').fansCount, 2);
 assert.equal(applyDocs.get('publicUsers/real').fanOfCount, 3);
-for (const profilePath of ['users/real', 'publicUsers/real']) {
-  const profile = applyDocs.get(profilePath);
-  assert.equal(profile.linkedAgencyId, null, `${profilePath} direct Codex agency affiliation cleared`);
-  assert.equal(profile.linkedAgencyName, '');
-  assert.equal(profile.linkedAgencyLink, null);
-  assert.equal(profile.linkedAgencyStatus, null);
-  assert.equal(profile.linkedCompanyId, null, `${profilePath} Codex-managed company affiliation cleared`);
-  assert.equal(profile.linkedCompanyName, '');
-  assert.equal(profile.linkedCompanyLink, null);
-  assert.equal(profile.linkedCompanyStatus, null);
-}
+const privateProfile = applyDocs.get('users/real');
+assert.equal(privateProfile.linkedAgencyId, null, 'private direct Codex agency affiliation cleared');
+assert.equal(privateProfile.linkedAgencyName, '');
+assert.equal(privateProfile.linkedAgencyLink, null);
+assert.equal(privateProfile.linkedAgencyStatus, null);
+assert.equal(privateProfile.linkedCompanyId, null, 'private Codex-managed company affiliation cleared');
+assert.equal(privateProfile.linkedCompanyName, '');
+assert.equal(privateProfile.linkedCompanyLink, null);
+assert.equal(privateProfile.linkedCompanyStatus, null);
+const publicProfile = applyDocs.get('publicUsers/real');
+assert.equal(publicProfile.linkedAgencyId, null, 'public direct Codex agency affiliation cleared');
+assert.equal(publicProfile.linkedAgencyName, '');
+assert.equal(publicProfile.linkedAgencyLink, null);
+assert.equal('linkedAgencyStatus' in publicProfile, false, 'public agency status removed instead of stored as null');
+assert.equal('linkedAgencyApprovedBy' in publicProfile, false, 'private approval metadata never leaks into public projection');
+assert.equal(publicProfile.linkedCompanyId, null, 'public Codex-managed company affiliation cleared');
+assert.equal(publicProfile.linkedCompanyName, '');
+assert.equal(publicProfile.linkedCompanyLink, null);
+assert.equal('linkedCompanyStatus' in publicProfile, false, 'public company status removed instead of stored as null');
 assert.deepEqual(applyDocs.get('users/real/moodboards/inspo').coverPostIds, ['real-empty', 'real-post']);
 assert.deepEqual(applyDocs.get('users/real/moodboards/inspo').coverImageUrls, ['', 'https://real.test/post.jpg'], 'cover image positions remain aligned');
 assert.equal(applyDocs.get('users/real/moodboards/inspo').postCount, 2);
@@ -244,6 +264,45 @@ assert.equal(secondStats.deletes, 0, 'second apply is idempotent');
 assert.equal(secondStats.targetUidAlreadyRegistered, true, 'registration is idempotent');
 assert.equal(secondStats.manualReviewRequired.filter((item) => item.reviewCaseId === 'approved-test-report').length, 1);
 assert.equal(secondStats.manualReviewRequired.filter((item) => item.claimRequestId === 'approved-test-merge').length, 1);
+
+applyDocs.set('users/real', { ...applyDocs.get('users/real'), linkedCompanyId: 'test-agency', linkedCompanyName: 'Late Codex Company', linkedCompanyStatus: 'approved' });
+applyDocs.set('publicUsers/real', { ...applyDocs.get('publicUsers/real'), linkedCompanyId: 'test-agency', linkedCompanyName: 'Late Codex Company', linkedCompanyStatus: 'approved' });
+applyDocs.set('users/real/moodboards/inspo/items/late-codex', {
+  postId: 'test-post', ownerUid: 'real', moodboardId: 'inspo',
+  postSnapshot: { imageUrl: 'https://codex.test/late.jpg', authorId: 'test-agency' },
+});
+applyDocs.set('users/real/moodboards/inspo', { ...applyDocs.get('users/real/moodboards/inspo'), postCount: 3 });
+const provenanceStats = await reconcileCodexDevIsolation({
+  db: fakeDb(applyDocs), bucket: fakeBucket(applyProofs), apply: true, auth: noModeratorAuth, env: {},
+  uid: 'marked-test', skipStorage: false, fieldValue: fakeFieldValue,
+});
+assert.equal(provenanceStats.affiliationUsers, 1, 'stored managed-profile provenance repairs late private dependency');
+assert.equal(provenanceStats.affiliationPublicUsers, 1, 'stored managed-profile provenance repairs late public dependency');
+assert.equal(provenanceStats.moodboardItems, 1, 'stored post/profile provenance repairs late moodboard dependency');
+assert.equal(applyDocs.has('users/real/moodboards/inspo/items/late-codex'), false);
+assert.equal(applyDocs.get('users/real').linkedCompanyId, null);
+assert.equal(applyDocs.get('publicUsers/real').linkedCompanyId, null);
+
+const acceptedLegacyDocs = new Map([
+  ['users/marked-test', { isDevTestUser: true, devActor: 'codex', onboardingComplete: true }],
+  ['users/legacy-owner', { onboardingComplete: true, linkedAgencyId: 'already-deleted-agency', linkedAgencyName: 'Old Codex Agency', linkedAgencyStatus: 'approved' }],
+  ['publicUsers/legacy-owner', { username: 'legacyowner', onboardingComplete: true, linkedAgencyId: 'already-deleted-agency', linkedAgencyName: 'Old Codex Agency', linkedAgencyStatus: 'approved', linkedAgencyApprovedBy: 'marked-test' }],
+  ['users/legacy-owner/moodboards/legacy', { ownerUid: 'legacy-owner', postCount: 1, coverPostIds: ['already-deleted-post'], coverImageUrls: ['https://codex.test/deleted.jpg'] }],
+  ['users/legacy-owner/moodboards/legacy/items/old', { postId: 'already-deleted-post', ownerUid: 'legacy-owner', moodboardId: 'legacy', postSnapshot: { authorId: 'already-deleted-agency' } }],
+]);
+const acceptedLegacyStats = await reconcileCodexDevIsolation({
+  db: fakeDb(acceptedLegacyDocs), apply: true, auth: noModeratorAuth, uid: 'marked-test', skipStorage: true, fieldValue: fakeFieldValue,
+  legacyManagedProfileIds: ['already-deleted-agency'], legacyPostIds: ['already-deleted-post'],
+});
+assert.equal(acceptedLegacyStats.affiliationUsers, 1);
+assert.equal(acceptedLegacyStats.affiliationPublicUsers, 1);
+assert.equal(acceptedLegacyStats.moodboardItems, 1);
+assert.equal(acceptedLegacyDocs.get('users/legacy-owner').linkedAgencyId, null);
+assert.equal('linkedAgencyStatus' in acceptedLegacyDocs.get('publicUsers/legacy-owner'), false);
+assert.equal('linkedAgencyApprovedBy' in acceptedLegacyDocs.get('publicUsers/legacy-owner'), false);
+assert.equal(acceptedLegacyDocs.has('users/legacy-owner/moodboards/legacy/items/old'), false);
+assert.deepEqual(acceptedLegacyDocs.get('codexDevActorRegistry/marked-test').cleanupManagedProfileIds, ['already-deleted-agency']);
+assert.deepEqual(acceptedLegacyDocs.get('codexDevActorRegistry/marked-test').cleanupPostIds, ['already-deleted-post']);
 
 const largeBoardDocs = new Map([
   ['users/marked-test', { isDevTestUser: true, devActor: 'codex', onboardingComplete: true }],

@@ -108,17 +108,18 @@ const decideUserReconciliation = ({
   serverTimestamp,
   productionDenied = false,
 }) => {
-  if (!privateSnap.exists) return { action: 'none', stats: {} };
-
-  const userData = privateSnap.data() || {};
   const publicExists = publicSnap.exists;
-  const publicData = publicExists ? (publicSnap.data() || {}) : {};
 
   if (productionDenied) {
     return publicExists
       ? { action: 'delete', stats: { testActorsSkipped: 1, publicProfilesDeleted: 1, deletes: 1 } }
       : { action: 'none', stats: { testActorsSkipped: 1 } };
   }
+
+  if (!privateSnap.exists) return { action: 'none', stats: {} };
+
+  const userData = privateSnap.data() || {};
+  const publicData = publicExists ? (publicSnap.data() || {}) : {};
 
   if (!isOnboardingComplete(userData)) {
     if (!publicExists) return { action: 'none', stats: { incompleteUsers: 1 } };

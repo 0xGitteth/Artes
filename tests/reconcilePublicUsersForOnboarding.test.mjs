@@ -262,6 +262,49 @@ assert.deepEqual(recreatedActorDb.stores.users.get('recreated-retired'), {
   displayName: 'Recreated private actor',
 }, 'actor quarantine does not modify the recreated private user');
 
+const deletedPrivateActorDb = createFakeDb(
+  [['deleted-private-retired', { onboardingComplete: true, displayName: 'Retired actor' }]],
+  [['deleted-private-retired', { onboardingComplete: true, displayName: 'Retired actor' }]],
+  {
+    registeredCodexUids: ['deleted-private-retired'],
+    beforeFirstTransaction: (stores) => {
+      stores.users.delete('deleted-private-retired');
+    },
+  },
+);
+const deletedPrivateActorStats = await reconcile({
+  db: deletedPrivateActorDb,
+  apply: true,
+  uid: 'deleted-private-retired',
+});
+assert.equal(deletedPrivateActorStats.publicProfilesDeleted, 1);
+assert.equal(
+  deletedPrivateActorDb.stores.publicUsers.has('deleted-private-retired'),
+  false,
+  'registry denial deletes the projection after the discovered private user disappears',
+);
+assert.equal(
+  deletedPrivateActorDb.stores.users.has('deleted-private-retired'),
+  false,
+  'actor quarantine does not recreate the deleted private user',
+);
+
+const deletedPrivateOrdinaryDb = createFakeDb(
+  [['deleted-private-ordinary', { onboardingComplete: true, displayName: 'Ordinary user' }]],
+  [['deleted-private-ordinary', { onboardingComplete: true, displayName: 'Ordinary user' }]],
+  {
+    beforeFirstTransaction: (stores) => {
+      stores.users.delete('deleted-private-ordinary');
+    },
+  },
+);
+await reconcile({ db: deletedPrivateOrdinaryDb, apply: true, uid: 'deleted-private-ordinary' });
+assert.equal(
+  deletedPrivateOrdinaryDb.stores.publicUsers.has('deleted-private-ordinary'),
+  true,
+  'an ordinary projection retains the existing behavior when its private user disappears',
+);
+
 const cleanupDb = createFakeDb(
   [['done', { displayName: 'Current', onboardingStep: '5', roles: ['maker'], themes: [] }]],
   [['done', {

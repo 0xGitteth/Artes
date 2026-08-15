@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import { buildDiditCustomClaims } from '../functions/diditCustomClaims.js';
 import {
   acquireCodexDevLifecycleFence,
   acquireCodexDevMergeFence,
   ensureCodexDevActorRegistered,
+  ensureModeratorUidLockedOutOfCodexRegistration,
   releaseCodexDevLifecycleFence,
 } from '../functions/codexDevActorRegistry.js';
 import { deleteSupportResetMessagesPageAtomically } from '../functions/supportResetIsolation.js';
@@ -85,4 +87,29 @@ test('support reset lifecycle fence blocks actor registration across destructive
 
   await releaseCodexDevLifecycleFence({ db, uid: 'owner', token: 'reset-token' });
   assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'owner' }), true);
+});
+
+
+test('production moderator authorization permanently serializes against Codex registration', async () => {
+  const { db, docs } = createMemoryDb();
+  assert.equal(await ensureModeratorUidLockedOutOfCodexRegistration({
+    db, uid: 'moderator-user', email: 'MOD@example.test', now: new Date('2026-08-15T19:00:00Z'),
+  }), true);
+  assert.equal(docs.get('codexDevActorModeratorLocks/moderator-user').blocksCodexRegistration, true);
+  assert.equal(docs.get('codexDevActorModeratorLocks/moderator-user').email, 'mod@example.test');
+  await assert.rejects(ensureCodexDevActorRegistered({ db, uid: 'moderator-user' }),
+    (error) => error.code === 'codex-moderator-lock-active' && error.retryable === false);
+
+  const { db: retiredDb } = createMemoryDb([[
+    'codexDevActorRegistry/retired-codex', { uid: 'retired-codex', actor: 'codex' },
+  ]]);
+  await assert.rejects(ensureModeratorUidLockedOutOfCodexRegistration({
+    db: retiredDb, uid: 'retired-codex', email: 'mod@example.test',
+  }), (error) => error.code === 'codex-moderator-production-denied' && error.status === 403);
+});
+
+test('ensureModerator rejects Codex claims and installs the moderator registration lock', async () => {
+  const indexSource = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  assert.match(indexSource, /if \(isCodexDevForProductionDeny\(decoded\)\)/);
+  assert.match(indexSource, /await ensureModeratorUidLockedOutOfCodexRegistration\(\{[\s\S]*?uid: decoded\?\.uid, email/);
 });

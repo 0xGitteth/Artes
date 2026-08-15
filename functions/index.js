@@ -48,6 +48,7 @@ import {
   acquireCodexDevLifecycleFence,
   acquireCodexDevMergeFence,
   ensureCodexDevActorRegistered,
+  ensureModeratorUidLockedOutOfCodexRegistration,
   isKnownCodexDevActorUid,
   queueCodexDevMergeFenceRenewal,
   readAndValidateCodexDevLifecycleFence,
@@ -340,6 +341,14 @@ const ensureModerator = async (decoded) => {
     error.status = 403;
     throw error;
   }
+  if (isCodexDevForProductionDeny(decoded)) {
+    const error = new Error('Codex Dev cannot receive production moderator authorization.');
+    error.status = 403;
+    throw error;
+  }
+  await ensureModeratorUidLockedOutOfCodexRegistration({
+    db, uid: decoded?.uid, email, now: new Date(),
+  });
   return { email };
 };
 

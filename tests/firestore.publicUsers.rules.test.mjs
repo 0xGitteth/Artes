@@ -583,6 +583,7 @@ async function run() {
     const codexDevDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, devActor: 'codex', email_verified: false }).firestore();
     const codexModeratorDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, devActor: 'codex', email_verified: true, email: 'mod_1@example.com' }).firestore();
     const retiredCodexDb = authedContext(testEnv, 'retired-codex', { email_verified: true, idvVerified: true, isAdult: true }).firestore();
+    const retiredCodexClaimedDb = authedContext(testEnv, 'retired-codex', { devCodex: true, devActor: 'codex', email_verified: false }).firestore();
     const retiredCodexModeratorDb = authedContext(testEnv, 'retired-codex', { email_verified: true, idvVerified: true, isAdult: true, email: 'mod_1@example.com' }).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
     const publicUserDbFor = (uid) => authedContext(testEnv, uid, { email_verified: true }).firestore();
@@ -600,7 +601,7 @@ async function run() {
 
     await assertFails(getDoc(doc(codexDevDb, 'uploads', 'owner_upload_rules')));
     await assertFails(getDoc(doc(codexDevDb, 'uploads', 'codex_legacy_production_upload_rules')));
-    await assertSucceeds(getDoc(doc(codexDevDb, 'uploads', 'codex_test_upload_rules')));
+    await assertFails(getDoc(doc(codexDevDb, 'uploads', 'codex_test_upload_rules')));
     await assertFails(getDoc(doc(codexDevDb, 'reviewCases', 'owner_review_case')));
     await assertFails(getDoc(doc(codexDevDb, 'reviewCases', 'codex_legacy_review_case')));
     await assertFails(getDocs(collection(codexDevDb, 'uploads')));
@@ -608,9 +609,10 @@ async function run() {
 
     await assertFails(getDoc(doc(codexModeratorDb, 'uploads', 'owner_upload_rules')));
     await assertFails(getDoc(doc(codexModeratorDb, 'reviewCases', 'owner_review_case')));
-    await assertSucceeds(getDoc(doc(codexModeratorDb, 'uploads', 'codex_test_upload_rules')));
+    await assertFails(getDoc(doc(codexModeratorDb, 'uploads', 'codex_test_upload_rules')));
 
     await assertFails(getDoc(doc(retiredCodexDb, 'uploads', 'retired_codex_test_upload_rules')));
+    await assertFails(getDoc(doc(retiredCodexClaimedDb, 'uploads', 'retired_codex_test_upload_rules')));
     await assertFails(getDoc(doc(retiredCodexDb, 'reviewCases', 'owner_review_case')));
     await assertFails(getDoc(doc(retiredCodexModeratorDb, 'uploads', 'owner_upload_rules')));
     await assertFails(getDoc(doc(retiredCodexModeratorDb, 'reviewCases', 'owner_review_case')));    const companyOwnerDb = authedContext(testEnv, 'company_owner', { email_verified: true }).firestore();

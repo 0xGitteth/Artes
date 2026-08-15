@@ -67,7 +67,7 @@ const seed = () => new Map(Object.entries({
   'claimRequests/approved-test-claim': { contributorId: 'claimed-by-test', requestedByUid: 'marked-test', status: 'approved' },
   'claimRequests/approved-test-merge': { contributorId: 'merge-primary', requestedByUid: 'marked-test', mode: 'merge', status: 'approved', primaryContributorId: 'merge-primary', secondaryContributorId: 'merge-secondary', mergeAudit: { updatedPosts: 2 } },
   'claimRequests/ordinary-approved-merge': { contributorId: 'ordinary-primary', requestedByUid: 'real', mode: 'merge', status: 'approved', primaryContributorId: 'ordinary-primary', secondaryContributorId: 'ordinary-secondary' },
-  'contributorAliases/merge-evidence-alias': { contributorId: 'merge-primary' },
+  'contributorAliases/merge-evidence-alias': { contributorId: 'merge-primary', createdByUid: 'marked-test', type: 'instagram' },
   'contributorAliases/merge-secondary-evidence-alias': { contributorId: 'merge-secondary', createdByUid: 'marked-test', type: 'instagram' },
   'claimVouches/real-claim/votes/voter': { voterUid: 'other', vote: 'yes' },
   'claimVouches/real-claim/votes/marked-test': { voterUid: 'marked-test', vote: 'no' },
@@ -157,7 +157,7 @@ assert.equal(dryStats.outgoingFollows, 2);
 assert.equal(dryStats.incomingFollows, 2);
 assert.equal(dryStats.followCounterRepairs, 3);
 assert.equal(dryStats.preservedContributors, 4);
-assert.equal(dryStats.preservedContributorAliases, 6);
+assert.equal(dryStats.preservedContributorAliases, 7);
 assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex_created_contributor_with_active_ordinary_claim' && item.contributorId === 'pending-claim-contributor'), true);
 assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex_created_contributor_with_active_ordinary_claim' && item.contributorId === 'moderation-claim-contributor'), true);
 assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex_approved_merge_claim_recovery' && item.claimRequestId === 'approved-test-merge'), true);

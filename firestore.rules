@@ -1122,12 +1122,7 @@ service cloud.firestore {
     }
 
     match /uploads/{uploadId} {
-      allow read: if (!isKnownCodexProductionDenied()
-          && (isModerator() || (request.auth != null && request.auth.uid == resource.data.userId)))
-        || (isCodexDev()
-          && request.auth.uid == resource.data.userId
-          && ('testActor' in resource.data)
-          && resource.data.testActor == 'codex');
+      allow read: if !isKnownCodexProductionDenied() && (isModerator() || (request.auth != null && request.auth.uid == resource.data.userId));
       allow create, update, delete: if false;
     }
 

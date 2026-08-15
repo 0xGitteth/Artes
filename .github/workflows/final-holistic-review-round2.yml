@@ -26,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm --prefix functions ci
       - run: node scripts/applyFinalHolisticReviewRound2Fixes.mjs
+      - run: node scripts/repairFinalHolisticRound2CliTest.mjs
       - run: node --check functions/supportChat.js
       - run: node --check functions/scripts/reconcileCodexDevIsolation.js
       - run: npm run test:codex-dev-isolation
@@ -41,6 +42,7 @@ jobs:
       - name: Commit validated fixes and remove temporary automation
         run: |
           rm scripts/applyFinalHolisticReviewRound2Fixes.mjs
+          rm scripts/repairFinalHolisticRound2CliTest.mjs
           rm .github/workflows/final-holistic-review-round2.yml
           git config user.name "chatgpt-codex-connector[bot]"
           git config user.email "199175422+chatgpt-codex-connector[bot]@users.noreply.github.com"

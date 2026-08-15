@@ -244,7 +244,6 @@ const inspectDiscoveredPublicProfile = async ({
       transaction.get(publicRef),
       isKnownCodexDevActorUid({ db, uid: discoveredSnap.id, transaction }),
     ]);
-    if (currentPrivateSnap.exists) return { action: 'none', stats: {} };
     if (productionDenied) {
       if (!currentPublicSnap.exists) return { action: 'none', stats: { testActorsSkipped: 1 } };
       transaction.delete(publicRef);
@@ -253,6 +252,7 @@ const inspectDiscoveredPublicProfile = async ({
         stats: { testActorsSkipped: 1, publicProfilesDeleted: 1, deletes: 1 },
       };
     }
+    if (currentPrivateSnap.exists) return { action: 'none', stats: {} };
     if (!currentPublicSnap.exists) return { action: 'none', stats: {} };
     if (!deleteOrphans) return { action: 'none', stats: { orphanPublicProfiles: 1 } };
     transaction.delete(publicRef);

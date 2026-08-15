@@ -130,6 +130,7 @@ function createFakeDb(initialUsers, initialPublicUsers, {
       const pending = [];
       const transaction = {
         get: async (ref) => {
+          assert.equal(pending.length, 0, 'all reconciliation transaction reads precede writes');
           const [name, id] = ref.path.split('/');
           return makeSnap(name, id);
         },
@@ -233,6 +234,33 @@ assert.equal(
   true,
   'ordinary orphan remains when deleteOrphans is false',
 );
+
+const recreatedActorDb = createFakeDb(
+  [],
+  [['recreated-retired', { onboardingComplete: true, displayName: 'Retired actor' }]],
+  {
+    registeredCodexUids: ['recreated-retired'],
+    beforeFirstTransaction: (stores) => {
+      stores.users.set('recreated-retired', {
+        uid: 'recreated-retired',
+        onboardingComplete: true,
+        displayName: 'Recreated private actor',
+      });
+    },
+  },
+);
+const recreatedActorStats = await reconcile({ db: recreatedActorDb, apply: true, pageSize: 10 });
+assert.equal(recreatedActorStats.publicProfilesDeleted, 1);
+assert.equal(
+  recreatedActorDb.stores.publicUsers.has('recreated-retired'),
+  false,
+  'registry denial takes precedence when the private actor is recreated before the orphan transaction',
+);
+assert.deepEqual(recreatedActorDb.stores.users.get('recreated-retired'), {
+  uid: 'recreated-retired',
+  onboardingComplete: true,
+  displayName: 'Recreated private actor',
+}, 'actor quarantine does not modify the recreated private user');
 
 const cleanupDb = createFakeDb(
   [['done', { displayName: 'Current', onboardingStep: '5', roles: ['maker'], themes: [] }]],

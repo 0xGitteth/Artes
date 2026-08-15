@@ -113,3 +113,20 @@ test('ensureModerator rejects Codex claims and installs the moderator registrati
   assert.match(indexSource, /if \(isCodexDevForProductionDeny\(decoded\)\)/);
   assert.match(indexSource, /await ensureModeratorUidLockedOutOfCodexRegistration\(\{[\s\S]*?uid: decoded\?\.uid, email/);
 });
+
+
+test('authoritative moderator assignment blocks Codex registration even before a moderator lock exists', async () => {
+  const { db, docs } = createMemoryDb([[
+    'config/moderation', { moderatorEmails: ['mod@example.test'] },
+  ]]);
+  await assert.rejects(ensureCodexDevActorRegistered({
+    db, uid: 'assigned-moderator', moderatorEmail: 'MOD@example.test',
+  }), (error) => error.code === 'codex-moderator-assignment-active' && error.retryable === false);
+  assert.equal(docs.has('codexDevActorRegistry/assigned-moderator'), false);
+});
+
+test('Codex establishment passes the existing Auth email into transactional registration', async () => {
+  const indexSource = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  assert.match(indexSource, /admin\.auth\(\)\.getUser\(uid\)/);
+  assert.match(indexSource, /ensureCodexDevActorRegistered\(\{ db, uid, now, moderatorEmail \}\)/);
+});

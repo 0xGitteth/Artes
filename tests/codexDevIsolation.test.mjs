@@ -617,7 +617,7 @@ test('ensureCodexDevProfileState deletes rather than writes a publicUsers projec
   const end = source.indexOf('\n};', start) + 3;
   const implementation = source.slice(start, end);
   assert.match(implementation, /publicUserRef\.delete\(\)/);
-  assert.match(implementation, /ensureCodexDevActorRegistered\(\{ db, uid, now \}\)/);
+  assert.match(implementation, /ensureCodexDevActorRegistered\(\{ db, uid, now, moderatorEmail \}\)/);
   assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('userRef.get()'));
   assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('userRef.set('));
   assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('publicUserRef.delete()'));

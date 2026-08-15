@@ -24,6 +24,10 @@ try {
   const ownerDb = env.authenticatedContext('owner', { email: 'owner@example.test' }).firestore();
   const spoofedDb = env.authenticatedContext('spoofed-marker', { email: 'spoofed@example.test' }).firestore();
   const moderatorDb = env.authenticatedContext('moderator-user', { email: 'mod@example.test', email_verified: true }).firestore();
+  const registeredCodexModeratorDb = env.authenticatedContext('registered-codex', { email: 'mod@example.test', email_verified: true }).firestore();
+  const claimedCodexModeratorDb = env.authenticatedContext('claimed-codex', {
+    email: 'mod@example.test', email_verified: true, devCodex: true, devActor: 'codex',
+  }).firestore();
 
   await assertSucceeds(setDoc(doc(ownerDb, 'users', 'owner', 'following', 'spoofed-marker'), {
     targetUid: 'spoofed-marker', createdAt: serverTimestamp(),
@@ -49,6 +53,8 @@ try {
     where('type', '==', 'support'),
   )));
   if (supportSnapshot.size !== 20) throw new Error(`Expected 20 support threads, got ${supportSnapshot.size}`);
+  await assertFails(getDocs(query(collection(registeredCodexModeratorDb, 'threads'), where('type', '==', 'support'))));
+  await assertFails(getDocs(query(collection(claimedCodexModeratorDb, 'threads'), where('type', '==', 'support'))));
 
   console.log('PASS firestore.codexMarkerIsolation.rules.test');
 } finally {

@@ -106,6 +106,7 @@ service cloud.firestore {
     }
     function isModerator() {
       return request.auth != null
+        && !isKnownCodexProductionDenied()
         && request.auth.token.email_verified == true
         && request.auth.token.email != null
         && exists(/databases/$(database)/documents/config/moderation)

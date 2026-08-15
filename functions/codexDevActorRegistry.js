@@ -28,23 +28,37 @@ export const isKnownCodexDevActorUid = async ({ db, uid, env = process.env, tran
   isCodexDevUid(uid, env) || isRegisteredCodexDevActorUid({ db, uid, transaction })
 );
 
-export const ensureCodexDevActorRegistered = async ({ db, uid, now = new Date() }) => {
+export const ensureCodexDevActorRegistered = async ({ db, uid, now = new Date(), moderatorEmail = '' }) => {
   if (!db || !uid) throw new Error('Firestore db and Codex actor UID are required.');
   const ref = db.collection(CODEX_DEV_ACTOR_REGISTRY_COLLECTION).doc(uid);
   const fenceRef = db.collection(CODEX_DEV_ACTOR_MERGE_FENCES_COLLECTION).doc(uid);
   const lifecycleFenceRef = db.collection(CODEX_DEV_ACTOR_LIFECYCLE_FENCES_COLLECTION).doc(uid);
   const moderatorLockRef = db.collection(CODEX_DEV_ACTOR_MODERATOR_LOCKS_COLLECTION).doc(uid);
+  const moderatorConfigRef = db.collection('config').doc('moderation');
   return db.runTransaction(async (transaction) => {
-    const [snapshot, fenceSnapshot, lifecycleFenceSnapshot, moderatorLockSnapshot] = await Promise.all([
+    const [snapshot, fenceSnapshot, lifecycleFenceSnapshot, moderatorLockSnapshot, moderatorConfigSnapshot] = await Promise.all([
       transaction.get(ref),
       transaction.get(fenceRef),
       transaction.get(lifecycleFenceRef),
       transaction.get(moderatorLockRef),
+      transaction.get(moderatorConfigRef),
     ]);
     if (snapshot.exists) return false;
     if (moderatorLockSnapshot.exists) {
       const error = new Error(`Codex actor registration is blocked because ${uid} has production moderator authorization; operator clearance is required before reuse as Codex.`);
       error.code = 'codex-moderator-lock-active';
+      error.status = 409;
+      error.retryable = false;
+      throw error;
+    }
+    const normalizedModeratorEmail = String(moderatorEmail || '').trim().toLowerCase();
+    const moderatorConfig = moderatorConfigSnapshot.exists ? moderatorConfigSnapshot.data() || {} : {};
+    const moderatorEmails = Array.isArray(moderatorConfig.moderatorEmails)
+      ? moderatorConfig.moderatorEmails.map((email) => String(email || '').trim().toLowerCase())
+      : [];
+    if (normalizedModeratorEmail && moderatorEmails.includes(normalizedModeratorEmail)) {
+      const error = new Error(`Codex actor registration is blocked because ${uid} is assigned production moderator access.`);
+      error.code = 'codex-moderator-assignment-active';
       error.status = 409;
       error.retryable = false;
       throw error;

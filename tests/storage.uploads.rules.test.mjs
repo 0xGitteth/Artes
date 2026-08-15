@@ -48,6 +48,12 @@ try {
   }).storage();
   const unauthedStorage = testEnv.unauthenticatedContext().storage();
   const retiredStorage = testEnv.authenticatedContext(retiredUid, { email_verified: true }).storage();
+  const retiredModeratorStorage = testEnv.authenticatedContext(retiredUid, {
+    email_verified: true, email: moderatorEmail,
+  }).storage();
+  const claimedModeratorStorage = testEnv.authenticatedContext('claimed_codex_uid', {
+    email_verified: true, email: moderatorEmail, devCodex: true, devActor: 'codex',
+  }).storage();
 
   await assertSucceeds(
     uploadBytes(ref(ownerStorage, uploadPath), new Blob(['valid-image'], { type: 'image/jpeg' }), jpegMeta),
@@ -78,6 +84,8 @@ try {
   await assertSucceeds(getBytes(ref(ownerStorage, uploadPath)));
   await assertSucceeds(getBytes(ref(moderatorStorage, uploadPath)));
   await assertFails(getBytes(ref(otherStorage, uploadPath)));
+  await assertFails(getBytes(ref(retiredModeratorStorage, uploadPath)));
+  await assertFails(getBytes(ref(claimedModeratorStorage, uploadPath)));
 
   await assertSucceeds(
     uploadBytes(ref(ownerStorage, claimProofPath), new Blob(['valid-png-proof'], { type: 'image/png' }), pngMeta),
@@ -109,6 +117,8 @@ try {
 
   await assertSucceeds(getBytes(ref(moderatorStorage, claimProofPath)));
   await assertFails(getBytes(ref(otherStorage, claimProofPath)));
+  await assertFails(getBytes(ref(retiredModeratorStorage, claimProofPath)));
+  await assertFails(getBytes(ref(claimedModeratorStorage, claimProofPath)));
 
   console.log('storage uploads and claimProofs rules tests passed');
 } finally {

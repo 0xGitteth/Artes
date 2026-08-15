@@ -6,6 +6,7 @@ service firebase.storage {
     }
     function isModerator() {
       return request.auth != null
+        && !isKnownCodexProductionDeniedUid(request.auth.uid)
         && request.auth.token.email_verified == true
         && request.auth.token.email != null
         && firestore.exists(/databases/(default)/documents/config/moderation)

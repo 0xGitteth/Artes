@@ -11,6 +11,8 @@ import {
 } from '../functions/codexDevActorRegistry.js';
 import { deleteSupportResetMessagesPageAtomically } from '../functions/supportResetIsolation.js';
 
+const noModeratorAuth = { getUser: async () => ({ email: null }) };
+
 const createMemoryDb = (initial = []) => {
   const docs = new Map(initial);
   const refFor = (path) => ({ path, get: async () => ({
@@ -50,7 +52,7 @@ test('mutated merge fences remain recovery blockers after lease expiry and canno
     'codexDevActorMergeFences/partial',
     { uid: 'partial', token: 'old-token', mutationCommitted: true, leaseExpiresAtMs: nowMs - 1 },
   ]]);
-  await assert.rejects(ensureCodexDevActorRegistered({ db, uid: 'partial' }),
+  await assert.rejects(ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'partial' }),
     (error) => error.code === 'codex-merge-fence-recovery-required' && error.retryable === false);
   await assert.rejects(acquireCodexDevMergeFence({ db, uid: 'partial', token: 'new-token', nowMs }),
     (error) => error.code === 'codex-merge-fence-recovery-required' && error.retryable === false);
@@ -68,7 +70,7 @@ test('support reset lifecycle fence blocks actor registration across destructive
   await acquireCodexDevLifecycleFence({
     db, uid: 'owner', token: 'reset-token', operation: 'resetSupportThread', nowMs,
   });
-  await assert.rejects(ensureCodexDevActorRegistered({ db, uid: 'owner' }),
+  await assert.rejects(ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'owner' }),
     (error) => error.code === 'codex-lifecycle-fence-active' && error.retryable === true);
 
   const result = await deleteSupportResetMessagesPageAtomically({
@@ -86,7 +88,7 @@ test('support reset lifecycle fence blocks actor registration across destructive
   assert.ok(docs.get('codexDevActorLifecycleFences/owner').leaseExpiresAtMs > nowMs);
 
   await releaseCodexDevLifecycleFence({ db, uid: 'owner', token: 'reset-token' });
-  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'owner' }), true);
+  assert.equal(await ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'owner' }), true);
 });
 
 
@@ -97,7 +99,7 @@ test('production moderator authorization permanently serializes against Codex re
   }), true);
   assert.equal(docs.get('codexDevActorModeratorLocks/moderator-user').blocksCodexRegistration, true);
   assert.equal(docs.get('codexDevActorModeratorLocks/moderator-user').email, 'mod@example.test');
-  await assert.rejects(ensureCodexDevActorRegistered({ db, uid: 'moderator-user' }),
+  await assert.rejects(ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'moderator-user' }),
     (error) => error.code === 'codex-moderator-lock-active' && error.retryable === false);
 
   const { db: retiredDb } = createMemoryDb([[
@@ -119,14 +121,28 @@ test('authoritative moderator assignment blocks Codex registration even before a
   const { db, docs } = createMemoryDb([[
     'config/moderation', { moderatorEmails: ['mod@example.test'] },
   ]]);
+  const moderatorAuth = { getUser: async () => ({ email: 'MOD@example.test' }) };
   await assert.rejects(ensureCodexDevActorRegistered({
-    db, uid: 'assigned-moderator', moderatorEmail: 'MOD@example.test',
+    db, auth: moderatorAuth, uid: 'assigned-moderator',
   }), (error) => error.code === 'codex-moderator-assignment-active' && error.retryable === false);
   assert.equal(docs.has('codexDevActorRegistry/assigned-moderator'), false);
 });
 
-test('Codex establishment passes the existing Auth email into transactional registration', async () => {
-  const indexSource = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
-  assert.match(indexSource, /admin\.auth\(\)\.getUser\(uid\)/);
-  assert.match(indexSource, /ensureCodexDevActorRegistered\(\{ db, uid, now, moderatorEmail \}\)/);
+test('Codex registration requires Firebase Auth evidence at the helper boundary', async () => {
+  const { db, docs } = createMemoryDb();
+  await assert.rejects(ensureCodexDevActorRegistered({ db, uid: 'missing-auth' }),
+    (error) => error.code === 'codex-registration-auth-required' && error.retryable === false);
+  assert.equal(docs.has('codexDevActorRegistry/missing-auth'), false);
+
+  const [registrySource, indexSource, reconcileSource] = await Promise.all([
+    fs.readFile(new URL('../functions/codexDevActorRegistry.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../functions/scripts/reconcileCodexDevIsolation.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(registrySource, /authUser = await auth\.getUser\(uid\)/);
+  assert.doesNotMatch(registrySource, /moderatorEmail =/);
+  assert.match(indexSource, /ensureCodexDevActorRegistered\(\{ db, auth: admin\.auth\(\), uid, now \}\)/);
+  assert.match(reconcileSource, /ensureCodexDevActorRegistered\(\{ db, auth, uid: canonicalUid \}\)/);
+  assert.match(reconcileSource, /const \{ getAuth \} = await import\('firebase-admin\/auth'\)/);
+  assert.match(reconcileSource, /auth: getAuth\(\)/);
 });

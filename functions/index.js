@@ -261,22 +261,11 @@ const getAppIdFromEnv = () => {
   }
 };
 
-const getExistingAuthEmail = async (uid) => {
-  try {
-    const authUser = await admin.auth().getUser(uid);
-    return String(authUser?.email || '').trim().toLowerCase();
-  } catch (error) {
-    if (error?.code === 'auth/user-not-found') return '';
-    throw error;
-  }
-};
-
 export const ensureCodexDevProfileState = async (uid) => {
   const now = FieldValue.serverTimestamp();
   const userRef = db.collection('users').doc(uid);
   const publicUserRef = db.collection('publicUsers').doc(uid);
-  const moderatorEmail = await getExistingAuthEmail(uid);
-  await ensureCodexDevActorRegistered({ db, uid, now, moderatorEmail });
+  await ensureCodexDevActorRegistered({ db, auth: admin.auth(), uid, now });
   const existingUserSnap = await userRef.get();
   await userRef.set(buildCodexDevPrivateProfile({
     uid,

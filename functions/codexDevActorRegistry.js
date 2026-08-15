@@ -28,8 +28,22 @@ export const isKnownCodexDevActorUid = async ({ db, uid, env = process.env, tran
   isCodexDevUid(uid, env) || isRegisteredCodexDevActorUid({ db, uid, transaction })
 );
 
-export const ensureCodexDevActorRegistered = async ({ db, uid, now = new Date(), moderatorEmail = '' }) => {
+export const ensureCodexDevActorRegistered = async ({ db, auth, uid, now = new Date() }) => {
   if (!db || !uid) throw new Error('Firestore db and Codex actor UID are required.');
+  if (!auth || typeof auth.getUser !== 'function') {
+    const error = new Error('Firebase Auth is required to verify Codex actor moderator assignment before registration.');
+    error.code = 'codex-registration-auth-required';
+    error.status = 500;
+    error.retryable = false;
+    throw error;
+  }
+  let authUser = null;
+  try {
+    authUser = await auth.getUser(uid);
+  } catch (error) {
+    if (error?.code !== 'auth/user-not-found') throw error;
+  }
+  const normalizedModeratorEmail = String(authUser?.email || '').trim().toLowerCase();
   const ref = db.collection(CODEX_DEV_ACTOR_REGISTRY_COLLECTION).doc(uid);
   const fenceRef = db.collection(CODEX_DEV_ACTOR_MERGE_FENCES_COLLECTION).doc(uid);
   const lifecycleFenceRef = db.collection(CODEX_DEV_ACTOR_LIFECYCLE_FENCES_COLLECTION).doc(uid);
@@ -51,7 +65,6 @@ export const ensureCodexDevActorRegistered = async ({ db, uid, now = new Date(),
       error.retryable = false;
       throw error;
     }
-    const normalizedModeratorEmail = String(moderatorEmail || '').trim().toLowerCase();
     const moderatorConfig = moderatorConfigSnapshot.exists ? moderatorConfigSnapshot.data() || {} : {};
     const moderatorEmails = Array.isArray(moderatorConfig.moderatorEmails)
       ? moderatorConfig.moderatorEmails.map((email) => String(email || '').trim().toLowerCase())

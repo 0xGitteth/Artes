@@ -11,6 +11,16 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/config/moderation)
         && request.auth.token.email in firestore.get(/databases/(default)/documents/config/moderation).data.moderatorEmails;
     }
+    function isCodexDev() {
+      return request.auth != null
+        && request.auth.token.keys().hasAll(['devCodex', 'devActor'])
+        && request.auth.token.devCodex == true
+        && request.auth.token.devActor == 'codex';
+    }
+    function isKnownCodexProductionDeniedUid(uid) {
+      return (request.auth != null && request.auth.uid == uid && isCodexDev())
+        || firestore.exists(/databases/(default)/documents/codexDevActorRegistry/$(uid));
+    }
     function isAllowedProfileImageName(fileName) {
       return fileName == 'avatar.jpg' || fileName == 'header.jpg';
     }
@@ -52,6 +62,7 @@ service firebase.storage {
       allow read: if isModerator() || (request.auth != null && request.auth.uid == userId);
       allow write: if isVerifiedUser()
         && request.auth.uid == userId
+        && !isKnownCodexProductionDeniedUid(userId)
         && isValidUserUploadImage(fileName);
     }
 
@@ -63,18 +74,26 @@ service firebase.storage {
     match /claimProofs/{requestId}/{fileName} {
       allow read: if isModerator() || (request.auth != null && fileName == request.auth.uid + '.png');
       allow write: if isVerifiedUser()
+        && firestore.exists(/databases/(default)/documents/claimRequests/$(requestId))
+        && firestore.get(/databases/(default)/documents/claimRequests/$(requestId)).data.requestedByUid == request.auth.uid
+        && !isKnownCodexProductionDeniedUid(request.auth.uid)
+        && !isKnownCodexProductionDeniedUid(firestore.get(/databases/(default)/documents/claimRequests/$(requestId)).data.requestedByUid)
         && isValidClaimProofUpload(fileName);
     }
 
     match /profileImages/{userId}/{fileName} {
       allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if isVerifiedUser() && request.auth.uid == userId && isValidProfileImageUpload(fileName);
+      allow write: if isVerifiedUser()
+        && request.auth.uid == userId
+        && !isKnownCodexProductionDeniedUid(userId)
+        && isValidProfileImageUpload(fileName);
     }
 
     match /managedProfiles/{ownerUid}/{profileId}/avatar/{fileName} {
       allow read: if isActiveManagedProfile(profileId) || isManagedProfileOwner(ownerUid, profileId);
       allow write: if isVerifiedUser()
         && isManagedProfileOwner(ownerUid, profileId)
+        && !isKnownCodexProductionDeniedUid(ownerUid)
         && fileName == 'avatar.jpg'
         && isValidProfileImageUpload(fileName);
     }

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
 import {
   assertFails,
   assertSucceeds,
@@ -36,6 +37,8 @@ const authedContext = (env, uid, token = {}) => {
 
 async function run() {
   const rules = await fs.readFile('firestore.rules', 'utf8');
+  assert.match(rules, /match \/codexDevActorRegistry\/\{uid\} \{\s*allow read, write: if false;/);
+  assert.match(rules, /match \/codexDevActorLifecycleFences\/\{uid\} \{\s*allow read, write: if false;/);
   const testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: { rules },
@@ -47,6 +50,16 @@ async function run() {
 
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
+      await setDoc(doc(db, 'codexDevActorRegistry', 'retired-codex'), {
+        uid: 'retired-codex', actor: 'codex', productionDenyOnly: true, registeredAt: new Date(),
+      });
+      await setDoc(doc(db, 'codexDevActorRegistry', 'retired-no-profile'), {
+        uid: 'retired-no-profile', actor: 'codex', productionDenyOnly: true, registeredAt: new Date(),
+      });
+      await setDoc(doc(db, 'users', 'retired-codex'), {
+        uid: 'retired-codex', onboardingComplete: true, onboardingStep: 5,
+        ageVerified: true, isAdult: true,
+      });
       await setDoc(doc(db, 'publicUsers', ownerUid), {
        onboardingComplete: true,
         onboardingComplete: true,
@@ -453,6 +466,12 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'claimRequests', 'preserved_retired_claim'), {
+        requestedByUid: 'retired-codex', contributorId: 'unclaimed_contributor', status: 'approved', mode: 'merge',
+      });
+      await setDoc(doc(db, 'claimRequests', 'current_codex_claim'), {
+        requestedByUid: 'codex-dev-user', contributorId: 'unclaimed_contributor', status: 'pending',
+      });
       await setDoc(doc(db, 'claimVouches', 'pending_vouch_request'), {
         claimRequestId: 'pending_vouch_request',
         voterUid: 'eligible_voter',
@@ -472,6 +491,12 @@ async function run() {
         vote: 'yes',
         status: 'submitted',
         createdAt: new Date(),
+      });
+      await setDoc(doc(db, 'claimVouches', 'preserved_retired_claim'), {
+        claimRequestId: 'preserved_retired_claim', voterUid: 'retired-codex', vote: 'yes',
+      });
+      await setDoc(doc(db, 'claimVouches', 'preserved_retired_claim', 'votes', 'retired-codex'), {
+        claimRequestId: 'preserved_retired_claim', voterUid: 'retired-codex', vote: 'yes',
       });
       await setDoc(doc(db, 'users', 'eligible_voter'), {
         onboardingComplete: true,
@@ -518,12 +543,17 @@ async function run() {
 
     const publicDb = testEnv.unauthenticatedContext().firestore();
     const ownerDb = authedContext(testEnv, ownerUid, { email_verified: true }).firestore();
+    await assertFails(getDoc(doc(ownerDb, 'codexDevActorRegistry', 'retired-codex')));
+    await assertFails(setDoc(doc(ownerDb, 'codexDevActorRegistry', ownerUid), { uid: ownerUid }));
+    await assertFails(getDoc(doc(ownerDb, 'codexDevActorLifecycleFences', ownerUid)));
+    await assertFails(setDoc(doc(ownerDb, 'codexDevActorLifecycleFences', ownerUid), { uid: ownerUid }));
     const ownerEmailFalseAdultDb = authedContext(testEnv, ownerUid, { email_verified: false, idvVerified: true, isAdult: true }).firestore();
     const ownerEmailOnlyDb = authedContext(testEnv, ownerUid, { email_verified: true, __adultDefaults: false }).firestore();
     const ownerIdvFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: false, isAdult: true }).firestore();
     const ownerAdultFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: true, isAdult: false }).firestore();
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
     const codexDevDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, devActor: 'codex', email_verified: false }).firestore();
+    const retiredCodexDb = authedContext(testEnv, 'retired-codex', { email_verified: true, idvVerified: true, isAdult: true }).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
     const publicUserDbFor = (uid) => authedContext(testEnv, uid, { email_verified: true }).firestore();
     const moderatorDb = authedContext(testEnv, 'mod_1', { email_verified: true, email: 'mod_1@example.com' }).firestore();
@@ -544,6 +574,17 @@ async function run() {
     await assertFails(updateDoc(doc(ownerDb, 'users', ownerUid), { isDevTestUser: true, devActor: 'codex' }));
     await assertFails(deleteDoc(doc(codexDevDb, 'users', 'codex-dev-user')));
     await assertFails(updateDoc(doc(codexDevDb, 'users', 'codex-dev-user'), { isDevTestUser: false, devActor: 'ordinary' }));
+    await assertFails(setDoc(doc(retiredCodexDb, 'publicUsers', 'retired-codex'), {
+      uid: 'retired-codex', profileId: 'retired-codex', ownerUid: 'retired-codex',
+      username: 'retiredcodex', onboardingComplete: true,
+    }));
+    await assertFails(setDoc(doc(retiredCodexDb, 'profiles', 'retired-codex-agency'), {
+      ownerUid: 'retired-codex', type: 'agency', status: 'active', displayName: 'Retired actor agency',
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(retiredCodexDb, 'users', 'retired-codex', 'following', ownerUid), {
+      targetUid: ownerUid, createdAt: serverTimestamp(),
+    }));
     await testEnv.withSecurityRulesDisabled(async (context) => setDoc(doc(context.firestore(), 'users', 'deletable_ordinary'), { uid: 'deletable_ordinary' }));
     await assertSucceeds(deleteDoc(doc(publicUserDbFor('deletable_ordinary'), 'users', 'deletable_ordinary')));
 
@@ -617,9 +658,25 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'threads', 'support_current_codex_rules'), {
+        type: 'support', userUid: 'codex-dev-user', threadKey: 'support_current_codex_rules',
+      });
+      await setDoc(doc(db, 'threads', 'support_retired_codex_rules'), {
+        type: 'support', userUid: 'retired-codex', threadKey: 'support_retired_codex_rules',
+      });
       await setDoc(doc(db, 'threads', 'ordinary_private_dm'), { type: 'dm', participantUids: [ownerUid, otherUid] });
+      await setDoc(doc(db, 'threads', 'retired_codex_dm'), { type: 'dm', participantUids: ['retired-codex', ownerUid] });
+      await setDoc(doc(db, 'threads', 'retired_no_profile_legacy_dm'), {
+        type: 'dm', participants: [ownerUid, 'retired-no-profile'], dmKey: 'owner_1_retired-no-profile',
+      });
       await setDoc(doc(db, 'threads', 'ordinary_private_dm', 'messages', 'secret'), { senderUid: ownerUid, text: 'private' });
       await setDoc(doc(db, 'threads', 'support_other_rules', 'messages', 'secret'), { senderUid: otherUid, text: 'support private' });
+      await setDoc(doc(db, 'threads', 'support_current_codex_rules', 'messages', 'secret'), {
+        senderUid: 'codex-dev-user', text: 'current Codex support private',
+      });
+      await setDoc(doc(db, 'threads', 'support_retired_codex_rules', 'messages', 'secret'), {
+        senderUid: 'retired-codex', text: 'retired Codex support private',
+      });
     });
 
     await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'owner_text'), {
@@ -628,6 +685,17 @@ async function run() {
       text: 'Allowed DM message from a participant.',
       createdAt: serverTimestamp(),
     }));
+    await assertFails(setDoc(doc(retiredCodexDb, 'threads', 'retired_codex_dm', 'messages', 'blocked_retired_text'), {
+      type: 'text', senderUid: 'retired-codex', text: 'Must remain quarantined.', createdAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_owner_retired_direct'), {
+      type: 'dm', participantUids: [ownerUid, 'retired-no-profile'], dmKey: 'owner_1_retired-no-profile',
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(ownerDb, 'threads', 'retired_no_profile_legacy_dm', 'messages', 'blocked_ordinary_text'), {
+      type: 'text', senderUid: ownerUid, text: 'Must be blocked by registry.', createdAt: serverTimestamp(),
+    }));
+    await assertFails(getDoc(doc(ownerDb, 'threads', 'retired_no_profile_legacy_dm')));
     await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules')));
     await assertSucceeds(getDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'owner_text')));
     await assertFails(setDoc(doc(ownerDb, 'threads', 'dm_without_owner_rules', 'messages', 'owner_non_participant_text'), {
@@ -751,6 +819,14 @@ async function run() {
     }));
     await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_owner_rules')));
     await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_owner_rules', 'messages', 'owner_support_text')));
+    await assertFails(getDoc(doc(codexDevDb, 'threads', 'support_current_codex_rules')));
+    await assertFails(getDoc(doc(codexDevDb, 'threads', 'support_current_codex_rules', 'messages', 'secret')));
+    await assertFails(getDoc(doc(retiredCodexDb, 'threads', 'support_retired_codex_rules')));
+    await assertFails(getDoc(doc(retiredCodexDb, 'threads', 'support_retired_codex_rules', 'messages', 'secret')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_current_codex_rules')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_current_codex_rules', 'messages', 'secret')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_retired_codex_rules')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_retired_codex_rules', 'messages', 'secret')));
     await assertFails(getDoc(doc(codexDevDb, 'threads', 'ordinary_private_dm')));
     await assertFails(getDoc(doc(codexDevDb, 'threads', 'ordinary_private_dm', 'messages', 'secret')));
     await assertFails(getDoc(doc(codexDevDb, 'threads', 'support_other_rules')));
@@ -1177,6 +1253,19 @@ async function run() {
         mergedInto: null,
       }),
     );
+    await assertFails(setDoc(doc(retiredCodexDb, 'contributors', 'retired_codex_contributor'), {
+      displayName: 'Retired Codex Contributor',
+      displayNameLower: 'retired codex contributor',
+      roles: ['photographer'],
+      socials: { instagram: 'retiredcodex' },
+      status: 'unclaimed',
+      createdByUid: 'retired-codex',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      source: 'client',
+      claimedByUid: null,
+      mergedInto: null,
+    }));
     await assertFails(
       setDoc(doc(codexDevDb, 'contributors', 'codex_direct_without_creator'), {
         displayName: 'Codex Direct Contributor',
@@ -1308,6 +1397,9 @@ async function run() {
     await assertSucceeds(
       getDoc(doc(moderatorDb, 'claimRequests', 'pending_vouch_request')),
     );
+    await assertFails(getDoc(doc(retiredCodexDb, 'claimRequests', 'preserved_retired_claim')));
+    await assertFails(getDoc(doc(codexDevDb, 'claimRequests', 'current_codex_claim')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'claimRequests', 'preserved_retired_claim')));
     await assertFails(
       getDoc(doc(otherDb, 'claimRequests', 'pending_vouch_request')),
     );
@@ -1367,6 +1459,10 @@ async function run() {
     await assertSucceeds(
       getDoc(doc(ownerDb, 'claimVouches', 'pending_vouch_request')),
     );
+    await assertFails(getDoc(doc(retiredCodexDb, 'claimVouches', 'preserved_retired_claim')));
+    await assertFails(getDoc(doc(retiredCodexDb, 'claimVouches', 'preserved_retired_claim', 'votes', 'retired-codex')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'claimVouches', 'preserved_retired_claim')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'claimVouches', 'preserved_retired_claim', 'votes', 'retired-codex')));
     await assertFails(
       updateDoc(doc(eligibleVoterDb, 'claimVouches', 'pending_vouch_request', 'votes', 'eligible_voter'), {
         vote: 'no',

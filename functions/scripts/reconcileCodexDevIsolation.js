@@ -52,7 +52,7 @@ const timestampMillis = (value) => value?.toMillis?.()
 
 const ACTIVE_ORDINARY_CLAIM_STATUSES = new Set(['pending', 'needsModeration']);
 
-export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = false, env = process.env, uid = null, uidSource = null, skipStorage = false, fieldValue = null } = {}) => {
+export const reconcileCodexDevIsolation = async ({ db, auth = null, bucket = null, apply = false, env = process.env, uid = null, uidSource = null, skipStorage = false, fieldValue = null } = {}) => {
   if (!db) throw new Error('Firestore db is verplicht.');
   const explicitUid = String(uid || env.CODEX_DEV_UID || '').trim();
   const source = uidSource || (uid ? 'argument' : (env.CODEX_DEV_UID ? 'CODEX_DEV_UID' : 'default'));
@@ -67,7 +67,7 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
   stats.applyWouldEnsureRegistration = !apply;
   stats.targetUidRegistered = stats.targetUidAlreadyRegistered;
   if (apply) {
-    await ensureCodexDevActorRegistered({ db, uid: canonicalUid });
+    await ensureCodexDevActorRegistered({ db, auth, uid: canonicalUid });
     stats.targetUidRegistered = true;
   }
   const users = await queryDocs(db.collection('users'));
@@ -408,13 +408,14 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const { initializeApp, applicationDefault } = await import('firebase-admin/app');
   const { FieldValue, getFirestore } = await import('firebase-admin/firestore');
+  const { getAuth } = await import('firebase-admin/auth');
   const { getStorage } = await import('firebase-admin/storage');
   const bucketName = options.bucket || process.env.FIREBASE_STORAGE_BUCKET || null;
   const appOptions = { credential: applicationDefault(), projectId: options.project || process.env.GOOGLE_CLOUD_PROJECT };
   if (bucketName) appOptions.storageBucket = bucketName;
   initializeApp(appOptions);
   const bucket = bucketName ? getStorage().bucket(bucketName) : null;
-  const stats = await reconcileCodexDevIsolation({ db: getFirestore(), bucket, apply: options.apply, uid: options.uid, uidSource: options.uid ? '--uid' : null, skipStorage: options.skipStorage, fieldValue: FieldValue });
+  const stats = await reconcileCodexDevIsolation({ db: getFirestore(), auth: getAuth(), bucket, apply: options.apply, uid: options.uid, uidSource: options.uid ? '--uid' : null, skipStorage: options.skipStorage, fieldValue: FieldValue });
   console.log(options.apply ? 'APPLY' : 'DRY RUN', stats);
 }
 

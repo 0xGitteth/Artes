@@ -3,6 +3,7 @@ import { CODEX_DEV_ACTOR, isCodexDevUid } from './codexDevIdentity.js';
 export const CODEX_DEV_ACTOR_REGISTRY_COLLECTION = 'codexDevActorRegistry';
 export const CODEX_DEV_ACTOR_MERGE_FENCES_COLLECTION = 'codexDevActorMergeFences';
 export const CODEX_DEV_ACTOR_LIFECYCLE_FENCES_COLLECTION = 'codexDevActorLifecycleFences';
+export const CODEX_DEV_ACTOR_MODERATOR_LOCKS_COLLECTION = 'codexDevActorModeratorLocks';
 const MERGE_FENCE_LEASE_MS = 30 * 60 * 1000;
 const LIFECYCLE_FENCE_LEASE_MS = 5 * 60 * 1000;
 
@@ -27,18 +28,54 @@ export const isKnownCodexDevActorUid = async ({ db, uid, env = process.env, tran
   isCodexDevUid(uid, env) || isRegisteredCodexDevActorUid({ db, uid, transaction })
 );
 
-export const ensureCodexDevActorRegistered = async ({ db, uid, now = new Date() }) => {
+export const ensureCodexDevActorRegistered = async ({ db, auth, uid, now = new Date() }) => {
   if (!db || !uid) throw new Error('Firestore db and Codex actor UID are required.');
+  if (!auth || typeof auth.getUser !== 'function') {
+    const error = new Error('Firebase Auth is required to verify Codex actor moderator assignment before registration.');
+    error.code = 'codex-registration-auth-required';
+    error.status = 500;
+    error.retryable = false;
+    throw error;
+  }
+  let authUser = null;
+  try {
+    authUser = await auth.getUser(uid);
+  } catch (error) {
+    if (error?.code !== 'auth/user-not-found') throw error;
+  }
+  const normalizedModeratorEmail = String(authUser?.email || '').trim().toLowerCase();
   const ref = db.collection(CODEX_DEV_ACTOR_REGISTRY_COLLECTION).doc(uid);
   const fenceRef = db.collection(CODEX_DEV_ACTOR_MERGE_FENCES_COLLECTION).doc(uid);
   const lifecycleFenceRef = db.collection(CODEX_DEV_ACTOR_LIFECYCLE_FENCES_COLLECTION).doc(uid);
+  const moderatorLockRef = db.collection(CODEX_DEV_ACTOR_MODERATOR_LOCKS_COLLECTION).doc(uid);
+  const moderatorConfigRef = db.collection('config').doc('moderation');
   return db.runTransaction(async (transaction) => {
-    const [snapshot, fenceSnapshot, lifecycleFenceSnapshot] = await Promise.all([
+    const [snapshot, fenceSnapshot, lifecycleFenceSnapshot, moderatorLockSnapshot, moderatorConfigSnapshot] = await Promise.all([
       transaction.get(ref),
       transaction.get(fenceRef),
       transaction.get(lifecycleFenceRef),
+      transaction.get(moderatorLockRef),
+      transaction.get(moderatorConfigRef),
     ]);
     if (snapshot.exists) return false;
+    if (moderatorLockSnapshot.exists) {
+      const error = new Error(`Codex actor registration is blocked because ${uid} has production moderator authorization; operator clearance is required before reuse as Codex.`);
+      error.code = 'codex-moderator-lock-active';
+      error.status = 409;
+      error.retryable = false;
+      throw error;
+    }
+    const moderatorConfig = moderatorConfigSnapshot.exists ? moderatorConfigSnapshot.data() || {} : {};
+    const moderatorEmails = Array.isArray(moderatorConfig.moderatorEmails)
+      ? moderatorConfig.moderatorEmails.map((email) => String(email || '').trim().toLowerCase())
+      : [];
+    if (normalizedModeratorEmail && moderatorEmails.includes(normalizedModeratorEmail)) {
+      const error = new Error(`Codex actor registration is blocked because ${uid} is assigned production moderator access.`);
+      error.code = 'codex-moderator-assignment-active';
+      error.status = 409;
+      error.retryable = false;
+      throw error;
+    }
     const fence = fenceSnapshot.exists ? fenceSnapshot.data() || {} : {};
     if (fence.mutationCommitted === true) {
       throwMergeFenceRecoveryRequired(uid);
@@ -63,6 +100,39 @@ export const ensureCodexDevActorRegistered = async ({ db, uid, now = new Date() 
       registeredAt: now,
     });
     return true;
+  });
+};
+
+export const ensureModeratorUidLockedOutOfCodexRegistration = async ({
+  db, uid, email = '', now = new Date(),
+}) => {
+  if (!db || !uid) throw new Error('Firestore db and moderator UID are required.');
+  const registryRef = db.collection(CODEX_DEV_ACTOR_REGISTRY_COLLECTION).doc(uid);
+  const moderatorLockRef = db.collection(CODEX_DEV_ACTOR_MODERATOR_LOCKS_COLLECTION).doc(uid);
+  return db.runTransaction(async (transaction) => {
+    const [registrySnapshot, lockSnapshot] = await Promise.all([
+      transaction.get(registryRef),
+      transaction.get(moderatorLockRef),
+    ]);
+    if (registrySnapshot.exists || isCodexDevUid(uid)) {
+      const error = new Error('Codex Dev identity cannot receive production moderator authorization.');
+      error.code = 'codex-moderator-production-denied';
+      error.status = 403;
+      error.retryable = false;
+      throw error;
+    }
+    if (!lockSnapshot.exists) {
+      transaction.set(moderatorLockRef, {
+        uid,
+        email: String(email || '').toLowerCase(),
+        blocksCodexRegistration: true,
+        reason: 'productionModeratorAuthorization',
+        createdAt: now,
+        updatedAt: now,
+      });
+      return true;
+    }
+    return false;
   });
 };
 

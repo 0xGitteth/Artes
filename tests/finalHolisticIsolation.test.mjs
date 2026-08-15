@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import { buildDiditCustomClaims } from '../functions/diditCustomClaims.js';
 import {
   acquireCodexDevLifecycleFence,
   acquireCodexDevMergeFence,
   ensureCodexDevActorRegistered,
+  ensureModeratorUidLockedOutOfCodexRegistration,
   releaseCodexDevLifecycleFence,
 } from '../functions/codexDevActorRegistry.js';
 import { deleteSupportResetMessagesPageAtomically } from '../functions/supportResetIsolation.js';
+
+const noModeratorAuth = { getUser: async () => ({ email: null }) };
 
 const createMemoryDb = (initial = []) => {
   const docs = new Map(initial);
@@ -48,7 +52,7 @@ test('mutated merge fences remain recovery blockers after lease expiry and canno
     'codexDevActorMergeFences/partial',
     { uid: 'partial', token: 'old-token', mutationCommitted: true, leaseExpiresAtMs: nowMs - 1 },
   ]]);
-  await assert.rejects(ensureCodexDevActorRegistered({ db, uid: 'partial' }),
+  await assert.rejects(ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'partial' }),
     (error) => error.code === 'codex-merge-fence-recovery-required' && error.retryable === false);
   await assert.rejects(acquireCodexDevMergeFence({ db, uid: 'partial', token: 'new-token', nowMs }),
     (error) => error.code === 'codex-merge-fence-recovery-required' && error.retryable === false);
@@ -66,7 +70,7 @@ test('support reset lifecycle fence blocks actor registration across destructive
   await acquireCodexDevLifecycleFence({
     db, uid: 'owner', token: 'reset-token', operation: 'resetSupportThread', nowMs,
   });
-  await assert.rejects(ensureCodexDevActorRegistered({ db, uid: 'owner' }),
+  await assert.rejects(ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'owner' }),
     (error) => error.code === 'codex-lifecycle-fence-active' && error.retryable === true);
 
   const result = await deleteSupportResetMessagesPageAtomically({
@@ -84,5 +88,61 @@ test('support reset lifecycle fence blocks actor registration across destructive
   assert.ok(docs.get('codexDevActorLifecycleFences/owner').leaseExpiresAtMs > nowMs);
 
   await releaseCodexDevLifecycleFence({ db, uid: 'owner', token: 'reset-token' });
-  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'owner' }), true);
+  assert.equal(await ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'owner' }), true);
+});
+
+
+test('production moderator authorization permanently serializes against Codex registration', async () => {
+  const { db, docs } = createMemoryDb();
+  assert.equal(await ensureModeratorUidLockedOutOfCodexRegistration({
+    db, uid: 'moderator-user', email: 'MOD@example.test', now: new Date('2026-08-15T19:00:00Z'),
+  }), true);
+  assert.equal(docs.get('codexDevActorModeratorLocks/moderator-user').blocksCodexRegistration, true);
+  assert.equal(docs.get('codexDevActorModeratorLocks/moderator-user').email, 'mod@example.test');
+  await assert.rejects(ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'moderator-user' }),
+    (error) => error.code === 'codex-moderator-lock-active' && error.retryable === false);
+
+  const { db: retiredDb } = createMemoryDb([[
+    'codexDevActorRegistry/retired-codex', { uid: 'retired-codex', actor: 'codex' },
+  ]]);
+  await assert.rejects(ensureModeratorUidLockedOutOfCodexRegistration({
+    db: retiredDb, uid: 'retired-codex', email: 'mod@example.test',
+  }), (error) => error.code === 'codex-moderator-production-denied' && error.status === 403);
+});
+
+test('ensureModerator rejects Codex claims and installs the moderator registration lock', async () => {
+  const indexSource = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  assert.match(indexSource, /if \(isCodexDevForProductionDeny\(decoded\)\)/);
+  assert.match(indexSource, /await ensureModeratorUidLockedOutOfCodexRegistration\(\{[\s\S]*?uid: decoded\?\.uid, email/);
+});
+
+
+test('authoritative moderator assignment blocks Codex registration even before a moderator lock exists', async () => {
+  const { db, docs } = createMemoryDb([[
+    'config/moderation', { moderatorEmails: ['mod@example.test'] },
+  ]]);
+  const moderatorAuth = { getUser: async () => ({ email: 'MOD@example.test' }) };
+  await assert.rejects(ensureCodexDevActorRegistered({
+    db, auth: moderatorAuth, uid: 'assigned-moderator',
+  }), (error) => error.code === 'codex-moderator-assignment-active' && error.retryable === false);
+  assert.equal(docs.has('codexDevActorRegistry/assigned-moderator'), false);
+});
+
+test('Codex registration requires Firebase Auth evidence at the helper boundary', async () => {
+  const { db, docs } = createMemoryDb();
+  await assert.rejects(ensureCodexDevActorRegistered({ db, uid: 'missing-auth' }),
+    (error) => error.code === 'codex-registration-auth-required' && error.retryable === false);
+  assert.equal(docs.has('codexDevActorRegistry/missing-auth'), false);
+
+  const [registrySource, indexSource, reconcileSource] = await Promise.all([
+    fs.readFile(new URL('../functions/codexDevActorRegistry.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../functions/scripts/reconcileCodexDevIsolation.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(registrySource, /authUser = await auth\.getUser\(uid\)/);
+  assert.doesNotMatch(registrySource, /moderatorEmail =/);
+  assert.match(indexSource, /ensureCodexDevActorRegistered\(\{ db, auth: admin\.auth\(\), uid, now \}\)/);
+  assert.match(reconcileSource, /ensureCodexDevActorRegistered\(\{ db, auth, uid: canonicalUid \}\)/);
+  assert.match(reconcileSource, /const \{ getAuth \} = await import\('firebase-admin\/auth'\)/);
+  assert.match(reconcileSource, /auth: getAuth\(\)/);
 });

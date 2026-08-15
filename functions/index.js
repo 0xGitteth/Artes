@@ -48,6 +48,7 @@ import {
   acquireCodexDevLifecycleFence,
   acquireCodexDevMergeFence,
   ensureCodexDevActorRegistered,
+  ensureModeratorUidLockedOutOfCodexRegistration,
   isKnownCodexDevActorUid,
   queueCodexDevMergeFenceRenewal,
   readAndValidateCodexDevLifecycleFence,
@@ -264,7 +265,7 @@ export const ensureCodexDevProfileState = async (uid) => {
   const now = FieldValue.serverTimestamp();
   const userRef = db.collection('users').doc(uid);
   const publicUserRef = db.collection('publicUsers').doc(uid);
-  await ensureCodexDevActorRegistered({ db, uid, now });
+  await ensureCodexDevActorRegistered({ db, auth: admin.auth(), uid, now });
   const existingUserSnap = await userRef.get();
   await userRef.set(buildCodexDevPrivateProfile({
     uid,
@@ -340,6 +341,14 @@ const ensureModerator = async (decoded) => {
     error.status = 403;
     throw error;
   }
+  if (isCodexDevForProductionDeny(decoded)) {
+    const error = new Error('Codex Dev cannot receive production moderator authorization.');
+    error.status = 403;
+    throw error;
+  }
+  await ensureModeratorUidLockedOutOfCodexRegistration({
+    db, uid: decoded?.uid, email, now: new Date(),
+  });
   return { email };
 };
 

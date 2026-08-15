@@ -16,6 +16,8 @@ import { cleanupCodexDevPostTrees } from '../functions/codexTestDataCleanup.js';
 import { createClaimInviteAtomically } from '../functions/claimInviteTransaction.js';
 import { runUserModerationActionMutation } from '../functions/userModerationActionIsolation.js';
 import { parseArgs } from '../functions/scripts/reconcileCodexDevIsolation.js';
+
+const noModeratorAuth = { getUser: async () => ({ email: null }) };
 import {
   acquireCodexDevMergeFence,
   acquireCodexDevLifecycleFence,
@@ -61,8 +63,8 @@ test('historical actor registry is deny-only and ignores spoofed profile markers
   const env = { CODEX_DEV_UID: 'current-codex' };
   assert.equal(await isKnownCodexDevActorUid({ db, uid: 'current-codex', env }), true);
   assert.equal(await isKnownCodexDevActorUid({ db, uid: 'retired-codex', env }), false);
-  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'retired-codex', now: 123 }), true);
-  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'retired-codex', now: 456 }), false);
+  assert.equal(await ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'retired-codex', now: 123 }), true);
+  assert.equal(await ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'retired-codex', now: 456 }), false);
   assert.equal(await isKnownCodexDevActorUid({ db, uid: 'retired-codex', env }), true);
   assert.equal(await isKnownCodexDevActorUid({
     db, uid: 'retired-codex', env, transaction: { get: (ref) => ref.get() },
@@ -89,12 +91,12 @@ test('merge-wide fence prevents mid-merge registration and releases after succes
   };
   await acquireCodexDevMergeFence({ db, uid: 'merge-user', token: 'merge-token' });
   await assert.rejects(
-    ensureCodexDevActorRegistered({ db, uid: 'merge-user', now: 1100 }),
+    ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'merge-user', now: 1100 }),
     (error) => error.code === 'codex-merge-fence-active' && error.retryable === true,
   );
   assert.equal(docs.has('codexDevActorRegistry/merge-user'), false, 'registration cannot appear halfway through merge');
   await releaseCodexDevMergeFence({ db, uid: 'merge-user', token: 'merge-token' });
-  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'merge-user', now: 1200 }), true);
+  assert.equal(await ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'merge-user', now: 1200 }), true);
   assert.equal(docs.has('codexDevActorRegistry/merge-user'), true, 'registration succeeds after merge completion');
 });
 
@@ -182,7 +184,7 @@ test('merge fence releases only before the first committed production mutation',
   assert.equal(await releaseCodexDevMergeFenceIfUnmutated({ db, uid: 'partial-merge', token: 'token-b' }), false);
   assert.equal(docs.get('codexDevActorMergeFences/partial-merge')?.mutationCommitted, true);
   await assert.rejects(
-    ensureCodexDevActorRegistered({ db, uid: 'partial-merge', now: 1200 }),
+    ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'partial-merge', now: 1200 }),
     (error) => error.code === 'codex-merge-fence-recovery-required' && error.retryable === false,
   );
   await releaseCodexDevMergeFence({ db, uid: 'partial-merge', token: 'token-b' });
@@ -207,7 +209,7 @@ test('account lifecycle fence blocks registration through Auth deletion and rele
   await acquireCodexDevLifecycleFence({ db, uid: 'deleting-user', token: 'delete-token', nowMs });
   assert.equal(docs.get('codexDevActorLifecycleFences/deleting-user')?.operation, 'deleteOnboardingAccount');
   await assert.rejects(
-    ensureCodexDevActorRegistered({ db, uid: 'deleting-user' }),
+    ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'deleting-user' }),
     (error) => error.code === 'codex-lifecycle-fence-active' && error.retryable === true,
   );
   await db.runTransaction((transaction) => readAndValidateCodexDevLifecycleFence({
@@ -215,13 +217,13 @@ test('account lifecycle fence blocks registration through Auth deletion and rele
   }));
   assert.equal(await releaseCodexDevLifecycleFence({ db, uid: 'deleting-user', token: 'wrong-token' }), false);
   assert.equal(await releaseCodexDevLifecycleFence({ db, uid: 'deleting-user', token: 'delete-token' }), true);
-  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'deleting-user' }), true,
+  assert.equal(await ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'deleting-user' }), true,
     'registration resumes only after the destructive lifecycle operation ends');
 
   docs.set('codexDevActorLifecycleFences/expired-user', {
     uid: 'expired-user', operation: 'deleteOnboardingAccount', token: 'expired', leaseExpiresAtMs: nowMs - 1,
   });
-  assert.equal(await ensureCodexDevActorRegistered({ db, uid: 'expired-user' }), true,
+  assert.equal(await ensureCodexDevActorRegistered({ db, auth: noModeratorAuth, uid: 'expired-user' }), true,
     'an expired lifecycle fence cannot block recovery forever');
 });
 
@@ -617,7 +619,7 @@ test('ensureCodexDevProfileState deletes rather than writes a publicUsers projec
   const end = source.indexOf('\n};', start) + 3;
   const implementation = source.slice(start, end);
   assert.match(implementation, /publicUserRef\.delete\(\)/);
-  assert.match(implementation, /ensureCodexDevActorRegistered\(\{ db, uid, now \}\)/);
+  assert.match(implementation, /ensureCodexDevActorRegistered\(\{ db, auth: admin\.auth\(\), uid, now \}\)/);
   assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('userRef.get()'));
   assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('userRef.set('));
   assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('publicUserRef.delete()'));

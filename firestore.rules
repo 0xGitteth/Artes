@@ -14,6 +14,9 @@ service cloud.firestore {
     match /codexDevActorLifecycleFences/{uid} {
       allow read, write: if false;
     }
+    match /codexDevActorModeratorLocks/{uid} {
+      allow read, write: if false;
+    }
     function isVerifiedUser() {
       return request.auth != null && request.auth.token.email_verified == true;
     }
@@ -103,6 +106,7 @@ service cloud.firestore {
     }
     function isModerator() {
       return request.auth != null
+        && !isKnownCodexProductionDenied()
         && request.auth.token.email_verified == true
         && request.auth.token.email != null
         && exists(/databases/$(database)/documents/config/moderation)
@@ -194,9 +198,7 @@ service cloud.firestore {
             && request.auth.uid in thread.participants)
         );
     }
-    function isTestActorThread(threadId) {
-      let path = /databases/$(database)/documents/threads/$(threadId);
-      let thread = exists(path) ? get(path).data : getAfter(path).data;
+    function isTestActorThreadData(thread) {
       return thread.type == 'dm' && (
         ('participantUids' in thread && thread.participantUids is list
           && thread.participantUids.size() == 2
@@ -211,6 +213,11 @@ service cloud.firestore {
             || isKnownCodexProductionDeniedUid(thread.participants[0])
             || isKnownCodexProductionDeniedUid(thread.participants[1])))
       );
+    }
+    function isTestActorThread(threadId) {
+      let path = /databases/$(database)/documents/threads/$(threadId);
+      let thread = exists(path) ? get(path).data : getAfter(path).data;
+      return isTestActorThreadData(thread);
     }
     function isSupportThreadOwner(threadId) {
       return request.auth != null
@@ -910,7 +917,7 @@ service cloud.firestore {
     }
 
     match /threads/{threadId} {
-      allow read: if request.auth != null && !isTestActorThread(threadId) && (
+      allow read: if request.auth != null && !isTestActorThreadData(resource.data) && (
         (isDevAnon() && !isKnownCodexProductionDenied())
         // eigenaar van support thread
         || (resource.data.type == 'support'

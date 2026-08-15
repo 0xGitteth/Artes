@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "purge-legacy-users": "node scripts/purgeLegacyUsers.js",
     "start": "node server/index.js",
-    "test:rules": "firebase emulators:exec --only firestore,storage \"node tests/firestore.publicUsers.rules.test.mjs && node tests/storage.profileImages.rules.test.mjs && node tests/storage.uploads.rules.test.mjs\"",
+    "test:rules": "firebase emulators:exec --only firestore,storage \"node tests/firestore.publicUsers.rules.test.mjs && node tests/firestore.codexMarkerIsolation.rules.test.mjs && node tests/storage.profileImages.rules.test.mjs && node tests/storage.uploads.rules.test.mjs\"",
     "cleanup-upload-history": "node functions/scripts/cleanupUploadFingerprintHistory.js",
     "test": "npm run test:rules",
     "backfill-public-users": "node functions/scripts/backfillPublicUsersFromUsers.js",
@@ -20,7 +20,7 @@
     "reconcile-codex-dev-isolation": "node functions/scripts/reconcileCodexDevIsolation.js",
     "test:reconcile-public-users": "node tests/reconcilePublicUsersForOnboarding.test.mjs",
     "test:public-user-publication": "node tests/publicUserPublication.test.mjs && node tests/publicProfileUnpublish.test.mjs && node tests/onboardingResetState.test.mjs && node tests/followCounters.test.mjs",
-    "test:codex-dev-isolation": "node --test tests/codexDevIsolation.test.mjs functions/test/codexDevLogin.test.js && node tests/codexDevLegacyCleanup.test.mjs"
+    "test:codex-dev-isolation": "node --test tests/codexDevIsolation.test.mjs functions/test/codexDevLogin.test.js tests/finalHolisticIsolation.test.mjs && node tests/codexDevLegacyCleanup.test.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",

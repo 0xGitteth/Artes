@@ -40,11 +40,7 @@ service cloud.firestore {
       return isCodexDev();
     }
     function isTestActorUid(uid) {
-      let path = /databases/$(database)/documents/users/$(uid);
-      return exists(path)
-        && get(path).data.keys().hasAll(['isDevTestUser', 'devActor'])
-        && get(path).data.isDevTestUser == true
-        && get(path).data.devActor == 'codex';
+      return isKnownCodexProductionDeniedUid(uid);
     }
     function isVerifiedOrDev() {
       return isVerifiedUser() || isCodexDev();

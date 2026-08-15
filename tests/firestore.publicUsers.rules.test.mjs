@@ -50,6 +50,9 @@ async function run() {
 
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
+      await setDoc(doc(db, 'codexDevActorRegistry', 'codex-dev-user'), {
+        uid: 'codex-dev-user', actor: 'codex', productionDenyOnly: true, registeredAt: new Date(),
+      });
       await setDoc(doc(db, 'codexDevActorRegistry', 'retired-codex'), {
         uid: 'retired-codex', actor: 'codex', productionDenyOnly: true, registeredAt: new Date(),
       });

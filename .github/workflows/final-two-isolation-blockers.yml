@@ -1,0 +1,47 @@
+name: Final two isolation blockers
+
+on:
+  push:
+    branches:
+      - chatgpt/final-two-isolation-blockers
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm --prefix functions ci
+      - run: node scripts/applyFinalTwoIsolationBlockers.mjs
+      - run: node --check functions/index.js
+      - run: node --check functions/codexDevActorRegistry.js
+      - run: npm run test:codex-dev-isolation
+      - run: npm run test:rules
+      - run: npm run test:public-user-publication
+      - run: npm run test:reconcile-public-users
+      - run: npm run test:backfill-public-users
+      - run: npm run lint
+      - run: npm run build
+      - run: git diff --check
+      - name: Commit validated fix and remove temporary automation
+        run: |
+          rm scripts/applyFinalTwoIsolationBlockers.mjs
+          rm .github/workflows/final-two-isolation-blockers.yml
+          git config user.name "chatgpt-codex-connector[bot]"
+          git config user.email "199175422+chatgpt-codex-connector[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "close final two Codex isolation blockers"
+          git push origin HEAD:chatgpt/final-two-isolation-blockers

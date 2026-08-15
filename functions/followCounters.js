@@ -1,4 +1,5 @@
 import { isLegitimatelyPublishedPersonalProfile } from './publicProfileAvailability.js';
+import { isCodexDevUid } from './codexDevIdentity.js';
 
 const getPersonalProfileRefs = (db, uid) => ({
   privateRef: db.collection('users').doc(uid),
@@ -22,6 +23,11 @@ export const applyFollowingCreatedCounters = async ({
 }) => db.runTransaction(async (transaction) => {
   const relationSnap = await transaction.get(relationRef);
   if (!relationSnap.exists) return { status: 'missing-relation' };
+
+  if (isCodexDevUid(uid) || isCodexDevUid(targetUid)) {
+    transaction.delete(relationRef);
+    return { status: 'rejected-test-actor', repairOnDelete: relationSnap.data()?.countersApplied === true };
+  }
 
   const relationData = relationSnap.data() || {};
   const normalizedRelation = {
@@ -72,7 +78,33 @@ export const applyFollowingDeletedCounters = async ({
   uid,
   targetUid,
   fieldValue,
+  codexUid = null,
 }) => {
+  const isTestUid = (candidate) => codexUid ? candidate === codexUid : isCodexDevUid(candidate);
+  const repairRef = db.collection('codexDevCounterRepairs').doc(`${uid}__${targetUid}`);
+  const existingRepair = await repairRef.get?.();
+  if (existingRepair?.exists) return { status: 'already-repaired-codex-relation' };
+  if (isTestUid(uid) || isTestUid(targetUid)) {
+    if (relationData.countersApplied !== true) return { status: 'skipped-test-actor' };
+    return db.runTransaction(async (transaction) => {
+      const repairSnap = await transaction.get(repairRef);
+      if (repairSnap.exists) return { status: 'already-repaired-test-actor' };
+      const ordinaryUid = isTestUid(uid) ? targetUid : uid;
+      const ordinaryRef = db.collection('publicUsers').doc(ordinaryUid);
+      const ordinarySnap = await transaction.get(ordinaryRef);
+      let repaired = null;
+      if (ordinarySnap.exists) {
+        repaired = isTestUid(uid) ? 'fansCount' : 'fanOfCount';
+        const current = Number(ordinarySnap.data()?.[repaired]) || 0;
+        transaction.update(ordinaryRef, {
+          [repaired]: Math.max(0, current - 1),
+          updatedAt: fieldValue.serverTimestamp(),
+        });
+      }
+      transaction.set(repairRef, { uid, targetUid, repaired, repairedAt: fieldValue.serverTimestamp() });
+      return { status: 'repaired-test-actor', repaired };
+    });
+  }
   if (relationData.countersApplied !== true) return { status: 'not-applied' };
 
   return db.runTransaction(async (transaction) => {

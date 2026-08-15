@@ -1,10 +1,18 @@
 import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import cors from "cors";
+import crypto from "node:crypto";
 
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { isCodexDevForProductionDeny } from "./codexDevIdentity.js";
+import {
+  acquireCodexDevLifecycleFence,
+  isKnownCodexDevActorUid,
+  readAndValidateCodexDevLifecycleFence,
+  releaseCodexDevLifecycleFence,
+} from "./codexDevActorRegistry.js";
 
 if (!getApps().length) initializeApp();
 
@@ -31,33 +39,55 @@ export const deleteOnboardingAccount = onRequest({ region: "europe-west4" }, (re
       }
 
       const decoded = await verifyIdToken(req);
+      if (isCodexDevForProductionDeny(decoded)) {
+        return res.status(403).json({ error: "Codex Dev identity cannot be deleted" });
+      }
       const uid = decoded.uid;
       if (!uid) {
         return res.status(400).json({ error: "Missing user id" });
       }
-
-      const userRef = db.collection("users").doc(uid);
-      const publicUserRef = db.collection("publicUsers").doc(uid);
-      const userSnapshot = await userRef.get();
-      if (!userSnapshot.exists) {
-        return res.status(404).json({ error: "User profile not found" });
-      }
-      if (userSnapshot.get("onboardingComplete") === true) {
-        return res.status(403).json({ error: "Onboarding already completed" });
+      if (await isKnownCodexDevActorUid({ db, uid })) {
+        return res.status(403).json({ error: "Codex Dev identity cannot be deleted" });
       }
 
-      await Promise.all([
-        userRef.delete().catch(() => null),
-        publicUserRef.delete().catch(() => null),
-      ]);
+      const lifecycleToken = crypto.randomUUID();
+      await acquireCodexDevLifecycleFence({ db, uid, token: lifecycleToken });
+      try {
+        const userRef = db.collection("users").doc(uid);
+        const publicUserRef = db.collection("publicUsers").doc(uid);
+        await db.runTransaction(async (transaction) => {
+          await readAndValidateCodexDevLifecycleFence({
+            db, uid, token: lifecycleToken, transaction,
+          });
+          const userSnapshot = await transaction.get(userRef);
+          if (!userSnapshot.exists) {
+            const error = new Error("User profile not found");
+            error.status = 404;
+            throw error;
+          }
+          if (userSnapshot.get("onboardingComplete") === true) {
+            const error = new Error("Onboarding already completed");
+            error.status = 403;
+            throw error;
+          }
+          transaction.delete(userRef);
+          transaction.delete(publicUserRef);
+        });
 
-      await auth.deleteUser(uid);
+        await auth.deleteUser(uid);
+      } finally {
+        try {
+          await releaseCodexDevLifecycleFence({ db, uid, token: lifecycleToken });
+        } catch (releaseError) {
+          logger.error("deleteOnboardingAccount lifecycle fence release failed", releaseError);
+        }
+      }
 
       return res.status(200).json({ ok: true });
     } catch (e) {
       logger.error("deleteOnboardingAccount failed", e);
       const message = e?.message || "Unauthorized";
-      return res.status(401).json({ error: message });
+      return res.status(e?.status || 401).json({ error: message });
     }
   });
 });

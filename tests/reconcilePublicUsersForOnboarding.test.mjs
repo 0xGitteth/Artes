@@ -58,12 +58,14 @@ assert.equal(malformed.onboardingStep, 5);
 const DELETE_TOKEN = Symbol('delete');
 
 function createFakeDb(initialUsers, initialPublicUsers, {
+  registeredCodexUids = [],
   beforeFirstTransaction = null,
   failTransaction = false,
 } = {}) {
   const stores = {
     users: new Map(initialUsers.map(([id, data]) => [id, structuredClone(data)])),
     publicUsers: new Map(initialPublicUsers.map(([id, data]) => [id, structuredClone(data)])),
+    codexDevActorRegistry: new Map(registeredCodexUids.map((id) => [id, { productionDenyOnly: true }])),
   };
   const pageReads = [];
   const transactionWrites = [];
@@ -128,6 +130,7 @@ function createFakeDb(initialUsers, initialPublicUsers, {
       const pending = [];
       const transaction = {
         get: async (ref) => {
+          assert.equal(pending.length, 0, 'all reconciliation transaction reads precede writes');
           const [name, id] = ref.path.split('/');
           return makeSnap(name, id);
         },
@@ -177,6 +180,130 @@ assert.equal(applyStats.diditSafetyProfilesPreserved, 0);
 assert.equal(applyDb.stores.publicUsers.has('pending'), false);
 assert.equal(applyDb.stores.publicUsers.has('done'), true);
 assert.ok(applyDb.transactionCalls >= 2, 'apply decisions use transactions instead of reusable batches');
+
+const codexIsolationUsers = [
+  ['retired-no-public', { displayName: 'Retired', onboardingComplete: true }],
+  ['retired-with-public', { displayName: 'Retired', onboardingComplete: true }],
+  ['codex-dev-user', { displayName: 'Current Codex', onboardingComplete: true }],
+  ['spoofed-markers', {
+    displayName: 'Ordinary Spoof', onboardingComplete: true, isDevTestUser: true, devActor: 'codex',
+  }],
+];
+const codexIsolationPublicUsers = [
+  ['retired-with-public', { onboardingComplete: true, displayName: 'Retired' }],
+  ['codex-dev-user', { onboardingComplete: true, displayName: 'Current Codex' }],
+];
+const isolationOptions = { registeredCodexUids: ['retired-no-public', 'retired-with-public'] };
+const codexDryRunDb = createFakeDb(codexIsolationUsers, codexIsolationPublicUsers, isolationOptions);
+const codexDryRunStats = await reconcile({ db: codexDryRunDb, pageSize: 10 });
+assert.equal(codexDryRunStats.testActorsSkipped, 3);
+assert.equal(codexDryRunStats.publicProfilesDeleted, 2, 'dry run reports current and retired projection deletion');
+assert.equal(codexDryRunStats.writes, 1, 'spoofed private markers remain non-authoritative and publish normally');
+assert.equal(codexDryRunDb.transactionCalls, 0);
+assert.equal(codexDryRunDb.transactionWrites.length, 0, 'dry run performs zero writes');
+assert.equal(codexDryRunDb.stores.publicUsers.has('retired-with-public'), true);
+
+const codexApplyDb = createFakeDb(codexIsolationUsers, codexIsolationPublicUsers, isolationOptions);
+await reconcile({ db: codexApplyDb, apply: true, pageSize: 10 });
+assert.equal(codexApplyDb.stores.publicUsers.has('retired-no-public'), false);
+assert.equal(codexApplyDb.stores.publicUsers.has('retired-with-public'), false);
+assert.equal(codexApplyDb.stores.publicUsers.has('codex-dev-user'), false);
+assert.equal(codexApplyDb.stores.publicUsers.has('spoofed-markers'), true);
+
+const actorOrphans = [
+  ['retired-orphan', { onboardingComplete: true, displayName: 'Retired orphan' }],
+  ['codex-dev-user', { onboardingComplete: true, displayName: 'Current Codex orphan' }],
+  ['ordinary-orphan', { onboardingComplete: true, displayName: 'Ordinary orphan' }],
+];
+const orphanDryRunDb = createFakeDb([], actorOrphans, { registeredCodexUids: ['retired-orphan'] });
+const orphanDryRunStats = await reconcile({ db: orphanDryRunDb, pageSize: 10 });
+assert.equal(orphanDryRunStats.publicProfilesDeleted, 2, 'dry run reports both registry-denied orphan projections');
+assert.equal(orphanDryRunStats.deletes, 2);
+assert.equal(orphanDryRunStats.orphanPublicProfiles, 1, 'ordinary orphan retention is unchanged');
+assert.equal(orphanDryRunDb.transactionCalls, 0, 'orphan dry run remains read-only');
+assert.equal(orphanDryRunDb.transactionWrites.length, 0);
+assert.equal(orphanDryRunDb.stores.publicUsers.size, 3);
+
+const orphanApplyDb = createFakeDb([], actorOrphans, { registeredCodexUids: ['retired-orphan'] });
+const orphanApplyStats = await reconcile({ db: orphanApplyDb, apply: true, pageSize: 10 });
+assert.equal(orphanApplyStats.publicProfilesDeleted, 2);
+assert.equal(orphanApplyDb.stores.publicUsers.has('retired-orphan'), false);
+assert.equal(orphanApplyDb.stores.publicUsers.has('codex-dev-user'), false);
+assert.equal(
+  orphanApplyDb.stores.publicUsers.has('ordinary-orphan'),
+  true,
+  'ordinary orphan remains when deleteOrphans is false',
+);
+
+const recreatedActorDb = createFakeDb(
+  [],
+  [['recreated-retired', { onboardingComplete: true, displayName: 'Retired actor' }]],
+  {
+    registeredCodexUids: ['recreated-retired'],
+    beforeFirstTransaction: (stores) => {
+      stores.users.set('recreated-retired', {
+        uid: 'recreated-retired',
+        onboardingComplete: true,
+        displayName: 'Recreated private actor',
+      });
+    },
+  },
+);
+const recreatedActorStats = await reconcile({ db: recreatedActorDb, apply: true, pageSize: 10 });
+assert.equal(recreatedActorStats.publicProfilesDeleted, 1);
+assert.equal(
+  recreatedActorDb.stores.publicUsers.has('recreated-retired'),
+  false,
+  'registry denial takes precedence when the private actor is recreated before the orphan transaction',
+);
+assert.deepEqual(recreatedActorDb.stores.users.get('recreated-retired'), {
+  uid: 'recreated-retired',
+  onboardingComplete: true,
+  displayName: 'Recreated private actor',
+}, 'actor quarantine does not modify the recreated private user');
+
+const deletedPrivateActorDb = createFakeDb(
+  [['deleted-private-retired', { onboardingComplete: true, displayName: 'Retired actor' }]],
+  [['deleted-private-retired', { onboardingComplete: true, displayName: 'Retired actor' }]],
+  {
+    registeredCodexUids: ['deleted-private-retired'],
+    beforeFirstTransaction: (stores) => {
+      stores.users.delete('deleted-private-retired');
+    },
+  },
+);
+const deletedPrivateActorStats = await reconcile({
+  db: deletedPrivateActorDb,
+  apply: true,
+  uid: 'deleted-private-retired',
+});
+assert.equal(deletedPrivateActorStats.publicProfilesDeleted, 1);
+assert.equal(
+  deletedPrivateActorDb.stores.publicUsers.has('deleted-private-retired'),
+  false,
+  'registry denial deletes the projection after the discovered private user disappears',
+);
+assert.equal(
+  deletedPrivateActorDb.stores.users.has('deleted-private-retired'),
+  false,
+  'actor quarantine does not recreate the deleted private user',
+);
+
+const deletedPrivateOrdinaryDb = createFakeDb(
+  [['deleted-private-ordinary', { onboardingComplete: true, displayName: 'Ordinary user' }]],
+  [['deleted-private-ordinary', { onboardingComplete: true, displayName: 'Ordinary user' }]],
+  {
+    beforeFirstTransaction: (stores) => {
+      stores.users.delete('deleted-private-ordinary');
+    },
+  },
+);
+await reconcile({ db: deletedPrivateOrdinaryDb, apply: true, uid: 'deleted-private-ordinary' });
+assert.equal(
+  deletedPrivateOrdinaryDb.stores.publicUsers.has('deleted-private-ordinary'),
+  true,
+  'an ordinary projection retains the existing behavior when its private user disappears',
+);
 
 const cleanupDb = createFakeDb(
   [['done', { displayName: 'Current', onboardingStep: '5', roles: ['maker'], themes: [] }]],

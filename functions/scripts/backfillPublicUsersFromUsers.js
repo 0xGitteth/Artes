@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url';
 import { cleanPublicStringArray } from '../../src/utils/publicProfileFieldNormalization.js';
+import { isKnownCodexDevActorUid } from '../codexDevActorRegistry.js';
 
 const BATCH_LIMIT = 400;
 
@@ -237,6 +238,8 @@ export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimesta
     failed: 0,
     legacyPrivateFieldsFound: 0,
     legacyPrivateFieldsDeleted: 0,
+    codexPublicProfilesWouldDelete: 0,
+    codexPublicProfilesDeleted: 0,
   };
 
   const userDocs = await getUserSnapshots(db, uid);
@@ -247,8 +250,67 @@ export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimesta
   for (const docSnap of userDocs) {
     stats.scanned += 1;
     const userData = docSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: docSnap.id })) {
+      const publicRef = db.collection('publicUsers').doc(docSnap.id);
+      const publicSnap = await publicRef.get();
+      if (publicSnap.exists) {
+        stats.codexPublicProfilesWouldDelete += 1;
+        if (!dryRun) {
+          batch.delete(publicRef);
+          batchCount += 1;
+          stats.codexPublicProfilesDeleted += 1;
+        }
+      }
+      continue;
+    }
     if (!isPublishEligibleUser(userData)) {
       stats.skippedNotEligible += 1;
+      continue;
+    }
+
+    if (!dryRun) {
+      const userRef = db.collection('users').doc(docSnap.id);
+      const publicRef = db.collection('publicUsers').doc(docSnap.id);
+      try {
+        const result = await db.runTransaction(async (transaction) => {
+          const [currentUserSnap, currentPublicSnap, productionDenied] = await Promise.all([
+            transaction.get(userRef),
+            transaction.get(publicRef),
+            isKnownCodexDevActorUid({ db, uid: docSnap.id, transaction }),
+          ]);
+          if (productionDenied) {
+            if (currentPublicSnap.exists) transaction.delete(publicRef);
+            return { action: currentPublicSnap.exists ? 'delete-codex' : 'skip-codex', legacyPrivateFields: 0 };
+          }
+          const currentUserData = currentUserSnap.exists ? (currentUserSnap.data() || {}) : {};
+          if (!currentUserSnap.exists || !isPublishEligibleUser(currentUserData)) {
+            return { action: 'skip-ineligible', legacyPrivateFields: 0 };
+          }
+          const currentPublicData = currentPublicSnap.exists ? (currentPublicSnap.data() || {}) : {};
+          const legacyPrivateFields = getLegacyPrivatePublicUserFields(currentPublicData);
+          transaction.set(publicRef, {
+            ...buildPublicUserBackfillPayload(docSnap.id, currentUserData, { serverTimestamp }),
+            ...buildLegacyPrivateFieldDeletes(currentPublicData, { deleteValue }),
+          }, { merge: true });
+          return { action: 'write', legacyPrivateFields: legacyPrivateFields.length };
+        });
+        if (result.action === 'write') {
+          stats.eligible += 1;
+          stats.wouldWrite += 1;
+          stats.written += 1;
+          stats.legacyPrivateFieldsFound += result.legacyPrivateFields;
+          stats.legacyPrivateFieldsDeleted += result.legacyPrivateFields;
+        } else if (result.action === 'delete-codex') {
+          stats.codexPublicProfilesWouldDelete += 1;
+          stats.codexPublicProfilesDeleted += 1;
+          stats.written += 1;
+        } else if (result.action === 'skip-ineligible') {
+          stats.skippedNotEligible += 1;
+        }
+      } catch (error) {
+        stats.failed += 1;
+        console.error('[backfillPublicUsersFromUsers] Transaction write failed:', error?.message || error);
+      }
       continue;
     }
 

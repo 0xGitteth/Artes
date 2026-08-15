@@ -1,0 +1,46 @@
+export const CODEX_DEV_ACTOR = 'codex';
+export const CODEX_DEV_UID_DEFAULT = 'codex-dev-user';
+
+export const resolveCodexDevUid = (env = process.env) => (
+  String(env.CODEX_DEV_UID || '').trim() || CODEX_DEV_UID_DEFAULT
+);
+
+export const hasCodexDevClaim = (claims = {}) => (
+  claims.devCodex === true && claims.devActor === CODEX_DEV_ACTOR
+);
+
+export const isCodexDevUid = (uid, env = process.env) => (
+  Boolean(uid) && uid === resolveCodexDevUid(env)
+);
+
+export const isCodexDevPrivateProfile = (uid, profile = {}, env = process.env) => (
+  isCodexDevUid(uid, env)
+);
+
+// These fields were historically client writable, so they are diagnostics only.
+export const hasCodexDevPrivateMarkers = (profile = {}) => (
+  profile?.isDevTestUser === true && profile?.devActor === CODEX_DEV_ACTOR
+);
+
+export const isCodexDevToken = (decoded = {}, env = process.env) => (
+  hasCodexDevClaim(decoded) && isCodexDevUid(decoded.uid, env)
+);
+
+export const isCodexDevForProductionDeny = (decoded = {}, env = process.env) => (
+  hasCodexDevClaim(decoded) || isCodexDevUid(decoded.uid, env)
+);
+
+export const buildCodexDevPrivateProfile = ({ uid, now, exists = false }) => ({
+  uid,
+  displayName: 'Codex',
+  authProvider: 'custom',
+  roles: ['assistent'],
+  onboardingStep: 5,
+  onboardingComplete: true,
+  ageVerified: true,
+  isAdult: true,
+  isDevTestUser: true,
+  devActor: CODEX_DEV_ACTOR,
+  ...(!exists ? { createdAt: now } : {}),
+  updatedAt: now,
+});

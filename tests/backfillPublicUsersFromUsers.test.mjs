@@ -76,6 +76,19 @@ assert.equal(isPublishEligibleUser({ onboardingStep: 4, ageVerified: true, isAdu
 
 const docs = [
   {
+    id: 'retired-registered-no-public',
+    data: () => ({ onboardingComplete: true, displayName: 'Retired No Public' }),
+  },
+  {
+    id: 'retired-registered-public',
+    data: () => ({ onboardingComplete: true, displayName: 'Retired Public' }),
+  },
+  {
+    id: 'non-default-codex',
+    data: () => ({ onboardingComplete: true, isDevTestUser: true, devActor: 'codex' }),
+  },
+  { id: 'codex-dev-user', data: () => ({ onboardingComplete: true }) },
+  {
     id: 'eligible_user',
     data: () => ({
       displayName: 'Eligible User',
@@ -105,8 +118,12 @@ const docs = [
   },
 ];
 
-const createFakeDb = () => {
+const createFakeDb = ({ beforeFirstTransaction = null } = {}) => {
+  const users = new Map(docs.map((snap) => [snap.id, snap.data()]));
   const publicUsers = new Map([
+    ['retired-registered-public', { displayName: 'Retired Public' }],
+    ['non-default-codex', { displayName: 'Marked Codex', ageVerified: true }],
+    ['codex-dev-user', { displayName: 'Configured Codex', ageVerified: true }],
     ['eligible_user', {
       displayName: 'Stale Eligible User',
       themes: ['Old Theme'],
@@ -118,7 +135,9 @@ const createFakeDb = () => {
     }],
   ]);
   const queuedWrites = [];
+  const registry = new Set(['retired-registered-no-public', 'retired-registered-public']);
   let batchSetCalls = 0;
+  let transactionCalls = 0;
 
   const makePublicRef = (id) => ({
     id,
@@ -131,15 +150,58 @@ const createFakeDb = () => {
       };
     },
   });
+  const makeRef = (name, id) => ({ id, path: `${name}/${id}` });
+  const makeSnap = (name, id) => {
+    const store = name === 'users' ? users : name === 'publicUsers' ? publicUsers : registry;
+    const value = store instanceof Set ? undefined : store.get(id);
+    return {
+      id,
+      exists: store instanceof Set ? store.has(id) : value !== undefined,
+      data: () => ({ ...(value || {}) }),
+    };
+  };
 
   return {
     get batchSetCalls() { return batchSetCalls; },
     get queuedWrites() { return queuedWrites; },
     get publicUsers() { return publicUsers; },
+    get transactionCalls() { return transactionCalls; },
+    get registry() { return registry; },
     collection: (name) => {
-      if (name === 'users') return { get: async () => ({ docs }) };
+      if (name === 'users') return { get: async () => ({ docs }), doc: (id) => makeRef(name, id) };
       if (name === 'publicUsers') return { doc: makePublicRef };
+      if (name === 'codexDevActorRegistry') return {
+        doc: (id) => ({ path: `${name}/${id}`, get: async () => ({ exists: registry.has(id) }) }),
+      };
       throw new Error(`Unexpected collection ${name}`);
+    },
+    runTransaction: async (callback) => {
+      transactionCalls += 1;
+      if (transactionCalls === 1 && beforeFirstTransaction) await beforeFirstTransaction({ registry, publicUsers, users });
+      const pending = [];
+      const transaction = {
+        get: async (ref) => {
+          assert.equal(pending.length, 0, 'all authoritative backfill reads precede writes');
+          return makeSnap(...ref.path.split('/'));
+        },
+        set: (ref, payload, options) => pending.push({ ref, payload, options }),
+        delete: (ref) => pending.push({ ref, delete: true }),
+      };
+      const result = await callback(transaction);
+      pending.forEach((write) => {
+        queuedWrites.push(write);
+        if (write.delete) publicUsers.delete(write.ref.id);
+        else {
+          const existing = publicUsers.get(write.ref.id) || {};
+          const next = { ...existing };
+          Object.entries(write.payload).forEach(([key, value]) => {
+            if (value === '__DELETE__') delete next[key];
+            else next[key] = value;
+          });
+          publicUsers.set(write.ref.id, next);
+        }
+      });
+      return result;
     },
     batch: () => {
       const pending = [];
@@ -148,9 +210,14 @@ const createFakeDb = () => {
           batchSetCalls += 1;
           pending.push({ ref, payload: nextPayload, options });
         },
+        delete: (ref) => pending.push({ ref, delete: true }),
         commit: async () => {
           pending.forEach((write) => {
             queuedWrites.push(write);
+            if (write.delete) {
+              publicUsers.delete(write.ref.id);
+              return;
+            }
             const existing = publicUsers.get(write.ref.id) || {};
             const next = { ...existing };
             Object.entries(write.payload).forEach(([key, value]) => {
@@ -171,32 +238,58 @@ const createFakeDb = () => {
 const dryRunDb = createFakeDb();
 const dryRunStats = await runBackfill({ db: dryRunDb, dryRun: true, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(dryRunStats, {
-  scanned: 3,
-  eligible: 2,
+  scanned: 7,
+  eligible: 3,
   skippedNotEligible: 1,
-  wouldWrite: 2,
+  wouldWrite: 3,
   written: 0,
   failed: 0,
-  legacyPrivateFieldsFound: 5,
+  legacyPrivateFieldsFound: 6,
   legacyPrivateFieldsDeleted: 0,
+  codexPublicProfilesWouldDelete: 2,
+  codexPublicProfilesDeleted: 0,
 });
 assert.equal(dryRunDb.batchSetCalls, 0, 'dry run must not enqueue writes');
+assert.equal(dryRunDb.queuedWrites.length, 0, 'dry run must perform zero writes, including deletes');
 
 const applyDb = createFakeDb();
 const applyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(applyStats, {
-  scanned: 3,
-  eligible: 2,
+  scanned: 7,
+  eligible: 3,
   skippedNotEligible: 1,
-  wouldWrite: 2,
-  written: 2,
+  wouldWrite: 3,
+  written: 5,
   failed: 0,
-  legacyPrivateFieldsFound: 5,
-  legacyPrivateFieldsDeleted: 5,
+  legacyPrivateFieldsFound: 6,
+  legacyPrivateFieldsDeleted: 6,
+  codexPublicProfilesWouldDelete: 2,
+  codexPublicProfilesDeleted: 2,
 });
-assert.equal(applyDb.batchSetCalls, 2, 'apply should enqueue every onboarding-eligible publicUsers write');
+assert.equal(applyDb.batchSetCalls, 0, 'publication writes use transactions rather than a stale write batch');
+assert.equal(applyDb.transactionCalls, 3, 'each eligible publication decision is authoritative in its own transaction');
+assert.equal(applyDb.publicUsers.has('codex-dev-user'), false, 'apply deletes the legacy Codex projection');
+assert.equal(applyDb.publicUsers.has('retired-registered-public'), false, 'apply deletes a retired registered Codex projection');
+assert.equal(applyDb.publicUsers.has('retired-registered-no-public'), false, 'apply never publishes a retired registered Codex actor');
+assert.equal(applyDb.publicUsers.has('non-default-codex'), true, 'historical markers alone never select an ordinary user destructively');
+const secondApplyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
+assert.equal(secondApplyStats.codexPublicProfilesWouldDelete, 0);
+assert.equal(secondApplyStats.codexPublicProfilesDeleted, 0, 'second apply is idempotent for Codex deletion');
 
-const writtenPayload = applyDb.queuedWrites[0].payload;
+const registryRaceDb = createFakeDb({
+  beforeFirstTransaction: ({ registry, publicUsers }) => {
+    registry.add('non-default-codex');
+    publicUsers.delete('non-default-codex');
+  },
+});
+await runBackfill({ db: registryRaceDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
+assert.equal(
+  registryRaceDb.publicUsers.has('non-default-codex'),
+  false,
+  'registration after the early check cannot be overwritten by a stale backfill publication',
+);
+
+const writtenPayload = applyDb.queuedWrites.find((write) => write.ref.id === 'eligible_user').payload;
 for (const legacyField of ['email', 'didit', 'idv', 'ageVerified', 'isAdult']) {
   assert.equal(writtenPayload[legacyField], '__DELETE__', `${legacyField} should be deleted in the merge payload`);
 }

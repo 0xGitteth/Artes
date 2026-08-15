@@ -20,6 +20,8 @@ import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.j
 import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
+import { runUserModerationActionMutation } from './userModerationActionIsolation.js';
+import { deleteSupportResetMessagesPageAtomically } from './supportResetIsolation.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
 import {
   fetchModerationExamplesForFingerprints,
@@ -35,10 +37,33 @@ import {
   isValidCodexDevLoginSecret,
   shouldExposeCodexDevLoginDiagnostics,
 } from './codexDevLogin.js';
+import {
+  CODEX_DEV_ACTOR,
+  buildCodexDevPrivateProfile,
+  isCodexDevForProductionDeny,
+  isCodexDevUid,
+  resolveCodexDevUid,
+} from './codexDevIdentity.js';
+import {
+  acquireCodexDevLifecycleFence,
+  acquireCodexDevMergeFence,
+  ensureCodexDevActorRegistered,
+  ensureModeratorUidLockedOutOfCodexRegistration,
+  isKnownCodexDevActorUid,
+  queueCodexDevMergeFenceRenewal,
+  readAndValidateCodexDevLifecycleFence,
+  readAndValidateCodexDevMergeFence,
+  releaseCodexDevLifecycleFence,
+  releaseCodexDevMergeFence,
+  releaseCodexDevMergeFenceIfUnmutated,
+} from './codexDevActorRegistry.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
+import { createClaimInviteAtomically } from './claimInviteTransaction.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
+import { findBestReusableAcrossPages, findReusableAcrossPages, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
+import { cleanupCodexDevPostTrees } from './codexTestDataCleanup.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
@@ -236,56 +261,21 @@ const getAppIdFromEnv = () => {
   }
 };
 
-const codexDevUidDefault = 'codex-dev-user';
-
-const resolveCodexDevUid = () => {
-  const configured = String(process.env.CODEX_DEV_UID || '').trim();
-  return configured || codexDevUidDefault;
-};
-
-const codexDevDisplayName = 'Codex';
-const codexDevActor = 'codex';
-const codexDevRoles = ['assistent'];
-const isCodexDevUid = (uid) => Boolean(uid) && uid === resolveCodexDevUid();
-
-const ensureCodexDevProfileState = async (uid) => {
+export const ensureCodexDevProfileState = async (uid) => {
   const now = FieldValue.serverTimestamp();
   const userRef = db.collection('users').doc(uid);
   const publicUserRef = db.collection('publicUsers').doc(uid);
+  await ensureCodexDevActorRegistered({ db, auth: admin.auth(), uid, now });
   const existingUserSnap = await userRef.get();
-
-  const userPayload = {
+  await userRef.set(buildCodexDevPrivateProfile({
     uid,
-    displayName: codexDevDisplayName,
-    authProvider: 'custom',
-    roles: codexDevRoles,
-    onboardingStep: 5,
-    onboardingComplete: true,
-    ageVerified: true,
-    isAdult: true,
-    isDevTestUser: true,
-    devActor: codexDevActor,
-    updatedAt: now,
-  };
-  if (!existingUserSnap.exists) {
-    userPayload.createdAt = now;
-  }
+    now,
+    exists: existingUserSnap.exists,
+  }), { merge: true });
 
-  const publicPayload = {
-    uid,
-    displayName: codexDevDisplayName,
-    displayNameLower: codexDevDisplayName.toLowerCase(),
-    roles: codexDevRoles,
-    ageVerified: true,
-    isAdult: true,
-    isDevTestUser: true,
-    updatedAt: now,
-  };
-
-  await Promise.all([
-    userRef.set(userPayload, { merge: true }),
-    publicUserRef.set(publicPayload, { merge: true }),
-  ]);
+  // A test actor has no public projection. Remove the legacy projection that
+  // used to leak capability/IDV fields and could make Codex discoverable.
+  await publicUserRef.delete();
 };
 
 const buildReportedPostPath = (postId) => {
@@ -351,6 +341,14 @@ const ensureModerator = async (decoded) => {
     error.status = 403;
     throw error;
   }
+  if (isCodexDevForProductionDeny(decoded)) {
+    const error = new Error('Codex Dev cannot receive production moderator authorization.');
+    error.status = 403;
+    throw error;
+  }
+  await ensureModeratorUidLockedOutOfCodexRegistration({
+    db, uid: decoded?.uid, email, now: new Date(),
+  });
   return { email };
 };
 
@@ -532,7 +530,19 @@ const buildContributorMergePostUpdate = (postData, primaryContributorId, seconda
   return { changed, updates };
 };
 
-const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId) => {
+const assertMergeActorAllowed = async ({ transaction, denyActorUid, mergeFenceToken = null }) => {
+  if (denyActorUid && mergeFenceToken) {
+    return readAndValidateCodexDevMergeFence({ db, uid: denyActorUid, token: mergeFenceToken, transaction });
+  }
+  if (denyActorUid && await isKnownCodexDevActorUid({ db, uid: denyActorUid, transaction })) {
+    const error = new Error('Codex Dev contributor claims are isolated.');
+    error.status = 403;
+    throw error;
+  }
+  return null;
+};
+
+const updatePostsForContributorMerge = async (primaryContributorId, secondaryContributorId, denyActorUid = null, mergeFenceToken = null) => {
   let updatedPosts = 0;
   let lastDoc = null;
   let hasMore = true;
@@ -549,21 +559,38 @@ const updatePostsForContributorMerge = async (primaryContributorId, secondaryCon
       hasMore = false;
       continue;
     }
-    const batch = db.batch();
-    snapshot.docs.forEach((docSnap) => {
-      const { changed, updates } = buildContributorMergePostUpdate(docSnap.data(), primaryContributorId, secondaryContributorId);
-      if (!changed) return;
-      batch.update(docSnap.ref, updates);
-      updatedPosts += 1;
+    let pageUpdatedPosts = 0;
+    await db.runTransaction(async (transaction) => {
+      pageUpdatedPosts = 0;
+      const fenceValidation = await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
+      const freshDocs = [];
+      for (const docSnap of snapshot.docs) {
+        const freshSnap = await transaction.get(docSnap.ref);
+        freshDocs.push({ ref: docSnap.ref, snap: freshSnap });
+      }
+      const mutationPlans = [];
+      for (const { ref, snap: freshSnap } of freshDocs) {
+        if (!freshSnap.exists) continue;
+        const { changed, updates } = buildContributorMergePostUpdate(freshSnap.data(), primaryContributorId, secondaryContributorId);
+        if (!changed) continue;
+        mutationPlans.push({ ref, updates });
+        pageUpdatedPosts += 1;
+      }
+      queueCodexDevMergeFenceRenewal({
+        transaction,
+        validation: fenceValidation,
+        mutationCommitted: mutationPlans.length > 0,
+      });
+      mutationPlans.forEach(({ ref, updates }) => transaction.update(ref, updates));
     });
-    await batch.commit();
+    updatedPosts += pageUpdatedPosts;
     lastDoc = snapshot.docs[snapshot.docs.length - 1];
     hasMore = snapshot.size === 200;
   }
   return updatedPosts;
 };
 
-const moveContributorAliases = async (primaryContributorId, secondaryContributorId) => {
+const moveContributorAliases = async (primaryContributorId, secondaryContributorId, denyActorUid = null, mergeFenceToken = null) => {
   let movedAliases = 0;
   let skippedAliases = 0;
   let lastDoc = null;
@@ -581,17 +608,35 @@ const moveContributorAliases = async (primaryContributorId, secondaryContributor
       hasMore = false;
       continue;
     }
-    const batch = db.batch();
-    snapshot.docs.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data?.contributorId !== secondaryContributorId) {
-        skippedAliases += 1;
-        return;
+    let pageMovedAliases = 0;
+    let pageSkippedAliases = 0;
+    await db.runTransaction(async (transaction) => {
+      pageMovedAliases = 0;
+      pageSkippedAliases = 0;
+      const fenceValidation = await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
+      const freshDocs = [];
+      for (const docSnap of snapshot.docs) {
+        const freshSnap = await transaction.get(docSnap.ref);
+        freshDocs.push({ ref: docSnap.ref, snap: freshSnap });
       }
-      batch.update(docSnap.ref, { contributorId: primaryContributorId });
-      movedAliases += 1;
+      const aliasesToMove = [];
+      for (const { ref, snap: freshSnap } of freshDocs) {
+        if (!freshSnap.exists || freshSnap.data()?.contributorId !== secondaryContributorId) {
+          pageSkippedAliases += 1;
+          continue;
+        }
+        aliasesToMove.push(ref);
+        pageMovedAliases += 1;
+      }
+      queueCodexDevMergeFenceRenewal({
+        transaction,
+        validation: fenceValidation,
+        mutationCommitted: aliasesToMove.length > 0,
+      });
+      aliasesToMove.forEach((ref) => transaction.update(ref, { contributorId: primaryContributorId }));
     });
-    await batch.commit();
+    movedAliases += pageMovedAliases;
+    skippedAliases += pageSkippedAliases;
     lastDoc = snapshot.docs[snapshot.docs.length - 1];
     hasMore = snapshot.size === 200;
   }
@@ -603,6 +648,8 @@ const mergeContributorsInternal = async ({
   secondaryContributorId,
   moderatorEmail,
   source,
+  denyActorUid = null,
+  mergeFenceToken = null,
 }) => {
   if (!primaryContributorId || !secondaryContributorId) {
     const error = new Error('Missing contributor ids');
@@ -625,18 +672,19 @@ const mergeContributorsInternal = async ({
     throw error;
   }
 
-  const updatedPosts = await updatePostsForContributorMerge(primaryContributorId, secondaryContributorId);
-  const aliasResult = await moveContributorAliases(primaryContributorId, secondaryContributorId);
+  const updatedPosts = await updatePostsForContributorMerge(primaryContributorId, secondaryContributorId, denyActorUid, mergeFenceToken);
+  const aliasResult = await moveContributorAliases(primaryContributorId, secondaryContributorId, denyActorUid, mergeFenceToken);
 
-  await secondaryRef.set(
-    {
+  await db.runTransaction(async (transaction) => {
+    const fenceValidation = await assertMergeActorAllowed({ transaction, denyActorUid, mergeFenceToken });
+    queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation, mutationCommitted: true });
+    transaction.set(secondaryRef, {
       status: 'merged',
       mergedInto: primaryContributorId,
       mergedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+    }, { merge: true });
+  });
 
   logger.info('Merged contributors', {
     primaryContributorId,
@@ -1048,10 +1096,17 @@ const findOpenReviewCase = async (userId) => {
   return { id: doc.id, data: doc.data() };
 };
 
-const findExactUpload = async (sha256) => {
-  const snapshot = await db.collection('uploads').where('fingerprints.sha256', '==', sha256).limit(1).get();
-  if (snapshot.empty) return null;
-  const doc = snapshot.docs[0];
+const findExactUpload = async (sha256, { isCodexActor = false } = {}) => {
+  const doc = await findReusableAcrossPages({
+    isCodexActor,
+    fetchPage: async (cursor) => {
+      let query = db.collection('uploads').where('fingerprints.sha256', '==', sha256).limit(25);
+      if (cursor) query = query.startAfter(cursor);
+      return (await query.get()).docs;
+    },
+    select: (docs) => docs[0] || null,
+  });
+  if (!doc) return null;
   return { id: doc.id, data: doc.data() };
 };
 
@@ -1084,23 +1139,22 @@ const findExactModerationExample = async (sha256) => {
   return ranked[0] || null;
 };
 
-const findNearDuplicateUpload = async ({ dhash, dhashPrefix }) => {
+const findNearDuplicateUpload = async ({ dhash, dhashPrefix }, { isCodexActor = false } = {}) => {
   if (!dhash) return null;
-  const snapshot = await db
-    .collection('uploads')
-    .where('fingerprints.dhashPrefix', '==', dhashPrefix)
-    .limit(25)
-    .get();
-  if (snapshot.empty) return null;
-  let best = null;
-  snapshot.docs.forEach((doc) => {
-    const candidate = doc.data();
-    const distance = hammingDistance(dhash, candidate?.fingerprints?.dhash);
-    if (distance <= dhashThreshold && (!best || distance < best.distance)) {
-      best = { id: doc.id, data: candidate, distance };
-    }
+  return findBestReusableAcrossPages({
+    isCodexActor,
+    fetchPage: async (cursor) => {
+      let query = db.collection('uploads').where('fingerprints.dhashPrefix', '==', dhashPrefix).limit(25);
+      if (cursor) query = query.startAfter(cursor);
+      return (await query.get()).docs;
+    },
+    selectBest: (docs) => selectNearReusableUpload({
+      uploads: docs.map((doc) => ({ id: doc.id, data: doc.data() })),
+      isCodexActor,
+      distanceFor: (candidate) => hammingDistance(dhash, candidate?.fingerprints?.dhash),
+      threshold: dhashThreshold,
+    }),
   });
-  return best;
 };
 
 const isFingerprintBlocked = (fingerprints, blockedFingerprints = []) => {
@@ -1430,6 +1484,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const { image, makerTags, themes } = body;
   const includeDebug = process.env.NODE_ENV === 'development' || body?.debug === true;
   const userId = decoded.uid;
+  const isCodexActor = isCodexDevForProductionDeny(decoded)
+    || await isKnownCodexDevActorUid({ db, uid: decoded.uid });
   const parsed = parseImageDataUrl(image);
   if (parsed.error) {
     res.status(400).json({ error: parsed.error });
@@ -1497,15 +1553,15 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const skipUploadReuse = Boolean(overrideReservation);
 
   try {
-    matchedModerationExample = await findExactModerationExample(fingerprints.sha256);
+    matchedModerationExample = isCodexActor ? null : await findExactModerationExample(fingerprints.sha256);
 
     if (!skipUploadReuse) {
-      matchedUpload = await findExactUpload(fingerprints.sha256);
+      matchedUpload = await findExactUpload(fingerprints.sha256, { isCodexActor });
       if (matchedUpload) {
         matchedFingerprintType = 'sha256';
       }
       if (!matchedUpload) {
-        matchedUpload = await findNearDuplicateUpload(fingerprints);
+        matchedUpload = await findNearDuplicateUpload(fingerprints, { isCodexActor });
         if (matchedUpload) {
           matchedFingerprintType = 'dhash';
         }
@@ -1522,7 +1578,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       appliedTriggers: matchedUpload.data.appliedTriggers || [],
       suggestedTriggers: matchedUpload.data.suggestedTriggers || [],
       forbiddenReasons: matchedUpload.data.forbiddenReasons || [],
-      reviewCaseId: matchedUpload.data.reviewCaseId || null,
+      reviewCaseId: isCodexActor ? null : (matchedUpload.data.reviewCaseId || null),
     };
   }
 
@@ -1787,7 +1843,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let inCooldown = false;
   let reviewCreated = false;
 
-  if (userId && finalForbiddenReasons.length > 0) {
+  if (userId && shouldCreateProductionReviewCase({ isCodexActor, forbiddenReasons: finalForbiddenReasons })) {
     try {
       userModeration = await getUserModeration(userId);
       const cooldownUntil = resolveTimestamp(userModeration?.data?.cooldownUntil);
@@ -1803,7 +1859,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         const openCount = Number(userModeration?.data?.openReviewCount ?? 0);
         if (rightsLevel > 0 && openCount < 1) {
           const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-          const reviewRef = await db.collection('reviewCases').add({
+          const reviewRef = db.collection('reviewCases').doc();
+          let persistedOrdinaryReview = false;
+          await db.runTransaction(async (transaction) => {
+            persistedOrdinaryReview = false;
+            if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
+            transaction.create(reviewRef, {
             caseType: 'upload',
             userId,
             status: 'inReview',
@@ -1832,10 +1893,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
             }),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
+            });
+            transaction.set(userModeration.ref, { openReviewCount: 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+            persistedOrdinaryReview = true;
           });
-          reviewCaseId = reviewRef.id;
-          reviewCreated = true;
-          await userModeration.ref.set({ openReviewCount: 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+          if (persistedOrdinaryReview) {
+            reviewCaseId = reviewRef.id;
+            reviewCreated = true;
+          }
         }
       }
     } catch (error) {
@@ -1843,7 +1908,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
   }
 
-  canRequestReview = finalForbiddenReasons.length > 0 && !inCooldown && !openReviewCase && !reviewCreated;
+  canRequestReview = !isCodexActor && finalForbiddenReasons.length > 0 && !inCooldown && !openReviewCase && !reviewCreated;
 
   const previousModeratorExample = policyResult.previousModeratorExample;
   const effectiveShouldReview = policyResult.shouldReview;
@@ -1884,6 +1949,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   };
 
   let persistedPreview = null;
+  let previewCreatedByRequest = false;
   let previewField = null;
   try {
     const matchedPreviewUrl = String(
@@ -1915,6 +1981,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         mimeType: parsed.mimeType,
         userId,
       });
+      previewCreatedByRequest = Boolean(persistedPreview?.storagePath);
       if (persistedPreview?.imageUrl) {
         persistedPreview.previewUrl = persistedPreview.imageUrl;
         previewField = 'imageUrl';
@@ -1924,7 +1991,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     const uploadPayload = {
       userId: userId || null,
       uploaderUid: userId || null,
-      ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
+      ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
       outcome,
       appliedTriggers: finalAppliedTriggers,
       suggestedTriggers: finalSuggestedTriggers,
@@ -1945,8 +2012,35 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       ...(persistedPreview?.storagePath ? { storagePath: persistedPreview.storagePath } : {}),
       createdAt: FieldValue.serverTimestamp(),
     };
-    const uploadRef = await db.collection('uploads').add(uploadPayload);
-    uploadId = uploadRef.id;
+    const uploadRef = db.collection('uploads').doc();
+    let persistedUpload = false;
+    let uploadSuppressedByHistoricalRegistry = false;
+    await db.runTransaction(async (transaction) => {
+      persistedUpload = false;
+      uploadSuppressedByHistoricalRegistry = false;
+      if (!isCodexActor && await isKnownCodexDevActorUid({ db, uid: userId, transaction })) {
+        uploadSuppressedByHistoricalRegistry = true;
+        return;
+      }
+      transaction.create(uploadRef, uploadPayload);
+      persistedUpload = true;
+    });
+    uploadId = persistedUpload ? uploadRef.id : null;
+
+    if (uploadSuppressedByHistoricalRegistry && previewCreatedByRequest && persistedPreview?.storagePath) {
+      try {
+        await admin.storage().bucket().file(persistedPreview.storagePath).delete({ ignoreNotFound: true });
+      } catch (error) {
+        logger.error('Historically quarantined moderation preview cleanup failed.', {
+          uid: userId,
+          storagePath: persistedPreview.storagePath,
+          error: error?.message || String(error),
+        });
+        throw error;
+      }
+      persistedPreview = null;
+      previewField = null;
+    }
 
     if (process.env.NODE_ENV === 'development') {
       logger.debug('Moderation preview linked to upload', {
@@ -1962,7 +2056,9 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   if (reviewCaseId && uploadId) {
     try {
       const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-      await db.collection('reviewCases').doc(reviewCaseId).set(
+      await db.runTransaction(async (transaction) => {
+        if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
+        transaction.set(db.collection('reviewCases').doc(reviewCaseId),
         {
           linkedUploadIds: FieldValue.arrayUnion(uploadId),
           fingerprints: FieldValue.arrayUnion(fingerprints),
@@ -1986,7 +2082,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
-      );
+        );
+      });
     } catch (error) {
       logger.error('Review case koppelen mislukt.', error);
     }
@@ -2082,6 +2179,12 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
       res.status(400).json({ error: 'Invalid recipientUid' });
       return;
     }
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })
+      || await isKnownCodexDevActorUid({ db, uid: recipientUid })) {
+      res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
+      return;
+    }
 
     const participantPair = [decoded.uid, recipientUid].sort();
     const dmKey = participantPair.join('_');
@@ -2144,9 +2247,32 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
     const recipientPublic = recipientPublicSnap.data() || {};
     const senderTitle = resolveDisplayTitle(recipientPublic);
     const recipientTitle = resolveDisplayTitle(senderPublic);
-    let createdCanonicalThread = false;
-    try {
-      await canonicalRef.create({
+    const senderIndexRef = db.collection('users').doc(decoded.uid).collection('threadIndex').doc(canonicalThreadId);
+    const recipientIndexRef = db.collection('users').doc(recipientUid).collection('threadIndex').doc(canonicalThreadId);
+    await db.runTransaction(async (transaction) => {
+      const [senderDenied, recipientDenied] = await Promise.all([
+        isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction }),
+        isKnownCodexDevActorUid({ db, uid: recipientUid, transaction }),
+      ]);
+      if (senderDenied || recipientDenied) {
+        const error = new Error('Codex Dev direct messages are isolated.');
+        error.status = 403;
+        throw error;
+      }
+      const existingCanonicalSnap = await transaction.get(canonicalRef);
+      if (existingCanonicalSnap.exists) {
+        const existingData = existingCanonicalSnap.data() || {};
+        const existingParticipants = Array.isArray(existingData?.participantUids)
+          ? [...existingData.participantUids].sort()
+          : [];
+        if (existingData?.type !== 'dm' || !arraysEqual(existingParticipants, participantPair)) {
+          const error = new Error('Canonical DM thread id conflict');
+          error.status = 409;
+          throw error;
+        }
+        return;
+      }
+      transaction.create(canonicalRef, {
         type: 'dm',
         participantUids: [decoded.uid, recipientUid],
         dmKey,
@@ -2156,59 +2282,23 @@ export const createDmThread = onRequest({ cors: true, region: 'europe-west4' }, 
         lastMessageText: '',
         lastSenderUid: decoded.uid,
       });
-      createdCanonicalThread = true;
-    } catch (error) {
-      const errorCode = error?.code;
-      const alreadyExists = errorCode === 6 || errorCode === 'already-exists' || errorCode === 'ALREADY_EXISTS';
-      if (!alreadyExists) throw error;
-    }
-
-    if (!createdCanonicalThread) {
-      const postCreateSnap = await canonicalRef.get();
-      const postCreateData = postCreateSnap.exists ? (postCreateSnap.data() || {}) : null;
-      const postCreateParticipants = Array.isArray(postCreateData?.participantUids)
-        ? [...postCreateData.participantUids].sort()
-        : [];
-      const canonicalValid = Boolean(
-        postCreateData
-        && postCreateData?.type === 'dm'
-        && arraysEqual(postCreateParticipants, participantPair)
-      );
-      if (canonicalValid) {
-        res.status(200).json({ threadId: canonicalThreadId });
-        return;
-      }
-      const conflictError = new Error('Canonical DM thread id conflict');
-      conflictError.status = 409;
-      throw conflictError;
-    }
-
-    const threadId = canonicalThreadId;
-
-    await Promise.all([
-      db.collection('users').doc(decoded.uid).collection('threadIndex').doc(threadId).set(
-        {
-          threadId,
+      transaction.set(senderIndexRef, {
+          threadId: canonicalThreadId,
           pinned: false,
           hidden: false,
           displayTitle: senderTitle,
           lastMessageAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      ),
-      db.collection('users').doc(recipientUid).collection('threadIndex').doc(threadId).set(
-        {
-          threadId,
+        }, { merge: true });
+      transaction.set(recipientIndexRef, {
+          threadId: canonicalThreadId,
           pinned: false,
           hidden: false,
           displayTitle: recipientTitle,
           lastMessageAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      ),
-    ]);
+        }, { merge: true });
+    });
 
-    res.status(200).json({ threadId });
+    res.status(200).json({ threadId: canonicalThreadId });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to create dm thread' });
@@ -2219,6 +2309,12 @@ export const resetPersonalOnboarding = onCall({ region: 'europe-west4' }, async 
   const uid = request.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  if (isCodexDevForProductionDeny({ uid, ...(request.auth?.token || {}) })) {
+    throw new HttpsError('permission-denied', 'Codex Dev identity cannot be reset.');
+  }
+  if (await isKnownCodexDevActorUid({ db, uid })) {
+    throw new HttpsError('permission-denied', 'Codex Dev identity cannot be reset.');
   }
   return resetPersonalOnboardingAtomically({ db, uid, onboardingStep: 2 });
 });
@@ -2252,7 +2348,7 @@ export const createDevCodexToken = onRequest({ cors: true, region: 'europe-west4
     await ensureCodexDevProfileState(uid);
     const token = await admin.auth().createCustomToken(uid, {
       devCodex: true,
-      devActor: codexDevActor,
+      devActor: CODEX_DEV_ACTOR,
     });
     res.status(200).json({ ok: true, uid, token });
   } catch (error) {
@@ -2268,6 +2364,11 @@ export const archiveDmThread = onRequest({ cors: true, region: 'europe-west4' },
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const threadId = String(body?.threadId || '').trim();
     if (!threadId) {
@@ -2276,29 +2377,42 @@ export const archiveDmThread = onRequest({ cors: true, region: 'europe-west4' },
     }
 
     const threadRef = db.collection('threads').doc(threadId);
-    const threadSnap = await threadRef.get();
-    if (!threadSnap.exists) {
-      res.status(404).json({ error: 'Thread not found' });
-      return;
-    }
-    const threadData = threadSnap.data() || {};
-    if (threadData?.type !== 'dm') {
-      res.status(400).json({ error: 'Only DM threads can be archived' });
-      return;
-    }
-    const participants = Array.isArray(threadData?.participantUids) ? threadData.participantUids : [];
-    if (!participants.includes(decoded.uid)) {
-      res.status(403).json({ error: 'Not a participant' });
-      return;
-    }
-
     const indexRef = db.collection('users').doc(decoded.uid).collection('threadIndex').doc(threadId);
-    const indexSnap = await indexRef.get();
-    if (indexSnap.exists) {
-      await indexRef.set({ hidden: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    }
+    let indexFound = false;
+    await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev direct messages are isolated.');
+        error.status = 403;
+        throw error;
+      }
+      const [threadSnap, indexSnap] = await Promise.all([
+        transaction.get(threadRef),
+        transaction.get(indexRef),
+      ]);
+      if (!threadSnap.exists) {
+        const error = new Error('Thread not found');
+        error.status = 404;
+        throw error;
+      }
+      const threadData = threadSnap.data() || {};
+      if (threadData?.type !== 'dm') {
+        const error = new Error('Only DM threads can be archived');
+        error.status = 400;
+        throw error;
+      }
+      const participants = Array.isArray(threadData?.participantUids) ? threadData.participantUids : [];
+      if (!participants.includes(decoded.uid)) {
+        const error = new Error('Not a participant');
+        error.status = 403;
+        throw error;
+      }
+      indexFound = indexSnap.exists;
+      if (indexSnap.exists) {
+        transaction.set(indexRef, { hidden: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
+    });
 
-    res.status(200).json({ ok: true, threadId, indexFound: indexSnap.exists });
+    res.status(200).json({ ok: true, threadId, indexFound });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to archive dm thread' });
@@ -2354,6 +2468,11 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const requestedThreadId = String(body?.threadId || '').trim();
     const fallbackThreadId = `support_${decoded.uid}`;
@@ -2393,6 +2512,11 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
       return;
     }
 
+    const supportResetFenceToken = crypto.randomUUID();
+    await acquireCodexDevLifecycleFence({
+      db, uid: decoded.uid, token: supportResetFenceToken, operation: 'resetSupportThread',
+    });
+    try {
     const messagesRef = threadRef.collection('messages');
     let keptIntroRef = null;
     let hasMoreMessages = true;
@@ -2402,69 +2526,95 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
         hasMoreMessages = false;
         continue;
       }
-      const batch = db.batch();
-      let deletesInRound = 0;
-      snapshot.docs.forEach((docSnap) => {
-        const data = docSnap.data() || {};
-        const isSystemIntro = data?.senderRole === 'system' && SUPPORT_INTRO_TEXTS.includes(data?.text || '');
-        if (isSystemIntro) {
-          if (!keptIntroRef) {
-            keptIntroRef = docSnap.ref;
-            return;
-          }
-          if (keptIntroRef.path === docSnap.ref.path) {
-            return;
-          }
-        }
-        batch.delete(docSnap.ref);
-        deletesInRound += 1;
+      const pageResult = await deleteSupportResetMessagesPageAtomically({
+        db,
+        actorUid: decoded.uid,
+        fenceToken: supportResetFenceToken,
+        threadRef,
+        expectedUserUid: userUid,
+        isModeratorRequest,
+        messageDocs: snapshot.docs,
+        keptIntroRef,
+        introTexts: SUPPORT_INTRO_TEXTS,
       });
-      if (deletesInRound > 0) {
-        await batch.commit();
-      }
-      hasMoreMessages = deletesInRound > 0 && snapshot.size === 400;
+      keptIntroRef = pageResult.keptIntroRef || keptIntroRef;
+      hasMoreMessages = pageResult.deletesInRound > 0 && snapshot.size === 400;
     }
-
-    if (!keptIntroRef) {
-      await messagesRef.add({
-        text: SUPPORT_INTRO_MESSAGE,
-        type: 'system',
-        senderRole: 'system',
-        senderUid: null,
-        senderId: 'system',
-        senderLabel: 'Artes Moderatie',
-        createdAt: FieldValue.serverTimestamp(),
-      });
-    }
-
-    await threadRef.set({
-      type: 'support',
-      title: 'Artes Moderatie',
-      threadKey: threadData?.threadKey || threadId,
-      userUid,
-      participantUids: [userUid],
-      hasUserMessage: false,
-      lastMessageAt: FieldValue.serverTimestamp(),
-      lastMessagePreview: SUPPORT_INTRO_MESSAGE,
-      unreadForModerator: 0,
-      unreadForUser: 0,
-      userMaySend: true,
-      userCanSend: true,
-      userMessageAllowance: 1,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
 
     const indexRef = db.collection('users').doc(userUid).collection('threadIndex').doc(threadId);
-    await indexRef.set({
-      threadId,
-      type: 'support',
-      threadType: 'support',
-      pinned: true,
-      hidden: false,
-      displayTitle: 'Artes Moderatie',
-      lastMessageAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    const introRef = keptIntroRef || messagesRef.doc();
+    await db.runTransaction(async (transaction) => {
+      await readAndValidateCodexDevLifecycleFence({
+        db,
+        uid: decoded.uid,
+        token: supportResetFenceToken,
+        transaction,
+        operation: 'resetSupportThread',
+      });
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev support traffic is isolated.');
+        error.status = 403;
+        throw error;
+      }
+      const freshThreadSnap = await transaction.get(threadRef);
+      if (!freshThreadSnap.exists) {
+        const error = new Error('Thread not found');
+        error.status = 404;
+        throw error;
+      }
+      const freshThreadData = freshThreadSnap.data() || {};
+      if (freshThreadData?.type !== 'support' || freshThreadData?.userUid !== userUid) {
+        const error = new Error('Support thread changed during reset');
+        error.status = 409;
+        throw error;
+      }
+      if (freshThreadData.userUid !== decoded.uid && !isModeratorRequest) {
+        const error = new Error('Not authorized to reset this support thread');
+        error.status = 403;
+        throw error;
+      }
 
+      if (!keptIntroRef) {
+        transaction.set(introRef, {
+          text: SUPPORT_INTRO_MESSAGE,
+          type: 'system',
+          senderRole: 'system',
+          senderUid: null,
+          senderId: 'system',
+          senderLabel: 'Artes Moderatie',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+      transaction.update(threadRef, {
+        type: 'support',
+        title: 'Artes Moderatie',
+        threadKey: freshThreadData?.threadKey || threadId,
+        userUid,
+        participantUids: [userUid],
+        hasUserMessage: false,
+        lastMessageAt: FieldValue.serverTimestamp(),
+        lastMessagePreview: SUPPORT_INTRO_MESSAGE,
+        unreadForModerator: 0,
+        unreadForUser: 0,
+        userMaySend: true,
+        userCanSend: true,
+        userMessageAllowance: 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      transaction.set(indexRef, {
+        threadId,
+        type: 'support',
+        threadType: 'support',
+        pinned: true,
+        hidden: false,
+        displayTitle: 'Artes Moderatie',
+        lastMessageAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+
+    } finally {
+      await releaseCodexDevLifecycleFence({ db, uid: decoded.uid, token: supportResetFenceToken });
+    }
     res.status(200).json({ ok: true, threadId, resetBy: isOwner ? 'owner' : 'moderator' });
   } catch (error) {
     const status = error.status || 500;
@@ -2479,6 +2629,10 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)) {
+      res.status(403).json({ error: 'Codex Dev direct messages are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const threadId = body?.threadId;
     const text = String(body?.text || '').trim();
@@ -2502,49 +2656,97 @@ export const sendDmMessage = onRequest({ cors: true, region: 'europe-west4' }, a
       res.status(403).json({ error: 'Cannot send message to system thread' });
       return;
     }
-    const participants = Array.isArray(threadData?.participantUids) ? threadData.participantUids : [];
-    if (!participants.includes(decoded.uid)) {
+    const participantUids = Array.isArray(threadData?.participantUids) ? threadData.participantUids : null;
+    const legacyParticipants = Array.isArray(threadData?.participants) ? threadData.participants : [];
+    const codexScanParticipants = [...new Set([
+      ...(participantUids || []),
+      ...legacyParticipants,
+    ].filter((uid) => typeof uid === 'string' && uid))];
+    const knownCodexParticipant = (await Promise.all(codexScanParticipants.map((uid) => (
+      isKnownCodexDevActorUid({ db, uid })
+    )))).some(Boolean);
+    if (knownCodexParticipant) {
+      res.status(403).json({ error: 'Codex Dev direct messages are retired.' });
+      return;
+    }
+    const authorizedParticipants = (participantUids || legacyParticipants)
+      .filter((uid) => typeof uid === 'string' && uid);
+    if (!authorizedParticipants.includes(decoded.uid)) {
       res.status(403).json({ error: 'Not a participant' });
       return;
     }
 
-    const publicUsers = await Promise.all(participants.map((uid) => fetchPublicUser(uid)));
+    const publicUsers = await Promise.all(authorizedParticipants.map((uid) => fetchPublicUser(uid)));
+    const publicUsersByUid = new Map(authorizedParticipants.map((uid, index) => [uid, publicUsers[index] || null]));
     const messageRef = threadRef.collection('messages').doc();
     const now = FieldValue.serverTimestamp();
 
-    await Promise.all([
-      messageRef.set({
+    await db.runTransaction(async (transaction) => {
+      const freshThreadSnap = await transaction.get(threadRef);
+      if (!freshThreadSnap.exists) {
+        const error = new Error('Thread not found');
+        error.status = 404;
+        throw error;
+      }
+      const freshThreadData = freshThreadSnap.data() || {};
+      if (freshThreadData?.type !== 'dm') {
+        const error = new Error('Cannot send message to system thread');
+        error.status = 403;
+        throw error;
+      }
+      const freshParticipantUids = Array.isArray(freshThreadData?.participantUids)
+        ? freshThreadData.participantUids
+        : null;
+      const freshLegacyParticipants = Array.isArray(freshThreadData?.participants)
+        ? freshThreadData.participants
+        : [];
+      const freshCodexScanParticipants = [...new Set([
+        ...(freshParticipantUids || []),
+        ...freshLegacyParticipants,
+      ].filter((uid) => typeof uid === 'string' && uid))];
+      const freshAuthorizedParticipants = (freshParticipantUids || freshLegacyParticipants)
+        .filter((uid) => typeof uid === 'string' && uid);
+      const hasKnownCodexParticipant = (await Promise.all(freshCodexScanParticipants.map((uid) => (
+        isKnownCodexDevActorUid({ db, uid, transaction })
+      )))).some(Boolean);
+      if (hasKnownCodexParticipant) {
+        const error = new Error('Codex Dev direct messages are retired.');
+        error.status = 403;
+        throw error;
+      }
+      if (!freshAuthorizedParticipants.includes(decoded.uid)) {
+        const error = new Error('Not a participant');
+        error.status = 403;
+        throw error;
+      }
+
+      transaction.set(messageRef, {
         senderId: decoded.uid,
         senderUid: decoded.uid,
         senderRole: 'user',
         text,
         type: 'text',
         createdAt: now,
-      }),
-      threadRef.set(
-        {
-          updatedAt: now,
+      });
+      transaction.update(threadRef, {
+        updatedAt: now,
+        lastMessageAt: now,
+        lastMessageText: text,
+        lastSenderUid: decoded.uid,
+      });
+      freshAuthorizedParticipants.forEach((uid) => {
+        const otherUid = freshAuthorizedParticipants.find((participantUid) => participantUid !== uid) || uid;
+        const otherPublic = publicUsersByUid.get(otherUid) || null;
+        const indexRef = db.collection('users').doc(uid).collection('threadIndex').doc(threadId);
+        transaction.set(indexRef, {
+          threadId,
+          pinned: false,
+          hidden: false,
+          displayTitle: resolveDisplayTitle(otherPublic),
           lastMessageAt: now,
-          lastMessageText: text,
-          lastSenderUid: decoded.uid,
-        },
-        { merge: true }
-      ),
-      ...participants.map((uid, index) => {
-        const otherIndex = participants[0] === uid ? 1 : 0;
-        const otherPublic = publicUsers[otherIndex] || null;
-        return db.collection('users').doc(uid).collection('threadIndex').doc(threadId).set(
-          {
-            threadId,
-            pinned: false,
-            hidden: false,
-            displayTitle: resolveDisplayTitle(otherPublic),
-            lastMessageAt: now,
-          },
-          { merge: true }
-        );
-      }),
-    ]);
+        }, { merge: true });
+      });
+    });
 
     res.status(200).json({ ok: true });
   } catch (error) {
@@ -2571,6 +2773,14 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
     logger.info('sendSupportMessage: Received POST request', { origin: req.get('origin') });
     
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)) {
+      res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
+      return;
+    }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
+      return;
+    }
     logger.info('sendSupportMessage: Token verified', { uid: decoded.uid });
     
     const body = parseJsonBody(req);
@@ -2591,6 +2801,11 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
 
     const threadRef = db.collection('threads').doc(threadId);
     await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev support traffic is isolated.');
+        error.status = 403;
+        throw error;
+      }
       const threadSnap = await transaction.get(threadRef);
       if (!threadSnap.exists) {
         const error = new Error('Thread not found');
@@ -2676,17 +2891,6 @@ export const sendSupportMessage = onRequest({ cors: false, region: 'europe-west4
       });
     });
 
-    await threadRef.set(
-      {
-        hasUserMessage: true,
-        userMaySend: false,
-        userCanSend: false,
-        userMessageAllowance: 0,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
     logger.info('sendSupportMessage: Message sent successfully', { uid: decoded.uid });
     res.status(200).json({ ok: true });
   } catch (error) {
@@ -2703,6 +2907,14 @@ export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, asyn
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)) {
+      res.status(403).json({ error: 'Codex Dev reports are isolated.' });
+      return;
+    }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev reports are isolated.' });
+      return;
+    }
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const {
@@ -2733,28 +2945,36 @@ export const reportPost = onRequest({ cors: true, region: 'europe-west4' }, asyn
       displayName: authorName || null,
     });
 
-    const reviewRef = await db.collection('reviewCases').add({
-      caseType: 'report',
-      status: 'inReview',
-      decision: null,
-      userId: authorId || null,
-      ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-      reviewReason: 'reportedPost',
-      reportedPost: {
-        id: postId,
-        imageUrl,
-        title,
-        authorId: authorId || null,
-        authorName: authorName || null,
-      },
-      reportedPostPath: reportedPostPath || null,
-      contributorUids: normalizedContributors,
-      reportedFingerprints,
-      reportedByUid: decoded.uid,
-      reportedByEmail: decoded.email || null,
-      reportedByName: decoded.name || null,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
+    const reviewRef = db.collection('reviewCases').doc();
+    await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev reports are isolated.');
+        error.status = 403;
+        throw error;
+      }
+      transaction.create(reviewRef, {
+        caseType: 'report',
+        status: 'inReview',
+        decision: null,
+        userId: authorId || null,
+        ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
+        reviewReason: 'reportedPost',
+        reportedPost: {
+          id: postId,
+          imageUrl,
+          title,
+          authorId: authorId || null,
+          authorName: authorName || null,
+        },
+        reportedPostPath: reportedPostPath || null,
+        contributorUids: normalizedContributors,
+        reportedFingerprints,
+        reportedByUid: decoded.uid,
+        reportedByEmail: decoded.email || null,
+        reportedByName: decoded.name || null,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
     });
 
     res.status(200).json({ ok: true, reviewCaseId: reviewRef.id });
@@ -2771,6 +2991,14 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)) {
+      res.status(403).json({ error: 'Codex Dev review cases are isolated.' });
+      return;
+    }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev review cases are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const uploadId = String(body?.uploadId || '').trim();
     if (!uploadId) {
@@ -2869,52 +3097,83 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       geminiDiagnostics: uploadData?.geminiDiagnostics || null,
     });
 
-    let reviewCaseId = existingCase?.id || null;
+    const candidateReviewRef = existingCase?.id
+      ? db.collection('reviewCases').doc(existingCase.id)
+      : null;
+    const newReviewRef = db.collection('reviewCases').doc();
+    let reviewCaseId = null;
     let created = false;
 
-    if (!reviewCaseId) {
-      const reviewRef = await db.collection('reviewCases').add({
-        caseType: 'upload',
-        status: 'inReview',
-        decision: null,
-        userId: decoded.uid,
+    await db.runTransaction(async (transaction) => {
+      reviewCaseId = null;
+      created = false;
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev review cases are isolated.');
+        error.status = 403;
+        throw error;
+      }
+      const freshUploadSnap = await transaction.get(uploadRef);
+      if (!freshUploadSnap.exists) {
+        const error = new Error('Upload not found');
+        error.status = 404;
+        throw error;
+      }
+      const freshUploadData = freshUploadSnap.data() || {};
+      const freshUploadOwnerId = freshUploadData.userId || freshUploadData.ownerUid || freshUploadData.userUid || null;
+      if (freshUploadOwnerId !== decoded.uid) {
+        const error = new Error('Not authorized for this upload');
+        error.status = 403;
+        throw error;
+      }
+
+      let reusableReviewRef = null;
+      if (candidateReviewRef) {
+        const candidateSnap = await transaction.get(candidateReviewRef);
+        if (candidateSnap.exists) {
+          const candidateData = candidateSnap.data() || {};
+          const candidateLinksUpload = freshUploadData.reviewCaseId === candidateReviewRef.id
+            || candidateData.uploadId === uploadId
+            || (Array.isArray(candidateData.linkedUploadIds) && candidateData.linkedUploadIds.includes(uploadId));
+          if (candidateData.status === 'inReview'
+            && candidateData.userId === decoded.uid
+            && (!candidateData.caseType || candidateData.caseType === 'upload')
+            && candidateLinksUpload) {
+            reusableReviewRef = candidateReviewRef;
+          }
+        }
+      }
+
+      const reviewRef = reusableReviewRef || newReviewRef;
+      reviewCaseId = reviewRef.id;
+      created = !reusableReviewRef;
+      const reviewUpdates = {
+        uploadId,
+        linkedUploadIds: created ? [uploadId] : FieldValue.arrayUnion(uploadId),
         ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
         reviewReason: 'manualUserReviewRequest',
         aiSummary,
-        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
-        uploadId,
-        linkedUploadIds: [uploadId],
-        createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
-      });
-      reviewCaseId = reviewRef.id;
-      created = true;
-    }
-
-    await uploadRef.set(
-      {
-        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
+      };
+      if (created) {
+        transaction.create(reviewRef, {
+          caseType: 'upload',
+          status: 'inReview',
+          decision: null,
+          userId: decoded.uid,
+          ...reviewUpdates,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        transaction.set(reviewRef, reviewUpdates, { merge: true });
+      }
+      transaction.set(uploadRef, {
         reviewCaseId,
         reviewStatus: 'inReview',
         reviewRequestedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
         ...(postDraft ? { postDraft } : {}),
-      },
-      { merge: true }
-    );
-
-    await db.collection('reviewCases').doc(reviewCaseId).set(
-      {
-        ...(isCodexDevUid(decoded.uid) ? { testActor: codexDevActor } : {}),
-        uploadId,
-        linkedUploadIds: FieldValue.arrayUnion(uploadId),
-        ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-        reviewReason: 'manualUserReviewRequest',
-        aiSummary,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+      }, { merge: true });
+    });
 
     res.status(200).json({ ok: true, reviewCaseId, created });
   } catch (error) {
@@ -3628,6 +3887,11 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     requireVerifiedPasswordUser(decoded);
     const body = parseJsonBody(req);
     const { messageId, uploadId, action, postDraft: postDraftFromBody } = body || {};
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev production moderation actions are isolated.' });
+      return;
+    }
     if (!uploadId || !action || (requiresMessageIdForAction(action) && !messageId)) {
       res.status(400).json({ error: 'uploadId and action are required (messageId required for this action)' });
       return;
@@ -3636,11 +3900,19 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       res.status(400).json({ error: 'Invalid action' });
       return;
     }
+
     const userId = decoded.uid;
-    const threadId = `support_${userId}`;
+    const threadId = 'support_' + userId;
     const threadRef = db.collection('threads').doc(threadId);
     const messageRef = action === 'repairPublished' || !messageId ? null : threadRef.collection('messages').doc(messageId);
     const uploadRef = db.collection('uploads').doc(uploadId);
+    const userRef = db.collection('users').doc(userId);
+    const postRef = action === 'publishNow' || action === 'repairPublished'
+      ? db.collection(isCodexDevUid(userId) ? 'codexDevPosts' : 'posts').doc(uploadId)
+      : null;
+    const draftRef = action === 'saveDraft'
+      ? userRef.collection('drafts').doc()
+      : null;
 
     const [messageSnap, uploadSnap] = await Promise.all([
       messageRef ? messageRef.get() : Promise.resolve(null),
@@ -3656,7 +3928,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     }
 
     const message = messageSnap?.data?.() || null;
-    const upload = uploadSnap.data();
+    const upload = uploadSnap.data() || {};
     const uploadOwnerId = upload?.userId || upload?.ownerUid || upload?.userUid || null;
     if (uploadOwnerId !== userId) {
       res.status(403).json({ error: 'Not authorized for this action' });
@@ -3667,8 +3939,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       return;
     }
 
-    const isApprovedOrLegacyPublished = canPublishUpload(upload);
-    if ((action === 'publishNow' || action === 'repairPublished') && !isApprovedOrLegacyPublished) {
+    if ((action === 'publishNow' || action === 'repairPublished') && !canPublishUpload(upload)) {
       res.status(409).json({ error: 'Upload is not approved' });
       return;
     }
@@ -3680,319 +3951,327 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       res.status(409).json({ error: 'Upload is not approved' });
       return;
     }
-    const currentPublicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
-    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && currentPublicationStatus === 'published') {
+    const initialPublicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
+    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && initialPublicationStatus === 'published') {
       res.status(409).json({ error: 'Upload is already published' });
       return;
     }
-
-    if (action === 'markPublicationPromptOpened') {
-      await uploadRef.set({
-        publicationPromptOpenedAt: FieldValue.serverTimestamp(),
-        publicationPromptOpenedByUid: userId,
-        publicationPromptDismissedAt: FieldValue.serverTimestamp(),
-        publicationPromptDismissedByUid: userId,
-      }, { merge: true });
-
-      if (messageRef) {
-        await messageRef.set({ unread: false }, { merge: true });
-      }
-    }
-
-    if (action === 'discardApprovedUpload') {
-      await db.runTransaction(async (transaction) => {
-        const latestUploadSnap = await transaction.get(uploadRef);
-        if (!latestUploadSnap.exists) {
-          const error = new Error('Upload not found');
-          error.status = 404;
-          throw error;
-        }
-        const latestUpload = latestUploadSnap.data() || {};
-        const latestOwnerId = latestUpload?.userId || latestUpload?.ownerUid || latestUpload?.userUid || null;
-        if (latestOwnerId !== userId) {
-          const error = new Error('Not authorized for this action');
-          error.status = 403;
-          throw error;
-        }
-        if (String(latestUpload?.publicationStatus || latestUpload?.publishStatus || '').trim() === 'published') {
-          const error = new Error('Upload is already published');
-          error.status = 409;
-          throw error;
-        }
-        if (latestUpload?.reviewStatus !== 'approved') {
-          const error = new Error('Upload is not approved');
-          error.status = 409;
-          throw error;
-        }
-
-        transaction.set(uploadRef, {
-          publicationStatus: 'discarded',
-          publishStatus: 'discarded',
-          discardedAt: FieldValue.serverTimestamp(),
-          discardedByUid: userId,
-          publicationPromptDismissedAt: FieldValue.serverTimestamp(),
-          publicationPromptDismissedByUid: userId,
-        }, { merge: true });
-
-        const reviewCaseId = latestUpload?.reviewCaseId || null;
-        if (reviewCaseId) {
-          transaction.set(db.collection('reviewCases').doc(reviewCaseId), {
-            userPublicationStatus: 'discarded',
-            userDiscardedAt: FieldValue.serverTimestamp(),
-            userDiscardedByUid: userId,
-          }, { merge: true });
-        }
-      });
-
-      if (messageRef) {
-        await messageRef.set({
-          unread: false,
-          resolved: true,
-          resolvedAt: FieldValue.serverTimestamp(),
-        }, { merge: true });
-      }
-    }
-
     if (action === 'acceptCorrection' || action === 'rejectCorrection') {
       const validation = validateUploaderCorrectionAction({ action, upload, userId });
       if (!validation.ok) {
         res.status(validation.status || 400).json({ error: validation.error });
         return;
       }
-      const { correctedTaxonomy } = validation;
-      const reviewCaseId = upload?.reviewCaseId || null;
-      const moderationExampleId = `${reviewCaseId || uploadId}_uploaderCorrection`;
-      const nextCorrection = {
-        ...(upload?.correction && typeof upload.correction === 'object' ? upload.correction : {}),
-        suggestedThemes: correctedTaxonomy.themes,
-        suggestedTriggers: correctedTaxonomy.triggers,
-      };
-      if (action === 'acceptCorrection') {
-        nextCorrection.userAcceptedAt = FieldValue.serverTimestamp();
-        nextCorrection.userRejectedAt = null;
-        nextCorrection.requiresModeratorReview = false;
-        nextCorrection.publishBlocked = false;
-        nextCorrection.finalAcceptedThemes = correctedTaxonomy.themes;
-        nextCorrection.finalAcceptedTriggers = correctedTaxonomy.triggers;
-      } else {
-        nextCorrection.userRejectedAt = FieldValue.serverTimestamp();
-        nextCorrection.requiresModeratorReview = true;
-        nextCorrection.publishBlocked = true;
-        nextCorrection.reviewRequestedAt = FieldValue.serverTimestamp();
-      }
-
-      await uploadRef.set({
-        correctedTaxonomy,
-        uploaderCorrectionResponse: action === 'acceptCorrection'
-          ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
-          : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
-        correction: nextCorrection,
-        publicationStatus: action === 'acceptCorrection' ? 'correction_accepted' : 'user_disagreed',
-        reviewStatus: action === 'acceptCorrection' ? 'approved' : 'needs_user_correction',
-        requiresUploaderAcceptance: action === 'acceptCorrection' ? false : true,
-        ...(action === 'acceptCorrection' ? {
-          postDraft: {
-            ...(upload?.postDraft || {}),
-            styles: correctedTaxonomy.themes,
-            makerTags: correctedTaxonomy.triggers,
-            appliedTriggers: correctedTaxonomy.triggers,
-          },
-        } : {}),
-      }, { merge: true });
-
-      const correctionActionName = action === 'acceptCorrection' ? 'acceptCorrection' : 'rejectCorrection';
-      const correctionExamplePayload = buildCommonModerationExample({
-        source: 'userModerationAction',
-        uploadId,
-        reviewCaseId,
-        postId: uploadId,
-        uploaderUid: userId,
-        fingerprints: upload?.fingerprints || null,
-        uploadData: upload || {},
-        reviewData: {},
-        aiResult: upload?.aiResult || {},
-        moderationSignals: upload?.moderationSignals || {},
-        correctionSnapshot: {
-          originalSelectedThemes: Array.isArray(upload?.postDraft?.styles) ? upload.postDraft.styles : [],
-          originalSelectedTriggers: Array.isArray(upload?.postDraft?.makerTags) ? upload.postDraft.makerTags : [],
-          finalAcceptedThemes: action === 'acceptCorrection' ? correctedTaxonomy.themes : [],
-          finalAcceptedTriggers: action === 'acceptCorrection' ? correctedTaxonomy.triggers : [],
-        },
-        decision: null,
-        policyDecisionOutcome: upload?.aiResult?.outcome || null,
-        moderatorDecision: {
-          action: correctionActionName,
-          priorAction: upload?.moderatorDecision?.action || null,
-          reasonCode: upload?.moderatorDecision?.reasonCode || null,
-          correctedTaxonomy,
-        },
-        uploaderCorrectionResponse: action === 'acceptCorrection'
-          ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
-          : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
-        userCorrectionAction: {
-          acceptedCorrection: action === 'acceptCorrection',
-          rejectedCorrection: action === 'rejectCorrection',
-          requestedReview: action === 'rejectCorrection',
-          timestamp: FieldValue.serverTimestamp(),
-        },
-        nowFactory: () => FieldValue.serverTimestamp(),
-      });
-
-      await db.collection('moderationExamples').doc(moderationExampleId).set(correctionExamplePayload, { merge: true });
     }
 
+    let resolvedAuthorProfile = null;
     if (action === 'publishNow' || action === 'repairPublished') {
-      const postDraft = {
+      const initialPostDraft = {
         ...(upload?.postDraft || {}),
         ...(postDraftFromBody && typeof postDraftFromBody === 'object' ? postDraftFromBody : {}),
       };
-      const normalizedTitle = String(postDraft?.title || upload?.title || upload?.caption || '').trim();
-      const normalizedDescription = String(postDraft?.description || postDraft?.caption || upload?.description || upload?.caption || '').trim();
-      const normalizedImageUrl = String(postDraft?.imageUrl || upload?.imageUrl || upload?.imageRef || '').trim();
-      const normalizedStyles = Array.isArray(postDraft?.styles)
-        ? postDraft.styles.filter(Boolean)
-        : Array.isArray(postDraft?.themes)
-          ? postDraft.themes.filter(Boolean)
-          : [];
-      const normalizedMakerTags = Array.isArray(postDraft?.makerTags)
-        ? postDraft.makerTags.filter(Boolean)
-        : Array.isArray(upload?.makerTags)
-          ? upload.makerTags.filter(Boolean)
-          : [];
-      const normalizedAppliedTriggers = Array.isArray(postDraft?.appliedTriggers)
-        ? postDraft.appliedTriggers.filter(Boolean)
-        : Array.isArray(upload?.appliedTriggers)
-          ? upload.appliedTriggers.filter(Boolean)
-          : [];
-      const normalizedCredits = Array.isArray(postDraft?.credits)
-        ? postDraft.credits.filter(Boolean)
-        : Array.isArray(postDraft?.contributors)
-          ? postDraft.contributors.filter(Boolean)
-          : [];
-      const requestedAuthorProfileId = postDraft?.authorProfileId || upload?.postDraft?.authorProfileId || upload?.authorProfileId || userId;
-      const resolvedAuthorProfile = await resolveAuthorProfileForUid(userId, requestedAuthorProfileId);
-      const normalizedAuthorName = String(postDraft?.authorName || resolvedAuthorProfile.displayName || upload?.authorName || '').trim();
-      const normalizedAuthorRole = String(postDraft?.authorRole || upload?.authorRole || '').trim();
-      const normalizedIsChallenge = Boolean(postDraft?.isChallenge || upload?.isChallenge);
+      const requestedAuthorProfileId = initialPostDraft?.authorProfileId || upload?.authorProfileId || userId;
+      resolvedAuthorProfile = await resolveAuthorProfileForUid(userId, requestedAuthorProfileId);
+    }
 
-      if (!normalizedImageUrl) {
-        res.status(400).json({ error: 'Cannot publish upload without imageUrl' });
-        return;
-      }
+    await runUserModerationActionMutation({
+      db,
+      uid: userId,
+      isKnownCodexDevActorUid,
+      mutate: async (transaction) => {
+        const [latestUploadSnap, latestMessageSnap, latestUserSnap, latestPostSnap] = await Promise.all([
+          transaction.get(uploadRef),
+          messageRef ? transaction.get(messageRef) : Promise.resolve(null),
+          postRef ? transaction.get(userRef) : Promise.resolve(null),
+          postRef ? transaction.get(postRef) : Promise.resolve(null),
+        ]);
 
-      await db.runTransaction(async (transaction) => {
-        const postRef = db.collection('posts').doc(uploadId);
-        const userRef = db.collection('users').doc(userId);
-        const latestUserSnap = await transaction.get(userRef);
-        const publishDecision = getUserPublicPostPublishDecision(latestUserSnap.exists ? latestUserSnap.data() : null);
-        if (!publishDecision.allowed) {
-          const error = new Error(publishDecision.code);
-          error.status = 403;
-          error.code = publishDecision.code;
-          throw error;
-        }
-        const latestUploadSnap = await transaction.get(uploadRef);
         if (!latestUploadSnap.exists) {
           const error = new Error('Upload not found');
           error.status = 404;
           throw error;
         }
+        if (messageRef && !latestMessageSnap?.exists) {
+          const error = new Error('Message not found');
+          error.status = 404;
+          throw error;
+        }
+
         const latestUpload = latestUploadSnap.data() || {};
+        const latestMessage = latestMessageSnap?.data?.() || null;
         const latestOwnerId = latestUpload?.userId || latestUpload?.ownerUid || latestUpload?.userUid || null;
         if (latestOwnerId !== userId) {
           const error = new Error('Not authorized for this action');
           error.status = 403;
           throw error;
         }
-        const latestApprovedOrLegacyPublished = canPublishUpload(latestUpload);
-        if (!latestApprovedOrLegacyPublished) {
+        if (messageRef && latestMessage?.metadata?.uploadId !== uploadId) {
+          const error = new Error('Not authorized for this action');
+          error.status = 403;
+          throw error;
+        }
+
+        const latestPublicationStatus = String(latestUpload?.publicationStatus || latestUpload?.publishStatus || '').trim();
+        if ((action === 'publishNow' || action === 'repairPublished') && !canPublishUpload(latestUpload)) {
           const error = new Error('Upload is not approved');
           error.status = 409;
           throw error;
         }
-
-        const postSnap = await transaction.get(postRef);
-        if (!postSnap.exists) {
-          transaction.create(postRef, {
-            title: normalizedTitle || 'Untitled',
-            description: normalizedDescription || '',
-            imageUrl: normalizedImageUrl,
-            authorId: userId,
-            authorUid: userId,
-            authorProfileId: resolvedAuthorProfile.profileId,
-            authorOwnerUid: userId,
-            authorName: normalizedAuthorName || null,
-            authorRole: normalizedAuthorRole || null,
-            styles: normalizedStyles,
-            makerTags: normalizedMakerTags,
-            appliedTriggers: normalizedAppliedTriggers,
-            triggers: normalizedAppliedTriggers,
-            outcome: latestUpload?.outcome || 'allowed',
-            forbiddenReasons: Array.isArray(latestUpload?.forbiddenReasons) ? latestUpload.forbiddenReasons : [],
-            reviewCaseId: latestUpload?.reviewCaseId || null,
-            credits: normalizedCredits,
-            likes: 0,
-            isChallenge: normalizedIsChallenge,
-            ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
-            createdAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
+        if (action === 'saveDraft' && latestUpload?.reviewStatus !== 'approved') {
+          const error = new Error('Upload is not approved');
+          error.status = 409;
+          throw error;
+        }
+        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && latestUpload?.reviewStatus !== 'approved') {
+          const error = new Error('Upload is not approved');
+          error.status = 409;
+          throw error;
+        }
+        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && latestPublicationStatus === 'published') {
+          const error = new Error('Upload is already published');
+          error.status = 409;
+          throw error;
         }
 
-        transaction.set(
-          uploadRef,
-          {
-            ...(isCodexDevUid(userId) ? { testActor: codexDevActor } : {}),
+        let correctionPlan = null;
+        if (action === 'acceptCorrection' || action === 'rejectCorrection') {
+          const validation = validateUploaderCorrectionAction({ action, upload: latestUpload, userId });
+          if (!validation.ok) {
+            const error = new Error(validation.error);
+            error.status = validation.status || 400;
+            throw error;
+          }
+          const { correctedTaxonomy } = validation;
+          const reviewCaseId = latestUpload?.reviewCaseId || null;
+          const nextCorrection = {
+            ...(latestUpload?.correction && typeof latestUpload.correction === 'object' ? latestUpload.correction : {}),
+            suggestedThemes: correctedTaxonomy.themes,
+            suggestedTriggers: correctedTaxonomy.triggers,
+          };
+          if (action === 'acceptCorrection') {
+            nextCorrection.userAcceptedAt = FieldValue.serverTimestamp();
+            nextCorrection.userRejectedAt = null;
+            nextCorrection.requiresModeratorReview = false;
+            nextCorrection.publishBlocked = false;
+            nextCorrection.finalAcceptedThemes = correctedTaxonomy.themes;
+            nextCorrection.finalAcceptedTriggers = correctedTaxonomy.triggers;
+          } else {
+            nextCorrection.userRejectedAt = FieldValue.serverTimestamp();
+            nextCorrection.requiresModeratorReview = true;
+            nextCorrection.publishBlocked = true;
+            nextCorrection.reviewRequestedAt = FieldValue.serverTimestamp();
+          }
+          const correctionActionName = action === 'acceptCorrection' ? 'acceptCorrection' : 'rejectCorrection';
+          const moderationExampleId = (reviewCaseId || uploadId) + '_uploaderCorrection';
+          correctionPlan = {
+            correctedTaxonomy,
+            nextCorrection,
+            moderationExampleRef: db.collection('moderationExamples').doc(moderationExampleId),
+            moderationExamplePayload: buildCommonModerationExample({
+              source: 'userModerationAction',
+              uploadId,
+              reviewCaseId,
+              postId: uploadId,
+              uploaderUid: userId,
+              fingerprints: latestUpload?.fingerprints || null,
+              uploadData: latestUpload,
+              reviewData: {},
+              aiResult: latestUpload?.aiResult || {},
+              moderationSignals: latestUpload?.moderationSignals || {},
+              correctionSnapshot: {
+                originalSelectedThemes: Array.isArray(latestUpload?.postDraft?.styles) ? latestUpload.postDraft.styles : [],
+                originalSelectedTriggers: Array.isArray(latestUpload?.postDraft?.makerTags) ? latestUpload.postDraft.makerTags : [],
+                finalAcceptedThemes: action === 'acceptCorrection' ? correctedTaxonomy.themes : [],
+                finalAcceptedTriggers: action === 'acceptCorrection' ? correctedTaxonomy.triggers : [],
+              },
+              decision: null,
+              policyDecisionOutcome: latestUpload?.aiResult?.outcome || null,
+              moderatorDecision: {
+                action: correctionActionName,
+                priorAction: latestUpload?.moderatorDecision?.action || null,
+                reasonCode: latestUpload?.moderatorDecision?.reasonCode || null,
+                correctedTaxonomy,
+              },
+              uploaderCorrectionResponse: action === 'acceptCorrection'
+                ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
+                : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
+              userCorrectionAction: {
+                acceptedCorrection: action === 'acceptCorrection',
+                rejectedCorrection: action === 'rejectCorrection',
+                requestedReview: action === 'rejectCorrection',
+                timestamp: FieldValue.serverTimestamp(),
+              },
+              nowFactory: () => FieldValue.serverTimestamp(),
+            }),
+          };
+        }
+
+        let publicationPlan = null;
+        if (postRef) {
+          const publishDecision = getUserPublicPostPublishDecision(latestUserSnap?.exists ? latestUserSnap.data() : null);
+          if (!publishDecision.allowed) {
+            const error = new Error(publishDecision.code);
+            error.status = 403;
+            error.code = publishDecision.code;
+            throw error;
+          }
+          const postDraft = {
+            ...(latestUpload?.postDraft || {}),
+            ...(postDraftFromBody && typeof postDraftFromBody === 'object' ? postDraftFromBody : {}),
+          };
+          const normalizedImageUrl = String(postDraft?.imageUrl || latestUpload?.imageUrl || latestUpload?.imageRef || '').trim();
+          if (!normalizedImageUrl) {
+            const error = new Error('Cannot publish upload without imageUrl');
+            error.status = 400;
+            throw error;
+          }
+          publicationPlan = {
+            title: String(postDraft?.title || latestUpload?.title || latestUpload?.caption || '').trim(),
+            description: String(postDraft?.description || postDraft?.caption || latestUpload?.description || latestUpload?.caption || '').trim(),
+            imageUrl: normalizedImageUrl,
+            styles: Array.isArray(postDraft?.styles)
+              ? postDraft.styles.filter(Boolean)
+              : Array.isArray(postDraft?.themes) ? postDraft.themes.filter(Boolean) : [],
+            makerTags: Array.isArray(postDraft?.makerTags)
+              ? postDraft.makerTags.filter(Boolean)
+              : Array.isArray(latestUpload?.makerTags) ? latestUpload.makerTags.filter(Boolean) : [],
+            appliedTriggers: Array.isArray(postDraft?.appliedTriggers)
+              ? postDraft.appliedTriggers.filter(Boolean)
+              : Array.isArray(latestUpload?.appliedTriggers) ? latestUpload.appliedTriggers.filter(Boolean) : [],
+            credits: Array.isArray(postDraft?.credits)
+              ? postDraft.credits.filter(Boolean)
+              : Array.isArray(postDraft?.contributors) ? postDraft.contributors.filter(Boolean) : [],
+            authorName: String(postDraft?.authorName || resolvedAuthorProfile?.displayName || latestUpload?.authorName || '').trim(),
+            authorRole: String(postDraft?.authorRole || latestUpload?.authorRole || '').trim(),
+            isChallenge: Boolean(postDraft?.isChallenge || latestUpload?.isChallenge),
+          };
+        }
+
+        // No transaction reads are allowed below this line.
+        if (action === 'markPublicationPromptOpened') {
+          transaction.set(uploadRef, {
+            publicationPromptOpenedAt: FieldValue.serverTimestamp(),
+            publicationPromptOpenedByUid: userId,
+            publicationPromptDismissedAt: FieldValue.serverTimestamp(),
+            publicationPromptDismissedByUid: userId,
+          }, { merge: true });
+          if (messageRef) transaction.set(messageRef, { unread: false }, { merge: true });
+        }
+
+        if (action === 'discardApprovedUpload') {
+          transaction.set(uploadRef, {
+            publicationStatus: 'discarded',
+            publishStatus: 'discarded',
+            discardedAt: FieldValue.serverTimestamp(),
+            discardedByUid: userId,
+            publicationPromptDismissedAt: FieldValue.serverTimestamp(),
+            publicationPromptDismissedByUid: userId,
+          }, { merge: true });
+          const reviewCaseId = latestUpload?.reviewCaseId || null;
+          if (reviewCaseId) {
+            transaction.set(db.collection('reviewCases').doc(reviewCaseId), {
+              userPublicationStatus: 'discarded',
+              userDiscardedAt: FieldValue.serverTimestamp(),
+              userDiscardedByUid: userId,
+            }, { merge: true });
+          }
+          if (messageRef) {
+            transaction.set(messageRef, {
+              unread: false,
+              resolved: true,
+              resolvedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+        }
+
+        if (correctionPlan) {
+          transaction.set(uploadRef, {
+            correctedTaxonomy: correctionPlan.correctedTaxonomy,
+            uploaderCorrectionResponse: action === 'acceptCorrection'
+              ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
+              : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
+            correction: correctionPlan.nextCorrection,
+            publicationStatus: action === 'acceptCorrection' ? 'correction_accepted' : 'user_disagreed',
+            reviewStatus: action === 'acceptCorrection' ? 'approved' : 'needs_user_correction',
+            requiresUploaderAcceptance: action !== 'acceptCorrection',
+            ...(action === 'acceptCorrection' ? {
+              postDraft: {
+                ...(latestUpload?.postDraft || {}),
+                styles: correctionPlan.correctedTaxonomy.themes,
+                makerTags: correctionPlan.correctedTaxonomy.triggers,
+                appliedTriggers: correctionPlan.correctedTaxonomy.triggers,
+              },
+            } : {}),
+          }, { merge: true });
+          transaction.set(correctionPlan.moderationExampleRef, correctionPlan.moderationExamplePayload, { merge: true });
+        }
+
+        if (publicationPlan) {
+          if (!latestPostSnap?.exists) {
+            transaction.create(postRef, {
+              title: publicationPlan.title || 'Untitled',
+              description: publicationPlan.description || '',
+              imageUrl: publicationPlan.imageUrl,
+              authorId: userId,
+              authorUid: userId,
+              authorProfileId: resolvedAuthorProfile.profileId,
+              authorOwnerUid: userId,
+              authorName: publicationPlan.authorName || null,
+              authorRole: publicationPlan.authorRole || null,
+              styles: publicationPlan.styles,
+              makerTags: publicationPlan.makerTags,
+              appliedTriggers: publicationPlan.appliedTriggers,
+              triggers: publicationPlan.appliedTriggers,
+              outcome: latestUpload?.outcome || 'allowed',
+              forbiddenReasons: Array.isArray(latestUpload?.forbiddenReasons) ? latestUpload.forbiddenReasons : [],
+              reviewCaseId: latestUpload?.reviewCaseId || null,
+              credits: publicationPlan.credits,
+              likes: 0,
+              isChallenge: publicationPlan.isChallenge,
+              createdAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          }
+          transaction.set(uploadRef, {
             publicationStatus: 'published',
             publishedAt: FieldValue.serverTimestamp(),
             postId: uploadId,
-          },
-          { merge: true }
-        );
-      });
+          }, { merge: true });
+          if (messageRef) {
+            transaction.set(messageRef, {
+              unread: false,
+              resolved: true,
+              resolvedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+        }
 
-      if (messageRef) {
-        await messageRef.set(
-          {
+        if (action === 'saveDraft') {
+          transaction.set(draftRef, {
+            uploadId,
+            storagePath: latestUpload?.storagePath || null,
+            imageRef: latestUpload?.imageRef || null,
+            caption: latestUpload?.caption || null,
+            tags: latestUpload?.tags || null,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            status: 'draft',
+          });
+          transaction.set(uploadRef, { publicationStatus: 'draft' }, { merge: true });
+          transaction.set(messageRef, {
             unread: false,
             resolved: true,
             resolvedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
-    }
+          }, { merge: true });
+        }
 
-    if (action === 'saveDraft') {
-      const draftRef = db.collection('users').doc(userId).collection('drafts').doc();
-      await Promise.all([
-        draftRef.set({
-          uploadId,
-          storagePath: upload?.storagePath || null,
-          imageRef: upload?.imageRef || null,
-          caption: upload?.caption || null,
-          tags: upload?.tags || null,
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-          status: 'draft',
-        }),
-        uploadRef.set({ publicationStatus: 'draft' }, { merge: true }),
-        messageRef.set(
-          {
-            unread: false,
-            resolved: true,
-            resolvedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        ),
-      ]);
-    }
+        if (action === 'dismiss') {
+          transaction.set(messageRef, { unread: false }, { merge: true });
+        }
 
-    if (action === 'dismiss') {
-      await messageRef.set({ unread: false }, { merge: true });
-    }
-
-    await threadRef.set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(threadRef, { updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      },
+    });
 
     res.status(200).json({ ok: true });
   } catch (error) {
@@ -4036,6 +4315,12 @@ export const createTemporaryContributor = onCall({ region: 'europe-west4' }, asy
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
+    throw new HttpsError('permission-denied', 'Codex Dev contributors are isolated');
+  }
+  if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid })) {
+    throw new HttpsError('permission-denied', 'Codex Dev contributors are isolated');
+  }
 
   const displayName = toContributorString(request.data?.displayName).replace(/\s+/g, ' ').slice(0, 80);
   if (!displayName) {
@@ -4065,6 +4350,9 @@ export const createTemporaryContributor = onCall({ region: 'europe-west4' }, asy
   }));
 
   await db.runTransaction(async (transaction) => {
+    if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid, transaction })) {
+      throw new HttpsError('permission-denied', 'Codex Dev contributors are isolated');
+    }
     for (const alias of aliasRefs) {
       const existing = await transaction.get(alias.ref);
       if (existing.exists) {
@@ -4120,6 +4408,12 @@ export const createClaimInvite = onCall({ region: 'europe-west4' }, async (reque
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) {
+    throw new HttpsError('permission-denied', 'Codex Dev claim invites are isolated');
+  }
+  if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid })) {
+    throw new HttpsError('permission-denied', 'Codex Dev claim invites are isolated');
+  }
   const contributorId = request.data?.contributorId || null;
   const postId = request.data?.postId || null;
   if (!contributorId) {
@@ -4135,22 +4429,17 @@ export const createClaimInvite = onCall({ region: 'europe-west4' }, async (reque
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + claimInviteExpiryMs));
   const rateRef = db.collection('claimInviteRateLimits').doc(request.auth.uid);
 
-  await db.runTransaction(async (transaction) => {
-    const rateSnap = await transaction.get(rateRef);
-    const todayKey = getDateKey();
-    const rateData = rateSnap.exists ? rateSnap.data() : null;
-    const currentCount = rateData?.date === todayKey ? Number(rateData?.count || 0) : 0;
-    if (currentCount >= claimInviteRateLimitPerDay) {
-      throw new HttpsError('resource-exhausted', 'Daily invite limit reached');
-    }
-    transaction.set(rateRef, {
-      date: todayKey,
-      count: currentCount + 1,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-
-    const inviteRef = db.collection('claimInvites').doc(token);
-    transaction.set(inviteRef, {
+  const inviteRef = db.collection('claimInvites').doc(token);
+  await createClaimInviteAtomically({
+    db,
+    uid: request.auth.uid,
+    rateRef,
+    inviteRef,
+    todayKey: getDateKey(),
+    rateLimitPerDay: claimInviteRateLimitPerDay,
+    serverTimestamp: FieldValue.serverTimestamp,
+    createError: (code, message) => new HttpsError(code, message),
+    inviteData: {
       contributorId,
       postId,
       createdByUid: request.auth.uid,
@@ -4158,7 +4447,7 @@ export const createClaimInvite = onCall({ region: 'europe-west4' }, async (reque
       expiresAt,
       usedAt: null,
       usedByUid: null,
-    });
+    },
   });
 
   return { path: `/claim/${token}` };
@@ -4245,6 +4534,11 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)
+      || await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const contributorId = body?.contributorId || null;
     const inviteToken = body?.inviteToken || null;
@@ -4278,6 +4572,11 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
     const inviteRef = inviteToken ? db.collection('claimInvites').doc(inviteToken) : null;
     let requestId = null;
     await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev contributor claims are isolated.');
+        error.status = 403;
+        throw error;
+      }
       if (inviteRef) {
         const inviteSnap = await transaction.get(inviteRef);
         if (!inviteSnap.exists) {
@@ -4355,6 +4654,8 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4392,7 +4693,14 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
   const token = crypto.randomBytes(18).toString('hex');
   const tokenHash = hashEmailProofToken(token);
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + emailProofExpiryMs));
-  await requestRef.set({
+  await db.runTransaction(async (transaction) => {
+    const freshRequestSnap = await transaction.get(requestRef);
+    if (!freshRequestSnap.exists) throw new HttpsError('not-found', 'Claim request not found');
+    const freshData = freshRequestSnap.data() || {};
+    if (freshData?.requestedByUid !== request.auth.uid) throw new HttpsError('permission-denied', 'Not allowed to start email proof');
+    if (await isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    if (freshData?.status !== 'pending') throw new HttpsError('failed-precondition', 'Claim request is not pending');
+    transaction.set(requestRef, {
     proofData: {
       email: {
         email,
@@ -4406,7 +4714,8 @@ export const startEmailClaimProof = onCall({ region: 'europe-west4' }, async (re
       emailVerifiedAt: null,
     },
     updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+    }, { merge: true });
+  });
 
   return {
     token,
@@ -4420,6 +4729,8 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4447,7 +4758,14 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
   const token = crypto.randomBytes(18).toString('hex');
   const tokenHash = hashWebsiteProofToken(token);
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + websiteProofExpiryMs));
-  await requestRef.set({
+  await db.runTransaction(async (transaction) => {
+    const freshRequestSnap = await transaction.get(requestRef);
+    if (!freshRequestSnap.exists) throw new HttpsError('not-found', 'Claim request not found');
+    const freshData = freshRequestSnap.data() || {};
+    if (freshData?.requestedByUid !== request.auth.uid) throw new HttpsError('permission-denied', 'Not allowed to start website proof');
+    if (await isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    if (freshData?.status !== 'pending') throw new HttpsError('failed-precondition', 'Claim request is not pending');
+    transaction.set(requestRef, {
     proofData: {
       website: {
         domain: websiteAlias.domain,
@@ -4462,7 +4780,8 @@ export const startWebsiteClaimProof = onCall({ region: 'europe-west4' }, async (
       websiteVerifiedAt: null,
     },
     updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+    }, { merge: true });
+  });
 
   const url = buildWebsiteClaimUrl(websiteAlias.domain);
   return {
@@ -4478,6 +4797,7 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   const token = request.data?.token || null;
   if (!requestId || !token) {
@@ -4490,6 +4810,9 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
     throw new HttpsError('not-found', 'Claim request not found');
   }
   const requestData = requestSnap.data() || {};
+  if (await isKnownCodexDevActorUid({ db, uid: requestData?.requestedByUid })) {
+    throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+  }
   if (requestData?.requestedByUid !== request.auth.uid) {
     throw new HttpsError('permission-denied', 'Not allowed to verify email proof');
   }
@@ -4507,31 +4830,40 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
     : new Date(emailProof.tokenExpiresAt).getTime();
   const now = Date.now();
 
+  const persistEmailProofFailure = async (updates) => db.runTransaction(async (transaction) => {
+    const freshRequestSnap = await transaction.get(requestRef);
+    if (!freshRequestSnap.exists) return false;
+    const freshData = freshRequestSnap.data() || {};
+    if (freshData?.requestedByUid !== request.auth.uid) {
+      throw new HttpsError('permission-denied', 'Not allowed to verify email proof');
+    }
+    if (freshData?.status !== 'pending') return false;
+    const freshEmailProof = freshData?.proofData?.email || null;
+    if (!freshEmailProof?.tokenHash || freshEmailProof.tokenHash !== emailProof.tokenHash) return false;
+    if (await isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })) {
+      return false;
+    }
+    transaction.update(requestRef, updates);
+    return true;
+  });
+
   if (!expiresAtMs || Number.isNaN(expiresAtMs) || now > expiresAtMs) {
-    await requestRef.set({
-      proofData: {
-        email: {
-          lastCheckedAt: FieldValue.serverTimestamp(),
-          lastCheckResult: 'expired',
-        },
-        emailVerified: false,
-      },
+    await persistEmailProofFailure({
+      'proofData.email.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.email.lastCheckResult': 'expired',
+      'proofData.emailVerified': false,
       updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    });
     throw new HttpsError('failed-precondition', 'Email token is verlopen.');
   }
 
   if (tokenHash !== emailProof.tokenHash) {
-    await requestRef.set({
-      proofData: {
-        email: {
-          lastCheckedAt: FieldValue.serverTimestamp(),
-          lastCheckResult: 'invalid',
-        },
-        emailVerified: false,
-      },
+    await persistEmailProofFailure({
+      'proofData.email.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.email.lastCheckResult': 'invalid',
+      'proofData.emailVerified': false,
       updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    });
     throw new HttpsError('failed-precondition', 'Email token is ongeldig.');
   }
 
@@ -4540,6 +4872,9 @@ export const verifyEmailClaimProof = onCall({ region: 'europe-west4' }, async (r
     const freshSnap = await transaction.get(requestRef);
     if (!freshSnap.exists) return;
     const data = freshSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+      throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    }
     const updates = {
       'proofData.emailVerified': true,
       'proofData.emailVerifiedAt': FieldValue.serverTimestamp(),
@@ -4604,6 +4939,7 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
   if (!request.auth?.uid) {
     throw new HttpsError('unauthenticated', 'Authentication required');
   }
+  if (isCodexDevForProductionDeny({ uid: request.auth.uid, ...(request.auth.token || {}) })) throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
   const requestId = request.data?.requestId || null;
   if (!requestId) {
     throw new HttpsError('invalid-argument', 'requestId is required');
@@ -4617,6 +4953,9 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
       throw new HttpsError('not-found', 'Claim request not found');
     }
     const data = requestSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+      throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    }
     if (data?.requestedByUid !== request.auth.uid) {
       throw new HttpsError('permission-denied', 'Not allowed to verify website proof');
     }
@@ -4652,6 +4991,21 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
     throw new HttpsError('failed-precondition', 'Website proof is not initialized');
   }
 
+  const persistWebsiteProofFailure = async (updates) => db.runTransaction(async (transaction) => {
+    const freshRequestSnap = await transaction.get(requestRef);
+    if (!freshRequestSnap.exists) return false;
+    const freshData = freshRequestSnap.data() || {};
+    if (freshData?.requestedByUid !== request.auth.uid) {
+      throw new HttpsError('permission-denied', 'Not allowed to verify website proof');
+    }
+    if (freshData?.status !== 'pending') return false;
+    if (await isKnownCodexDevActorUid({ db, uid: freshData.requestedByUid, transaction })) {
+      return false;
+    }
+    transaction.update(requestRef, updates);
+    return true;
+  });
+
   const url = buildWebsiteClaimUrl(proofPayload.domain);
   let responseBody = '';
   try {
@@ -4663,16 +5017,12 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
       maxRedirects: websiteProofMaxRedirects,
     });
   } catch (error) {
-    await requestRef.set({
-      proofData: {
-        website: {
-          lastCheckedAt: FieldValue.serverTimestamp(),
-          lastCheckResult: 'fetch_failed',
-          lastCheckMessage: error?.message || 'Fetch failed',
-        },
-      },
+    await persistWebsiteProofFailure({
+      'proofData.website.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.website.lastCheckResult': 'fetch_failed',
+      'proofData.website.lastCheckMessage': error?.message || 'Fetch failed',
       updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    });
     throw new HttpsError('failed-precondition', 'Website verificatie mislukt.');
   }
 
@@ -4686,17 +5036,13 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
   });
 
   if (!tokenCheck.ok) {
-    await requestRef.set({
-      proofData: {
-        website: {
-          lastCheckedAt: FieldValue.serverTimestamp(),
-          lastCheckResult: tokenCheck.reason || 'invalid',
-          lastCheckPreview: String(responseBody || '').trim().slice(0, 200),
-        },
-        websiteVerified: false,
-      },
+    await persistWebsiteProofFailure({
+      'proofData.website.lastCheckedAt': FieldValue.serverTimestamp(),
+      'proofData.website.lastCheckResult': tokenCheck.reason || 'invalid',
+      'proofData.website.lastCheckPreview': String(responseBody || '').trim().slice(0, 200),
+      'proofData.websiteVerified': false,
       updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    });
     const errorMessage = tokenCheck.reason === 'expired'
       ? 'Website token is verlopen.'
       : 'Website token niet gevonden.';
@@ -4708,6 +5054,9 @@ export const verifyWebsiteClaimProof = onCall({ region: 'europe-west4' }, async 
     const requestSnap = await transaction.get(requestRef);
     if (!requestSnap.exists) return;
     const data = requestSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+      throw new HttpsError('permission-denied', 'Codex Dev contributor claims are isolated');
+    }
     const updates = {
       'proofData.websiteVerified': true,
       'proofData.websiteVerifiedAt': FieldValue.serverTimestamp(),
@@ -4822,6 +5171,11 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
     const requestedByUid = requestData?.requestedByUid || null;
     const contributorId = primaryOverride || requestData?.contributorId || null;
 
+    if (await isKnownCodexDevActorUid({ db, uid: requestedByUid })) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
+
     if (!requestedByUid || !contributorId) {
       res.status(400).json({ error: 'Claim request missing contributor or requester' });
       return;
@@ -4839,38 +5193,72 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
         res.status(400).json({ error: 'Secondary contributor is required for merge' });
         return;
       }
-      const mergeResult = await mergeContributorsInternal({
-        primaryContributorId: contributorId,
-        secondaryContributorId,
-        moderatorEmail: email,
-        source: 'claimRequest',
-      });
-      await db.collection('users').doc(requestedByUid).set(
-        {
-          contributorId,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-      await requestRef.set(
-        {
-          status: 'approved',
-          statusReason: null,
-          approvedAt: FieldValue.serverTimestamp(),
-          approvedByEmail: email,
+      const mergeFenceToken = crypto.randomUUID();
+      await acquireCodexDevMergeFence({ db, uid: requestedByUid, token: mergeFenceToken });
+      try {
+        const mergeResult = await mergeContributorsInternal({
           primaryContributorId: contributorId,
           secondaryContributorId,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-      res.status(200).json({ ok: true, status: 'approved', merge: mergeResult });
-      return;
+          moderatorEmail: email,
+          source: 'claimRequest',
+          denyActorUid: requestedByUid,
+          mergeFenceToken,
+        });
+        await db.runTransaction(async (transaction) => {
+          const freshRequestSnap = await transaction.get(requestRef);
+          if (!freshRequestSnap.exists) {
+            const error = new Error('Claim request disappeared during contributor merge.');
+            error.status = 409;
+            throw error;
+          }
+          const freshRequestedByUid = freshRequestSnap.data()?.requestedByUid || null;
+          const fenceValidation = await assertMergeActorAllowed({
+            transaction,
+            denyActorUid: freshRequestedByUid,
+            mergeFenceToken,
+          });
+          queueCodexDevMergeFenceRenewal({ transaction, validation: fenceValidation, mutationCommitted: true });
+          transaction.set(db.collection('users').doc(freshRequestedByUid), {
+            contributorId,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+          transaction.set(requestRef, {
+            status: 'approved',
+            statusReason: null,
+            approvedAt: FieldValue.serverTimestamp(),
+            approvedByEmail: email,
+            primaryContributorId: contributorId,
+            secondaryContributorId,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+        });
+        await releaseCodexDevMergeFence({ db, uid: requestedByUid, token: mergeFenceToken });
+        res.status(200).json({ ok: true, status: 'approved', merge: mergeResult });
+        return;
+      } catch (error) {
+        try {
+          await releaseCodexDevMergeFenceIfUnmutated({ db, uid: requestedByUid, token: mergeFenceToken });
+        } catch (releaseError) {
+          logger.error('Failed to inspect merge fence after claim merge failure', {
+            requestId,
+            error: releaseError?.message || String(releaseError),
+          });
+        }
+        throw error;
+      }
     }
 
     await db.runTransaction(async (transaction) => {
+      const freshRequestSnap = await transaction.get(requestRef);
+      if (!freshRequestSnap.exists) return;
+      const freshRequestedByUid = freshRequestSnap.data()?.requestedByUid || null;
+      if (await isKnownCodexDevActorUid({ db, uid: freshRequestedByUid, transaction })) {
+        const error = new Error('Codex Dev contributor claims are isolated.');
+        error.status = 403;
+        throw error;
+      }
       const contributorRef = db.collection('contributors').doc(contributorId);
-      const claimantRef = db.collection('users').doc(requestedByUid);
+      const claimantRef = db.collection('users').doc(freshRequestedByUid);
       const contributorSnap = await transaction.get(contributorRef);
       if (!contributorSnap.exists) {
         const error = new Error('Contributor not found');
@@ -4882,7 +5270,7 @@ export const moderatorApproveClaimRequest = onRequest({ cors: true, region: 'eur
         updatedAt: FieldValue.serverTimestamp(),
       });
       transaction.update(contributorRef, {
-        claimedByUid: requestedByUid,
+        claimedByUid: freshRequestedByUid,
         claimedAt: FieldValue.serverTimestamp(),
         status: 'claimed',
         updatedAt: FieldValue.serverTimestamp(),
@@ -4910,6 +5298,14 @@ export const getVouchRequests = onRequest({ cors: true, region: 'europe-west4' }
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
     const snapshot = await db.collection('claimRequests')
       .where('status', '==', 'pending')
       .where('eligibleVoterUids', 'array-contains', decoded.uid)
@@ -4989,6 +5385,7 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
     const [
       postsByAuthorIdSnap,
       postsByAuthorUidSnap,
+      codexDevPostsSnap,
       uploadsSnap,
       commentsSnap,
       likesSnap,
@@ -4996,6 +5393,7 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
     ] = await Promise.all([
       db.collection('posts').where('authorId', '==', targetUid).get(),
       db.collection('posts').where('authorUid', '==', targetUid).get(),
+      db.collection('codexDevPosts').where('authorId', '==', targetUid).get(),
       db.collection('uploads').where('userId', '==', targetUid).get(),
       db.collectionGroup('comments').where('authorId', '==', targetUid).get(),
       db.collectionGroup('likes').get(),
@@ -5043,6 +5441,7 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
         comments: commentsRefs.length,
         follows: followsRefs.length,
         posts: postsRefs.length,
+        codexDevPosts: codexDevPostsSnap.size,
         reviewCases: reviewCaseRefs.length,
         uploads: uploadsRefs.length,
       },
@@ -5051,13 +5450,14 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
         comments: commentsRefs.slice(0, 20).map((ref) => ref.path),
         follows: followsRefs.slice(0, 20).map((ref) => ref.path),
         posts: postsRefs.slice(0, 20).map((ref) => ref.path),
+        codexDevPosts: codexDevPostsSnap.docs.slice(0, 20).map((docSnap) => docSnap.ref.path),
         reviewCases: reviewCaseRefs.slice(0, 20).map((ref) => ref.path),
         uploads: uploadsRefs.slice(0, 20).map((ref) => ref.path),
       },
       guard: {
         moderatorEmail: decoded?.email || null,
       },
-      order: ['likes', 'comments', 'follows', 'posts', 'reviewCases', 'uploads'],
+      order: ['likes', 'comments', 'follows', 'posts', 'codexDevPosts', 'reviewCases', 'uploads'],
     };
 
     if (dryRun) {
@@ -5083,6 +5483,10 @@ export const cleanupCodexTestData = onRequest({ cors: true, region: 'europe-west
     const postResult = await deleteInBatches(postsRefs);
     deletedCounts.posts = postResult.deleted;
     failures.push(...postResult.failed);
+
+    const codexDevPostResult = await cleanupCodexDevPostTrees({ db, postDocs: codexDevPostsSnap.docs, dryRun });
+    deletedCounts.codexDevPosts = codexDevPostResult.deleted;
+    failures.push(...codexDevPostResult.failed);
 
     const reviewCaseResult = await deleteInBatches(reviewCaseRefs);
     deletedCounts.reviewCases = reviewCaseResult.deleted;
@@ -5111,6 +5515,14 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
   }
   try {
     const decoded = await verifyToken(req);
+    if (isCodexDevForProductionDeny(decoded)) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
+    if (await isKnownCodexDevActorUid({ db, uid: decoded.uid })) {
+      res.status(403).json({ error: 'Codex Dev contributor claims are isolated.' });
+      return;
+    }
     const body = parseJsonBody(req);
     const requestId = body?.requestId || null;
     const vote = claimVoteOptions.includes(body?.vote) ? body.vote : null;
@@ -5124,6 +5536,11 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
     let responsePayload = { ok: true };
 
     await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev contributor claims are isolated.');
+        error.status = 403;
+        throw error;
+      }
       const requestSnap = await transaction.get(requestRef);
       if (!requestSnap.exists) {
         const error = new Error('Claim request not found');
@@ -5131,6 +5548,11 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
         throw error;
       }
       const data = requestSnap.data();
+      if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+        const error = new Error('Codex Dev contributor claims are isolated.');
+        error.status = 403;
+        throw error;
+      }
       if (!claimStatuses.includes(data?.status)) {
         const error = new Error('Invalid claim request status');
         error.status = 400;
@@ -5307,6 +5729,10 @@ export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-we
   }
 
   const requestData = requestSnap.data() || {};
+  if (await isKnownCodexDevActorUid({ db, uid: requestData?.requestedByUid })) {
+    logger.warn('Ignoring Codex Dev claim proof upload', { requestId });
+    return;
+  }
   const claimCode = requestData?.claimCode ? String(requestData.claimCode) : null;
   const claimCodeExpiresAt = requestData?.claimCodeExpiresAt instanceof Timestamp
     ? requestData.claimCodeExpiresAt
@@ -5343,29 +5769,32 @@ export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-we
   const isWithinExpiry = Boolean(claimCodeExpiresAt && claimCodeExpiresAt.toMillis() >= Date.now());
   const screenshotVerified = Boolean(codeMatch && handleMatch && isWithinExpiry);
 
-  await requestRef.set({
-    proofData: {
-      screenshotVerified,
-      screenshotVerifiedAt: FieldValue.serverTimestamp(),
-      screenshotStoragePath: name,
-      screenshotClaimCodeMatched: codeMatch,
-      screenshotHandleMatched: handleMatch,
-      screenshotHandleChecked: handleChecked,
-      screenshotExpired: !isWithinExpiry,
-      screenshotTextPreview: extractedText.slice(0, 300),
-    },
-    updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+  await db.runTransaction(async (transaction) => {
+    const freshSnap = await transaction.get(requestRef);
+    if (!freshSnap.exists) return;
+    const data = freshSnap.data() || {};
+    if (await isKnownCodexDevActorUid({ db, uid: data?.requestedByUid, transaction })) {
+      logger.warn('Ignoring newly registered Codex Dev claim proof upload', { requestId });
+      return;
+    }
+    transaction.set(requestRef, {
+      proofData: {
+        screenshotVerified,
+        screenshotVerifiedAt: FieldValue.serverTimestamp(),
+        screenshotStoragePath: name,
+        screenshotClaimCodeMatched: codeMatch,
+        screenshotHandleMatched: handleMatch,
+        screenshotHandleChecked: handleChecked,
+        screenshotExpired: !isWithinExpiry,
+        screenshotTextPreview: extractedText.slice(0, 300),
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
 
-  const shouldAutoResolve = requestData?.status === 'pending' && Number(requestData?.yesCount || 0) >= 1;
-  if (shouldAutoResolve) {
-    const mode = requestData?.mode === 'merge' ? 'merge' : 'link';
-    if (screenshotVerified && mode === 'link' && Number(requestData?.noCount || 0) < 1) {
-      await db.runTransaction(async (transaction) => {
-        const freshSnap = await transaction.get(requestRef);
-        if (!freshSnap.exists) return;
-        const data = freshSnap.data() || {};
-        if (data?.status !== 'pending') return;
+    const shouldAutoResolve = data?.status === 'pending' && Number(data?.yesCount || 0) >= 1;
+    if (!shouldAutoResolve) return;
+    const mode = data?.mode === 'merge' ? 'merge' : 'link';
+    if (screenshotVerified && mode === 'link' && Number(data?.noCount || 0) < 1) {
         const contributorIdInner = data?.contributorId || null;
         const requestedByUid = data?.requestedByUid || null;
         if (!contributorIdInner || !requestedByUid) return;
@@ -5387,15 +5816,14 @@ export const verifyClaimProofScreenshot = onObjectFinalized({ region: 'europe-we
           approvedAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
-      });
     } else {
-      await requestRef.set({
+      transaction.set(requestRef, {
         status: 'needsModeration',
         statusReason: screenshotVerified ? 'manual review required' : 'screenshot required',
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
     }
-  }
+  });
 
   try {
     const retentionDate = new Date(Date.now() + claimProofRetentionMs);

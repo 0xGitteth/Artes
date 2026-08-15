@@ -26,7 +26,7 @@ const createFakeDb = (entries = []) => {
   const docs = new Map(entries.map(([path, data]) => [path, clone(data)]));
   const refs = new Map();
   const ref = (path) => {
-    if (!refs.has(path)) refs.set(path, { path });
+    if (!refs.has(path)) refs.set(path, { path, get: async () => ({ exists: docs.has(path), data: () => clone(docs.get(path)) }) });
     return refs.get(path);
   };
   let transactionCalls = 0;
@@ -100,6 +100,67 @@ assert.equal(validCreateDb.get('publicUsers/fan').fanOfCount, 3);
 assert.equal(validCreateDb.get('publicUsers/target').fansCount, 5);
 assert.equal(validCreateDb.get(relationPath).countersApplied, true);
 assert.equal('ageVerified' in validCreateDb.get('users/fan'), false, 'legacy step 5 needs no age gate');
+
+const codexFollowingPath = 'users/codex-dev-user/following/target';
+const codexFollowingDb = createFakeDb([
+  ['publicUsers/target', { onboardingComplete: true, fansCount: 4 }],
+  [codexFollowingPath, { targetUid: 'target', countersApplied: true }],
+]);
+const codexFollowingResult = await applyFollowingCreatedCounters({
+  db: codexFollowingDb,
+  relationRef: codexFollowingDb.ref(codexFollowingPath),
+  uid: 'codex-dev-user',
+  targetUid: 'target',
+  fieldValue,
+});
+assert.equal(codexFollowingResult.repairOnDelete, true);
+assert.equal(codexFollowingDb.get('publicUsers/target').fansCount, 4);
+assert.equal(codexFollowingDb.has(codexFollowingPath), false);
+const codexDeleteRepair = await applyFollowingDeletedCounters({ db: codexFollowingDb, relationData: { countersApplied: true }, uid: 'codex-dev-user', targetUid: 'target', fieldValue });
+assert.equal(codexDeleteRepair.repaired, 'fansCount');
+assert.equal(codexFollowingDb.get('publicUsers/target').fansCount, 3);
+assert.equal((await applyFollowingCreatedCounters({
+  db: codexFollowingDb,
+  relationRef: codexFollowingDb.ref(codexFollowingPath),
+  uid: 'codex-dev-user',
+  targetUid: 'target',
+  fieldValue,
+})).status, 'missing-relation', 'repeated cleanup cannot decrement twice');
+assert.equal(codexFollowingDb.get('publicUsers/target').fansCount, 3);
+
+const ordinaryFollowingCodexPath = 'users/fan/following/codex-dev-user';
+const ordinaryFollowingCodexDb = createFakeDb([
+  ['publicUsers/fan', { onboardingComplete: true, fanOfCount: 2 }],
+  [ordinaryFollowingCodexPath, { targetUid: 'codex-dev-user', countersApplied: true }],
+]);
+const ordinaryFollowingCodexResult = await applyFollowingCreatedCounters({
+  db: ordinaryFollowingCodexDb,
+  relationRef: ordinaryFollowingCodexDb.ref(ordinaryFollowingCodexPath),
+  uid: 'fan',
+  targetUid: 'codex-dev-user',
+  fieldValue,
+});
+assert.equal(ordinaryFollowingCodexResult.repairOnDelete, true);
+const ordinaryDeleteRepair = await applyFollowingDeletedCounters({ db: ordinaryFollowingCodexDb, relationData: { countersApplied: true }, uid: 'fan', targetUid: 'codex-dev-user', fieldValue });
+assert.equal(ordinaryDeleteRepair.repaired, 'fanOfCount');
+assert.equal(ordinaryFollowingCodexDb.get('publicUsers/fan').fanOfCount, 1);
+assert.equal(ordinaryFollowingCodexDb.has('publicUsers/codex-dev-user'), false);
+assert.equal((await applyFollowingDeletedCounters({ db: ordinaryFollowingCodexDb, relationData: { countersApplied: true }, uid: 'fan', targetUid: 'codex-dev-user', fieldValue })).status, 'already-repaired-codex-relation');
+assert.equal(ordinaryFollowingCodexDb.get('publicUsers/fan').fanOfCount, 1);
+
+const retiredCodexDb = createFakeDb([
+  ['publicUsers/target', { fansCount: 3 }],
+  ['codexDevCounterRepairs/retired-codex__target', { repaired: 'fansCount' }],
+]);
+assert.equal((await applyFollowingDeletedCounters({ db: retiredCodexDb, relationData: { countersApplied: true }, uid: 'retired-codex', targetUid: 'target', fieldValue })).status, 'already-repaired-codex-relation');
+assert.equal(retiredCodexDb.get('publicUsers/target').fansCount, 3, 'retired actor trigger cannot decrement after reconciliation marker');
+
+const unappliedCodexDb = createFakeDb([
+  ['publicUsers/target', { onboardingComplete: true, fansCount: 4 }],
+  [codexFollowingPath, { targetUid: 'target', countersApplied: false }],
+]);
+await applyFollowingCreatedCounters({ db: unappliedCodexDb, relationRef: unappliedCodexDb.ref(codexFollowingPath), uid: 'codex-dev-user', targetUid: 'target', fieldValue });
+assert.equal(unappliedCodexDb.get('publicUsers/target').fansCount, 4);
 
 const unavailableCases = [
   ['incomplete fan', (db) => db.put('users/fan', { onboardingStep: 4, ageVerified: true, isAdult: true })],

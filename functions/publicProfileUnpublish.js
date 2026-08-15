@@ -1,6 +1,7 @@
 import {
   isAvailablePersonalPublicProfile,
 } from './publicProfileAvailability.js';
+import { isKnownCodexDevActorUid } from './codexDevActorRegistry.js';
 
 const normalizeStatus = (value) => String(value || '').trim().toLowerCase();
 
@@ -22,6 +23,11 @@ export const resetPersonalOnboardingAtomically = async ({ db, uid, onboardingSte
   const publicRef = db.collection('publicUsers').doc(uid);
 
   return db.runTransaction(async (transaction) => {
+    if (await isKnownCodexDevActorUid({ db, uid, transaction })) {
+      const error = new Error('Codex Dev identity cannot be reset.');
+      error.status = 403;
+      throw error;
+    }
     const privateSnap = await transaction.get(privateRef);
     if (!privateSnap.exists) return { status: 'missing-private-profile' };
 

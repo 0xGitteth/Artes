@@ -164,3 +164,33 @@ test('ensureSupportThread owns a lifecycle fence for all production writes', asy
   assert.match(source, /acquireCodexDevLifecycleFence\(\{[\s\S]*?operation: 'ensureSupportThread'/);
   assert.match(source, /try \{[\s\S]*?threadRef\.set[\s\S]*?indexRef\.set[\s\S]*?finally \{[\s\S]*?releaseCodexDevLifecycleFence/);
 });
+
+
+test('lifecycle fence contention exposes operation metadata for safe same-operation retry', async () => {
+  const { db } = createMemoryDb();
+  const nowMs = Date.now();
+  await acquireCodexDevLifecycleFence({
+    db, uid: 'concurrent-support', token: 'first', operation: 'ensureSupportThread', nowMs,
+  });
+  await assert.rejects(acquireCodexDevLifecycleFence({
+    db, uid: 'concurrent-support', token: 'second', operation: 'ensureSupportThread', nowMs: nowMs + 1,
+  }), (error) => error.code === 'codex-lifecycle-fence-active'
+    && error.operation === 'ensureSupportThread'
+    && error.status === 409
+    && error.retryable === true);
+});
+
+test('support ensure retries only same-operation contention and preserves non-auth error status', async () => {
+  const source = await fs.readFile(new URL('../functions/supportChat.js', import.meta.url), 'utf8');
+  assert.match(source, /sameOperationContention = error\?\.code === 'codex-lifecycle-fence-active'[\s\S]*?error\?\.operation === 'ensureSupportThread'/);
+  assert.match(source, /SUPPORT_FENCE_RETRY_DELAYS_MS\[attempt\]/);
+  assert.match(source, /Number\.isInteger\(e\?\.status\) \? e\.status : 401/);
+});
+
+test('reconcile uses bounded transactions, fresh destructive rechecks, and position-safe moodboard covers', async () => {
+  const source = await fs.readFile(new URL('../functions/scripts/reconcileCodexDevIsolation.js', import.meta.url), 'utf8');
+  assert.match(source, /MOODBOARD_REPAIR_TRANSACTION_ITEM_LIMIT = 400/);
+  assert.match(source, /clearAffiliationsIfStillCodex[\s\S]*?transaction\.get\(ref\)[\s\S]*?buildAffiliationClearPatch\(snapshot\.data\(\)/);
+  assert.match(source, /matchingItems = chunk\.filter[\s\S]*?snapshot\?\.exists && isCodexMoodboardItem/);
+  assert.match(source, /nextCoverImageUrls\.push\(typeof currentCoverImageUrls\[index\] === 'string' \? currentCoverImageUrls\[index\] : ''\)/);
+});

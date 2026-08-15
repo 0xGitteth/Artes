@@ -19,6 +19,25 @@ const auth = getAuth();
 const db = getFirestore();
 const corsHandler = cors({ origin: true });
 
+const SUPPORT_FENCE_RETRY_DELAYS_MS = [25, 50, 100, 200, 400, 800, 1600];
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function acquireSupportThreadLifecycleFence({ uid, token }) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await acquireCodexDevLifecycleFence({
+        db, uid, token, operation: 'ensureSupportThread',
+      });
+      return;
+    } catch (error) {
+      const sameOperationContention = error?.code === 'codex-lifecycle-fence-active'
+        && error?.operation === 'ensureSupportThread';
+      if (!sameOperationContention || attempt >= SUPPORT_FENCE_RETRY_DELAYS_MS.length) throw error;
+      await sleep(SUPPORT_FENCE_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
 async function detectSupportThreadHasUserMessage(threadRef, userUid) {
   const byRole = await threadRef.collection("messages")
     .where("senderRole", "==", "user")
@@ -62,9 +81,7 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
       }
 
       const lifecycleToken = randomUUID();
-      await acquireCodexDevLifecycleFence({
-        db, uid, token: lifecycleToken, operation: 'ensureSupportThread',
-      });
+      await acquireSupportThreadLifecycleFence({ uid, token: lifecycleToken });
       try {
       const threadId = `support_${uid}`;
       const threadRef = db.collection("threads").doc(threadId);
@@ -149,7 +166,8 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
       }
     } catch (e) {
       logger.error("ensureSupportThread failed", e);
-      return res.status(401).json({ error: e?.message || "Unauthorized" });
+      const status = Number.isInteger(e?.status) ? e.status : 401;
+      return res.status(status).json({ error: e?.message || "Unauthorized" });
     }
   });
 });

@@ -81,6 +81,23 @@ const moodboardItemPathParts = (path = '') => {
   return match ? { ownerUid: match[1], moodboardId: match[2], itemId: match[3] } : null;
 };
 
+const MOODBOARD_REPAIR_TRANSACTION_ITEM_LIMIT = 400;
+
+const isCodexMoodboardItem = ({ data = {}, itemId = '', actorPostIds, actorAffiliationTargetIds }) => {
+  const postId = String(data?.postId || itemId || '').trim();
+  const snapshotAuthorId = String(data?.postSnapshot?.authorId || '').trim();
+  return actorPostIds.has(postId) || actorAffiliationTargetIds.has(snapshotAuthorId);
+};
+
+const clearAffiliationsIfStillCodex = async ({ db, ref, actorAffiliationTargetIds }) => db.runTransaction(async (transaction) => {
+  const snapshot = await transaction.get(ref);
+  if (!snapshot.exists) return 0;
+  const { patch, cleared } = buildAffiliationClearPatch(snapshot.data() || {}, actorAffiliationTargetIds);
+  if (!cleared) return 0;
+  transaction.set(ref, { ...patch, updatedAt: new Date() }, { merge: true });
+  return cleared;
+});
+
 export const reconcileCodexDevIsolation = async ({ db, auth = null, bucket = null, apply = false, env = process.env, uid = null, uidSource = null, skipStorage = false, fieldValue = null } = {}) => {
   if (!db) throw new Error('Firestore db is verplicht.');
   const explicitUid = String(uid || env.CODEX_DEV_UID || '').trim();
@@ -122,18 +139,24 @@ export const reconcileCodexDevIsolation = async ({ db, auth = null, bucket = nul
     const actorManagedProfiles = await queryDocs(db.collection('profiles').where('ownerUid', '==', uid));
     const actorAffiliationTargetIds = new Set([uid, ...actorManagedProfiles.map((profile) => profile.id)]);
     for (const user of users.filter((candidate) => candidate.id !== uid)) {
-      const { patch, cleared } = buildAffiliationClearPatch(user.data() || {}, actorAffiliationTargetIds);
+      const preview = buildAffiliationClearPatch(user.data() || {}, actorAffiliationTargetIds);
+      if (!preview.cleared) continue;
+      const cleared = apply
+        ? await clearAffiliationsIfStillCodex({ db, ref: user.ref, actorAffiliationTargetIds })
+        : preview.cleared;
       if (!cleared) continue;
       stats.affiliationUsers += 1;
       stats.affiliationsCleared += cleared;
-      if (apply) await user.ref.set({ ...patch, updatedAt: new Date() }, { merge: true });
     }
     for (const publicUser of (await queryDocs(db.collection('publicUsers'))).filter((candidate) => candidate.id !== uid)) {
-      const { patch, cleared } = buildAffiliationClearPatch(publicUser.data() || {}, actorAffiliationTargetIds);
+      const preview = buildAffiliationClearPatch(publicUser.data() || {}, actorAffiliationTargetIds);
+      if (!preview.cleared) continue;
+      const cleared = apply
+        ? await clearAffiliationsIfStillCodex({ db, ref: publicUser.ref, actorAffiliationTargetIds })
+        : preview.cleared;
       if (!cleared) continue;
       stats.affiliationPublicUsers += 1;
       stats.affiliationsCleared += cleared;
-      if (apply) await publicUser.ref.set({ ...patch, updatedAt: new Date() }, { merge: true });
     }
 
     const actorPosts = uniqueDocs((await Promise.all([
@@ -157,43 +180,67 @@ export const reconcileCodexDevIsolation = async ({ db, auth = null, bucket = nul
       group.items.push(item);
       moodboardsToRepair.set(boardKey, group);
     }
-    stats.moodboardItems += ordinaryMoodboardItems.length;
-    stats.moodboardsRepaired += moodboardsToRepair.size;
-    stats.deletes += ordinaryMoodboardItems.length;
-    if (apply) {
+    if (!apply) {
+      stats.moodboardItems += ordinaryMoodboardItems.length;
+      stats.moodboardsRepaired += moodboardsToRepair.size;
+      stats.deletes += ordinaryMoodboardItems.length;
+    } else {
       for (const group of moodboardsToRepair.values()) {
         const boardRef = db.collection('users').doc(group.ownerUid).collection('moodboards').doc(group.moodboardId);
-        await db.runTransaction(async (transaction) => {
-          const [boardSnapshot, ...itemSnapshots] = await Promise.all([
-            transaction.get(boardRef),
-            ...group.items.map((item) => transaction.get(item.ref)),
-          ]);
-          const existingItems = group.items.filter((_, index) => itemSnapshots[index]?.exists);
-          if (!existingItems.length) return;
-          existingItems.forEach((item) => transaction.delete(item.ref));
-          if (!boardSnapshot.exists) return;
-          const boardData = boardSnapshot.data() || {};
-          const removedPostIds = new Set(existingItems.map((item) => String(item.data()?.postId || item.id || '').trim()).filter(Boolean));
-          const currentCoverPostIds = Array.isArray(boardData.coverPostIds) ? boardData.coverPostIds : [];
-          const currentCoverImageUrls = Array.isArray(boardData.coverImageUrls) ? boardData.coverImageUrls : [];
-          const nextCoverPostIds = [];
-          const nextCoverImageUrls = [];
-          currentCoverPostIds.forEach((postId, index) => {
-            if (removedPostIds.has(String(postId || '').trim())) return;
-            nextCoverPostIds.push(postId);
-            if (currentCoverImageUrls[index]) nextCoverImageUrls.push(currentCoverImageUrls[index]);
+        let groupDeleted = 0;
+        for (let offset = 0; offset < group.items.length; offset += MOODBOARD_REPAIR_TRANSACTION_ITEM_LIMIT) {
+          const chunk = group.items.slice(offset, offset + MOODBOARD_REPAIR_TRANSACTION_ITEM_LIMIT);
+          const deletedInChunk = await db.runTransaction(async (transaction) => {
+            const [boardSnapshot, ...itemSnapshots] = await Promise.all([
+              transaction.get(boardRef),
+              ...chunk.map((item) => transaction.get(item.ref)),
+            ]);
+            const matchingItems = chunk.filter((item, index) => {
+              const snapshot = itemSnapshots[index];
+              return snapshot?.exists && isCodexMoodboardItem({
+                data: snapshot.data() || {},
+                itemId: item.id,
+                actorPostIds,
+                actorAffiliationTargetIds,
+              });
+            });
+            if (!matchingItems.length) return 0;
+            matchingItems.forEach((item) => transaction.delete(item.ref));
+            if (boardSnapshot.exists) {
+              const boardData = boardSnapshot.data() || {};
+              const removedPostIds = new Set(matchingItems.map((item) => {
+                const snapshot = itemSnapshots[chunk.indexOf(item)];
+                return String(snapshot?.data()?.postId || item.id || '').trim();
+              }).filter(Boolean));
+              const currentCoverPostIds = Array.isArray(boardData.coverPostIds) ? boardData.coverPostIds : [];
+              const currentCoverImageUrls = Array.isArray(boardData.coverImageUrls) ? boardData.coverImageUrls : [];
+              const nextCoverPostIds = [];
+              const nextCoverImageUrls = [];
+              currentCoverPostIds.forEach((postId, index) => {
+                if (removedPostIds.has(String(postId || '').trim())) return;
+                nextCoverPostIds.push(postId);
+                nextCoverImageUrls.push(typeof currentCoverImageUrls[index] === 'string' ? currentCoverImageUrls[index] : '');
+              });
+              const numericPostCount = Number(boardData.postCount);
+              const boardPatch = {
+                updatedAt: new Date(),
+                coverPostIds: nextCoverPostIds,
+                coverImageUrls: nextCoverImageUrls,
+              };
+              if (Number.isFinite(numericPostCount)) {
+                boardPatch.postCount = Math.max(0, numericPostCount - matchingItems.length);
+              }
+              transaction.set(boardRef, boardPatch, { merge: true });
+            }
+            return matchingItems.length;
           });
-          const numericPostCount = Number(boardData.postCount);
-          const boardPatch = {
-            updatedAt: new Date(),
-            coverPostIds: nextCoverPostIds,
-            coverImageUrls: nextCoverImageUrls,
-          };
-          if (Number.isFinite(numericPostCount)) {
-            boardPatch.postCount = Math.max(0, numericPostCount - existingItems.length);
-          }
-          transaction.set(boardRef, boardPatch, { merge: true });
-        });
+          groupDeleted += deletedInChunk;
+        }
+        if (groupDeleted > 0) {
+          stats.moodboardItems += groupDeleted;
+          stats.moodboardsRepaired += 1;
+          stats.deletes += groupDeleted;
+        }
       }
     }
     for (const post of actorPosts) {

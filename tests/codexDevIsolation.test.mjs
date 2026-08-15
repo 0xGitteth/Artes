@@ -183,7 +183,7 @@ test('merge fence releases only before the first committed production mutation',
   assert.equal(docs.get('codexDevActorMergeFences/partial-merge')?.mutationCommitted, true);
   await assert.rejects(
     ensureCodexDevActorRegistered({ db, uid: 'partial-merge', now: 1200 }),
-    (error) => error.code === 'codex-merge-fence-active',
+    (error) => error.code === 'codex-merge-fence-recovery-required' && error.retryable === false,
   );
   await releaseCodexDevMergeFence({ db, uid: 'partial-merge', token: 'token-b' });
   assert.equal(docs.has('codexDevActorMergeFences/partial-merge'), false, 'full-success release remains token-safe');

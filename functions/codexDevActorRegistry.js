@@ -6,6 +6,14 @@ export const CODEX_DEV_ACTOR_LIFECYCLE_FENCES_COLLECTION = 'codexDevActorLifecyc
 const MERGE_FENCE_LEASE_MS = 30 * 60 * 1000;
 const LIFECYCLE_FENCE_LEASE_MS = 5 * 60 * 1000;
 
+const throwMergeFenceRecoveryRequired = (uid) => {
+  const error = new Error(`Codex actor registration is blocked because contributor merge mutations already committed for ${uid}; operator recovery is required before clearing the fence.`);
+  error.code = 'codex-merge-fence-recovery-required';
+  error.status = 409;
+  error.retryable = false;
+  throw error;
+};
+
 export const isRegisteredCodexDevActorUid = async ({ db, uid, transaction = null }) => {
   if (!db || !uid) return false;
   const ref = db.collection(CODEX_DEV_ACTOR_REGISTRY_COLLECTION).doc(uid);
@@ -32,6 +40,9 @@ export const ensureCodexDevActorRegistered = async ({ db, uid, now = new Date() 
     ]);
     if (snapshot.exists) return false;
     const fence = fenceSnapshot.exists ? fenceSnapshot.data() || {} : {};
+    if (fence.mutationCommitted === true) {
+      throwMergeFenceRecoveryRequired(uid);
+    }
     if (Number(fence.leaseExpiresAtMs || 0) > Date.now()) {
       const error = new Error(`Codex actor registration is blocked by an active contributor merge for ${uid}; retry after the merge completes.`);
       error.code = 'codex-merge-fence-active';
@@ -103,6 +114,16 @@ export const readAndValidateCodexDevLifecycleFence = async ({
     error.status = 409;
     throw error;
   }
+  return { fenceRef, nowMs };
+};
+
+export const queueCodexDevLifecycleFenceRenewal = ({ transaction, validation }) => {
+  if (!validation) return;
+  const { fenceRef, nowMs } = validation;
+  transaction.set(fenceRef, {
+    leaseExpiresAtMs: nowMs + LIFECYCLE_FENCE_LEASE_MS,
+    updatedAt: new Date(nowMs),
+  }, { merge: true });
 };
 
 export const releaseCodexDevLifecycleFence = async ({ db, uid, token }) => {
@@ -128,6 +149,9 @@ export const acquireCodexDevMergeFence = async ({ db, uid, token, nowMs = Date.n
       throw error;
     }
     const fence = fenceSnapshot.exists ? fenceSnapshot.data() || {} : {};
+    if (fence.mutationCommitted === true) {
+      throwMergeFenceRecoveryRequired(uid);
+    }
     if (Number(fence.leaseExpiresAtMs || 0) > nowMs && fence.token !== token) {
       const error = new Error('Another contributor merge is already active for this claimant.');
       error.status = 409;

@@ -3,6 +3,7 @@ import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
 import admin from 'firebase-admin';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { buildDiditCustomClaims } from './diditCustomClaims.js';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -602,14 +603,13 @@ const applyDiditStatusToUser = async ({ uid, sessionId, status, age, reason, sou
 
   if (isApprovedAdult || shouldClearAdultVerification) {
     try {
-      const existingClaims = shouldClearAdultVerification
-        ? (await admin.auth().getUser(uid)).customClaims || {}
-        : {};
-      await admin.auth().setCustomUserClaims(uid, {
-        ...existingClaims,
-        idvVerified: isApprovedAdult,
-        isAdult: isApprovedAdult && isAdult === true,
-      });
+      const existingClaims = (await admin.auth().getUser(uid)).customClaims || {};
+      await admin.auth().setCustomUserClaims(uid, buildDiditCustomClaims({
+        uid,
+        existingClaims,
+        isApprovedAdult,
+        isAdult,
+      }));
     } catch (error) {
       logger.warn('Failed to update custom claims for Didit status', {
         uid,

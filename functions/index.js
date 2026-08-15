@@ -21,6 +21,7 @@ import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } 
 import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { canPublishUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { runUserModerationActionMutation } from './userModerationActionIsolation.js';
+import { deleteSupportResetMessagesPageAtomically } from './supportResetIsolation.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
 import {
   fetchModerationExamplesForFingerprints,
@@ -44,11 +45,14 @@ import {
   resolveCodexDevUid,
 } from './codexDevIdentity.js';
 import {
+  acquireCodexDevLifecycleFence,
   acquireCodexDevMergeFence,
   ensureCodexDevActorRegistered,
   isKnownCodexDevActorUid,
   queueCodexDevMergeFenceRenewal,
+  readAndValidateCodexDevLifecycleFence,
   readAndValidateCodexDevMergeFence,
+  releaseCodexDevLifecycleFence,
   releaseCodexDevMergeFence,
   releaseCodexDevMergeFenceIfUnmutated,
 } from './codexDevActorRegistry.js';
@@ -2499,6 +2503,11 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
       return;
     }
 
+    const supportResetFenceToken = crypto.randomUUID();
+    await acquireCodexDevLifecycleFence({
+      db, uid: decoded.uid, token: supportResetFenceToken, operation: 'resetSupportThread',
+    });
+    try {
     const messagesRef = threadRef.collection('messages');
     let keptIntroRef = null;
     let hasMoreMessages = true;
@@ -2508,32 +2517,31 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
         hasMoreMessages = false;
         continue;
       }
-      const batch = db.batch();
-      let deletesInRound = 0;
-      snapshot.docs.forEach((docSnap) => {
-        const data = docSnap.data() || {};
-        const isSystemIntro = data?.senderRole === 'system' && SUPPORT_INTRO_TEXTS.includes(data?.text || '');
-        if (isSystemIntro) {
-          if (!keptIntroRef) {
-            keptIntroRef = docSnap.ref;
-            return;
-          }
-          if (keptIntroRef.path === docSnap.ref.path) {
-            return;
-          }
-        }
-        batch.delete(docSnap.ref);
-        deletesInRound += 1;
+      const pageResult = await deleteSupportResetMessagesPageAtomically({
+        db,
+        actorUid: decoded.uid,
+        fenceToken: supportResetFenceToken,
+        threadRef,
+        expectedUserUid: userUid,
+        isModeratorRequest,
+        messageDocs: snapshot.docs,
+        keptIntroRef,
+        introTexts: SUPPORT_INTRO_TEXTS,
       });
-      if (deletesInRound > 0) {
-        await batch.commit();
-      }
-      hasMoreMessages = deletesInRound > 0 && snapshot.size === 400;
+      keptIntroRef = pageResult.keptIntroRef || keptIntroRef;
+      hasMoreMessages = pageResult.deletesInRound > 0 && snapshot.size === 400;
     }
 
     const indexRef = db.collection('users').doc(userUid).collection('threadIndex').doc(threadId);
     const introRef = keptIntroRef || messagesRef.doc();
     await db.runTransaction(async (transaction) => {
+      await readAndValidateCodexDevLifecycleFence({
+        db,
+        uid: decoded.uid,
+        token: supportResetFenceToken,
+        transaction,
+        operation: 'resetSupportThread',
+      });
       if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
         const error = new Error('Codex Dev support traffic is isolated.');
         error.status = 403;
@@ -2595,6 +2603,9 @@ export const resetSupportThread = onRequest({ cors: true, region: 'europe-west4'
       }, { merge: true });
     });
 
+    } finally {
+      await releaseCodexDevLifecycleFence({ db, uid: decoded.uid, token: supportResetFenceToken });
+    }
     res.status(200).json({ ok: true, threadId, resetBy: isOwner ? 'owner' : 'moderator' });
   } catch (error) {
     const status = error.status || 500;

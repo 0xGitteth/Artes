@@ -5,11 +5,11 @@ const noModeratorAuth = { getUser: async () => ({ email: null }) };
 
 const seed = () => new Map(Object.entries({
   'users/marked-test': { isDevTestUser: true, devActor: 'codex', onboardingComplete: true, contributorId: 'claimed-by-test' },
-  'users/real': { onboardingComplete: true, contributorId: 'real-claimed-test-contributor' },
+  'users/real': { onboardingComplete: true, contributorId: 'real-claimed-test-contributor', linkedAgencyId: 'marked-test', linkedAgencyName: 'Codex Agency', linkedAgencyLink: 'https://codex.test/agency', linkedAgencyStatus: 'approved', linkedAgencyApprovedBy: 'marked-test', linkedCompanyId: 'test-agency', linkedCompanyName: 'Codex Company', linkedCompanyLink: 'https://codex.test/company', linkedCompanyStatus: 'pending' },
   'users/other': { onboardingComplete: true },
   'users/suspicious-marker': { isDevTestUser: true, devActor: 'codex', onboardingComplete: true },
   'publicUsers/marked-test': { displayName: 'Legacy Codex' },
-  'publicUsers/real': { displayName: 'Real', fansCount: 3, fanOfCount: 4 },
+  'publicUsers/real': { displayName: 'Real', fansCount: 3, fanOfCount: 4, linkedAgencyId: 'marked-test', linkedAgencyName: 'Codex Agency', linkedAgencyLink: 'https://codex.test/agency', linkedAgencyStatus: 'approved', linkedCompanyId: 'test-agency', linkedCompanyName: 'Codex Company', linkedCompanyLink: 'https://codex.test/company', linkedCompanyStatus: 'pending' },
   'publicUsers/other': { displayName: 'Other', fanOfCount: 5 },
   'publicUsers/suspicious-marker': { displayName: 'Ordinary historical user' },
   'posts/test-post': { authorId: 'marked-test' },
@@ -18,6 +18,9 @@ const seed = () => new Map(Object.entries({
   'posts/test-post/comments/comment': { authorId: 'marked-test' },
   'posts/test-post/likes/real': { createdAt: 1 },
   'posts/real-post': { authorId: 'real' },
+  'users/real/moodboards/inspo': { ownerUid: 'real', postCount: 2, coverPostIds: ['test-post', 'real-post'], coverImageUrls: ['https://codex.test/post.jpg', 'https://real.test/post.jpg'] },
+  'users/real/moodboards/inspo/items/test-post': { postId: 'test-post', ownerUid: 'real', moodboardId: 'inspo', postSnapshot: { imageUrl: 'https://codex.test/post.jpg', title: 'Codex snapshot', authorId: 'marked-test' } },
+  'users/real/moodboards/inspo/items/real-post': { postId: 'real-post', ownerUid: 'real', moodboardId: 'inspo', postSnapshot: { imageUrl: 'https://real.test/post.jpg', title: 'Real snapshot', authorId: 'real' } },
   'posts/real-post/comments/test-engagement': { authorId: 'marked-test' },
   'posts/real-post/comments/real-engagement': { authorId: 'real' },
   'posts/real-post/likes/marked-test': { createdAt: 1 },
@@ -123,7 +126,11 @@ const fakeDb = (docs) => {
   return {
     collection: collectionFor,
     collectionGroup: (name) => ({ where: (field, _op, value) => ({ get: async () => ({ docs: [...docs.entries()]
-      .filter(([path, data]) => path.split('/').at(-2) === name && data?.[field] === value)
+      .filter(([path, data]) => {
+        if (path.split('/').at(-2) !== name) return false;
+        const actual = String(field).split('.').reduce((current, key) => current?.[key], data);
+        return actual === value;
+      })
       .map(([path, data]) => ({ id: path.split('/').at(-1), ref: refFor(path), data: () => data })) }) }) }),
     recursiveDelete: async (ref) => [...docs.keys()].filter((path) => path === ref.path || path.startsWith(`${ref.path}/`)).forEach((path) => docs.delete(path)),
     runTransaction: async (callback) => callback({
@@ -145,6 +152,11 @@ const dryProofs = new Set(['claimProofs/test-claim/marked-test.png', 'claimProof
 const dryStats = await reconcileCodexDevIsolation({ db: fakeDb(dryDocs), bucket: fakeBucket(dryProofs), apply: false, env: {}, uid: 'marked-test' });
 assert.equal(dryStats.targetUid, 'marked-test');
 assert.equal(dryStats.posts, 2);
+assert.equal(dryStats.affiliationUsers, 1);
+assert.equal(dryStats.affiliationPublicUsers, 1);
+assert.equal(dryStats.affiliationsCleared, 4);
+assert.equal(dryStats.moodboardItems, 1);
+assert.equal(dryStats.moodboardsRepaired, 1);
 assert.equal(dryStats.reviewCases, 2);
 assert.equal(dryStats.autoCleanableReviewCases, 2);
 assert.equal(dryStats.contentRecoveryReviewCases, 1);
@@ -178,8 +190,8 @@ assert.deepEqual(applyDocs.get('codexDevActorRegistry/marked-test'), {
 });
 assert.equal(applyStats.targetUidRegistered, true);
 assert.equal(applyDocs.has('codexDevActorRegistry/suspicious-marker'), false, 'ambiguous marker is never registered');
-assert.equal(applyStats.deletes, 40);
-for (const removed of ['publicUsers/marked-test', 'posts/test-post', 'posts/test-managed-post', 'posts/test-post/comments/comment', 'posts/real-post/comments/test-engagement', 'posts/real-post/likes/marked-test', 'profiles/test-agency', 'reviewCases/test-review', 'reviewCases/test-report', 'moderationExamples/test-example', 'moderationExamples/report-linked-example', 'moderationExamples/approved-report-linked-example', 'contributors/test-contributor', 'contributors/test-claimed-by-codex', 'contributors/denied-claim-contributor', 'contributorAliases/test-alias', 'contributorAliases/codex-claimed-test-alias', 'contributorAliases/denied-claim-alias', 'claimInvites/test-invite', 'claimInvites/test-invite-real-contributor', 'contributorContentRequests/test-content-request', 'claimRequests/test-claim', 'claimRequests/approved-test-claim', 'claimVouches/test-claim/votes/voter', 'claimVouches/real-claim/votes/marked-test', 'claimVouches/proof-review-claim/votes/marked-test', 'communities/art/topics/topic/comments/test-comment', 'threads/dm_test_real', 'users/real/threadIndex/dm_test_real', 'threads/support_marked-test', 'users/marked-test/threadIndex/support_marked-test', 'threads/support_real/messages/codex-decision', 'threads/support_real/messages/approved-codex-decision', 'users/marked-test/following/real', 'users/marked-test/following/no-counter', 'users/real/following/marked-test', 'users/other/following/marked-test']) {
+assert.equal(applyStats.deletes, 41);
+for (const removed of ['publicUsers/marked-test', 'posts/test-post', 'posts/test-managed-post', 'posts/test-post/comments/comment', 'users/real/moodboards/inspo/items/test-post', 'posts/real-post/comments/test-engagement', 'posts/real-post/likes/marked-test', 'profiles/test-agency', 'reviewCases/test-review', 'reviewCases/test-report', 'moderationExamples/test-example', 'moderationExamples/report-linked-example', 'moderationExamples/approved-report-linked-example', 'contributors/test-contributor', 'contributors/test-claimed-by-codex', 'contributors/denied-claim-contributor', 'contributorAliases/test-alias', 'contributorAliases/codex-claimed-test-alias', 'contributorAliases/denied-claim-alias', 'claimInvites/test-invite', 'claimInvites/test-invite-real-contributor', 'contributorContentRequests/test-content-request', 'claimRequests/test-claim', 'claimRequests/approved-test-claim', 'claimVouches/test-claim/votes/voter', 'claimVouches/real-claim/votes/marked-test', 'claimVouches/proof-review-claim/votes/marked-test', 'communities/art/topics/topic/comments/test-comment', 'threads/dm_test_real', 'users/real/threadIndex/dm_test_real', 'threads/support_marked-test', 'users/marked-test/threadIndex/support_marked-test', 'threads/support_real/messages/codex-decision', 'threads/support_real/messages/approved-codex-decision', 'users/marked-test/following/real', 'users/marked-test/following/no-counter', 'users/real/following/marked-test', 'users/other/following/marked-test']) {
   assert.equal(applyDocs.has(removed), false, `${removed} removed`);
 }
 assert.equal(applyDocs.get('contributors/claimed-by-test').status, 'unclaimed');
@@ -200,9 +212,23 @@ assert.equal(applyDocs.get('claimRequests/proof-review-claim').status, 'needsMod
 assert.equal(applyDocs.get('claimRequests/proof-review-claim').statusReason, 'proof required');
 assert.equal(applyDocs.get('publicUsers/real').fansCount, 2);
 assert.equal(applyDocs.get('publicUsers/real').fanOfCount, 3);
+for (const profilePath of ['users/real', 'publicUsers/real']) {
+  const profile = applyDocs.get(profilePath);
+  assert.equal(profile.linkedAgencyId, null, `${profilePath} direct Codex agency affiliation cleared`);
+  assert.equal(profile.linkedAgencyName, '');
+  assert.equal(profile.linkedAgencyLink, null);
+  assert.equal(profile.linkedAgencyStatus, null);
+  assert.equal(profile.linkedCompanyId, null, `${profilePath} Codex-managed company affiliation cleared`);
+  assert.equal(profile.linkedCompanyName, '');
+  assert.equal(profile.linkedCompanyLink, null);
+  assert.equal(profile.linkedCompanyStatus, null);
+}
+assert.deepEqual(applyDocs.get('users/real/moodboards/inspo').coverPostIds, ['real-post']);
+assert.deepEqual(applyDocs.get('users/real/moodboards/inspo').coverImageUrls, ['https://real.test/post.jpg']);
+assert.equal(applyDocs.get('users/real/moodboards/inspo').postCount, 1);
 assert.equal(applyDocs.get('publicUsers/other').fanOfCount, 5, 'existing repair marker prevents double decrement');
 assert.deepEqual([...applyProofs], ['claimProofs/real-claim/real.png']);
-for (const preserved of ['publicUsers/real', 'publicUsers/suspicious-marker', 'posts/real-post', 'posts/ordinary-managed-post', 'posts/real-post/comments/real-engagement', 'posts/real-post/likes/real', 'profiles/real-agency', 'reviewCases/real-review', 'reviewCases/approved-test-report', 'moderationExamples/real-example', 'moderationExamples/real-linked-example', 'contributors/real-contributor', 'contributors/real-claimed-test-contributor', 'contributors/pending-claim-contributor', 'contributors/moderation-claim-contributor', 'contributors/merge-secondary', 'contributorAliases/real-alias', 'contributorAliases/real-claimed-test-alias', 'contributorAliases/real-claimed-email-alias', 'contributorAliases/real-claimed-domain-alias', 'contributorAliases/pending-claim-alias', 'contributorAliases/moderation-claim-alias', 'contributorAliases/merge-evidence-alias', 'contributorAliases/merge-secondary-evidence-alias', 'claimInvites/real-invite', 'contributorContentRequests/real-content-request', 'claimRequests/real-claim', 'claimRequests/proof-review-claim', 'claimRequests/pending-ordinary-claim', 'claimRequests/moderation-ordinary-claim', 'claimRequests/denied-ordinary-claim', 'claimRequests/approved-test-merge', 'claimRequests/ordinary-approved-merge', 'claimVouches/moderation-ordinary-claim/votes/voter', 'claimVouches/real-claim/votes/voter', 'claimVouches/proof-review-claim/votes/voter', 'communities/art/topics/topic/comments/real-comment', 'threads/dm_real_other', 'users/real/threadIndex/dm_real_other', 'threads/support_real', 'threads/support_real/messages/user-message', 'threads/support_real/messages/real-decision', 'users/real/following/other']) {
+for (const preserved of ['publicUsers/real', 'publicUsers/suspicious-marker', 'posts/real-post', 'posts/ordinary-managed-post', 'posts/real-post/comments/real-engagement', 'posts/real-post/likes/real', 'users/real/moodboards/inspo', 'users/real/moodboards/inspo/items/real-post', 'profiles/real-agency', 'reviewCases/real-review', 'reviewCases/approved-test-report', 'moderationExamples/real-example', 'moderationExamples/real-linked-example', 'contributors/real-contributor', 'contributors/real-claimed-test-contributor', 'contributors/pending-claim-contributor', 'contributors/moderation-claim-contributor', 'contributors/merge-secondary', 'contributorAliases/real-alias', 'contributorAliases/real-claimed-test-alias', 'contributorAliases/real-claimed-email-alias', 'contributorAliases/real-claimed-domain-alias', 'contributorAliases/pending-claim-alias', 'contributorAliases/moderation-claim-alias', 'contributorAliases/merge-evidence-alias', 'contributorAliases/merge-secondary-evidence-alias', 'claimInvites/real-invite', 'contributorContentRequests/real-content-request', 'claimRequests/real-claim', 'claimRequests/proof-review-claim', 'claimRequests/pending-ordinary-claim', 'claimRequests/moderation-ordinary-claim', 'claimRequests/denied-ordinary-claim', 'claimRequests/approved-test-merge', 'claimRequests/ordinary-approved-merge', 'claimVouches/moderation-ordinary-claim/votes/voter', 'claimVouches/real-claim/votes/voter', 'claimVouches/proof-review-claim/votes/voter', 'communities/art/topics/topic/comments/real-comment', 'threads/dm_real_other', 'users/real/threadIndex/dm_real_other', 'threads/support_real', 'threads/support_real/messages/user-message', 'threads/support_real/messages/real-decision', 'users/real/following/other']) {
   assert.equal(applyDocs.has(preserved), true, `${preserved} preserved`);
 }
 const secondStats = await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), bucket: fakeBucket(applyProofs), apply: true, auth: noModeratorAuth, env: {}, uid: 'marked-test', skipStorage: false, fieldValue: fakeFieldValue });

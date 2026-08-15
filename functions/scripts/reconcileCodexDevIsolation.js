@@ -37,6 +37,11 @@ const emptyStats = () => ({
   supportDecisionThreads: 0,
   supportDecisionMessages: 0,
   contributorContentRequests: 0,
+  affiliationUsers: 0,
+  affiliationPublicUsers: 0,
+  affiliationsCleared: 0,
+  moodboardItems: 0,
+  moodboardsRepaired: 0,
   claimVotes: 0,
   claimVoteRequestsRecomputed: 0,
   manualReviewRequired: [],
@@ -51,6 +56,30 @@ const timestampMillis = (value) => value?.toMillis?.()
   ?? Number(value?.seconds ?? value?._seconds ?? value ?? 0) * 1000;
 
 const ACTIVE_ORDINARY_CLAIM_STATUSES = new Set(['pending', 'needsModeration']);
+
+const buildAffiliationClearPatch = (data = {}, targetIds = new Set()) => {
+  const patch = {};
+  let cleared = 0;
+  for (const kind of ['Agency', 'Company']) {
+    const idField = `linked${kind}Id`;
+    const linkedId = String(data?.[idField] || '').trim();
+    if (!linkedId || !targetIds.has(linkedId)) continue;
+    cleared += 1;
+    patch[idField] = null;
+    patch[`linked${kind}Name`] = '';
+    patch[`linked${kind}Link`] = null;
+    patch[`linked${kind}Status`] = null;
+    patch[`linked${kind}StatusUpdatedAt`] = null;
+    patch[`linked${kind}ApprovedAt`] = null;
+    patch[`linked${kind}ApprovedBy`] = null;
+  }
+  return { patch, cleared };
+};
+
+const moodboardItemPathParts = (path = '') => {
+  const match = String(path).match(/^users\/([^/]+)\/moodboards\/([^/]+)\/items\/([^/]+)$/);
+  return match ? { ownerUid: match[1], moodboardId: match[2], itemId: match[3] } : null;
+};
 
 export const reconcileCodexDevIsolation = async ({ db, auth = null, bucket = null, apply = false, env = process.env, uid = null, uidSource = null, skipStorage = false, fieldValue = null } = {}) => {
   if (!db) throw new Error('Firestore db is verplicht.');
@@ -90,15 +119,87 @@ export const reconcileCodexDevIsolation = async ({ db, auth = null, bucket = nul
 
     await deleteRef(db.collection('publicUsers').doc(uid), 'publicUsers');
 
+    const actorManagedProfiles = await queryDocs(db.collection('profiles').where('ownerUid', '==', uid));
+    const actorAffiliationTargetIds = new Set([uid, ...actorManagedProfiles.map((profile) => profile.id)]);
+    for (const user of users.filter((candidate) => candidate.id !== uid)) {
+      const { patch, cleared } = buildAffiliationClearPatch(user.data() || {}, actorAffiliationTargetIds);
+      if (!cleared) continue;
+      stats.affiliationUsers += 1;
+      stats.affiliationsCleared += cleared;
+      if (apply) await user.ref.set({ ...patch, updatedAt: new Date() }, { merge: true });
+    }
+    for (const publicUser of (await queryDocs(db.collection('publicUsers'))).filter((candidate) => candidate.id !== uid)) {
+      const { patch, cleared } = buildAffiliationClearPatch(publicUser.data() || {}, actorAffiliationTargetIds);
+      if (!cleared) continue;
+      stats.affiliationPublicUsers += 1;
+      stats.affiliationsCleared += cleared;
+      if (apply) await publicUser.ref.set({ ...patch, updatedAt: new Date() }, { merge: true });
+    }
+
     const actorPosts = uniqueDocs((await Promise.all([
       queryDocs(db.collection('posts').where('authorId', '==', uid)),
       queryDocs(db.collection('posts').where('authorUid', '==', uid)),
     ])).flat());
     const actorPostIds = new Set(actorPosts.map((post) => post.id));
+    const moodboardQueries = await Promise.all([
+      ...[...actorPostIds].map((postId) => queryDocs(db.collectionGroup('items').where('postId', '==', postId))),
+      ...[...actorAffiliationTargetIds].map((authorId) => queryDocs(db.collectionGroup('items').where('postSnapshot.authorId', '==', authorId))),
+    ]);
+    const ordinaryMoodboardItems = uniqueDocs(moodboardQueries.flat()).filter((item) => {
+      const parts = moodboardItemPathParts(item.ref?.path);
+      return parts && parts.ownerUid !== uid;
+    });
+    const moodboardsToRepair = new Map();
+    for (const item of ordinaryMoodboardItems) {
+      const parts = moodboardItemPathParts(item.ref.path);
+      const boardKey = `${parts.ownerUid}/${parts.moodboardId}`;
+      const group = moodboardsToRepair.get(boardKey) || { ...parts, items: [] };
+      group.items.push(item);
+      moodboardsToRepair.set(boardKey, group);
+    }
+    stats.moodboardItems += ordinaryMoodboardItems.length;
+    stats.moodboardsRepaired += moodboardsToRepair.size;
+    stats.deletes += ordinaryMoodboardItems.length;
+    if (apply) {
+      for (const group of moodboardsToRepair.values()) {
+        const boardRef = db.collection('users').doc(group.ownerUid).collection('moodboards').doc(group.moodboardId);
+        await db.runTransaction(async (transaction) => {
+          const [boardSnapshot, ...itemSnapshots] = await Promise.all([
+            transaction.get(boardRef),
+            ...group.items.map((item) => transaction.get(item.ref)),
+          ]);
+          const existingItems = group.items.filter((_, index) => itemSnapshots[index]?.exists);
+          if (!existingItems.length) return;
+          existingItems.forEach((item) => transaction.delete(item.ref));
+          if (!boardSnapshot.exists) return;
+          const boardData = boardSnapshot.data() || {};
+          const removedPostIds = new Set(existingItems.map((item) => String(item.data()?.postId || item.id || '').trim()).filter(Boolean));
+          const currentCoverPostIds = Array.isArray(boardData.coverPostIds) ? boardData.coverPostIds : [];
+          const currentCoverImageUrls = Array.isArray(boardData.coverImageUrls) ? boardData.coverImageUrls : [];
+          const nextCoverPostIds = [];
+          const nextCoverImageUrls = [];
+          currentCoverPostIds.forEach((postId, index) => {
+            if (removedPostIds.has(String(postId || '').trim())) return;
+            nextCoverPostIds.push(postId);
+            if (currentCoverImageUrls[index]) nextCoverImageUrls.push(currentCoverImageUrls[index]);
+          });
+          const numericPostCount = Number(boardData.postCount);
+          const boardPatch = {
+            updatedAt: new Date(),
+            coverPostIds: nextCoverPostIds,
+            coverImageUrls: nextCoverImageUrls,
+          };
+          if (Number.isFinite(numericPostCount)) {
+            boardPatch.postCount = Math.max(0, numericPostCount - existingItems.length);
+          }
+          transaction.set(boardRef, boardPatch, { merge: true });
+        });
+      }
+    }
     for (const post of actorPosts) {
       await deleteRef(post.ref, 'posts', { recursive: true });
     }
-    for (const profile of await queryDocs(db.collection('profiles').where('ownerUid', '==', uid))) {
+    for (const profile of actorManagedProfiles) {
       await deleteRef(profile.ref, 'managedProfiles', { recursive: true });
     }
     const reviewCaseQueries = await Promise.all([

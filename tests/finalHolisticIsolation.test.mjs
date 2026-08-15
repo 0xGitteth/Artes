@@ -146,3 +146,21 @@ test('Codex registration requires Firebase Auth evidence at the helper boundary'
   assert.match(reconcileSource, /const \{ getAuth \} = await import\('firebase-admin\/auth'\)/);
   assert.match(reconcileSource, /auth: getAuth\(\)/);
 });
+
+
+test('support thread creation is fenced against actor registration', async () => {
+  const { db } = createMemoryDb();
+  await acquireCodexDevLifecycleFence({
+    db, uid: 'support-user', token: 'support-token', operation: 'ensureSupportThread',
+  });
+  await assert.rejects(ensureCodexDevActorRegistered({
+    db, auth: noModeratorAuth, uid: 'support-user',
+  }), (error) => error.code === 'codex-lifecycle-fence-active' && error.retryable === true);
+  await releaseCodexDevLifecycleFence({ db, uid: 'support-user', token: 'support-token' });
+});
+
+test('ensureSupportThread owns a lifecycle fence for all production writes', async () => {
+  const source = await fs.readFile(new URL('../functions/supportChat.js', import.meta.url), 'utf8');
+  assert.match(source, /acquireCodexDevLifecycleFence\(\{[\s\S]*?operation: 'ensureSupportThread'/);
+  assert.match(source, /try \{[\s\S]*?threadRef\.set[\s\S]*?indexRef\.set[\s\S]*?finally \{[\s\S]*?releaseCodexDevLifecycleFence/);
+});

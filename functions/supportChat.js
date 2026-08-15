@@ -1,12 +1,17 @@
 import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import cors from "cors";
+import { randomUUID } from "node:crypto";
 
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { isCodexDevForProductionDeny } from "./codexDevIdentity.js";
-import { isKnownCodexDevActorUid } from "./codexDevActorRegistry.js";
+import {
+  acquireCodexDevLifecycleFence,
+  isKnownCodexDevActorUid,
+  releaseCodexDevLifecycleFence,
+} from "./codexDevActorRegistry.js";
 
 if (!getApps().length) initializeApp();
 
@@ -56,6 +61,11 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
         return res.status(403).json({ error: 'Codex Dev support traffic is isolated.' });
       }
 
+      const lifecycleToken = randomUUID();
+      await acquireCodexDevLifecycleFence({
+        db, uid, token: lifecycleToken, operation: 'ensureSupportThread',
+      });
+      try {
       const threadId = `support_${uid}`;
       const threadRef = db.collection("threads").doc(threadId);
       const indexRef = db.collection("users").doc(uid).collection("threadIndex").doc(threadId);
@@ -130,6 +140,13 @@ export const ensureSupportThread = onRequest({ region: "europe-west4" }, (req, r
       }
 
       return res.status(200).json({ ok: true, threadId });
+      } finally {
+        try {
+          await releaseCodexDevLifecycleFence({ db, uid, token: lifecycleToken });
+        } catch (releaseError) {
+          logger.error("ensureSupportThread lifecycle fence release failed", releaseError);
+        }
+      }
     } catch (e) {
       logger.error("ensureSupportThread failed", e);
       return res.status(401).json({ error: e?.message || "Unauthorized" });

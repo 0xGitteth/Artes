@@ -1,0 +1,72 @@
+name: Apply final holistic isolation fixes
+
+on:
+  push:
+    branches:
+      - chatgpt/final-holistic-isolation-blockers
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix functions ci
+
+      - name: Apply fixes
+        run: node scripts/applyFinalHolisticIsolationBlockersV2.mjs
+
+      - name: Syntax checks
+        run: |
+          node --check functions/didit.js
+          node --check functions/diditCustomClaims.js
+          node --check functions/index.js
+          node --check functions/codexDevActorRegistry.js
+          node --check functions/supportResetIsolation.js
+
+      - name: Focused isolation tests
+        run: npm run test:codex-dev-isolation
+
+      - name: Firestore and Storage rules tests
+        run: npm run test:rules
+
+      - name: Existing publication and reconciliation tests
+        run: |
+          npm run test:public-user-publication
+          npm run test:reconcile-public-users
+          npm run test:backfill-public-users
+
+      - name: Lint and build
+        run: |
+          npm run lint
+          npm run build
+          git diff --check
+
+      - name: Commit validated result
+        run: |
+          rm -f scripts/applyFinalHolisticIsolationBlockers.mjs
+          rm -f scripts/repairFinalHolisticDiditClaims.mjs
+          rm -f scripts/repairFinalHolisticStaleTests.mjs
+          rm -f scripts/applyFinalHolisticIsolationBlockersV2.mjs
+          rm -f .github/workflows/apply-final-holistic-isolation.yml
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "close final holistic Codex isolation blockers"
+          git push origin HEAD:chatgpt/final-holistic-isolation-blockers

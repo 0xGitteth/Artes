@@ -531,8 +531,15 @@ test('historical private markers never establish destructive identity', () => {
 test('reconciliation CLI accepts explicit identity/storage configuration', () => {
   assert.deepEqual(parseArgs(['--apply', '--uid', 'canonical', '--bucket=test.appspot.com']), {
     apply: true, skipStorage: false, project: null, uid: 'canonical', bucket: 'test.appspot.com',
+    legacyManagedProfileIds: [], legacyPostIds: [],
   });
-  assert.equal(parseArgs(['--skip-storage']).skipStorage, true);
+  assert.deepEqual(parseArgs([
+    '--apply', '--uid=canonical', '--skip-storage',
+    '--legacy-managed-profile-ids=old-agency,old-company', '--legacy-post-ids', 'old-post-1,old-post-2',
+  ]), {
+    apply: true, skipStorage: true, project: null, uid: 'canonical', bucket: null,
+    legacyManagedProfileIds: ['old-agency', 'old-company'], legacyPostIds: ['old-post-1', 'old-post-2'],
+  });
 });
 
 test('private capability profile passes onboarding gates without being a public payload', () => {

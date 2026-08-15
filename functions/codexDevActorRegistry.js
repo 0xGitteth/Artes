@@ -153,7 +153,10 @@ export const acquireCodexDevLifecycleFence = async ({
     const fence = fenceSnapshot.exists ? fenceSnapshot.data() || {} : {};
     if (Number(fence.leaseExpiresAtMs || 0) > nowMs && fence.token !== token) {
       const error = new Error('Another account lifecycle operation is already active.');
+      error.code = 'codex-lifecycle-fence-active';
+      error.operation = String(fence.operation || '');
       error.status = 409;
+      error.retryable = true;
       throw error;
     }
     transaction.set(fenceRef, {

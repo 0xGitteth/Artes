@@ -187,6 +187,17 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       }
     }
 
+    const claimRequests = await queryDocs(db.collection('claimRequests').where('requestedByUid', '==', uid));
+    const approvedMergeRecoveryContributorIds = new Set();
+    for (const claimRequest of claimRequests) {
+      const requestData = claimRequest.data() || {};
+      if (requestData.mode !== 'merge' || requestData.status !== 'approved') continue;
+      const primaryContributorId = requestData.primaryContributorId || requestData.contributorId || null;
+      const secondaryContributorId = requestData.secondaryContributorId || null;
+      if (primaryContributorId) approvedMergeRecoveryContributorIds.add(primaryContributorId);
+      if (secondaryContributorId) approvedMergeRecoveryContributorIds.add(secondaryContributorId);
+    }
+
     const contributors = await queryDocs(db.collection('contributors').where('createdByUid', '==', uid));
     const deletableContributors = [];
     const preservedContributorIds = new Set();
@@ -204,7 +215,8 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
         return claimData.requestedByUid && claimData.requestedByUid !== uid
           && ACTIVE_ORDINARY_CLAIM_STATUSES.has(claimData.status);
       });
-      if (legitimateOwner || activeOrdinaryClaims.length > 0) {
+      const requiredForApprovedMergeRecovery = approvedMergeRecoveryContributorIds.has(contributor.id);
+      if (legitimateOwner || activeOrdinaryClaims.length > 0 || requiredForApprovedMergeRecovery) {
         preservedContributorIds.add(contributor.id);
         stats.preservedContributors += 1;
         if (legitimateOwner) {
@@ -223,19 +235,23 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       }
     }
     const contributorIds = new Set(deletableContributors.map((doc) => doc.id));
+    const aliasPreservationContributorIds = new Set([
+      ...preservedContributorIds,
+      ...approvedMergeRecoveryContributorIds,
+    ]);
     const aliasQueries = await Promise.all([
       queryDocs(db.collection('contributorAliases').where('createdByUid', '==', uid)),
       ...[...contributorIds].map((id) => queryDocs(db.collection('contributorAliases').where('contributorId', '==', id))),
-      ...[...preservedContributorIds].map((id) => queryDocs(db.collection('contributorAliases').where('contributorId', '==', id))),
+      ...[...aliasPreservationContributorIds].map((id) => queryDocs(db.collection('contributorAliases').where('contributorId', '==', id))),
     ]);
     const inviteQueries = await Promise.all([
       queryDocs(db.collection('claimInvites').where('createdByUid', '==', uid)),
       ...[...contributorIds].map((id) => queryDocs(db.collection('claimInvites').where('contributorId', '==', id))),
     ]);
     const aliases = uniqueDocs(aliasQueries.flat());
-    const preservedAliases = aliases.filter((alias) => preservedContributorIds.has(alias.data()?.contributorId));
+    const preservedAliases = aliases.filter((alias) => aliasPreservationContributorIds.has(alias.data()?.contributorId));
     stats.preservedContributorAliases += preservedAliases.length;
-    for (const alias of aliases.filter((candidate) => !preservedContributorIds.has(candidate.data()?.contributorId))) {
+    for (const alias of aliases.filter((candidate) => !aliasPreservationContributorIds.has(candidate.data()?.contributorId))) {
       await deleteRef(alias.ref, 'contributorAliases');
     }
     for (const invite of uniqueDocs(inviteQueries.flat())) await deleteRef(invite.ref, 'claimInvites');
@@ -267,7 +283,6 @@ export const reconcileCodexDevIsolation = async ({ db, bucket = null, apply = fa
       }
     }
 
-    const claimRequests = await queryDocs(db.collection('claimRequests').where('requestedByUid', '==', uid));
     for (const claimRequest of claimRequests) {
       const requestData = claimRequest.data() || {};
       const approvedMerge = requestData.mode === 'merge' && requestData.status === 'approved';

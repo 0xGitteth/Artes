@@ -429,6 +429,14 @@ async function run() {
       await setDoc(doc(db, 'config', 'moderation'), {
         moderatorEmails: ['mod_1@example.com'],
       });
+      await setDoc(doc(db, 'reviewCases', 'owner_review_case'), { userId: ownerUid, status: 'inReview' });
+      await setDoc(doc(db, 'reviewCases', 'other_review_case'), { userId: otherUid, status: 'inReview' });
+      await setDoc(doc(db, 'reviewCases', 'codex_legacy_review_case'), { userId: 'codex-dev-user', status: 'inReview' });
+      await setDoc(doc(db, 'uploads', 'owner_upload_rules'), { userId: ownerUid, outcome: 'allowed' });
+      await setDoc(doc(db, 'uploads', 'other_upload_rules'), { userId: otherUid, outcome: 'allowed' });
+      await setDoc(doc(db, 'uploads', 'codex_test_upload_rules'), { userId: 'codex-dev-user', testActor: 'codex', outcome: 'allowed' });
+      await setDoc(doc(db, 'uploads', 'codex_legacy_production_upload_rules'), { userId: 'codex-dev-user', outcome: 'allowed' });
+      await setDoc(doc(db, 'uploads', 'retired_codex_test_upload_rules'), { userId: 'retired-codex', testActor: 'codex', outcome: 'allowed' });
       await setDoc(doc(db, 'announcements', 'active_update'), {
         type: 'appUpdate',
         title: 'Nieuwe versie',
@@ -573,12 +581,41 @@ async function run() {
     const ownerAdultFalseDb = authedContext(testEnv, ownerUid, { email_verified: true, idvVerified: true, isAdult: false }).firestore();
     const ownerUnverifiedDb = authedContext(testEnv, ownerUid).firestore();
     const codexDevDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, devActor: 'codex', email_verified: false }).firestore();
+    const codexModeratorDb = authedContext(testEnv, 'codex-dev-user', { devCodex: true, devActor: 'codex', email_verified: true, email: 'mod_1@example.com' }).firestore();
     const retiredCodexDb = authedContext(testEnv, 'retired-codex', { email_verified: true, idvVerified: true, isAdult: true }).firestore();
+    const retiredCodexClaimedDb = authedContext(testEnv, 'retired-codex', { devCodex: true, devActor: 'codex', email_verified: false }).firestore();
+    const retiredCodexModeratorDb = authedContext(testEnv, 'retired-codex', { email_verified: true, idvVerified: true, isAdult: true, email: 'mod_1@example.com' }).firestore();
     const otherDb = authedContext(testEnv, otherUid, { email_verified: true }).firestore();
     const publicUserDbFor = (uid) => authedContext(testEnv, uid, { email_verified: true }).firestore();
     const moderatorDb = authedContext(testEnv, 'mod_1', { email_verified: true, email: 'mod_1@example.com' }).firestore();
     const agencyOwnerDb = authedContext(testEnv, 'agency_owner', { email_verified: true }).firestore();
-    const companyOwnerDb = authedContext(testEnv, 'company_owner', { email_verified: true }).firestore();
+
+
+    // Production moderation data is not a Codex dev-wide namespace.
+    await assertSucceeds(getDoc(doc(ownerDb, 'uploads', 'owner_upload_rules')));
+    await assertFails(getDoc(doc(ownerDb, 'uploads', 'other_upload_rules')));
+    await assertSucceeds(getDoc(doc(ownerDb, 'reviewCases', 'owner_review_case')));
+    await assertFails(getDoc(doc(ownerDb, 'reviewCases', 'other_review_case')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'uploads', 'owner_upload_rules')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'reviewCases', 'other_review_case')));
+
+    await assertFails(getDoc(doc(codexDevDb, 'uploads', 'owner_upload_rules')));
+    await assertFails(getDoc(doc(codexDevDb, 'uploads', 'codex_legacy_production_upload_rules')));
+    await assertFails(getDoc(doc(codexDevDb, 'uploads', 'codex_test_upload_rules')));
+    await assertFails(getDoc(doc(codexDevDb, 'reviewCases', 'owner_review_case')));
+    await assertFails(getDoc(doc(codexDevDb, 'reviewCases', 'codex_legacy_review_case')));
+    await assertFails(getDocs(collection(codexDevDb, 'uploads')));
+    await assertFails(getDocs(collection(codexDevDb, 'reviewCases')));
+
+    await assertFails(getDoc(doc(codexModeratorDb, 'uploads', 'owner_upload_rules')));
+    await assertFails(getDoc(doc(codexModeratorDb, 'reviewCases', 'owner_review_case')));
+    await assertFails(getDoc(doc(codexModeratorDb, 'uploads', 'codex_test_upload_rules')));
+
+    await assertFails(getDoc(doc(retiredCodexDb, 'uploads', 'retired_codex_test_upload_rules')));
+    await assertFails(getDoc(doc(retiredCodexClaimedDb, 'uploads', 'retired_codex_test_upload_rules')));
+    await assertFails(getDoc(doc(retiredCodexDb, 'reviewCases', 'owner_review_case')));
+    await assertFails(getDoc(doc(retiredCodexModeratorDb, 'uploads', 'owner_upload_rules')));
+    await assertFails(getDoc(doc(retiredCodexModeratorDb, 'reviewCases', 'owner_review_case')));    const companyOwnerDb = authedContext(testEnv, 'company_owner', { email_verified: true }).firestore();
     const agencyOtherDb = authedContext(testEnv, 'agency_other', { email_verified: true }).firestore();
     const companyOtherDb = authedContext(testEnv, 'company_other', { email_verified: true }).firestore();
     const talentDb = authedContext(testEnv, 'talent_pending', { email_verified: true }).firestore();

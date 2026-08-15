@@ -40,6 +40,8 @@ const seed = () => new Map(Object.entries({
   'contributors/real-claimed-test-contributor': { createdByUid: 'marked-test', claimedByUid: 'real', status: 'claimed' },
   'contributors/real-contributor': { createdByUid: 'real' },
   'contributors/claimed-by-test': { createdByUid: 'real', claimedByUid: 'marked-test', status: 'claimed' },
+  'contributors/merge-primary': { createdByUid: 'real', displayName: 'Merge Primary' },
+  'contributors/merge-secondary': { createdByUid: 'marked-test', claimedByUid: 'marked-test', status: 'merged', displayName: 'Merge Secondary Recovery', mergedInto: 'merge-primary' },
   'contributorAliases/test-alias': { contributorId: 'test-contributor', createdByUid: 'marked-test', type: 'instagram' },
   'contributorAliases/codex-claimed-test-alias': { contributorId: 'test-claimed-by-codex', createdByUid: 'marked-test', type: 'domain' },
   'contributorAliases/pending-claim-alias': { contributorId: 'pending-claim-contributor', createdByUid: 'marked-test', type: 'instagram' },
@@ -65,7 +67,8 @@ const seed = () => new Map(Object.entries({
   'claimRequests/approved-test-claim': { contributorId: 'claimed-by-test', requestedByUid: 'marked-test', status: 'approved' },
   'claimRequests/approved-test-merge': { contributorId: 'merge-primary', requestedByUid: 'marked-test', mode: 'merge', status: 'approved', primaryContributorId: 'merge-primary', secondaryContributorId: 'merge-secondary', mergeAudit: { updatedPosts: 2 } },
   'claimRequests/ordinary-approved-merge': { contributorId: 'ordinary-primary', requestedByUid: 'real', mode: 'merge', status: 'approved', primaryContributorId: 'ordinary-primary', secondaryContributorId: 'ordinary-secondary' },
-  'contributorAliases/merge-evidence-alias': { contributorId: 'merge-primary' },
+  'contributorAliases/merge-evidence-alias': { contributorId: 'merge-primary', createdByUid: 'marked-test', type: 'instagram' },
+  'contributorAliases/merge-secondary-evidence-alias': { contributorId: 'merge-secondary', createdByUid: 'marked-test', type: 'instagram' },
   'claimVouches/real-claim/votes/voter': { voterUid: 'other', vote: 'yes' },
   'claimVouches/real-claim/votes/marked-test': { voterUid: 'marked-test', vote: 'no' },
   'claimVouches/proof-review-claim/votes/voter': { voterUid: 'other', vote: 'yes' },
@@ -153,8 +156,8 @@ assert.equal(dryStats.contributorContentRequests, 1);
 assert.equal(dryStats.outgoingFollows, 2);
 assert.equal(dryStats.incomingFollows, 2);
 assert.equal(dryStats.followCounterRepairs, 3);
-assert.equal(dryStats.preservedContributors, 3);
-assert.equal(dryStats.preservedContributorAliases, 5);
+assert.equal(dryStats.preservedContributors, 4);
+assert.equal(dryStats.preservedContributorAliases, 7);
 assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex_created_contributor_with_active_ordinary_claim' && item.contributorId === 'pending-claim-contributor'), true);
 assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex_created_contributor_with_active_ordinary_claim' && item.contributorId === 'moderation-claim-contributor'), true);
 assert.equal(dryStats.manualReviewRequired.some((item) => item.reason === 'codex_approved_merge_claim_recovery' && item.claimRequestId === 'approved-test-merge'), true);
@@ -179,6 +182,8 @@ for (const removed of ['publicUsers/marked-test', 'posts/test-post', 'posts/test
 }
 assert.equal(applyDocs.get('contributors/claimed-by-test').status, 'unclaimed');
 assert.equal(applyDocs.get('contributors/claimed-by-test').claimedByUid, null);
+assert.equal(applyDocs.get('contributors/merge-secondary').displayName, 'Merge Secondary Recovery');
+assert.equal(applyDocs.get('contributors/merge-secondary').mergedInto, 'merge-primary');
 assert.equal(applyDocs.get('users/marked-test').contributorId, null);
 assert.equal(applyDocs.get('reviewCases/approved-test-report').evidenceSnapshot.title, 'Recovery evidence');
 assert.deepEqual(applyDocs.get('userModeration/real').blockedFingerprints, [{ sha256: 'real', reviewCaseId: 'real-review' }]);
@@ -195,7 +200,7 @@ assert.equal(applyDocs.get('publicUsers/real').fansCount, 2);
 assert.equal(applyDocs.get('publicUsers/real').fanOfCount, 3);
 assert.equal(applyDocs.get('publicUsers/other').fanOfCount, 5, 'existing repair marker prevents double decrement');
 assert.deepEqual([...applyProofs], ['claimProofs/real-claim/real.png']);
-for (const preserved of ['publicUsers/real', 'publicUsers/suspicious-marker', 'posts/real-post', 'posts/ordinary-managed-post', 'posts/real-post/comments/real-engagement', 'posts/real-post/likes/real', 'profiles/real-agency', 'reviewCases/real-review', 'reviewCases/approved-test-report', 'moderationExamples/real-example', 'moderationExamples/real-linked-example', 'contributors/real-contributor', 'contributors/real-claimed-test-contributor', 'contributors/pending-claim-contributor', 'contributors/moderation-claim-contributor', 'contributorAliases/real-alias', 'contributorAliases/real-claimed-test-alias', 'contributorAliases/real-claimed-email-alias', 'contributorAliases/real-claimed-domain-alias', 'contributorAliases/pending-claim-alias', 'contributorAliases/moderation-claim-alias', 'contributorAliases/merge-evidence-alias', 'claimInvites/real-invite', 'contributorContentRequests/real-content-request', 'claimRequests/real-claim', 'claimRequests/proof-review-claim', 'claimRequests/pending-ordinary-claim', 'claimRequests/moderation-ordinary-claim', 'claimRequests/denied-ordinary-claim', 'claimRequests/approved-test-merge', 'claimRequests/ordinary-approved-merge', 'claimVouches/moderation-ordinary-claim/votes/voter', 'claimVouches/real-claim/votes/voter', 'claimVouches/proof-review-claim/votes/voter', 'communities/art/topics/topic/comments/real-comment', 'threads/dm_real_other', 'users/real/threadIndex/dm_real_other', 'threads/support_real', 'threads/support_real/messages/user-message', 'threads/support_real/messages/real-decision', 'users/real/following/other']) {
+for (const preserved of ['publicUsers/real', 'publicUsers/suspicious-marker', 'posts/real-post', 'posts/ordinary-managed-post', 'posts/real-post/comments/real-engagement', 'posts/real-post/likes/real', 'profiles/real-agency', 'reviewCases/real-review', 'reviewCases/approved-test-report', 'moderationExamples/real-example', 'moderationExamples/real-linked-example', 'contributors/real-contributor', 'contributors/real-claimed-test-contributor', 'contributors/pending-claim-contributor', 'contributors/moderation-claim-contributor', 'contributors/merge-secondary', 'contributorAliases/real-alias', 'contributorAliases/real-claimed-test-alias', 'contributorAliases/real-claimed-email-alias', 'contributorAliases/real-claimed-domain-alias', 'contributorAliases/pending-claim-alias', 'contributorAliases/moderation-claim-alias', 'contributorAliases/merge-evidence-alias', 'contributorAliases/merge-secondary-evidence-alias', 'claimInvites/real-invite', 'contributorContentRequests/real-content-request', 'claimRequests/real-claim', 'claimRequests/proof-review-claim', 'claimRequests/pending-ordinary-claim', 'claimRequests/moderation-ordinary-claim', 'claimRequests/denied-ordinary-claim', 'claimRequests/approved-test-merge', 'claimRequests/ordinary-approved-merge', 'claimVouches/moderation-ordinary-claim/votes/voter', 'claimVouches/real-claim/votes/voter', 'claimVouches/proof-review-claim/votes/voter', 'communities/art/topics/topic/comments/real-comment', 'threads/dm_real_other', 'users/real/threadIndex/dm_real_other', 'threads/support_real', 'threads/support_real/messages/user-message', 'threads/support_real/messages/real-decision', 'users/real/following/other']) {
   assert.equal(applyDocs.has(preserved), true, `${preserved} preserved`);
 }
 const secondStats = await reconcileCodexDevIsolation({ db: fakeDb(applyDocs), bucket: fakeBucket(applyProofs), apply: true, env: {}, uid: 'marked-test', skipStorage: false, fieldValue: fakeFieldValue });

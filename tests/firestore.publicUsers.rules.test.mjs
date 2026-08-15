@@ -643,6 +643,12 @@ async function run() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      await setDoc(doc(db, 'threads', 'support_current_codex_rules'), {
+        type: 'support', userUid: 'codex-dev-user', threadKey: 'support_current_codex_rules',
+      });
+      await setDoc(doc(db, 'threads', 'support_retired_codex_rules'), {
+        type: 'support', userUid: 'retired-codex', threadKey: 'support_retired_codex_rules',
+      });
       await setDoc(doc(db, 'threads', 'ordinary_private_dm'), { type: 'dm', participantUids: [ownerUid, otherUid] });
       await setDoc(doc(db, 'threads', 'retired_codex_dm'), { type: 'dm', participantUids: ['retired-codex', ownerUid] });
       await setDoc(doc(db, 'threads', 'retired_no_profile_legacy_dm'), {
@@ -650,6 +656,12 @@ async function run() {
       });
       await setDoc(doc(db, 'threads', 'ordinary_private_dm', 'messages', 'secret'), { senderUid: ownerUid, text: 'private' });
       await setDoc(doc(db, 'threads', 'support_other_rules', 'messages', 'secret'), { senderUid: otherUid, text: 'support private' });
+      await setDoc(doc(db, 'threads', 'support_current_codex_rules', 'messages', 'secret'), {
+        senderUid: 'codex-dev-user', text: 'current Codex support private',
+      });
+      await setDoc(doc(db, 'threads', 'support_retired_codex_rules', 'messages', 'secret'), {
+        senderUid: 'retired-codex', text: 'retired Codex support private',
+      });
     });
 
     await assertSucceeds(setDoc(doc(ownerDb, 'threads', 'dm_owner_other_rules', 'messages', 'owner_text'), {
@@ -792,6 +804,14 @@ async function run() {
     }));
     await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_owner_rules')));
     await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_owner_rules', 'messages', 'owner_support_text')));
+    await assertFails(getDoc(doc(codexDevDb, 'threads', 'support_current_codex_rules')));
+    await assertFails(getDoc(doc(codexDevDb, 'threads', 'support_current_codex_rules', 'messages', 'secret')));
+    await assertFails(getDoc(doc(retiredCodexDb, 'threads', 'support_retired_codex_rules')));
+    await assertFails(getDoc(doc(retiredCodexDb, 'threads', 'support_retired_codex_rules', 'messages', 'secret')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_current_codex_rules')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_current_codex_rules', 'messages', 'secret')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_retired_codex_rules')));
+    await assertSucceeds(getDoc(doc(moderatorDb, 'threads', 'support_retired_codex_rules', 'messages', 'secret')));
     await assertFails(getDoc(doc(codexDevDb, 'threads', 'ordinary_private_dm')));
     await assertFails(getDoc(doc(codexDevDb, 'threads', 'ordinary_private_dm', 'messages', 'secret')));
     await assertFails(getDoc(doc(codexDevDb, 'threads', 'support_other_rules')));

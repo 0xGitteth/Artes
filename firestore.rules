@@ -913,7 +913,9 @@ service cloud.firestore {
       allow read: if request.auth != null && !isTestActorThread(threadId) && (
         (isDevAnon() && !isKnownCodexProductionDenied())
         // eigenaar van support thread
-        || (resource.data.type == 'support' && resource.data.userUid == request.auth.uid)
+        || (resource.data.type == 'support'
+          && resource.data.userUid == request.auth.uid
+          && !isKnownCodexProductionDenied())
         // moderators mogen alle support threads lezen
         || (isModerator() && (resource.data.type == "support" || threadId.matches("^support_")))
         // DM participants use participantUids as canonical, with participants only for legacy threads
@@ -927,6 +929,7 @@ service cloud.firestore {
           ))
         // Non-DM participants retain existing participant array read behavior
         || (resource.data.type != 'dm'
+          && resource.data.type != 'support'
           && (
             ('participantUids' in resource.data && resource.data.participantUids is list && request.auth.uid in resource.data.participantUids)
             || ('participants' in resource.data && resource.data.participants is list && request.auth.uid in resource.data.participants)
@@ -1014,12 +1017,13 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if request.auth != null && !isTestActorThread(threadId) && (
           (isDevAnon() && !isKnownCodexProductionDenied())
-          || isSupportThreadOwner(threadId)
+          || (!isKnownCodexProductionDenied() && isSupportThreadOwner(threadId))
           || (isModerator() && (get(/databases/$(database)/documents/threads/$(threadId)).data.type == "support"
               || threadId.matches("^support_")))
           || (get(/databases/$(database)/documents/threads/$(threadId)).data.type == 'dm'
               && isThreadParticipant(threadId))
           || (get(/databases/$(database)/documents/threads/$(threadId)).data.type != 'dm'
+              && get(/databases/$(database)/documents/threads/$(threadId)).data.type != 'support'
               && (
                 (
                   'participantUids' in get(/databases/$(database)/documents/threads/$(threadId)).data

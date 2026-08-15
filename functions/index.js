@@ -3075,52 +3075,83 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       geminiDiagnostics: uploadData?.geminiDiagnostics || null,
     });
 
-    let reviewCaseId = existingCase?.id || null;
+    const candidateReviewRef = existingCase?.id
+      ? db.collection('reviewCases').doc(existingCase.id)
+      : null;
+    const newReviewRef = db.collection('reviewCases').doc();
+    let reviewCaseId = null;
     let created = false;
 
-    if (!reviewCaseId) {
-      const reviewRef = await db.collection('reviewCases').add({
-        caseType: 'upload',
-        status: 'inReview',
-        decision: null,
-        userId: decoded.uid,
+    await db.runTransaction(async (transaction) => {
+      reviewCaseId = null;
+      created = false;
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev review cases are isolated.');
+        error.status = 403;
+        throw error;
+      }
+      const freshUploadSnap = await transaction.get(uploadRef);
+      if (!freshUploadSnap.exists) {
+        const error = new Error('Upload not found');
+        error.status = 404;
+        throw error;
+      }
+      const freshUploadData = freshUploadSnap.data() || {};
+      const freshUploadOwnerId = freshUploadData.userId || freshUploadData.ownerUid || freshUploadData.userUid || null;
+      if (freshUploadOwnerId !== decoded.uid) {
+        const error = new Error('Not authorized for this upload');
+        error.status = 403;
+        throw error;
+      }
+
+      let reusableReviewRef = null;
+      if (candidateReviewRef) {
+        const candidateSnap = await transaction.get(candidateReviewRef);
+        if (candidateSnap.exists) {
+          const candidateData = candidateSnap.data() || {};
+          const candidateLinksUpload = freshUploadData.reviewCaseId === candidateReviewRef.id
+            || candidateData.uploadId === uploadId
+            || (Array.isArray(candidateData.linkedUploadIds) && candidateData.linkedUploadIds.includes(uploadId));
+          if (candidateData.status === 'inReview'
+            && candidateData.userId === decoded.uid
+            && (!candidateData.caseType || candidateData.caseType === 'upload')
+            && candidateLinksUpload) {
+            reusableReviewRef = candidateReviewRef;
+          }
+        }
+      }
+
+      const reviewRef = reusableReviewRef || newReviewRef;
+      reviewCaseId = reviewRef.id;
+      created = !reusableReviewRef;
+      const reviewUpdates = {
+        uploadId,
+        linkedUploadIds: created ? [uploadId] : FieldValue.arrayUnion(uploadId),
         ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
         reviewReason: 'manualUserReviewRequest',
         aiSummary,
-        ...(isCodexDevUid(decoded.uid) ? { testActor: CODEX_DEV_ACTOR } : {}),
-        uploadId,
-        linkedUploadIds: [uploadId],
-        createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
-      });
-      reviewCaseId = reviewRef.id;
-      created = true;
-    }
-
-    await uploadRef.set(
-      {
-        ...(isCodexDevUid(decoded.uid) ? { testActor: CODEX_DEV_ACTOR } : {}),
+      };
+      if (created) {
+        transaction.create(reviewRef, {
+          caseType: 'upload',
+          status: 'inReview',
+          decision: null,
+          userId: decoded.uid,
+          ...reviewUpdates,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        transaction.set(reviewRef, reviewUpdates, { merge: true });
+      }
+      transaction.set(uploadRef, {
         reviewCaseId,
         reviewStatus: 'inReview',
         reviewRequestedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
         ...(postDraft ? { postDraft } : {}),
-      },
-      { merge: true }
-    );
-
-    await db.collection('reviewCases').doc(reviewCaseId).set(
-      {
-        ...(isCodexDevUid(decoded.uid) ? { testActor: CODEX_DEV_ACTOR } : {}),
-        uploadId,
-        linkedUploadIds: FieldValue.arrayUnion(uploadId),
-        ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-        reviewReason: 'manualUserReviewRequest',
-        aiSummary,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+      }, { merge: true });
+    });
 
     res.status(200).json({ ok: true, reviewCaseId, created });
   } catch (error) {

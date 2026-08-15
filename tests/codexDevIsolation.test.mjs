@@ -426,6 +426,18 @@ test('latest historical-registry races are guarded at their final authoritative 
   assert.ok(report.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })')
     < report.indexOf('transaction.create(reviewRef'));
 
+  const uploadReview = section('export const requestUploadReviewCase', 'export const getModerationExamplesForCase');
+  const finalTransaction = uploadReview.lastIndexOf('await db.runTransaction');
+  const registryGuard = uploadReview.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })', finalTransaction);
+  const freshUploadRead = uploadReview.indexOf('transaction.get(uploadRef)', finalTransaction);
+  const candidateRead = uploadReview.indexOf('transaction.get(candidateReviewRef)', finalTransaction);
+  const caseCreate = uploadReview.indexOf('transaction.create(reviewRef', finalTransaction);
+  const uploadLink = uploadReview.indexOf('transaction.set(uploadRef', finalTransaction);
+  assert.ok(finalTransaction < registryGuard && registryGuard < freshUploadRead);
+  assert.ok(freshUploadRead < candidateRead && candidateRead < caseCreate, 'all reuse reads precede new-case writes');
+  assert.ok(caseCreate < uploadLink, 'case creation and upload linkage share the authoritative transaction');
+  assert.doesNotMatch(uploadReview, /await uploadRef\.set\(/);
+
   const vouches = section('export const getVouchRequests', 'export const cleanupCodexTestData');
   assert.ok(vouches.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid })')
     < vouches.indexOf("collection('claimRequests')"));

@@ -10,7 +10,7 @@ import {
 } from './backfillPublicUsersFromUsers.js';
 import { isAvailablePersonalPublicProfile } from '../publicProfileAvailability.js';
 import { isDiditSafetyDeactivatedPrivateProfile } from '../publicProfileUnpublish.js';
-import { isCodexDevPrivateProfile } from '../codexDevIdentity.js';
+import { isKnownCodexDevActorUid } from '../codexDevActorRegistry.js';
 
 export const DEFAULT_PAGE_SIZE = 200;
 export const PRIVATE_FIELDS = LEGACY_PRIVATE_PUBLIC_USER_FIELDS;
@@ -106,6 +106,7 @@ const decideUserReconciliation = ({
   publicSnap,
   deleteValue,
   serverTimestamp,
+  productionDenied = false,
 }) => {
   if (!privateSnap.exists) return { action: 'none', stats: {} };
 
@@ -113,7 +114,7 @@ const decideUserReconciliation = ({
   const publicExists = publicSnap.exists;
   const publicData = publicExists ? (publicSnap.data() || {}) : {};
 
-  if (isCodexDevPrivateProfile(uid, userData)) {
+  if (productionDenied) {
     return publicExists
       ? { action: 'delete', stats: { testActorsSkipped: 1, publicProfilesDeleted: 1, deletes: 1 } }
       : { action: 'none', stats: { testActorsSkipped: 1 } };
@@ -174,25 +175,33 @@ const reconcileDiscoveredUser = async ({
   const publicRef = db.collection('publicUsers').doc(discoveredSnap.id);
 
   if (!apply) {
-    const publicSnap = await publicRef.get();
+    const [publicSnap, productionDenied] = await Promise.all([
+      publicRef.get(),
+      isKnownCodexDevActorUid({ db, uid: discoveredSnap.id }),
+    ]);
     return decideUserReconciliation({
       uid: discoveredSnap.id,
       privateSnap: discoveredSnap,
       publicSnap,
       deleteValue,
       serverTimestamp,
+      productionDenied,
     });
   }
 
   return db.runTransaction(async (transaction) => {
-    const currentPrivateSnap = await transaction.get(userRef);
-    const currentPublicSnap = await transaction.get(publicRef);
+    const [currentPrivateSnap, currentPublicSnap, productionDenied] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(publicRef),
+      isKnownCodexDevActorUid({ db, uid: discoveredSnap.id, transaction }),
+    ]);
     const decision = decideUserReconciliation({
       uid: discoveredSnap.id,
       privateSnap: currentPrivateSnap,
       publicSnap: currentPublicSnap,
       deleteValue,
       serverTimestamp,
+      productionDenied,
     });
     executeUserDecision(transaction, publicRef, decision);
     return decision;

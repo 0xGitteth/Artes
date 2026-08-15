@@ -58,12 +58,14 @@ assert.equal(malformed.onboardingStep, 5);
 const DELETE_TOKEN = Symbol('delete');
 
 function createFakeDb(initialUsers, initialPublicUsers, {
+  registeredCodexUids = [],
   beforeFirstTransaction = null,
   failTransaction = false,
 } = {}) {
   const stores = {
     users: new Map(initialUsers.map(([id, data]) => [id, structuredClone(data)])),
     publicUsers: new Map(initialPublicUsers.map(([id, data]) => [id, structuredClone(data)])),
+    codexDevActorRegistry: new Map(registeredCodexUids.map((id) => [id, { productionDenyOnly: true }])),
   };
   const pageReads = [];
   const transactionWrites = [];
@@ -177,6 +179,35 @@ assert.equal(applyStats.diditSafetyProfilesPreserved, 0);
 assert.equal(applyDb.stores.publicUsers.has('pending'), false);
 assert.equal(applyDb.stores.publicUsers.has('done'), true);
 assert.ok(applyDb.transactionCalls >= 2, 'apply decisions use transactions instead of reusable batches');
+
+const codexIsolationUsers = [
+  ['retired-no-public', { displayName: 'Retired', onboardingComplete: true }],
+  ['retired-with-public', { displayName: 'Retired', onboardingComplete: true }],
+  ['codex-dev-user', { displayName: 'Current Codex', onboardingComplete: true }],
+  ['spoofed-markers', {
+    displayName: 'Ordinary Spoof', onboardingComplete: true, isDevTestUser: true, devActor: 'codex',
+  }],
+];
+const codexIsolationPublicUsers = [
+  ['retired-with-public', { onboardingComplete: true, displayName: 'Retired' }],
+  ['codex-dev-user', { onboardingComplete: true, displayName: 'Current Codex' }],
+];
+const isolationOptions = { registeredCodexUids: ['retired-no-public', 'retired-with-public'] };
+const codexDryRunDb = createFakeDb(codexIsolationUsers, codexIsolationPublicUsers, isolationOptions);
+const codexDryRunStats = await reconcile({ db: codexDryRunDb, pageSize: 10 });
+assert.equal(codexDryRunStats.testActorsSkipped, 3);
+assert.equal(codexDryRunStats.publicProfilesDeleted, 2, 'dry run reports current and retired projection deletion');
+assert.equal(codexDryRunStats.writes, 1, 'spoofed private markers remain non-authoritative and publish normally');
+assert.equal(codexDryRunDb.transactionCalls, 0);
+assert.equal(codexDryRunDb.transactionWrites.length, 0, 'dry run performs zero writes');
+assert.equal(codexDryRunDb.stores.publicUsers.has('retired-with-public'), true);
+
+const codexApplyDb = createFakeDb(codexIsolationUsers, codexIsolationPublicUsers, isolationOptions);
+await reconcile({ db: codexApplyDb, apply: true, pageSize: 10 });
+assert.equal(codexApplyDb.stores.publicUsers.has('retired-no-public'), false);
+assert.equal(codexApplyDb.stores.publicUsers.has('retired-with-public'), false);
+assert.equal(codexApplyDb.stores.publicUsers.has('codex-dev-user'), false);
+assert.equal(codexApplyDb.stores.publicUsers.has('spoofed-markers'), true);
 
 const cleanupDb = createFakeDb(
   [['done', { displayName: 'Current', onboardingStep: '5', roles: ['maker'], themes: [] }]],

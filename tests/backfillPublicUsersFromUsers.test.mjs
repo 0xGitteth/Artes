@@ -76,6 +76,14 @@ assert.equal(isPublishEligibleUser({ onboardingStep: 4, ageVerified: true, isAdu
 
 const docs = [
   {
+    id: 'retired-registered-no-public',
+    data: () => ({ onboardingComplete: true, displayName: 'Retired No Public' }),
+  },
+  {
+    id: 'retired-registered-public',
+    data: () => ({ onboardingComplete: true, displayName: 'Retired Public' }),
+  },
+  {
     id: 'non-default-codex',
     data: () => ({ onboardingComplete: true, isDevTestUser: true, devActor: 'codex' }),
   },
@@ -112,6 +120,7 @@ const docs = [
 
 const createFakeDb = () => {
   const publicUsers = new Map([
+    ['retired-registered-public', { displayName: 'Retired Public' }],
     ['non-default-codex', { displayName: 'Marked Codex', ageVerified: true }],
     ['codex-dev-user', { displayName: 'Configured Codex', ageVerified: true }],
     ['eligible_user', {
@@ -125,6 +134,7 @@ const createFakeDb = () => {
     }],
   ]);
   const queuedWrites = [];
+  const registry = new Set(['retired-registered-no-public', 'retired-registered-public']);
   let batchSetCalls = 0;
 
   const makePublicRef = (id) => ({
@@ -146,6 +156,9 @@ const createFakeDb = () => {
     collection: (name) => {
       if (name === 'users') return { get: async () => ({ docs }) };
       if (name === 'publicUsers') return { doc: makePublicRef };
+      if (name === 'codexDevActorRegistry') return {
+        doc: (id) => ({ get: async () => ({ exists: registry.has(id) }) }),
+      };
       throw new Error(`Unexpected collection ${name}`);
     },
     batch: () => {
@@ -183,7 +196,7 @@ const createFakeDb = () => {
 const dryRunDb = createFakeDb();
 const dryRunStats = await runBackfill({ db: dryRunDb, dryRun: true, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(dryRunStats, {
-  scanned: 5,
+  scanned: 7,
   eligible: 3,
   skippedNotEligible: 1,
   wouldWrite: 3,
@@ -191,27 +204,30 @@ assert.deepEqual(dryRunStats, {
   failed: 0,
   legacyPrivateFieldsFound: 6,
   legacyPrivateFieldsDeleted: 0,
-  codexPublicProfilesWouldDelete: 1,
+  codexPublicProfilesWouldDelete: 2,
   codexPublicProfilesDeleted: 0,
 });
 assert.equal(dryRunDb.batchSetCalls, 0, 'dry run must not enqueue writes');
+assert.equal(dryRunDb.queuedWrites.length, 0, 'dry run must perform zero writes, including deletes');
 
 const applyDb = createFakeDb();
 const applyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.deepEqual(applyStats, {
-  scanned: 5,
+  scanned: 7,
   eligible: 3,
   skippedNotEligible: 1,
   wouldWrite: 3,
-  written: 4,
+  written: 5,
   failed: 0,
   legacyPrivateFieldsFound: 6,
   legacyPrivateFieldsDeleted: 6,
-  codexPublicProfilesWouldDelete: 1,
-  codexPublicProfilesDeleted: 1,
+  codexPublicProfilesWouldDelete: 2,
+  codexPublicProfilesDeleted: 2,
 });
 assert.equal(applyDb.batchSetCalls, 3, 'apply should enqueue every onboarding-eligible publicUsers write');
 assert.equal(applyDb.publicUsers.has('codex-dev-user'), false, 'apply deletes the legacy Codex projection');
+assert.equal(applyDb.publicUsers.has('retired-registered-public'), false, 'apply deletes a retired registered Codex projection');
+assert.equal(applyDb.publicUsers.has('retired-registered-no-public'), false, 'apply never publishes a retired registered Codex actor');
 assert.equal(applyDb.publicUsers.has('non-default-codex'), true, 'historical markers alone never select an ordinary user destructively');
 const secondApplyStats = await runBackfill({ db: applyDb, dryRun: false, serverTimestamp: fakeTimestamp, deleteValue: fakeDelete });
 assert.equal(secondApplyStats.codexPublicProfilesWouldDelete, 0);

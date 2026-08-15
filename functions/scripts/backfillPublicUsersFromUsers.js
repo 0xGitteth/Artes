@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url';
 import { cleanPublicStringArray } from '../../src/utils/publicProfileFieldNormalization.js';
-import { isCodexDevPrivateProfile } from '../codexDevIdentity.js';
+import { isKnownCodexDevActorUid } from '../codexDevActorRegistry.js';
 
 const BATCH_LIMIT = 400;
 
@@ -250,7 +250,7 @@ export const runBackfill = async ({ db, uid = null, dryRun = true, serverTimesta
   for (const docSnap of userDocs) {
     stats.scanned += 1;
     const userData = docSnap.data() || {};
-    if (isCodexDevPrivateProfile(docSnap.id, userData)) {
+    if (await isKnownCodexDevActorUid({ db, uid: docSnap.id })) {
       const publicRef = db.collection('publicUsers').doc(docSnap.id);
       const publicSnap = await publicRef.get();
       if (publicSnap.exists) {

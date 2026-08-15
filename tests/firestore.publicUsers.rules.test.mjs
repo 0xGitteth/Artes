@@ -58,7 +58,7 @@ async function run() {
       });
       await setDoc(doc(db, 'users', 'retired-codex'), {
         uid: 'retired-codex', onboardingComplete: true, onboardingStep: 5,
-        ageVerified: true, isAdult: true,
+        ageVerified: true, isAdult: true, roles: ['agency'],
       });
       await setDoc(doc(db, 'publicUsers', ownerUid), {
        onboardingComplete: true,
@@ -155,7 +155,27 @@ async function run() {
         onboardingStep: 5,
         isDevTestUser: true,
         devActor: 'codex',
+        roles: ['agency'],
       });
+      for (const [targetUid, agencyUid] of [
+        ['codex_affiliation_target', 'codex-dev-user'],
+        ['retired_affiliation_target', 'retired-codex'],
+      ]) {
+        const target = {
+          onboardingComplete: true,
+          uid: targetUid,
+          username: targetUid.replaceAll('_', ''),
+          displayName: targetUid,
+          linkedAgencyId: agencyUid,
+          linkedAgencyName: 'Agency',
+          linkedAgencyStatus: 'pending',
+        };
+        await setDoc(doc(db, 'users', targetUid), target);
+        await setDoc(doc(db, 'publicUsers', targetUid), {
+          ...target,
+          displayNameLower: targetUid,
+        });
+      }
       await setDoc(doc(db, 'users', 'agency_owner'), {
         onboardingComplete: true,
         uid: 'agency_owner',
@@ -570,6 +590,26 @@ async function run() {
     const selfWithdrawDb = authedContext(testEnv, 'self_withdraw', { email_verified: true }).firestore();
     const ownerUnverifiedRulesDb = authedContext(testEnv, ownerUid, { email_verified: false, __adultDefaults: false }).firestore();
     const eligibleVoterDb = authedContext(testEnv, 'eligible_voter', { email_verified: true }).firestore();
+
+    for (const [actorDb, actorUid, targetUid] of [
+      [codexDevDb, 'codex-dev-user', 'codex_affiliation_target'],
+      [retiredCodexDb, 'retired-codex', 'retired_affiliation_target'],
+    ]) {
+      await assertFails(setDoc(doc(actorDb, 'users', targetUid), {
+        linkedAgencyStatus: 'approved',
+        linkedAgencyStatusUpdatedAt: serverTimestamp(),
+        linkedAgencyApprovedAt: serverTimestamp(),
+        linkedAgencyApprovedBy: actorUid,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }));
+      await assertFails(setDoc(doc(actorDb, 'publicUsers', targetUid), {
+        onboardingComplete: true,
+        linkedAgencyId: actorUid,
+        linkedAgencyName: 'Agency',
+        linkedAgencyStatus: 'approved',
+        updatedAt: serverTimestamp(),
+      }, { merge: true }));
+    }
 
     await assertFails(updateDoc(doc(ownerDb, 'users', ownerUid), { isDevTestUser: true, devActor: 'codex' }));
     await assertFails(deleteDoc(doc(codexDevDb, 'users', 'codex-dev-user')));

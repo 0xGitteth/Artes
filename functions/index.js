@@ -52,6 +52,7 @@ import {
   releaseCodexDevMergeFenceIfUnmutated,
 } from './codexDevActorRegistry.js';
 import { createMarkSupportThreadReadForModerator } from './supportThreadRead.js';
+import { createClaimInviteAtomically } from './claimInviteTransaction.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
@@ -4398,22 +4399,17 @@ export const createClaimInvite = onCall({ region: 'europe-west4' }, async (reque
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + claimInviteExpiryMs));
   const rateRef = db.collection('claimInviteRateLimits').doc(request.auth.uid);
 
-  await db.runTransaction(async (transaction) => {
-    const rateSnap = await transaction.get(rateRef);
-    const todayKey = getDateKey();
-    const rateData = rateSnap.exists ? rateSnap.data() : null;
-    const currentCount = rateData?.date === todayKey ? Number(rateData?.count || 0) : 0;
-    if (currentCount >= claimInviteRateLimitPerDay) {
-      throw new HttpsError('resource-exhausted', 'Daily invite limit reached');
-    }
-    transaction.set(rateRef, {
-      date: todayKey,
-      count: currentCount + 1,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-
-    const inviteRef = db.collection('claimInvites').doc(token);
-    transaction.set(inviteRef, {
+  const inviteRef = db.collection('claimInvites').doc(token);
+  await createClaimInviteAtomically({
+    db,
+    uid: request.auth.uid,
+    rateRef,
+    inviteRef,
+    todayKey: getDateKey(),
+    rateLimitPerDay: claimInviteRateLimitPerDay,
+    serverTimestamp: FieldValue.serverTimestamp,
+    createError: (code, message) => new HttpsError(code, message),
+    inviteData: {
       contributorId,
       postId,
       createdByUid: request.auth.uid,
@@ -4421,7 +4417,7 @@ export const createClaimInvite = onCall({ region: 'europe-west4' }, async (reque
       expiresAt,
       usedAt: null,
       usedByUid: null,
-    });
+    },
   });
 
   return { path: `/claim/${token}` };

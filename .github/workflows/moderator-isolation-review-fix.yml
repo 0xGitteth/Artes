@@ -27,6 +27,7 @@ jobs:
       - run: npm --prefix functions ci
       - run: node scripts/applyModeratorIsolationReviewFix.mjs
       - run: node scripts/addStorageModeratorIsolationTest.mjs
+      - run: node scripts/repairModeratorIsolationStaleAssertion.mjs
       - run: node --check functions/index.js
       - run: node --check functions/codexDevActorRegistry.js
       - run: npm run test:codex-dev-isolation
@@ -41,6 +42,7 @@ jobs:
         run: |
           rm scripts/applyModeratorIsolationReviewFix.mjs
           rm scripts/addStorageModeratorIsolationTest.mjs
+          rm scripts/repairModeratorIsolationStaleAssertion.mjs
           rm .github/workflows/moderator-isolation-review-fix.yml
           git config user.name "chatgpt-codex-connector[bot]"
           git config user.email "199175422+chatgpt-codex-connector[bot]@users.noreply.github.com"

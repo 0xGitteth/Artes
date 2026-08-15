@@ -391,6 +391,25 @@ test('historical registry blocks claim actors, screenshot races, and production 
   assert.ok(transactionalGuard < screenshot.indexOf('transaction.set(requestRef'));
   assert.ok(transactionalGuard < screenshot.indexOf('transaction.update(contributorRef'));
   assert.match(section('export const userModerationAction', 'export const moderatorDecide'), /collection\(isCodexDevUid\(userId\) \? 'codexDevPosts' : 'posts'\)/);
+
+  const contributor = section('export const createTemporaryContributor', 'export const createClaimInvite');
+  const contributorTransaction = contributor.indexOf('db.runTransaction');
+  const contributorGuard = contributor.indexOf('isKnownCodexDevActorUid({ db, uid: request.auth.uid, transaction })');
+  assert.ok(contributorTransaction < contributorGuard && contributorGuard < contributor.indexOf('transaction.get(alias.ref)'));
+  assert.ok(contributor.indexOf('transaction.get(alias.ref)') < contributor.indexOf('transaction.set(contributorRef'));
+
+  const claim = section('export const createClaimRequest', 'export const startEmailClaimProof');
+  const claimTransaction = claim.indexOf('db.runTransaction');
+  const claimGuard = claim.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })');
+  assert.ok(claimTransaction < claimGuard && claimGuard < claim.indexOf('transaction.get(inviteRef)'));
+  assert.ok(claimGuard < claim.indexOf('transaction.set(requestRef'));
+  assert.ok(claimGuard < claim.indexOf('transaction.update(inviteRef'));
+
+  const vouch = section('export const submitClaimVouch', 'export const expireClaimRequests');
+  const vouchTransaction = vouch.indexOf('db.runTransaction');
+  const voterGuard = vouch.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })');
+  assert.ok(vouchTransaction < voterGuard && voterGuard < vouch.indexOf('transaction.get(requestRef)'));
+  assert.ok(voterGuard < vouch.indexOf('transaction.set(voteRef'));
 });
 
 test('Firestore production deny helper is registry-backed but grants no Codex privileges', async () => {
@@ -592,6 +611,9 @@ test('ensureCodexDevProfileState deletes rather than writes a publicUsers projec
   const implementation = source.slice(start, end);
   assert.match(implementation, /publicUserRef\.delete\(\)/);
   assert.match(implementation, /ensureCodexDevActorRegistered\(\{ db, uid, now \}\)/);
+  assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('userRef.get()'));
+  assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('userRef.set('));
+  assert.ok(implementation.indexOf('ensureCodexDevActorRegistered') < implementation.indexOf('publicUserRef.delete()'));
   assert.doesNotMatch(implementation, /publicUserRef\.set\(/);
   for (const privateField of ['ageVerified', 'isAdult', 'didit', 'idv', 'email', 'isDevTestUser']) {
     assert.equal(implementation.includes(`publicPayload.${privateField}`), false);

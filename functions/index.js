@@ -258,6 +258,7 @@ export const ensureCodexDevProfileState = async (uid) => {
   const now = FieldValue.serverTimestamp();
   const userRef = db.collection('users').doc(uid);
   const publicUserRef = db.collection('publicUsers').doc(uid);
+  await ensureCodexDevActorRegistered({ db, uid, now });
   const existingUserSnap = await userRef.get();
   await userRef.set(buildCodexDevPrivateProfile({
     uid,
@@ -268,7 +269,6 @@ export const ensureCodexDevProfileState = async (uid) => {
   // A test actor has no public projection. Remove the legacy projection that
   // used to leak capability/IDV fields and could make Codex discoverable.
   await publicUserRef.delete();
-  await ensureCodexDevActorRegistered({ db, uid, now });
 };
 
 const buildReportedPostPath = (postId) => {
@@ -4319,6 +4319,9 @@ export const createTemporaryContributor = onCall({ region: 'europe-west4' }, asy
   }));
 
   await db.runTransaction(async (transaction) => {
+    if (await isKnownCodexDevActorUid({ db, uid: request.auth.uid, transaction })) {
+      throw new HttpsError('permission-denied', 'Codex Dev contributors are isolated');
+    }
     for (const alias of aliasRefs) {
       const existing = await transaction.get(alias.ref);
       if (existing.exists) {
@@ -4543,6 +4546,11 @@ export const createClaimRequest = onRequest({ cors: true, region: 'europe-west4'
     const inviteRef = inviteToken ? db.collection('claimInvites').doc(inviteToken) : null;
     let requestId = null;
     await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev contributor claims are isolated.');
+        error.status = 403;
+        throw error;
+      }
       if (inviteRef) {
         const inviteSnap = await transaction.get(inviteRef);
         if (!inviteSnap.exists) {
@@ -5502,6 +5510,11 @@ export const submitClaimVouch = onRequest({ cors: true, region: 'europe-west4' }
     let responsePayload = { ok: true };
 
     await db.runTransaction(async (transaction) => {
+      if (await isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })) {
+        const error = new Error('Codex Dev contributor claims are isolated.');
+        error.status = 403;
+        throw error;
+      }
       const requestSnap = await transaction.get(requestRef);
       if (!requestSnap.exists) {
         const error = new Error('Claim request not found');

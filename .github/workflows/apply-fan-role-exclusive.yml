@@ -1,21 +1,22 @@
 name: Apply exclusive fan profile role fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - chatgpt/fan-role-exclusive
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply-and-test:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -48,4 +49,4 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m "Enforce exclusive fan profile role"
-          git push origin HEAD:chatgpt/fan-role-exclusive
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}

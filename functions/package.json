@@ -14,6 +14,7 @@
   },
   "scripts": {
     "cleanup-upload-history": "node scripts/cleanupUploadFingerprintHistory.js",
-    "backfill-public-users": "node scripts/backfillPublicUsersFromUsers.js"
+    "backfill-public-users": "node scripts/backfillPublicUsersFromUsers.js",
+    "reconcile-fan-profile-roles": "node scripts/reconcileExclusiveFanProfileRoles.js"
   }
 }

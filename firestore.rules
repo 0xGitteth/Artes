@@ -104,6 +104,17 @@ service cloud.firestore {
         ? !request.resource.data.keys().hasAny(['fansCount', 'fanOfCount'])
         : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['fansCount', 'fanOfCount']);
     }
+    function hasExclusiveFanProfileRoles(data) {
+      return !('roles' in data)
+        || (data.roles is list
+          && (!('fan' in data.roles) || data.roles.size() == 1));
+    }
+    function hasValidProfileRoleWrite() {
+      return resource == null
+        ? hasExclusiveFanProfileRoles(request.resource.data)
+        : (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['roles'])
+          || hasExclusiveFanProfileRoles(request.resource.data));
+    }
     function isModerator() {
       return request.auth != null
         && !isKnownCodexProductionDenied()
@@ -734,12 +745,14 @@ service cloud.firestore {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId)
         && noServerManagedUserFieldWrites()
+        && hasExclusiveFanProfileRoles(request.resource.data)
         && isSelfSafeAffiliationStatusWrite();
       // Update must keep server-managed/sensitive fields client-immutable as well.
       allow update: if !isKnownCodexProductionDenied()
         && ((isOwner(userId)
           && noClientGateFieldWrites()
           && noServerManagedUserFieldWrites()
+          && hasValidProfileRoleWrite()
           && isSelfSafeAffiliationStatusWrite())
           || isAgencyApprovalWrite(userId)
           || isCompanyApprovalWrite(userId));
@@ -823,6 +836,7 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if !isKnownCodexProductionDenied()
         && ((isOwner(uid)
+        && hasValidProfileRoleWrite()
         && exists(/databases/$(database)/documents/users/$(uid))
         && ((('onboardingComplete' in get(/databases/$(database)/documents/users/$(uid)).data)
             && get(/databases/$(database)/documents/users/$(uid)).data.onboardingComplete == true)

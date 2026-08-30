@@ -376,7 +376,8 @@ test('moderateImage derives all quarantine decisions from production-deny identi
   const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));
   assert.match(moderate, /const isCodexActor = isCodexDevForProductionDeny\(decoded\)\s*\|\| await isKnownCodexDevActorUid/);
   assert.match(moderate, /isCodexActor \? null : await findExactModerationExample/);
-  assert.match(moderate, /findExactUpload\([^\n]+\{ isCodexActor \}/);
+  assert.match(moderate, /findExactUpload\([^\n]+\{ isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags \}/);
+  assert.match(moderate, /findNearDuplicateUpload\([^\n]+\{ isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags, userId \}/);
   assert.match(moderate, /shouldCreateProductionReviewCase\(\{ isCodexActor/);
   assert.match(moderate, /\.\.\.\(isCodexActor \? \{ testActor: CODEX_DEV_ACTOR \} : \{\}\)/);
   assert.doesNotMatch(moderate, /isCodexDevUid\(userId\)/);
@@ -497,11 +498,12 @@ test('latest historical-registry races are guarded at their final authoritative 
   const finalTransaction = uploadReview.lastIndexOf('await db.runTransaction');
   const registryGuard = uploadReview.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })', finalTransaction);
   const freshUploadRead = uploadReview.indexOf('transaction.get(uploadRef)', finalTransaction);
-  const candidateRead = uploadReview.indexOf('transaction.get(candidateReviewRef)', finalTransaction);
+  const candidateLoop = uploadReview.indexOf('for (const candidateReviewCaseId of candidateReviewCaseIds)', finalTransaction);
+  const candidateRead = uploadReview.indexOf('transaction.get(candidateRef)', candidateLoop);
   const caseCreate = uploadReview.indexOf('transaction.create(reviewRef', finalTransaction);
   const uploadLink = uploadReview.indexOf('transaction.set(uploadRef', finalTransaction);
   assert.ok(finalTransaction < registryGuard && registryGuard < freshUploadRead);
-  assert.ok(freshUploadRead < candidateRead && candidateRead < caseCreate, 'all reuse reads precede new-case writes');
+  assert.ok(freshUploadRead < candidateLoop && candidateLoop < candidateRead && candidateRead < caseCreate, 'all reuse reads precede new-case writes');
   assert.ok(caseCreate < uploadLink, 'case creation and upload linkage share the authoritative transaction');
   assert.doesNotMatch(uploadReview, /await uploadRef\.set\(/);
 

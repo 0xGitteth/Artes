@@ -27,17 +27,50 @@ export const buildCommonModerationExample = ({
   decision = null, policyDecisionOutcome = null, moderatorDecision = null, userCorrectionAction = null, uploaderCorrectionResponse = null,
   nowFactory = null,
 }) => {
-  const safeSearch = moderationSignals?.safeSearch || moderationSignals?.safeSearchLikelihoods || null;
+  const reviewAiSummary = reviewData?.aiSummary && typeof reviewData.aiSummary === 'object'
+    ? reviewData.aiSummary
+    : {};
+  const providedModerationSignals = moderationSignals && typeof moderationSignals === 'object' ? moderationSignals : {};
+  const reviewModerationSignals = reviewAiSummary?.moderationSignals && typeof reviewAiSummary.moderationSignals === 'object'
+    ? reviewAiSummary.moderationSignals
+    : {};
+  const effectiveModerationSignals = Object.keys(providedModerationSignals).length > 0
+    ? providedModerationSignals
+    : reviewModerationSignals;
+  const safeSearch = effectiveModerationSignals?.safeSearch || effectiveModerationSignals?.safeSearchLikelihoods || null;
   const visionRaw = Array.isArray(aiResult?.visionLabelsRaw) ? aiResult.visionLabelsRaw : toArray(aiResult?.visionLabels);
   const visionNorm = Array.isArray(aiResult?.visionLabelsNormalized) ? aiResult.visionLabelsNormalized : [];
-  const aiThemes = toArray(aiResult?.suggestedThemes);
-  const aiTriggers = toArray(aiResult?.suggestedTriggers);
+  const aiThemes = Array.isArray(aiResult?.suggestedThemes)
+    ? toArray(aiResult.suggestedThemes)
+    : toArray(uploadData?.suggestedThemes || uploadData?.aiSuggestedTaxonomy?.themes);
+  const aiTriggers = Array.isArray(aiResult?.suggestedTriggers)
+    ? toArray(aiResult.suggestedTriggers)
+    : toArray(uploadData?.suggestedTriggers || uploadData?.aiSuggestedTaxonomy?.triggers || reviewAiSummary?.suggestedTriggers || reviewAiSummary?.aiSuggestedTaxonomy?.triggers);
+  const aiAppliedTriggers = Array.isArray(aiResult?.appliedTriggers)
+    ? toArray(aiResult.appliedTriggers)
+    : toArray(uploadData?.appliedTriggers || reviewAiSummary?.appliedTriggers || reviewAiSummary?.policyAppliedTriggers);
+  const aiForbiddenReasons = Array.isArray(aiResult?.forbiddenReasons)
+    ? toArray(aiResult.forbiddenReasons)
+    : toArray(uploadData?.forbiddenReasons || reviewAiSummary?.forbiddenReasons);
+  const aiRequiredThemes = Array.isArray(aiResult?.requiredThemes)
+    ? toArray(aiResult.requiredThemes)
+    : toArray(uploadData?.requiredThemes);
+  const aiClassification = aiResult?.classification
+    ?? uploadData?.classification
+    ?? reviewAiSummary?.classification
+    ?? null;
+  const aiShouldReview = typeof aiResult?.shouldReview === 'boolean'
+    ? aiResult.shouldReview
+    : typeof uploadData?.shouldReview === 'boolean'
+      ? uploadData.shouldReview
+      : (typeof reviewAiSummary?.shouldReview === 'boolean' ? reviewAiSummary.shouldReview : null);
+  const aiGeminiDiagnostics = aiResult?.geminiDiagnostics || uploadData?.geminiDiagnostics || reviewAiSummary?.geminiDiagnostics || null;
   const userTaxRoles = toArray(uploadData?.roles || uploadData?.postDraft?.roles);
   const now = nowFactory ? nowFactory() : null;
 
   const finalOutcome = mapFinalOutcomeByAction({ action: moderatorDecision?.action || null, decision });
   const learningStatus = mapLearningStatus({ action: moderatorDecision?.action || null, finalOutcome });
-  const aiOutcome = pickOutcome(aiResult?.outcome);
+  const aiOutcome = pickOutcome(aiResult?.outcome ?? uploadData?.outcome);
   const comparableFinal = finalOutcome === 'forbidden' ? 'forbidden' : finalOutcome === 'allowed' ? 'allowed' : null;
   const agreed = Boolean(aiOutcome && comparableFinal && aiOutcome === comparableFinal);
   let mismatchType = agreed ? 'none' : null;
@@ -51,21 +84,22 @@ export const buildCommonModerationExample = ({
   };
   const aiSnapshot = {
     outcome: pickOutcome(policyDecisionOutcome || aiResult?.outcome),
-    classification: aiResult?.classification || null,
-    shouldReview: typeof aiResult?.shouldReview === 'boolean' ? aiResult.shouldReview : null,
-    appliedTriggers: toArray(aiResult?.appliedTriggers),
+    classification: aiClassification,
+    shouldReview: aiShouldReview,
+    appliedTriggers: aiAppliedTriggers,
     suggestedTriggers: aiTriggers,
-    forbiddenReasons: toArray(aiResult?.forbiddenReasons),
-    requiredThemes: toArray(aiResult?.requiredThemes),
+    forbiddenReasons: aiForbiddenReasons,
+    requiredThemes: aiRequiredThemes,
     suggestedThemes: aiThemes,
-    adultDecision: moderationSignals?.adultDecision ?? null,
-    sexualExplicitConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
-    geminiDiagnostics: aiResult?.geminiDiagnostics || null,
+    adultDecision: effectiveModerationSignals?.adultDecision ?? null,
+    sexualExplicitConfidence: effectiveModerationSignals?.sexualExplicitConfidence ?? null,
+    geminiDiagnostics: aiGeminiDiagnostics,
   };
 
   return {
     schemaVersion: MODERATION_EXAMPLE_SCHEMA_VERSION,
     source,
+    caseType: reviewData?.caseType || (uploadId ? 'upload' : null),
     uploadId,
     reviewCaseId,
     postId,
@@ -86,25 +120,25 @@ export const buildCommonModerationExample = ({
     aiSuggestedTaxonomy: { suggestedThemes: aiThemes, suggestedTriggers: aiTriggers, confidence: aiResult?.suggestedConfidence ?? null },
     aiSafetySignals: {
       safeSearch,
-      geminiAdultDecision: moderationSignals?.adultDecision ?? null,
-      explicitnessConfidence: moderationSignals?.sexualExplicitConfidence ?? null,
-      nuditySignal: moderationSignals?.nuditySignal ?? moderationSignals?.nudityOrGenitalVisibility ?? null,
+      geminiAdultDecision: effectiveModerationSignals?.adultDecision ?? null,
+      explicitnessConfidence: effectiveModerationSignals?.sexualExplicitConfidence ?? null,
+      nuditySignal: effectiveModerationSignals?.nuditySignal ?? effectiveModerationSignals?.nudityOrGenitalVisibility ?? null,
       uncertaintyFlags: toArray(aiResult?.uncertaintyFlags),
     },
     aiVisionLabels: { rawLabels: visionRaw, normalizedLabels: visionNorm, confidenceScores: aiResult?.visionLabelScores || null },
     policyDecision: {
       outcome: pickOutcome(policyDecisionOutcome || aiResult?.outcome),
-      shouldReview: typeof aiResult?.shouldReview === 'boolean' ? aiResult.shouldReview : null,
-      forbiddenReasons: toArray(aiResult?.forbiddenReasons),
-      appliedPolicyTriggers: toArray(aiResult?.appliedTriggers),
-      requiredThemes: toArray(aiResult?.requiredThemes),
+      shouldReview: aiShouldReview,
+      forbiddenReasons: aiForbiddenReasons,
+      appliedPolicyTriggers: aiAppliedTriggers,
+      requiredThemes: aiRequiredThemes,
       needsCorrection: Boolean(correctionSnapshot),
     },
     analytics: { aiModeratorAgreed: agreed, mismatchType, visionContributedToError: Boolean(!agreed && (visionRaw.length || visionNorm.length)) },
     provenance: {
       sourceEndpoint: source,
       policyVersion: uploadData?.policyVersion || reviewData?.policyVersion || null,
-      modelVersions: aiResult?.modelVersions || moderationSignals?.modelVersions || null,
+      modelVersions: aiResult?.modelVersions || effectiveModerationSignals?.modelVersions || null,
       createdAt: now,
       updatedAt: now,
     },

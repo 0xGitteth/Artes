@@ -2292,7 +2292,10 @@ async function run() {
       },
     };
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), basePost));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'safe_correction_ok'), basePost);
+    });
+    await assertFails(setDoc(doc(ownerDb, 'posts', 'client_create_even_when_valid_denied'), basePost));
     await assertFails(setDoc(doc(codexDevDb, 'posts', 'codex_production_denied'), {
       ...basePost, authorId: 'codex-dev-user', credits: [{ ...basePost.credits[0], uid: 'codex-dev-user' }],
     }));
@@ -2452,19 +2455,23 @@ async function run() {
       createdAt: Timestamp.now(),
     }));
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'profile_identity_ok'), {
       ...basePost,
       authorUid: ownerUid,
       authorProfileId: ownerUid,
       authorOwnerUid: ownerUid,
-    }));
+    });
+    });
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'profile_identity_external_ok'), {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'profile_identity_external_ok'), {
       ...basePost,
       authorUid: ownerUid,
       authorProfileId: 'active_agency_profile',
       authorOwnerUid: ownerUid,
-    }));
+    });
+    });
 
     await assertFails(setDoc(doc(ownerDb, 'posts', 'profile_identity_inactive_profile'), {
       ...basePost,
@@ -2495,28 +2502,36 @@ async function run() {
       uploadConsent: { ...baseConsent, hasMaker: true },
     }));
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_actual_photographer'), {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'consent_actual_photographer'), {
       ...basePost,
       credits: [{ uid: 'photographer_1', role: 'photographer', name: 'Photo One', consentStatus: 'accepted' }],
-    }));
+    });
+    });
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_model_self_portrait_explicit_maker'), {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'consent_model_self_portrait_explicit_maker'), {
       ...basePost,
       credits: [{ uid: ownerUid, role: 'model', name: 'Model Self Portrait', isSelf: true, isMaker: true, makerFunction: 'photographer', consentStatus: 'accepted' }],
       uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
-    }));
+    });
+    });
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_agency_rights_holder_maker'), {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'consent_agency_rights_holder_maker'), {
       ...basePost,
       credits: [{ uid: 'agency_1', role: 'agency', name: 'Agency One', isMaker: true, makerFunction: 'rightsHolder', consentStatus: 'accepted' }],
       uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
-    }));
+    });
+    });
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_company_production_owner_maker'), {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'consent_company_production_owner_maker'), {
       ...basePost,
       credits: [{ uid: 'company_1', role: 'company', name: 'Company One', isMaker: true, makerFunction: 'productionOwner', consentStatus: 'accepted' }],
       uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
-    }));
+    });
+    });
 
     await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_agency_unmarked_not_maker'), {
       ...basePost,
@@ -2536,7 +2551,8 @@ async function run() {
       uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
     }));
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_late_maker_index'), {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'consent_late_maker_index'), {
       ...basePost,
       credits: Array.from({ length: 10 }, (_, index) => ({
         uid: `non_maker_${index}`,
@@ -2545,7 +2561,8 @@ async function run() {
         consentStatus: 'accepted',
       })).concat({ uid: 'late_maker', role: 'photographer', name: 'Late Maker', consentStatus: 'accepted' }),
       uploadConsent: { ...baseConsent, makerCreditIndex: 10 },
-    }));
+    });
+    });
 
     const { makerCreditIndex: _unusedMakerCreditIndex, ...baseConsentWithoutMakerCreditIndex } = baseConsent;
     await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_missing_maker_credit_index'), {
@@ -2583,14 +2600,16 @@ async function run() {
       uploadConsent: { ...baseConsent, makerCreditIndex: 0 },
     }));
 
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'consent_anonymous_photographer'), {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'consent_anonymous_photographer'), {
       ...basePost,
       credits: [
         { uid: 'model_before_anonymous', role: 'model', name: 'Model Before Anonymous', consentStatus: 'accepted' },
         { role: 'photographer', name: 'Anonymous maker', isAnonymous: true, consentStatus: 'anonymous' },
       ],
       uploadConsent: { ...baseConsent, makerCreditIndex: 1 },
-    }));
+    });
+    });
 
     await assertFails(setDoc(doc(ownerDb, 'posts', 'consent_maker_roles_only'), {
       ...basePost,
@@ -2606,7 +2625,7 @@ async function run() {
       uploadConsent: { ...baseConsent, hasMaker: true, makerCreditIndex: 0 },
     }));
 
-    await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
+    await assertFails(updateDoc(doc(ownerDb, 'posts', 'safe_correction_ok'), {
       credits: [
         { uid: 'model_3', role: 'model', name: 'Model Three', consentStatus: 'accepted' },
         { uid: 'photographer_moved', role: 'photographer', name: 'Moved Photographer', consentStatus: 'accepted' },
@@ -2628,8 +2647,6 @@ async function run() {
 
     await assertSucceeds(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
       title: 'Profile identity update ok',
-      authorProfileId: ownerUid,
-      authorOwnerUid: ownerUid,
     }));
 
     await assertFails(updateDoc(doc(ownerDb, 'posts', 'profile_identity_ok'), {
@@ -2656,7 +2673,9 @@ async function run() {
     }));
 
     const { correction: _unusedCorrection, ...postWithoutCorrection } = basePost;
-    await assertSucceeds(setDoc(doc(ownerDb, 'posts', 'allowed_without_correction'), postWithoutCorrection));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts', 'allowed_without_correction'), postWithoutCorrection);
+    });
 
     await assertFails(setDoc(doc(ownerDb, 'posts', 'missing_maker_consent'), {
       ...postWithoutCorrection,

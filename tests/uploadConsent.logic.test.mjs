@@ -5,6 +5,7 @@ import {
   MISSING_MAKER_PROMPT_RESOLVED_BY,
   VISIBLE_PERSON_PROMPT_REASONS,
   VISIBLE_PERSON_PROMPT_RESOLVED_BY,
+  buildConsentDraftState,
   buildUploadConsent,
   getMakerCreditIndex,
   getSelfMakerRoles,
@@ -13,6 +14,7 @@ import {
   hasMakerCredit,
   hasVisibleSubjectCredit,
   normalizeConsentCredit,
+  normalizeConsentDraftState,
   normalizeCreditAfterRoleChange,
   sanitizePostCreditForWrite,
   validateUploadConsent,
@@ -501,3 +503,24 @@ const labelOnlyPhotographerCredit = normalizeConsentCredit({ role: { label: 'Fot
 assert.equal(labelOnlyPhotographerCredit.role, 'photographer', 'label-only photographer role objects normalize to canonical ids');
 
 console.log('PASS uploadConsent.logic.test.mjs');
+
+const acceptedCorrectionConsentDraft = buildConsentDraftState({
+  consentException: { enabled: true, type: CONSENT_EXCEPTION_REASONS.DOCUMENTARY, reason: 'Documentary context' },
+  aiPeoplePresent: true,
+  subjectWarningAcknowledged: true,
+  missingMakerPromptShown: true,
+  selectedSelfMakerRole: 'retoucher',
+  pendingSelfMakerRole: 'photographer',
+  selfMakerRoleConfirmation: { confirmed: true, role: 'photographer', confirmedAt: '2026-08-27T08:00:00.000Z' },
+});
+assert.deepEqual(normalizeConsentDraftState(acceptedCorrectionConsentDraft), acceptedCorrectionConsentDraft, 'accepted correction consent draft state round-trips through canonical normalization');
+const malformedCorrectionConsentDraft = normalizeConsentDraftState({
+  consentException: { enabled: true, type: 'invalid', reason: 'ignored' },
+  selectedSelfMakerRole: 'model',
+  pendingSelfMakerRole: 'agency',
+  selfMakerRoleConfirmation: { confirmed: true, role: 'model', confirmedAt: 'bad' },
+});
+assert.deepEqual(malformedCorrectionConsentDraft.consentException, { enabled: false, type: CONSENT_EXCEPTION_REASONS.STREET, reason: '' });
+assert.equal(malformedCorrectionConsentDraft.selectedSelfMakerRole, 'photographer');
+assert.equal(malformedCorrectionConsentDraft.pendingSelfMakerRole, null);
+assert.deepEqual(malformedCorrectionConsentDraft.selfMakerRoleConfirmation, { confirmed: false, role: '', confirmedAt: null });

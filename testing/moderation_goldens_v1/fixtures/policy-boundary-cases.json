@@ -1,13 +1,13 @@
 [
   {
     "id": "BOUDOIR_ALLOWED_01",
-    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": ["adultEroticSuggestive"] },
+    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": [] },
     "vision": { "safeSearch": { "adult": "UNLIKELY", "racy": "POSSIBLE" }, "labels": ["Lingerie", "Portrait"] },
     "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.18, "explicitSexualAct": false, "visibleGenitalia": false }
   },
   {
     "id": "BOUDOIR_WEAK_SIGNAL_01",
-    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": ["adultEroticSuggestive"] },
+    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": [] },
     "vision": { "safeSearch": { "adult": "POSSIBLE", "racy": "LIKELY" }, "labels": ["Lingerie"] },
     "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.2, "explicitSexualAct": false, "visibleGenitalia": false }
   },
@@ -18,10 +18,40 @@
     "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.12, "explicitSexualAct": false, "visibleGenitalia": false }
   },
   {
+    "id": "MALE_TOPLESS_GENERAL_01",
+    "uploaderTaxonomy": { "themes": ["Portrait"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "UNLIKELY", "racy": "POSSIBLE" }, "labels": ["Person", "Chest"] },
+    "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.05, "explicitSexualAct": false, "visibleGenitalia": false }
+  },
+  {
+    "id": "STRING_GENERAL_01",
+    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "POSSIBLE", "racy": "LIKELY" }, "labels": ["Lingerie"] },
+    "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.12, "explicitSexualAct": false, "visibleGenitalia": false }
+  },
+  {
+    "id": "IMPLIED_NUDE_ADULT_01",
+    "uploaderTaxonomy": { "themes": ["Conceptual"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "LIKELY", "racy": "LIKELY" }, "labels": ["Person", "Skin"] },
+    "ai": { "adultDecision": "borderline", "sexualExplicitConfidence": 0.18, "explicitSexualAct": false, "visibleGenitalia": false }
+  },
+  {
+    "id": "BARE_BUTTOCKS_ADULT_01",
+    "uploaderTaxonomy": { "themes": ["Editorial"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "LIKELY", "racy": "VERY_LIKELY" }, "labels": ["Person", "Skin"] },
+    "ai": { "adultDecision": "borderline", "sexualExplicitConfidence": 0.2, "explicitSexualAct": false, "visibleGenitalia": false }
+  },
+  {
     "id": "ART_NUDE_BORDERLINE_01",
-    "uploaderTaxonomy": { "themes": ["FigureStudy"], "triggers": ["adultArtNude"] },
+    "uploaderTaxonomy": { "themes": ["Art Nude"], "triggers": ["adultArtNude"] },
     "vision": { "safeSearch": { "adult": "LIKELY", "racy": "LIKELY" }, "labels": ["Art", "Nude"] },
     "ai": { "adultDecision": "borderline", "sexualExplicitConfidence": 0.44, "explicitSexualAct": false, "visibleGenitalia": true }
+  },
+  {
+    "id": "EROTIC_CLOTHED_ADULT_01",
+    "uploaderTaxonomy": { "themes": ["Boudoir"], "triggers": [] },
+    "vision": { "safeSearch": { "adult": "POSSIBLE", "racy": "LIKELY" }, "labels": ["Lingerie", "Person"] },
+    "ai": { "adultDecision": "none", "sexualExplicitConfidence": 0.25, "explicitSexualAct": false, "visibleGenitalia": false, "suggestedTriggers": ["adultEroticSuggestive"] }
   },
   {
     "id": "EXPLICIT_FORBIDDEN_01",
@@ -38,8 +68,8 @@
   {
     "id": "WRONG_SENSITIVE_TAXONOMY_01",
     "uploaderTaxonomy": { "themes": ["Landscape"], "triggers": [] },
-    "vision": { "safeSearch": { "adult": "LIKELY", "racy": "VERY_LIKELY" }, "labels": ["Lingerie"] },
-    "ai": { "adultDecision": "borderline", "sexualExplicitConfidence": 0.55, "explicitSexualAct": false, "visibleGenitalia": false, "suggestedTriggers": ["adultEroticSuggestive"] }
+    "vision": { "safeSearch": { "adult": "LIKELY", "racy": "VERY_LIKELY" }, "labels": ["Skin"] },
+    "ai": { "adultDecision": "borderline", "sexualExplicitConfidence": 0.25, "explicitSexualAct": false, "visibleGenitalia": false }
   },
   {
     "id": "AI_LABEL_RENDERING_01",

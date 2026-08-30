@@ -5,6 +5,9 @@ const CLOSED_PUBLICATION_STATUSES = new Set([
   'blocked',
   'needs_user_correction',
   'user_disagreed',
+  'expired',
+  'deleted',
+  'deleted_pending_cleanup',
 ]);
 
 export function resolveUploadTimestampMs(value) {

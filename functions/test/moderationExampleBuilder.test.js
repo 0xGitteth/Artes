@@ -68,3 +68,72 @@ test('missing optional fields do not crash', () => {
   assert.deepEqual(ex.policyDecision.forbiddenReasons, []);
   assert.equal(ex.aiSafetySignals.safeSearch, null);
 });
+
+
+test('moderator examples retain top-level persisted review evidence when aiResult is absent', () => {
+  const ex = buildCommonModerationExample({
+    ...base(),
+    decision: 'approved',
+    policyDecisionOutcome: 'allowed',
+    uploadData: {
+      outcome: 'review',
+      classification: 'uncertain_possible_explicit',
+      shouldReview: true,
+      appliedTriggers: [{ trigger: 'adultArtNude', source: 'policyAuto' }],
+      suggestedTriggers: [{ trigger: 'bloodInjury', source: 'gemini', score: 0.6 }],
+      forbiddenReasons: [{ trigger: 'geminiSafetyBlocked', reason: 'candidate_safety' }],
+      requiredThemes: ['Art Nude'],
+      geminiDiagnostics: { safetyBlocked: true, safetyBlockReason: 'candidate_safety' },
+    },
+    aiResult: {},
+    moderatorDecision: { action: 'approveAsIs' },
+  });
+
+  assert.equal(ex.aiSnapshot.classification, 'uncertain_possible_explicit');
+  assert.equal(ex.aiSnapshot.shouldReview, true);
+  assert.deepEqual(ex.aiSnapshot.forbiddenReasons, [{ trigger: 'geminiSafetyBlocked', reason: 'candidate_safety' }]);
+  assert.deepEqual(ex.policyDecision.forbiddenReasons, [{ trigger: 'geminiSafetyBlocked', reason: 'candidate_safety' }]);
+  assert.deepEqual(ex.aiSnapshot.appliedTriggers, [{ trigger: 'adultArtNude', source: 'policyAuto' }]);
+  assert.deepEqual(ex.aiSnapshot.requiredThemes, ['Art Nude']);
+  assert.equal(ex.aiSnapshot.geminiDiagnostics.safetyBlocked, true);
+});
+
+test('moderator examples fall back to review-case aiSummary evidence when upload evidence is absent', () => {
+  const ex = buildCommonModerationExample({
+    ...base(),
+    decision: 'approved',
+    policyDecisionOutcome: 'allowed',
+    uploadData: { outcome: 'review' },
+    reviewData: {
+      caseType: 'upload',
+      aiSummary: {
+        classification: 'uncertain_possible_explicit',
+        shouldReview: true,
+        forbiddenReasons: [{ trigger: 'geminiSafetyBlocked', reason: 'candidate_safety' }],
+        appliedTriggers: [{ trigger: 'adultArtNude', source: 'policyAuto' }],
+        suggestedTriggers: [{ trigger: 'bloodInjury', source: 'gemini', score: 0.6 }],
+        moderationSignals: {
+          adultDecision: 'borderline',
+          sexualExplicitConfidence: 0.2,
+        },
+        geminiDiagnostics: {
+          safetyBlocked: true,
+          safetyBlockReason: 'candidate_safety',
+        },
+      },
+    },
+    aiResult: {},
+    moderationSignals: {},
+    moderatorDecision: { action: 'approveAsIs' },
+  });
+
+  assert.equal(ex.aiSnapshot.classification, 'uncertain_possible_explicit');
+  assert.equal(ex.aiSnapshot.shouldReview, true);
+  assert.equal(ex.policyDecision.shouldReview, true);
+  assert.deepEqual(ex.aiSnapshot.forbiddenReasons, [{ trigger: 'geminiSafetyBlocked', reason: 'candidate_safety' }]);
+  assert.deepEqual(ex.aiSnapshot.appliedTriggers, [{ trigger: 'adultArtNude', source: 'policyAuto' }]);
+  assert.deepEqual(ex.aiSnapshot.suggestedTriggers, [{ trigger: 'bloodInjury', source: 'gemini', score: 0.6 }]);
+  assert.equal(ex.aiSnapshot.adultDecision, 'borderline');
+  assert.equal(ex.aiSnapshot.sexualExplicitConfidence, 0.2);
+  assert.equal(ex.aiSnapshot.geminiDiagnostics.safetyBlocked, true);
+});

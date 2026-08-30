@@ -75,3 +75,11 @@ assert.equal(
   'newer',
   'newest unresolved approved upload is selected first',
 );
+
+for (const publicationStatus of ['expired', 'deleted', 'deleted_pending_cleanup']) {
+  assert.equal(
+    isPendingApprovedUploadCandidate({ ...baseUpload, publicationStatus }),
+    false,
+    `${publicationStatus} upload never resurfaces as a pending publication reminder`,
+  );
+}

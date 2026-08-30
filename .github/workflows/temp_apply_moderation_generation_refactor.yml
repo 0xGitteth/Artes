@@ -23,6 +23,32 @@ jobs:
         run: npm ci
       - name: Install Functions dependencies
         run: npm --prefix functions ci
+      - name: Fix exact-upload harness signature
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/temp_refactor_moderation_generation.py')
+          source = path.read_text()
+          replacements = [
+              (
+                  '"const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [] } = {}) => (",',
+                  '"const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [] } = {}) => {",',
+              ),
+              (
+                  '"const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [], currentGeneration = 0 } = {}) => (",',
+                  '"const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [], currentGeneration = 0 } = {}) => {",',
+              ),
+          ]
+          changed = 0
+          for old, new in replacements:
+              if source.count(old) != 1:
+                  raise SystemExit(f'harness signature fix expected one match for: {old}')
+              source = source.replace(old, new, 1)
+              changed += 1
+          if changed != 2:
+              raise SystemExit('expected exactly two harness signature fixes')
+          path.write_text(source)
+          PY
       - name: Apply generation refactor
         run: python3 scripts/temp_refactor_moderation_generation.py
       - name: Enforce generation architecture source invariants

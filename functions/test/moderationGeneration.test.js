@@ -8,6 +8,7 @@ import {
   normalizeModerationFingerprintEntry,
   normalizeModerationGeneration,
   normalizeModerationScopeKey,
+  planModerationScopeGenerationIncrement,
   resolveModerationScopeKey,
 } from '../moderationGeneration.js';
 
@@ -102,4 +103,18 @@ test('collects unique scope keys without treating near matching as identity', ()
     { dhashPrefix: '1234', dhash: '1234000000000000' },
     { dhashPrefix: 'bad', dhash: '' },
   ]), ['1234', 'abcd']);
+});
+
+test('every explicit requeue increments every represented scope exactly once', () => {
+  const first = planModerationScopeGenerationIncrement({
+    scopeKeys: ['abcd', '1234', 'ABCD'],
+    currentGenerations: { abcd: 0, 1234: 4 },
+  });
+  assert.deepEqual(first, { 1234: 5, abcd: 1 });
+
+  const second = planModerationScopeGenerationIncrement({
+    scopeKeys: Object.keys(first),
+    currentGenerations: first,
+  });
+  assert.deepEqual(second, { 1234: 6, abcd: 2 });
 });

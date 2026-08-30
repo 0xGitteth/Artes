@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/temp_validate_media_anchor_refactor.yml
       - temp_apply_media_anchor_refactor.py
+      - temp_fix_media_harness.py
   workflow_dispatch:
 
 permissions:
@@ -40,6 +41,9 @@ jobs:
 
       - name: Install functions dependencies
         run: npm ci --prefix functions
+
+      - name: Harden temporary patch harness
+        run: python temp_fix_media_harness.py
 
       - name: Apply media anchor refactor
         run: python temp_apply_media_anchor_refactor.py
@@ -90,7 +94,6 @@ jobs:
       - name: Verify final diff invariants
         run: |
           git diff --check
-          git diff --exit-code -- . ':!temp_apply_media_anchor_refactor.py' ':!.github/workflows/temp_validate_media_anchor_refactor.yml' >/dev/null || true
           test -z "$(grep -R -l "moderationPreviewCleanupTasks" functions tests firestore.rules docs --exclude-dir=node_modules || true)"
           grep -q "mediaState: 'pending'" functions/index.js
           grep -q "mediaState: 'ready'" functions/index.js
@@ -98,7 +101,7 @@ jobs:
 
       - name: Remove temporary harness and commit validated product changes
         run: |
-          rm -f temp_apply_media_anchor_refactor.py .github/workflows/temp_validate_media_anchor_refactor.yml
+          rm -f temp_apply_media_anchor_refactor.py temp_fix_media_harness.py .github/workflows/temp_validate_media_anchor_refactor.yml
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"

@@ -128,3 +128,19 @@ export const collectModerationScopeKeys = (
     .map((entry) => resolveModerationScopeKey(entry, prefixLength))
     .filter(Boolean),
 )).sort();
+
+export const planModerationScopeGenerationIncrement = ({
+  scopeKeys = [],
+  currentGenerations = {},
+} = {}) => {
+  const uniqueScopeKeys = Array.from(new Set(
+    (Array.isArray(scopeKeys) ? scopeKeys : [])
+      .map((scopeKey) => normalizeModerationScopeKey(scopeKey))
+      .filter(Boolean),
+  )).sort();
+
+  return Object.fromEntries(uniqueScopeKeys.map((scopeKey) => [
+    scopeKey,
+    normalizeModerationGeneration(currentGenerations?.[scopeKey]) + 1,
+  ]));
+};

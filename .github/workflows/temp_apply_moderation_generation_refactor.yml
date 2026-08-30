@@ -82,7 +82,18 @@ jobs:
           functions/test/moderationReuseRouting.test.js
           functions/test/moderationExampleBuilder.test.js
       - name: Run full moderation policy suite
-        run: npm run test:moderation-policy
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:moderation-policy 2>&1 | tee moderation-policy.log
+      - name: Preserve moderation policy failure output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moderation-policy-failure
+          path: moderation-policy.log
+          if-no-files-found: error
+          retention-days: 1
       - name: Run full Functions tests
         run: node --test functions/test/*.test.js
       - name: Run Codex Dev isolation regressions

@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  collectModerationFingerprintEntries,
   collectModerationScopeKeys,
   getModerationGenerationDecision,
   isModerationGenerationCurrent,
+  normalizeModerationFingerprintEntry,
   normalizeModerationGeneration,
   normalizeModerationScopeKey,
   resolveModerationScopeKey,
 } from '../moderationGeneration.js';
+
+const sha = (char) => char.repeat(64);
 
 test('normalizes moderation generations conservatively', () => {
   assert.equal(normalizeModerationGeneration(undefined), 0);
@@ -23,7 +27,50 @@ test('uses one stable four-hex dHash prefix scope', () => {
   assert.equal(normalizeModerationScopeKey('zzzz'), null);
   assert.equal(resolveModerationScopeKey({ dhashPrefix: 'ABCD', dhash: 'ffff0000' }), 'abcd');
   assert.equal(resolveModerationScopeKey({ dhash: '12Abcdef' }), '12ab');
-  assert.equal(resolveModerationScopeKey({ sha256: 'a'.repeat(64) }), null);
+  assert.equal(resolveModerationScopeKey({ sha256: sha('a') }), null);
+});
+
+test('normalizes server fingerprint evidence without inventing identity', () => {
+  assert.deepEqual(normalizeModerationFingerprintEntry({
+    sha256: sha('A'),
+    dhash: 'ABCD1234567890EF',
+    dhashPrefix: 'ABCD',
+  }), {
+    sha256: sha('a'),
+    dhash: 'abcd1234567890ef',
+    dhashPrefix: 'abcd',
+  });
+  assert.deepEqual(normalizeModerationFingerprintEntry({ dhashPrefix: '1234' }), {
+    dhashPrefix: '1234',
+  }, 'a valid server-owned prefix is enough to invalidate the conservative scope');
+  assert.equal(normalizeModerationFingerprintEntry({ dhash: 'abcd1234567890ef', dhashPrefix: 'ffff' }), null);
+  assert.equal(normalizeModerationFingerprintEntry({ sha256: 'not-a-sha', dhashPrefix: 'abcd' }), null);
+  assert.equal(normalizeModerationFingerprintEntry([{ dhashPrefix: 'abcd' }]), null);
+});
+
+test('recovers fingerprint arrays, legacy containers, and remaining linked-upload evidence through one path', () => {
+  const entries = collectModerationFingerprintEntries(
+    {
+      fingerprints: [
+        { sha256: sha('a'), dhash: 'abcd000000000001', dhashPrefix: 'abcd' },
+        { sha256: sha('b'), dhash: '1234000000000002', dhashPrefix: '1234' },
+      ],
+    },
+    { fingerprint: { sha256: sha('a'), dhash: 'abcd000000000001', dhashPrefix: 'abcd' } },
+    { metadata: { fingerprints: { dhash: 'beef000000000003', dhashPrefix: 'beef' } } },
+  );
+
+  assert.equal(entries.length, 3);
+  assert.deepEqual(collectModerationScopeKeys(entries), ['1234', 'abcd', 'beef']);
+});
+
+test('fingerprint recovery ignores malformed and unrelated nested objects', () => {
+  const entries = collectModerationFingerprintEntries(
+    { fingerprints: [{ dhashPrefix: 'bad' }, null, 'abcd'] },
+    { arbitrary: { dhashPrefix: 'cafe' } },
+    { fingerprint: { dhashPrefix: 'CAFE' } },
+  );
+  assert.deepEqual(entries, [{ dhashPrefix: 'cafe' }]);
 });
 
 test('legacy evidence is generation zero and becomes stale after first requeue', () => {
@@ -50,9 +97,9 @@ test('generation decision exposes only monotone stale distance', () => {
 
 test('collects unique scope keys without treating near matching as identity', () => {
   assert.deepEqual(collectModerationScopeKeys([
-    { dhashPrefix: 'abcd', dhash: 'abcd0000' },
-    { dhash: 'abcdffff' },
-    { dhashPrefix: '1234', dhash: '12340000' },
+    { dhashPrefix: 'abcd', dhash: 'abcd000000000000' },
+    { dhash: 'abcdffffffffffff' },
+    { dhashPrefix: '1234', dhash: '1234000000000000' },
     { dhashPrefix: 'bad', dhash: '' },
   ]), ['1234', 'abcd']);
 });

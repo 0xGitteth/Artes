@@ -1,0 +1,57 @@
+name: Temporary apply moderation generation refactor
+
+on:
+  push:
+    branches:
+      - chatgpt/moderation-architecture-simplification
+
+permissions:
+  contents: write
+
+jobs:
+  refactor-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install root dependencies
+        run: npm ci
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+      - name: Apply generation refactor
+        run: python3 scripts/temp_refactor_moderation_generation.py
+      - name: Enforce generation architecture source invariants
+        run: node --test tests/moderationGenerationArchitectureSource.test.mjs
+      - name: Run generation and reuse regressions
+        run: >-
+          node --test
+          functions/test/moderationGeneration.test.js
+          functions/test/moderationReuseRouting.test.js
+          functions/test/moderationExampleBuilder.test.js
+      - name: Run full moderation policy suite
+        run: npm run test:moderation-policy
+      - name: Run full Functions tests
+        run: node --test functions/test/*.test.js
+      - name: Run Codex Dev isolation regressions
+        run: npm run test:codex-dev-isolation
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+      - name: Diff check
+        run: git diff --check
+      - name: Remove temporary harness and commit product refactor
+        run: |
+          rm -f scripts/temp_refactor_moderation_generation.py
+          rm -f .github/workflows/temp_apply_moderation_generation_refactor.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Replace fresh evaluation reservations with generation fence"
+          git push origin HEAD:chatgpt/moderation-architecture-simplification

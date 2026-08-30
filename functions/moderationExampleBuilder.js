@@ -1,3 +1,5 @@
+import { normalizeModerationGeneration } from './moderationGeneration.js';
+
 export const MODERATION_EXAMPLE_SCHEMA_VERSION = 2;
 
 export const toArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
@@ -25,6 +27,7 @@ export const buildCommonModerationExample = ({
   source = 'unknown', uploadId = null, reviewCaseId = null, postId = null, uploaderUid = null, fingerprints = null,
   uploadData = {}, reviewData = {}, aiResult = {}, moderationSignals = {}, correctionSnapshot = null,
   decision = null, policyDecisionOutcome = null, moderatorDecision = null, userCorrectionAction = null, uploaderCorrectionResponse = null,
+  moderationGeneration = null,
   nowFactory = null,
 }) => {
   const reviewAiSummary = reviewData?.aiSummary && typeof reviewData.aiSummary === 'object'
@@ -65,6 +68,12 @@ export const buildCommonModerationExample = ({
       ? uploadData.shouldReview
       : (typeof reviewAiSummary?.shouldReview === 'boolean' ? reviewAiSummary.shouldReview : null);
   const aiGeminiDiagnostics = aiResult?.geminiDiagnostics || uploadData?.geminiDiagnostics || reviewAiSummary?.geminiDiagnostics || null;
+  const effectiveModerationGeneration = normalizeModerationGeneration(
+    moderationGeneration
+      ?? uploadData?.moderationGeneration
+      ?? reviewData?.moderationGeneration
+      ?? reviewAiSummary?.moderationGeneration,
+  );
   const userTaxRoles = toArray(uploadData?.roles || uploadData?.postDraft?.roles);
   const now = nowFactory ? nowFactory() : null;
 
@@ -94,6 +103,7 @@ export const buildCommonModerationExample = ({
     adultDecision: effectiveModerationSignals?.adultDecision ?? null,
     sexualExplicitConfidence: effectiveModerationSignals?.sexualExplicitConfidence ?? null,
     geminiDiagnostics: aiGeminiDiagnostics,
+    moderationGeneration: effectiveModerationGeneration,
   };
 
   return {
@@ -105,6 +115,7 @@ export const buildCommonModerationExample = ({
     postId,
     fingerprints: fingerprints || null,
     uploaderUid,
+    moderationGeneration: effectiveModerationGeneration,
     decidedAt: now,
     createdAt: now,
     policyVersion: uploadData?.policyVersion || reviewData?.policyVersion || null,
@@ -139,6 +150,7 @@ export const buildCommonModerationExample = ({
       sourceEndpoint: source,
       policyVersion: uploadData?.policyVersion || reviewData?.policyVersion || null,
       modelVersions: aiResult?.modelVersions || effectiveModerationSignals?.modelVersions || null,
+      moderationGeneration: effectiveModerationGeneration,
       createdAt: now,
       updatedAt: now,
     },

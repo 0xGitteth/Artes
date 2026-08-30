@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url';
 import { cleanPublicStringArray } from '../../src/utils/publicProfileFieldNormalization.js';
+import { normalizeProfileRoles } from '../../src/utils/roles.js';
 import { isKnownCodexDevActorUid } from '../codexDevActorRegistry.js';
 
 const BATCH_LIMIT = 400;
@@ -26,7 +27,6 @@ export const PUBLIC_STRING_ONLY_FIELDS = [
 ];
 
 export const PUBLIC_ARRAY_FIELDS = [
-  'roles',
   'themes',
 ];
 
@@ -131,7 +131,7 @@ export const buildPublicUserBackfillPayload = (uid, userData = {}, { serverTimes
     username: normalizeUsername(userData.username) || generateUsername(displayName, uid),
     displayName,
     displayNameLower: displayName.toLowerCase(),
-    roles: cleanStringArray(userData.roles),
+    roles: normalizeProfileRoles(cleanStringArray(userData.roles)),
     themes: cleanStringArray(userData.themes),
     onboardingComplete: true,
     updatedAt: serverTimestamp(),

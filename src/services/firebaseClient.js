@@ -9,6 +9,7 @@ import { canAccessFirestore, devLog, isOnboardingComplete } from '../utils/fires
 import { syncPublicProfileFromCurrentPrivate } from '../utils/publicProfileSync';
 import { buildUploadConsent, hasMakerCredit, normalizeConsentCredit, normalizeConsentException, sanitizePostCreditForWrite } from '../utils/uploadConsent';
 import { buildPostAuthorFields, isLegacySetupProfileId, isPublicProfileVisible, resolvePostAuthorProfile } from '../utils/managedProfiles';
+import { normalizeProfileRoles } from '../utils/roles.js';
 import { isCodexDevUser, sortCodexDevPostsNewestFirst } from '../utils/codexDevIdentity';
 import {
   getFirestore,
@@ -59,7 +60,7 @@ const PUBLIC_NULLABLE_STRING_FIELDS = [
 const PUBLIC_STRING_FIELDS = [
   'bio', 'headerPosition', 'linkedAgencyStatus', 'linkedCompanyStatus',
 ];
-const PUBLIC_ARRAY_FIELDS = ['roles', 'themes', 'quickProfilePostIds'];
+const PUBLIC_ARRAY_FIELDS = ['themes', 'quickProfilePostIds'];
 const cleanStringArray = (value) => (Array.isArray(value)
   ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
   : []);
@@ -87,6 +88,9 @@ const toPublicProfilePayload = (payload = {}, uid) => {
   PUBLIC_STRING_FIELDS.forEach((field) => {
     if (typeof payload?.[field] === 'string') publicPayload[field] = payload[field];
   });
+  if (payload?.roles !== undefined) {
+    publicPayload.roles = normalizeProfileRoles(cleanStringArray(payload.roles));
+  }
   PUBLIC_ARRAY_FIELDS.forEach((field) => {
     if (payload?.[field] !== undefined) publicPayload[field] = cleanStringArray(payload[field]);
   });
@@ -200,6 +204,7 @@ export const subscribeToUsers = (callback, gate = {}) => {
       return {
         id: docSnap.id,
         ...safeData,
+        roles: normalizeProfileRoles(safeData.roles),
         uid: resolvedUid,
         profileId: safeData.profileId || resolvedUid,
         ownerUid: safeData.ownerUid || resolvedUid,
@@ -219,18 +224,21 @@ export const seedDemoContent = async () => {
 // Profile payload fields we store (subset used by UI):
 // avatar, headerImage, headerPosition, quickProfilePreviewMode, quickProfilePostIds.
 export const createProfile = async (uid, profile) => {
+  const normalizedProfile = Array.isArray(profile?.roles)
+    ? { ...profile, roles: normalizeProfileRoles(profile.roles, { fallbackToFan: true }) }
+    : profile;
   const payload = {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-    ...profile,
-    uid: profile?.uid || uid,
-    profileId: profile?.profileId || uid,
-    ownerUid: profile?.ownerUid || uid,
+    ...normalizedProfile,
+    uid: normalizedProfile?.uid || uid,
+    profileId: normalizedProfile?.profileId || uid,
+    ownerUid: normalizedProfile?.ownerUid || uid,
   };
   logFirestoreOp('WRITE', `users/${uid}`, 'createProfile');
   await setDoc(doc(db, 'users', uid), payload);
-  if (isOnboardingComplete(profile) && !(await isCodexDevUser(auth.currentUser))) {
-    const publicPayload = { ...toPublicProfilePayload(profile, uid), onboardingComplete: true };
+  if (isOnboardingComplete(normalizedProfile) && !(await isCodexDevUser(auth.currentUser))) {
+    const publicPayload = { ...toPublicProfilePayload(normalizedProfile, uid), onboardingComplete: true };
     logFirestoreOp('WRITE', `publicUsers/${uid}`, 'createProfile');
     await setDoc(doc(db, 'publicUsers', uid), publicPayload, { merge: true });
   }
@@ -239,12 +247,15 @@ export const createProfile = async (uid, profile) => {
 // Update is merged into both private and public profile indices.
 // Keep profile preview preferences in sync with UI expectations.
 export const updateProfile = async (uid, payload) => {
+  const normalizedPayload = Array.isArray(payload?.roles)
+    ? { ...payload, roles: normalizeProfileRoles(payload.roles, { fallbackToFan: true }) }
+    : payload;
   const privateRef = doc(db, 'users', uid);
   const publicRef = doc(db, 'publicUsers', uid);
   const privateSnap = await getDoc(privateRef);
-  const resultingProfile = { ...(privateSnap.exists() ? privateSnap.data() : {}), ...payload };
+  const resultingProfile = { ...(privateSnap.exists() ? privateSnap.data() : {}), ...normalizedPayload };
   logFirestoreOp('UPDATE', `users/${uid}`, 'updateProfile');
-  await setDoc(privateRef, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+  await setDoc(privateRef, { ...normalizedPayload, updatedAt: serverTimestamp() }, { merge: true });
   if (isOnboardingComplete(resultingProfile) && !(await isCodexDevUser(auth.currentUser))) {
     logFirestoreOp('UPDATE', `publicUsers/${uid}`, 'updateProfile');
     await syncPublicProfileFromCurrentPrivate({
@@ -350,6 +361,7 @@ export const fetchUserIndex = async (userId, gate = {}) => {
   const { email: _publicEmail, ...safePublicData } = publicData;
   const resolvedPublicData = {
     ...safePublicData,
+    roles: normalizeProfileRoles(safePublicData.roles),
     profileId: safePublicData.profileId || safePublicData.uid || userId,
     ownerUid: safePublicData.ownerUid || safePublicData.uid || userId,
   };

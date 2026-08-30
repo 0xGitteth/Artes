@@ -59,6 +59,7 @@ import {
   normalizePublicProfileField,
   resolvePublicDisplayName,
 } from './utils/publicProfileFieldNormalization';
+import { normalizeProfileRoles } from './utils/roles.js';
 import {
   AFFILIATION_STATUSES,
   applyAffiliationStatusTransitions,
@@ -902,6 +903,12 @@ export const patchUserProfile = async (uid, patch = {}, {
   let nextPatch = authorizeOnboardingWritePatch(patch, {
     allowCompletion: allowOnboardingCompletion,
   });
+  if (Array.isArray(nextPatch.roles)) {
+    nextPatch = {
+      ...nextPatch,
+      roles: normalizeProfileRoles(nextPatch.roles, { fallbackToFan: true }),
+    };
+  }
 
   if (!hasOnboardingWriteKeys(nextPatch)) {
     await setDoc(userRef, nextPatch, { merge: true });
@@ -1248,6 +1255,9 @@ export const updateUserProfile = async (uid, data, { completeOnboarding = false 
   // backwards. Explicit resets must use resetPersonalOnboardingToIdCheck so
   // the private reset and public unpublish happen in one server transaction.
   Object.assign(safeData, normalizeOnboardingWritePatch(existingPrivate, safeData));
+  if (Array.isArray(safeData.roles)) {
+    safeData.roles = normalizeProfileRoles(safeData.roles, { fallbackToFan: true });
+  }
 
   const updatePayload = { ...safeData, updatedAt: serverTimestamp() };
   const userDocPath = `users/${resolvedUid}`;

@@ -1,9 +1,18 @@
-export const isReusableModerationCache = (uploadData, expectedPromptVersion) => {
+import {
+  isModerationGenerationCurrent,
+  normalizeModerationGeneration,
+} from './moderationGeneration.js';
+
+export const isReusableModerationCache = (uploadData, expectedPromptVersion, currentGeneration = 0) => {
   const expected = String(expectedPromptVersion || '').trim();
   if (!expected) return false;
   const diagnostics = uploadData?.geminiDiagnostics || null;
   const cachedVersion = String(diagnostics?.promptVersion || '').trim();
   if (cachedVersion !== expected) return false;
+  if (!isModerationGenerationCurrent({
+    evidenceGeneration: uploadData?.moderationGeneration,
+    currentGeneration,
+  })) return false;
   return diagnostics?.success === true
     && diagnostics?.contractValidated === true
     && diagnostics?.fallbackUsed !== true
@@ -14,8 +23,9 @@ export const buildReusableCacheGeminiDiagnostics = ({
   uploadData = {},
   expectedPromptVersion,
   sourceUploadId = null,
+  currentGeneration = 0,
 } = {}) => {
-  if (!isReusableModerationCache(uploadData, expectedPromptVersion)) return null;
+  if (!isReusableModerationCache(uploadData, expectedPromptVersion, currentGeneration)) return null;
   const sourceDiagnostics = uploadData?.geminiDiagnostics || {};
   const promptVersion = String(expectedPromptVersion || '').trim();
   const normalizedSourceUploadId = String(sourceUploadId || '').trim() || null;
@@ -29,6 +39,7 @@ export const buildReusableCacheGeminiDiagnostics = ({
     promptVersion,
     cacheReused: true,
     cacheSourceUploadId: normalizedSourceUploadId,
+    cacheModerationGeneration: normalizeModerationGeneration(uploadData?.moderationGeneration),
   };
 };
 
@@ -73,6 +84,12 @@ export const isUploadModerationExampleData = (exampleData = {}) => {
   return true;
 };
 
+export const isModerationExampleGenerationRouteable = (exampleData = {}, currentGeneration = 0) => (
+  isModerationGenerationCurrent({
+    evidenceGeneration: exampleData?.moderationGeneration,
+    currentGeneration,
+  })
+);
 
 const FINAL_MODERATION_EXAMPLE_ACTIONS = new Set([
   'approveAsIs',
@@ -110,6 +127,9 @@ export const isFinalModerationExampleAction = (action) => (
 );
 
 export const compareModerationExampleCandidates = (a, b) => {
+  const generationDiff = normalizeModerationGeneration(b?.data?.moderationGeneration)
+    - normalizeModerationGeneration(a?.data?.moderationGeneration);
+  if (generationDiff !== 0) return generationDiff;
   const aAction = String(a?.data?.moderatorDecision?.action || '').trim();
   const bAction = String(b?.data?.moderatorDecision?.action || '').trim();
   const aBoundary = MODERATION_ROUTING_BOUNDARY_ACTIONS.has(aAction) ? 1 : 0;
@@ -119,7 +139,6 @@ export const compareModerationExampleCandidates = (a, b) => {
   if (timeDiff !== 0) return timeDiff;
   return String(a?.id || '').localeCompare(String(b?.id || ''));
 };
-
 
 export const selectPreferredModerationExampleCandidate = (candidates = []) => {
   const usable = (Array.isArray(candidates) ? candidates : []).filter(Boolean);

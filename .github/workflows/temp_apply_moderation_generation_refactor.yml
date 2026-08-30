@@ -73,10 +73,11 @@ jobs:
           PY
       - name: Apply generation refactor
         run: python3 scripts/temp_refactor_moderation_generation.py
-      - name: Update generation-aware integration source expectations
+      - name: Update generation-aware source expectations
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           path = Path('tests/moderationV2IntegrationSource.test.mjs')
           source = path.read_text()
 
@@ -111,8 +112,27 @@ jobs:
               if source.count(old_text) != 1:
                   raise SystemExit(f'{label}: expected 1 match, found {source.count(old_text)}')
               source = source.replace(old_text, new_text, 1)
-
           path.write_text(source)
+
+          codex_path = Path('tests/codexDevIsolation.test.mjs')
+          codex_source = codex_path.read_text()
+          codex_replacements = [
+              (
+                  r"  assert.match(moderate, /findExactUpload\([^\n]+\{ isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags \}/);",
+                  r"  assert.match(moderate, /findExactUpload\(fingerprints\.sha256,\s*\{[\s\S]{0,240}?isCodexActor,[\s\S]{0,240}?themes: normalizedThemes,[\s\S]{0,240}?makerTags: normalizedMakerTags,[\s\S]{0,240}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);",
+                  'Codex exact lookup expectation',
+              ),
+              (
+                  r"  assert.match(moderate, /findNearDuplicateUpload\([^\n]+\{ isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags, userId \}/);",
+                  r"  assert.match(moderate, /findNearDuplicateUpload\(fingerprints,\s*\{[\s\S]{0,280}?isCodexActor,[\s\S]{0,280}?themes: normalizedThemes,[\s\S]{0,280}?makerTags: normalizedMakerTags,[\s\S]{0,280}?userId,[\s\S]{0,160}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);",
+                  'Codex near lookup expectation',
+              ),
+          ]
+          for old_text, new_text, label in codex_replacements:
+              if codex_source.count(old_text) != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {codex_source.count(old_text)}')
+              codex_source = codex_source.replace(old_text, new_text, 1)
+          codex_path.write_text(codex_source)
           PY
       - name: Enforce generation architecture source invariants
         run: node --test tests/moderationGenerationArchitectureSource.test.mjs

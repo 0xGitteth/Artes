@@ -23,30 +23,52 @@ jobs:
         run: npm ci
       - name: Install Functions dependencies
         run: npm --prefix functions ci
-      - name: Fix exact-upload harness signature
+      - name: Fix temporary refactor harness matches
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('scripts/temp_refactor_moderation_generation.py')
           source = path.read_text()
+
           replacements = [
               (
                   '"const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [] } = {}) => (",',
                   '"const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [] } = {}) => {",',
+                  'exact-upload old signature',
               ),
               (
                   '"const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [], currentGeneration = 0 } = {}) => (",',
                   '"const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [], currentGeneration = 0 } = {}) => {",',
+                  'exact-upload new signature',
               ),
           ]
-          changed = 0
-          for old, new in replacements:
+          for old, new, label in replacements:
               if source.count(old) != 1:
-                  raise SystemExit(f'harness signature fix expected one match for: {old}')
+                  raise SystemExit(f'{label}: expected one harness match, found {source.count(old)}')
               source = source.replace(old, new, 1)
-              changed += 1
-          if changed != 2:
-              raise SystemExit('expected exactly two harness signature fixes')
+
+          old_block = '''replace_once(
+              "      uploaderUid: userId || null,",
+              "      uploaderUid: userId || null,\\n      moderationGeneration: requestModerationGeneration,\\n      moderationScopeKey: requestModerationScope.scopeKey,",
+              'upload generation provenance',
+          )'''
+          new_block = '''replace_once(
+              """    const uploadPayload = {
+                userId: userId || null,
+                uploaderUid: userId || null,
+                ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),""",
+              """    const uploadPayload = {
+                userId: userId || null,
+                uploaderUid: userId || null,
+                moderationGeneration: requestModerationGeneration,
+                moderationScopeKey: requestModerationScope.scopeKey,
+                ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),""",
+              'upload generation provenance',
+          )'''
+          if source.count(old_block) != 1:
+              raise SystemExit(f'upload provenance harness block: expected one match, found {source.count(old_block)}')
+          source = source.replace(old_block, new_block, 1)
+
           path.write_text(source)
           PY
       - name: Apply generation refactor

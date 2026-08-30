@@ -36,7 +36,29 @@ import { composeModerationPolicyResult } from './moderationPolicy.js';
 import { runGeminiClassifier as runGeminiClassifierV2 } from './geminiModerationClassifier.js';
 import { GEMINI_MODERATION_PROMPT_VERSION } from './geminiModerationContract.js';
 import { routeGeminiForbiddenReasons } from './geminiModerationRouting.js';
-import { buildReusableCacheGeminiDiagnostics, canRouteNearDuplicateModerationExampleAction, compareModerationExampleCandidates, hasMatchingReusableModerationTaxonomy, isFinalModerationExampleAction, isNearDuplicateReuseOwnedByUploader, isReusableModerationCache, isUploadModerationExampleData } from './moderationReuseRouting.js';
+import {
+  buildReusableCacheGeminiDiagnostics,
+  canRouteNearDuplicateModerationExampleAction,
+  compareModerationExampleCandidates,
+  hasMatchingReusableModerationTaxonomy,
+  isFinalModerationExampleAction,
+  isModerationExampleGenerationRouteable,
+  isNearDuplicateReuseOwnedByUploader,
+  isReusableModerationCache,
+  isUploadModerationExampleData,
+} from './moderationReuseRouting.js';
+import {
+  collectModerationFingerprintEntries,
+  collectModerationScopeKeys,
+  isModerationGenerationCurrent,
+  normalizeModerationGeneration,
+  planModerationScopeGenerationIncrement,
+  resolveModerationScopeKey,
+} from './moderationGeneration.js';
+import {
+  getModerationFreshScopeRef,
+  readModerationScopeGeneration,
+} from './moderationGenerationStore.js';
 import {
   getCodexDevLoginDecision,
   getCodexDevLoginDiagnostics,
@@ -157,7 +179,6 @@ const spidersKeywords = ['spider', 'spiders', 'insect', 'insects', 'bug', 'bugs'
 const VISION_DIAGNOSTIC_ONLY_TRIGGERS = new Set(['spidersInsects', 'needlesInjections']);
 const dhashPrefixLength = 4;
 const dhashThreshold = Number.parseInt(process.env.DHASH_HAMMING_THRESHOLD || '8', 10);
-const freshEvaluationReservationMs = Number.parseInt(process.env.FRESH_EVAL_RESERVATION_MS || '120000', 10);
 const falseAppealThreshold = Number.parseInt(process.env.FALSE_APPEAL_THRESHOLD || '2', 10);
 const cooldownDays = Number.parseInt(process.env.REVIEW_COOLDOWN_DAYS || '7', 10);
 const claimInviteExpiryMs = Number.parseInt(process.env.CLAIM_INVITE_EXPIRY_MS || `${14 * 24 * 60 * 60 * 1000}`, 10);
@@ -1153,11 +1174,11 @@ const findOpenReviewCase = async (userId) => {
   return doc ? { id: doc.id, data: doc.data() } : null;
 };
 
-const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [] } = {}) => {
+const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [], currentGeneration = 0 } = {}) => {
   const doc = await findReusableAcrossPages({
     isCodexActor,
     isReusable: (uploadData) => (
-      isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION)
+      isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION, currentGeneration)
       && hasMatchingReusableModerationTaxonomy({ uploadData, themes, makerTags })
     ),
     fetchPage: async (cursor) => {
@@ -1171,7 +1192,7 @@ const findExactUpload = async (sha256, { isCodexActor = false, themes = [], make
   return { id: doc.id, data: doc.data() };
 };
 
-const findExactModerationExample = async (sha256) => {
+const findExactModerationExample = async (sha256, currentGeneration = 0) => {
   if (!sha256) return null;
   let cursor = null;
   let best = null;
@@ -1184,6 +1205,7 @@ const findExactModerationExample = async (sha256) => {
     snapshot.docs.forEach((doc) => {
       const candidate = { id: doc.id, data: doc.data() };
       if (!isUploadModerationExampleData(candidate.data)) return;
+      if (!isModerationExampleGenerationRouteable(candidate.data, currentGeneration)) return;
       if (!best || compareModerationExampleCandidates(candidate, best) < 0) best = candidate;
     });
     if (snapshot.docs.length < 25) {
@@ -1195,12 +1217,12 @@ const findExactModerationExample = async (sha256) => {
   return best;
 };
 
-const findNearDuplicateUpload = async ({ dhash, dhashPrefix }, { isCodexActor = false, themes = [], makerTags = [], userId = null } = {}) => {
+const findNearDuplicateUpload = async ({ dhash, dhashPrefix }, { isCodexActor = false, themes = [], makerTags = [], userId = null, currentGeneration = 0 } = {}) => {
   if (!dhash) return null;
   return findBestReusableAcrossPages({
     isCodexActor,
     isReusable: (uploadData) => (
-      isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION)
+      isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION, currentGeneration)
       && hasMatchingReusableModerationTaxonomy({ uploadData, themes, makerTags })
       && isNearDuplicateReuseOwnedByUploader({ uploadData, userId })
     ),
@@ -1233,121 +1255,6 @@ const isFingerprintBlocked = (fingerprints, blockedFingerprints = []) => {
     }
   }
   return false;
-};
-
-const matchesFingerprintEntry = (fingerprints, candidate) => {
-  if (!fingerprints || !candidate) return false;
-  if (candidate?.sha256 && candidate.sha256 === fingerprints.sha256) {
-    return true;
-  }
-  if (!fingerprints.dhash || !fingerprints.dhashPrefix) return false;
-  if (candidate?.dhashPrefix !== fingerprints.dhashPrefix) return false;
-  if (!candidate?.dhash) return false;
-  const distance = hammingDistance(fingerprints.dhash, candidate.dhash);
-  return distance <= dhashThreshold;
-};
-
-const reserveFreshEvaluationOverride = async ({ userModerationRef, fingerprints }) => {
-  if (!userModerationRef || !fingerprints) return null;
-  const requestId = crypto.randomUUID();
-  let reservation = null;
-  await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(userModerationRef);
-    if (!snapshot.exists) return;
-    const data = snapshot.data() || {};
-    const overrides = Array.isArray(data.freshEvaluationOverrides)
-      ? data.freshEvaluationOverrides
-      : [];
-    const now = Date.now();
-    const matchIndex = overrides.findIndex((item) => {
-      if (!matchesFingerprintEntry(fingerprints, item)) return false;
-      const expiresAtMs = Number(item?.reservationExpiresAtMs || 0);
-      const isReserved = Boolean(item?.reservationRequestId) && expiresAtMs > now;
-      return !isReserved;
-    });
-    if (matchIndex === -1) return;
-    const nextOverrides = overrides.map((item, index) => {
-      if (index !== matchIndex) return item;
-      return {
-        ...item,
-        reservationRequestId: requestId,
-        reservationReservedAtMs: now,
-        reservationExpiresAtMs: now + freshEvaluationReservationMs,
-      };
-    });
-    transaction.set(
-      userModerationRef,
-      {
-        freshEvaluationOverrides: nextOverrides,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-    reservation = { requestId };
-  });
-  return reservation;
-};
-
-const consumeFreshEvaluationOverride = async ({ userModerationRef, fingerprints, reservationRequestId }) => {
-  if (!userModerationRef || !fingerprints || !reservationRequestId) return false;
-  let consumed = false;
-  await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(userModerationRef);
-    if (!snapshot.exists) return;
-    const data = snapshot.data() || {};
-    const overrides = Array.isArray(data.freshEvaluationOverrides)
-      ? data.freshEvaluationOverrides
-      : [];
-    const matchIndex = overrides.findIndex((item) => (
-      matchesFingerprintEntry(fingerprints, item)
-      && item?.reservationRequestId === reservationRequestId
-    ));
-    if (matchIndex === -1) return;
-    const nextOverrides = overrides.filter((_, index) => index !== matchIndex);
-    transaction.set(
-      userModerationRef,
-      {
-        freshEvaluationOverrides: nextOverrides,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-    consumed = true;
-  });
-  return consumed;
-};
-
-const releaseFreshEvaluationOverrideReservation = async ({ userModerationRef, fingerprints, reservationRequestId }) => {
-  if (!userModerationRef || !fingerprints || !reservationRequestId) return false;
-  let released = false;
-  await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(userModerationRef);
-    if (!snapshot.exists) return;
-    const data = snapshot.data() || {};
-    const overrides = Array.isArray(data.freshEvaluationOverrides)
-      ? data.freshEvaluationOverrides
-      : [];
-    const matchIndex = overrides.findIndex((item) => (
-      matchesFingerprintEntry(fingerprints, item)
-      && item?.reservationRequestId === reservationRequestId
-    ));
-    if (matchIndex === -1) return;
-    const nextOverrides = overrides.map((item, index) => {
-      if (index !== matchIndex) return item;
-      const { reservationRequestId: _a, reservationReservedAtMs: _b, reservationExpiresAtMs: _c, ...rest } = item;
-      return rest;
-    });
-    transaction.set(
-      userModerationRef,
-      {
-        freshEvaluationOverrides: nextOverrides,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-    released = true;
-  });
-  return released;
 };
 
 const extractLabelScore = (labels, keywords) => {
@@ -1603,40 +1510,52 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     return;
   }
 
-  let overrideReservation = null;
+  let requestModerationScope = null;
   try {
-    overrideReservation = await reserveFreshEvaluationOverride({
-      userModerationRef: userModeration?.ref,
-      fingerprints,
-    });
+    requestModerationScope = await readModerationScopeGeneration({ db, fingerprints });
   } catch (error) {
-    logger.error('Fresh evaluation override reserve mislukt.', error);
+    logger.error('Moderation generation ophalen mislukt.', error);
+    res.status(503).json({ error: 'Moderation generation is unavailable.' });
+    return;
   }
-  const skipUploadReuse = Boolean(overrideReservation);
+  if (!requestModerationScope?.scopeKey) {
+    res.status(500).json({ error: 'Moderation fingerprint scope is unavailable.' });
+    return;
+  }
+  const requestModerationGeneration = normalizeModerationGeneration(requestModerationScope.generation);
   const normalizedMakerTags = normalizeMakerTags(makerTags);
   const normalizedThemes = normalizeThemes(themes);
 
   try {
-    matchedModerationExample = isCodexActor ? null : await findExactModerationExample(fingerprints.sha256);
+    matchedModerationExample = isCodexActor ? null : await findExactModerationExample(fingerprints.sha256, requestModerationGeneration);
     if (matchedModerationExample) matchedModerationExampleFingerprintType = 'sha256';
 
-    if (!skipUploadReuse) {
-      matchedUpload = await findExactUpload(fingerprints.sha256, { isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags });
+    matchedUpload = await findExactUpload(fingerprints.sha256, {
+      isCodexActor,
+      themes: normalizedThemes,
+      makerTags: normalizedMakerTags,
+      currentGeneration: requestModerationGeneration,
+    });
+    if (matchedUpload) {
+      matchedFingerprintType = 'sha256';
+    }
+    if (!matchedUpload) {
+      matchedUpload = await findNearDuplicateUpload(fingerprints, {
+        isCodexActor,
+        themes: normalizedThemes,
+        makerTags: normalizedMakerTags,
+        userId,
+        currentGeneration: requestModerationGeneration,
+      });
       if (matchedUpload) {
-        matchedFingerprintType = 'sha256';
-      }
-      if (!matchedUpload) {
-        matchedUpload = await findNearDuplicateUpload(fingerprints, { isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags, userId });
-        if (matchedUpload) {
-          matchedFingerprintType = 'dhash';
-        }
+        matchedFingerprintType = 'dhash';
       }
     }
 
     if (!isCodexActor && !matchedModerationExample && matchedUpload && matchedFingerprintType === 'dhash') {
       const matchedUploadSha = String(matchedUpload?.data?.fingerprints?.sha256 || '').trim();
       if (matchedUploadSha && matchedUploadSha !== fingerprints.sha256) {
-        matchedModerationExample = await findExactModerationExample(matchedUploadSha);
+        matchedModerationExample = await findExactModerationExample(matchedUploadSha, requestModerationGeneration);
         if (matchedModerationExample) matchedModerationExampleFingerprintType = 'dhash';
       }
     }
@@ -1649,13 +1568,13 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     || canRouteNearDuplicateModerationExampleAction(previousExampleAction);
   const shouldRouteByPreviousExample = Boolean(matchedModerationExample?.id)
     && previousExampleIsFinalDecision
-    && previousExampleRouteAllowed
-    && !skipUploadReuse;
+    && previousExampleRouteAllowed;
   const cachedGeminiDiagnostics = matchedUpload?.data && matchedFingerprintType === 'sha256'
     ? buildReusableCacheGeminiDiagnostics({
         uploadData: matchedUpload.data,
         expectedPromptVersion: GEMINI_MODERATION_PROMPT_VERSION,
         sourceUploadId: matchedUpload.id,
+        currentGeneration: requestModerationGeneration,
       })
     : null;
   if (matchedUpload?.data && cachedGeminiDiagnostics) {
@@ -1977,6 +1896,13 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
           await db.runTransaction(async (transaction) => {
             persistedOrdinaryReview = false;
             if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
+            const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
+            if (freshModerationScope.generation !== requestModerationGeneration) {
+              const error = new Error('Fresh evaluation superseded this moderation request');
+              error.status = 409;
+              error.code = 'fresh_evaluation_superseded_during_request';
+              throw error;
+            }
             const freshUserModerationSnap = await transaction.get(userModeration.ref);
             const freshUserModerationData = freshUserModerationSnap.exists
               ? (freshUserModerationSnap.data() || {})
@@ -2040,6 +1966,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         }
       }
     } catch (error) {
+      if (error?.code === 'fresh_evaluation_superseded_during_request') throw error;
       logger.error('User moderation check mislukt.', error);
     }
   }
@@ -2096,6 +2023,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     moderationSignals: policyResult.moderationSignals,
     geminiDiagnostics,
     userSelectedTaxonomy: policyResult.userSelectedTaxonomy,
+    moderationGeneration: requestModerationGeneration,
+    moderationScopeKey: requestModerationScope.scopeKey,
     moderatorCorrectionApplied: Boolean(policyResult.moderatorCorrectionApplied),
     moderatorCorrectedTaxonomy: policyResult.moderatorCorrectedTaxonomy,
     aiSuggestedTaxonomy: policyResult.aiSuggestedTaxonomy,
@@ -2137,6 +2066,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     const uploadPayload = {
       userId: userId || null,
       uploaderUid: userId || null,
+      moderationGeneration: requestModerationGeneration,
+      moderationScopeKey: requestModerationScope.scopeKey,
       ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
       outcome,
       classification,
@@ -2189,6 +2120,13 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         uploadSuppressedByHistoricalRegistry = true;
         return;
       }
+      const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
+      if (freshModerationScope.generation !== requestModerationGeneration) {
+        const error = new Error('Fresh evaluation superseded this moderation request');
+        error.status = 409;
+        error.code = 'fresh_evaluation_superseded_during_request';
+        throw error;
+      }
       transaction.create(uploadRef, uploadPayload);
       persistedUpload = true;
     });
@@ -2231,6 +2169,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         });
       }
     }
+    if (error?.code === 'fresh_evaluation_superseded_during_request') throw error;
     logger.error('Upload opslaan mislukt.', error);
   }
 
@@ -2239,6 +2178,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
       await db.runTransaction(async (transaction) => {
         if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
+        const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
+        if (freshModerationScope.generation !== requestModerationGeneration) return;
         transaction.set(db.collection('reviewCases').doc(reviewCaseId),
         {
           linkedUploadIds: FieldValue.arrayUnion(uploadId),
@@ -2277,15 +2218,13 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     response.debug = {
       path: blockedByReport
         ? 'blockedFingerprint'
-        : skipUploadReuse
-          ? 'freshEvaluationOverrideUsed'
-          : cachedResult && matchedFingerprintType === 'sha256'
-            ? 'exactReuse'
-            : cachedResult && matchedFingerprintType === 'dhash'
-              ? 'nearReuse'
-              : matchedUpload
-                ? 'matchedUploadFreshEvaluation'
-                : 'none',
+        : cachedResult && matchedFingerprintType === 'sha256'
+          ? 'exactReuse'
+          : cachedResult && matchedFingerprintType === 'dhash'
+            ? 'nearReuse'
+            : matchedUpload
+              ? 'matchedUploadFreshEvaluation'
+              : 'freshEvaluation',
       matchedUploadId: matchedUpload?.id || null,
       matchedModerationExampleId: matchedModerationExample?.id || null,
       matchedFingerprintType,
@@ -2298,36 +2237,19 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         geminiFailed,
       },
       geminiDiagnostics,
+      moderationGeneration: requestModerationGeneration,
+      moderationScopeKey: requestModerationScope.scopeKey,
     };
-  }
-
-  if (skipUploadReuse) {
-    try {
-      await consumeFreshEvaluationOverride({
-        userModerationRef: userModeration?.ref,
-        fingerprints,
-        reservationRequestId: overrideReservation?.requestId,
-      });
-    } catch (error) {
-      logger.error('Fresh evaluation override consume mislukt.', error);
-    }
   }
 
   res.status(200).json(response);
   } catch (error) {
-    if (skipUploadReuse) {
-      try {
-        await releaseFreshEvaluationOverrideReservation({
-          userModerationRef: userModeration?.ref,
-          fingerprints,
-          reservationRequestId: overrideReservation?.requestId,
-        });
-      } catch (releaseError) {
-        logger.error('Fresh evaluation override release mislukt.', releaseError);
-      }
-    }
     logger.error('moderateImage fout.', error);
-    res.status(500).json({ error: 'Moderatie mislukt.' });
+    const status = Number(error?.status) || 500;
+    res.status(status).json({
+      error: error?.message || 'Moderatie mislukt.',
+      ...(error?.code ? { code: error.code } : {}),
+    });
   }
 });
 
@@ -3961,198 +3883,172 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       res.status(400).json({ error: 'reasonCode is required' });
       return;
     }
-    if (!MODERATION_EXAMPLE_REASON_CODES.has(reasonCode)) {
-      res.status(400).json({ error: 'Invalid reasonCode' });
-      return;
-    }
-    if (!MODERATION_EXAMPLE_REASON_CODES_BY_ACTION.queueFreshEvaluation.has(reasonCode)) {
+    if (!MODERATION_EXAMPLE_REASON_CODES.has(reasonCode)
+      || !MODERATION_EXAMPLE_REASON_CODES_BY_ACTION.queueFreshEvaluation.has(reasonCode)) {
       res.status(400).json({ error: 'Invalid reasonCode for action queueFreshEvaluation' });
       return;
     }
 
-    const pickFingerprint = (value) => {
-      if (!value || typeof value !== 'object') return null;
-      const sha256 = typeof value.sha256 === 'string' ? value.sha256.trim() : '';
-      const dhash = typeof value.dhash === 'string' ? value.dhash.trim() : '';
-      const dhashPrefix = typeof value.dhashPrefix === 'string' ? value.dhashPrefix.trim() : '';
-      if (!sha256 || !dhash || !dhashPrefix) return null;
-      return { sha256, dhash, dhashPrefix };
-    };
-
-    const pickString = (...values) => {
-      for (const value of values) {
-        if (typeof value === 'string' && value.trim()) return value.trim();
-      }
-      return '';
-    };
-
-    const pickFingerprintFromCandidates = (...candidates) => {
-      for (const candidate of candidates) {
-        const entry = pickFingerprint(candidate);
-        if (entry) return entry;
-      }
-      return null;
-    };
+    const pickString = (...values) => values
+      .map((value) => String(value || '').trim())
+      .find(Boolean) || '';
+    const ownerForUpload = (data = {}) => pickString(data?.userId, data?.uploaderUid, data?.ownerUid, data?.userUid);
 
     const reviewCaseRef = db.collection('reviewCases').doc(reviewCaseId);
-    const reviewCaseSnapshot = await reviewCaseRef.get();
-    if (!reviewCaseSnapshot.exists) {
+    const initialReviewCaseSnap = await reviewCaseRef.get();
+    if (!initialReviewCaseSnap.exists) {
       res.status(404).json({ error: 'Review case not found' });
       return;
     }
-
-    const reviewCaseData = reviewCaseSnapshot.data() || {};
-    const reviewCaseUploadIds = resolveReviewCaseUploadIds(reviewCaseData);
-    if (uploadIdFromBody && reviewCaseUploadIds.length > 0 && !reviewCaseUploadIds.includes(uploadIdFromBody)) {
+    const initialReviewCaseData = initialReviewCaseSnap.data() || {};
+    if (!isUploadReviewCaseData(initialReviewCaseData)) {
+      res.status(409).json({ error: 'Fresh evaluation requires an upload review case' });
+      return;
+    }
+    const initialReviewCaseUploadIds = resolveReviewCaseUploadIds(initialReviewCaseData);
+    if (uploadIdFromBody && initialReviewCaseUploadIds.length > 0 && !initialReviewCaseUploadIds.includes(uploadIdFromBody)) {
       const error = new Error('uploadId does not belong to this review case');
       error.status = 409;
       error.code = 'review_case_upload_mismatch';
       throw error;
     }
-    const effectiveUploadId = String(
-      uploadIdFromBody
-      || reviewCaseData.uploadId
-      || (Array.isArray(reviewCaseData.linkedUploadIds) ? reviewCaseData.linkedUploadIds[0] : '')
-      || ''
-    ).trim() || null;
+    const effectiveUploadId = uploadIdFromBody || initialReviewCaseUploadIds[0] || null;
 
-    let uploadData = {};
-    let uploadFound = false;
-    if (effectiveUploadId) {
-      const uploadSnapshot = await db.collection('uploads').doc(effectiveUploadId).get();
-      uploadFound = uploadSnapshot.exists;
-      uploadData = uploadFound ? (uploadSnapshot.data() || {}) : {};
-    }
-
-    const userId = pickString(
-      reviewCaseData?.userId,
-      reviewCaseData?.uploaderUid,
-      reviewCaseData?.ownerUid,
-      reviewCaseData?.uploaderSnapshot?.uid,
-      reviewCaseData?.uploadSnapshot?.userId,
-      reviewCaseData?.uploadSnapshot?.ownerUid,
-      uploadData?.userId,
-      uploadData?.ownerUid
-    );
-    const fingerprints = pickFingerprintFromCandidates(
-      reviewCaseData?.fingerprints,
-      reviewCaseData?.fingerprint,
-      {
-        sha256: reviewCaseData?.sha256,
-        dhash: reviewCaseData?.dhash,
-        dhashPrefix: reviewCaseData?.dhashPrefix,
-      },
-      reviewCaseData?.uploadSnapshot?.fingerprints,
-      reviewCaseData?.uploadSnapshot?.metadata?.fingerprints,
-      uploadData?.fingerprints,
-      uploadData?.metadata?.fingerprints
-    );
-
-    const moderationRef = userId ? db.collection('userModeration').doc(userId) : null;
-    const queueModerationExampleRef = (reviewCaseId || effectiveUploadId)
-      ? db.collection('moderationExamples').doc(`${reviewCaseId || effectiveUploadId}_queueFreshEvaluation`)
-      : null;
-    let fingerprintQueued = false;
-    let queueMode = 'closeOnlyNoFingerprint';
-    let nextStatus = 'closedNoFingerprint';
+    let responseUserId = null;
+    let responseScopeKeys = [];
+    let responseGenerations = {};
+    let responseUploadFound = false;
+    let responseStatus = 'closedNoFingerprint';
 
     await db.runTransaction(async (transaction) => {
-      const freshReviewCaseSnapshot = await transaction.get(reviewCaseRef);
-      if (!freshReviewCaseSnapshot.exists) {
+      const freshReviewCaseSnap = await transaction.get(reviewCaseRef);
+      if (!freshReviewCaseSnap.exists) {
         const error = new Error('Review case not found');
         error.status = 404;
         throw error;
       }
-      const freshReviewCaseData = freshReviewCaseSnapshot.data() || {};
-      const freshUploadRef = effectiveUploadId ? db.collection('uploads').doc(effectiveUploadId) : null;
-      const freshUploadSnapshot = freshUploadRef ? await transaction.get(freshUploadRef) : null;
-      const freshUploadData = freshUploadSnapshot?.exists ? (freshUploadSnapshot.data() || {}) : {};
+      const freshReviewCaseData = freshReviewCaseSnap.data() || {};
+      if (!isUploadReviewCaseData(freshReviewCaseData)) {
+        const error = new Error('Fresh evaluation requires an upload review case');
+        error.status = 409;
+        throw error;
+      }
+
       const freshReviewCaseUploadIds = resolveReviewCaseUploadIds(freshReviewCaseData);
-      if (effectiveUploadId && freshReviewCaseUploadIds.length > 0 && !freshReviewCaseUploadIds.includes(effectiveUploadId)) {
+      if (uploadIdFromBody && freshReviewCaseUploadIds.length > 0 && !freshReviewCaseUploadIds.includes(uploadIdFromBody)) {
         const error = new Error('Review case upload changed while queuing fresh evaluation');
         error.status = 409;
         error.code = 'review_case_upload_changed';
         throw error;
       }
+      const linkedUploadIds = Array.from(new Set([
+        ...freshReviewCaseUploadIds,
+        ...(uploadIdFromBody ? [uploadIdFromBody] : []),
+      ].filter(Boolean)));
+      if (linkedUploadIds.length > 25) {
+        const error = new Error('Review case has too many linked uploads for atomic fresh evaluation');
+        error.status = 409;
+        error.code = 'review_case_link_limit';
+        throw error;
+      }
+
+      const linkedUploadRefs = linkedUploadIds.map((uploadId) => db.collection('uploads').doc(uploadId));
+      const linkedUploadSnaps = await Promise.all(linkedUploadRefs.map((ref) => transaction.get(ref)));
+      const linkedUploads = linkedUploadSnaps
+        .map((snapshot, index) => ({
+          id: linkedUploadIds[index],
+          ref: linkedUploadRefs[index],
+          exists: snapshot.exists,
+          data: snapshot.exists ? (snapshot.data() || {}) : {},
+        }));
+
       const freshCaseUserId = pickString(
         freshReviewCaseData?.userId,
         freshReviewCaseData?.uploaderUid,
         freshReviewCaseData?.ownerUid,
         freshReviewCaseData?.uploaderSnapshot?.uid,
-        freshUploadData?.userId,
-        freshUploadData?.ownerUid
+        ...linkedUploads.map((item) => ownerForUpload(item.data)),
       );
-      if (userId && freshCaseUserId && freshCaseUserId !== userId) {
-        const error = new Error('Review case ownership changed while queuing fresh evaluation');
-        error.status = 409;
-        error.code = 'review_case_owner_changed';
-        throw error;
-      }
-      const freshUploadOwnerId = pickString(freshUploadData?.userId, freshUploadData?.ownerUid, freshUploadData?.userUid);
-      if (freshCaseUserId && freshUploadOwnerId && freshCaseUserId !== freshUploadOwnerId) {
-        const error = new Error('Review case and upload ownership do not match');
-        error.status = 409;
-        error.code = 'review_case_upload_owner_mismatch';
-        throw error;
-      }
-      const freshModerationSnapshot = moderationRef ? await transaction.get(moderationRef) : null;
-      const freshModerationData = freshModerationSnapshot?.exists ? (freshModerationSnapshot.data() || {}) : {};
-      const existingOverrides = Array.isArray(freshModerationData.freshEvaluationOverrides)
-        ? freshModerationData.freshEvaluationOverrides
-        : [];
-      const alreadyQueued = fingerprints
-        ? existingOverrides.some((item) => matchesFingerprintEntry(fingerprints, item))
-        : false;
-      const shouldQueueFingerprintOverride = Boolean(fingerprints) && !alreadyQueued && Boolean(moderationRef);
-      fingerprintQueued = shouldQueueFingerprintOverride || alreadyQueued;
-      queueMode = fingerprintQueued ? 'fingerprintOverride' : 'closeOnlyNoFingerprint';
-      nextStatus = fingerprintQueued ? 'freshEvalQueued' : 'closedNoFingerprint';
-
-      const wasOpenUploadCase = freshReviewCaseData.status === 'inReview'
-        && isUploadReviewCaseData(freshReviewCaseData);
-      if (moderationRef && (shouldQueueFingerprintOverride || wasOpenUploadCase)) {
-        const moderationUpdates = {
-          updatedAt: FieldValue.serverTimestamp(),
-        };
-        if (shouldQueueFingerprintOverride) {
-          moderationUpdates.freshEvaluationOverrides = FieldValue.arrayUnion({
-            sha256: fingerprints.sha256,
-            dhash: fingerprints.dhash,
-            dhashPrefix: fingerprints.dhashPrefix,
-            uploadId: effectiveUploadId,
-            reviewCaseId,
-            createdByUid: decoded.uid,
-            createdAtMs: Date.now(),
-          });
+      for (const linkedUpload of linkedUploads) {
+        const linkedOwner = ownerForUpload(linkedUpload.data);
+        if (freshCaseUserId && linkedOwner && freshCaseUserId !== linkedOwner) {
+          const error = new Error('Review case and upload ownership do not match');
+          error.status = 409;
+          error.code = 'review_case_upload_owner_mismatch';
+          throw error;
         }
-        if (wasOpenUploadCase) {
-          moderationUpdates.openReviewCount = getOpenReviewCountAfterCaseExit({
+      }
+
+      const fingerprintEntries = collectModerationFingerprintEntries(
+        freshReviewCaseData,
+        freshReviewCaseData?.uploadSnapshot,
+        ...linkedUploads.filter((item) => item.exists).map((item) => item.data),
+      );
+      const scopeKeys = collectModerationScopeKeys(fingerprintEntries);
+      if (scopeKeys.length > 25) {
+        const error = new Error('Review case spans too many moderation fingerprint scopes');
+        error.status = 409;
+        error.code = 'moderation_scope_limit';
+        throw error;
+      }
+
+      const scopeRefs = scopeKeys.map((scopeKey) => getModerationFreshScopeRef({ db, scopeKey }));
+      const scopeSnaps = await Promise.all(scopeRefs.map((ref) => transaction.get(ref)));
+      const currentGenerations = Object.fromEntries(scopeKeys.map((scopeKey, index) => [
+        scopeKey,
+        normalizeModerationGeneration(scopeSnaps[index]?.exists ? scopeSnaps[index].data()?.generation : 0),
+      ]));
+      const nextGenerations = planModerationScopeGenerationIncrement({
+        scopeKeys,
+        currentGenerations,
+      });
+
+      const moderationRef = freshCaseUserId ? db.collection('userModeration').doc(freshCaseUserId) : null;
+      const freshModerationSnap = moderationRef ? await transaction.get(moderationRef) : null;
+      const freshModerationData = freshModerationSnap?.exists ? (freshModerationSnap.data() || {}) : {};
+
+      // All transaction reads are complete above this line.
+      Object.entries(nextGenerations).forEach(([scopeKey, generation]) => {
+        const scopeRef = getModerationFreshScopeRef({ db, scopeKey });
+        transaction.set(scopeRef, {
+          generation,
+          scopeKey,
+          reviewCaseId,
+          reasonCode,
+          queuedByUid: decoded.uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+
+      const hasScopes = scopeKeys.length > 0;
+      const nextStatus = hasScopes ? 'freshEvalQueued' : 'closedNoFingerprint';
+      const wasOpenUploadCase = freshReviewCaseData.status === 'inReview';
+      if (moderationRef && wasOpenUploadCase) {
+        transaction.set(moderationRef, {
+          openReviewCount: getOpenReviewCountAfterCaseExit({
             openReviewCount: freshModerationData.openReviewCount,
             wasOpenUploadCase: true,
-          });
-        }
-        transaction.set(moderationRef, moderationUpdates, { merge: true });
-      }
-
-      const freshAlreadyFinal = freshReviewCaseData.status === 'freshEvalQueued'
-        || freshReviewCaseData.status === 'closedNoFingerprint';
-      if (!freshAlreadyFinal || freshReviewCaseData.status !== nextStatus) {
-        transaction.set(reviewCaseRef, {
-          status: nextStatus,
-          queueExitReason: 'reEvaluateOnNextUpload',
-          queuedFreshEvaluationAt: FieldValue.serverTimestamp(),
-          queuedFreshEvaluationBy: decoded.uid,
-          queuedFreshEvaluationByUid: decoded.uid,
-          queueReasonCode: reasonCode,
-          fingerprintQueued,
-          queueFreshEvaluationMode: queueMode,
-          lock: FieldValue.delete(),
+          }),
           updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
       }
 
-      if (freshUploadRef && freshUploadSnapshot?.exists) {
-        transaction.set(freshUploadRef, {
+      transaction.set(reviewCaseRef, {
+        status: nextStatus,
+        queueExitReason: 'reEvaluateOnNextUpload',
+        queuedFreshEvaluationAt: FieldValue.serverTimestamp(),
+        queuedFreshEvaluationBy: decoded.uid,
+        queuedFreshEvaluationByUid: decoded.uid,
+        queueReasonCode: reasonCode,
+        fingerprintQueued: hasScopes,
+        queueFreshEvaluationMode: hasScopes ? 'moderationGeneration' : 'closeOnlyNoFingerprint',
+        moderationScopeGenerations: nextGenerations,
+        lock: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      linkedUploads.filter((item) => item.exists).forEach((linkedUpload) => {
+        transaction.set(linkedUpload.ref, {
           reviewStatus: nextStatus,
           publicationStatus: nextStatus,
           requiresUploaderAcceptance: false,
@@ -4162,57 +4058,82 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
           queuedFreshEvaluationByUid: decoded.uid,
           queueReasonCode: reasonCode,
           previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
-          queueFreshEvaluationMode: queueMode,
+          queueFreshEvaluationMode: hasScopes ? 'moderationGeneration' : 'closeOnlyNoFingerprint',
           updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
-      }
+      });
 
-      if (queueModerationExampleRef) {
-        const queueExamplePayload = buildCommonModerationExample({
-          uploadId: effectiveUploadId,
-          reviewCaseId,
-          uploaderUid: freshCaseUserId || userId || null,
-          fingerprints: fingerprints ? { ...fingerprints } : null,
-          uploadData: freshUploadData,
-          reviewData: freshReviewCaseData,
-          aiResult: freshUploadData?.aiResult || freshReviewCaseData?.uploadSnapshot?.aiResult || {},
-          moderationSignals: freshUploadData?.moderationSignals || freshReviewCaseData?.uploadSnapshot?.moderationSignals || {},
-          correctionSnapshot: freshUploadData?.correction || freshUploadData?.postDraft?.correction || freshReviewCaseData?.uploadSnapshot?.correction || null,
-          decision: null,
-          policyDecisionOutcome: 'review',
-          moderatorDecision: {
-            action: 'queueFreshEvaluation',
-            finalOutcome: 'review',
-            reasonCode,
-            notes: null,
-            decidedBy: decoded.uid,
-            decidedAt: FieldValue.serverTimestamp(),
-          },
-          source: 'moderatorQueueFreshEvaluation',
-          nowFactory: () => FieldValue.serverTimestamp(),
-        });
-        transaction.set(queueModerationExampleRef, queueExamplePayload, { merge: true });
-      }
+      const primaryUpload = linkedUploads.find((item) => item.id === effectiveUploadId && item.exists)
+        || linkedUploads.find((item) => item.exists)
+        || null;
+      const primaryFingerprints = collectModerationFingerprintEntries(
+        primaryUpload?.data,
+        freshReviewCaseData,
+      )[0] || null;
+      const primaryScopeKey = resolveModerationScopeKey(primaryFingerprints || {});
+      const primaryGeneration = primaryScopeKey
+        ? normalizeModerationGeneration(nextGenerations[primaryScopeKey])
+        : 0;
+      const queueModerationExampleRef = db.collection('moderationExamples')
+        .doc(`${reviewCaseId}_queueFreshEvaluation`);
+      const queueExamplePayload = buildCommonModerationExample({
+        uploadId: primaryUpload?.id || effectiveUploadId,
+        reviewCaseId,
+        uploaderUid: freshCaseUserId || null,
+        fingerprints: primaryFingerprints,
+        uploadData: primaryUpload?.data || {},
+        reviewData: freshReviewCaseData,
+        aiResult: primaryUpload?.data?.aiResult || freshReviewCaseData?.uploadSnapshot?.aiResult || {},
+        moderationSignals: primaryUpload?.data?.moderationSignals || freshReviewCaseData?.uploadSnapshot?.moderationSignals || {},
+        correctionSnapshot: primaryUpload?.data?.correction || primaryUpload?.data?.postDraft?.correction || freshReviewCaseData?.uploadSnapshot?.correction || null,
+        decision: null,
+        policyDecisionOutcome: 'review',
+        moderatorDecision: {
+          action: 'queueFreshEvaluation',
+          finalOutcome: 'review',
+          reasonCode,
+          notes: null,
+          decidedBy: decoded.uid,
+          decidedAt: FieldValue.serverTimestamp(),
+        },
+        moderationGeneration: primaryGeneration,
+        source: 'moderatorQueueFreshEvaluation',
+        nowFactory: () => FieldValue.serverTimestamp(),
+      });
+      transaction.set(queueModerationExampleRef, {
+        ...queueExamplePayload,
+        moderationScopeGenerations: nextGenerations,
+      }, { merge: true });
+
+      responseUserId = freshCaseUserId || null;
+      responseScopeKeys = scopeKeys;
+      responseGenerations = nextGenerations;
+      responseUploadFound = Boolean(primaryUpload?.exists);
+      responseStatus = nextStatus;
     });
-
-
 
     res.status(200).json({
       ok: true,
       reviewCaseId,
       uploadId: effectiveUploadId,
-      uploadFound,
-      uploadUpdateSkipped: Boolean(effectiveUploadId) && !uploadFound,
-      fingerprintQueued,
-      queueFreshEvaluationMode: queueMode,
-      status: nextStatus,
-      message: queueMode === 'fingerprintOverride'
-        ? 'Fresh evaluation queued for next matching upload.'
-        : 'Case removed from active review; no fingerprint override created.',
+      userId: responseUserId,
+      uploadFound: responseUploadFound,
+      uploadUpdateSkipped: Boolean(effectiveUploadId) && !responseUploadFound,
+      fingerprintQueued: responseScopeKeys.length > 0,
+      queueFreshEvaluationMode: responseScopeKeys.length > 0 ? 'moderationGeneration' : 'closeOnlyNoFingerprint',
+      moderationScopeKeys: responseScopeKeys,
+      moderationGenerations: responseGenerations,
+      status: responseStatus,
+      message: responseScopeKeys.length > 0
+        ? 'Fresh evaluation generation incremented for matching fingerprint scope.'
+        : 'Case removed from active review; no valid fingerprint scope was available.',
     });
   } catch (error) {
     const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Failed to queue fresh evaluation override' });
+    res.status(status).json({
+      error: error.message || 'Failed to queue fresh evaluation',
+      ...(error?.code ? { code: error.code } : {}),
+    });
   }
 });
 
@@ -4358,6 +4279,22 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
           const error = new Error('Not authorized for this action');
           error.status = 403;
           throw error;
+        }
+        if (postRef) {
+          const latestModerationScope = await readModerationScopeGeneration({
+            db,
+            fingerprints: latestUpload?.fingerprints || null,
+            transaction,
+          });
+          if (!isModerationGenerationCurrent({
+            evidenceGeneration: latestUpload?.moderationGeneration,
+            currentGeneration: latestModerationScope.generation,
+          })) {
+            const error = new Error('Upload moderation is stale and must be evaluated again');
+            error.status = 409;
+            error.code = 'moderation_generation_stale';
+            throw error;
+          }
         }
         if (publicationAuthorProfileRef) {
           resolvedAuthorProfile = resolveValidatedPublicationAuthorOrThrow(validateModerationPublicationAuthorProfile({

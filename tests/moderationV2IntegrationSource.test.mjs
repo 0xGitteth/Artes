@@ -215,7 +215,7 @@ test('nonsexual safety rejection reason codes exist on server and moderator clie
 test('moderation reuse excludes reports and filters stale prompt caches during selection', () => {
   assert.ok(indexSource.includes("GEMINI_MODERATION_PROMPT_VERSION"));
   assert.ok(indexSource.includes("isUploadModerationExampleData(candidate.data)"));
-  assert.ok(indexSource.includes('isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION)'));
+  assert.ok(indexSource.includes('isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION, currentGeneration)'));
   assert.ok(indexSource.includes('hasMatchingReusableModerationTaxonomy({ uploadData, themes, makerTags })'));
   assert.ok(indexSource.includes("resolveCachedReviewCaseIdForUploader({ uploadData: matchedUpload.data, userId, isCodexActor })"));
   assert.equal(indexSource.includes("!isReusableModerationCache(matchedUpload.data, GEMINI_MODERATION_PROMPT_VERSION)"), false);
@@ -388,7 +388,7 @@ test('cache reuse is gated by the current normalized uploader taxonomy and audit
   const nearCacheStart = indexSource.indexOf('const findNearDuplicateUpload = async');
   const cacheSelectionSource = indexSource.slice(exactCacheStart, indexSource.indexOf('const isFingerprintBlocked', nearCacheStart));
   assert.ok(cacheSelectionSource.includes('hasMatchingReusableModerationTaxonomy({ uploadData, themes, makerTags })'));
-  assert.ok(cacheSelectionSource.includes('isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION)'));
+  assert.ok(cacheSelectionSource.includes('isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION, currentGeneration)'));
   assert.equal(indexSource.includes('const cachedTaxonomyMatches ='), false);
   assert.match(indexSource, /const cachedGeminiDiagnostics = matchedUpload\?\.data/);
   assert.ok(indexSource.includes("? 'matchedUploadFreshEvaluation'"));
@@ -431,9 +431,9 @@ test('initial review drafts preserve consent state for later correction resume',
 });
 
 test('cache selection applies current taxonomy eligibility before choosing exact or near candidates', () => {
-  assert.match(indexSource, /const findExactUpload = async \(sha256, \{ isCodexActor = false, themes = \[\], makerTags = \[\] \}/);
-  assert.match(indexSource, /findExactUpload\(fingerprints\.sha256, \{ isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags \}\)/);
-  assert.match(indexSource, /findNearDuplicateUpload\(fingerprints, \{ isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags, userId \}\)/);
+  assert.match(indexSource, /const findExactUpload = async \(sha256, \{ isCodexActor = false, themes = \[\], makerTags = \[\], currentGeneration = 0 \}/);
+  assert.match(indexSource, /findExactUpload\(fingerprints\.sha256,\s*\{[\s\S]{0,240}?isCodexActor,[\s\S]{0,240}?themes: normalizedThemes,[\s\S]{0,240}?makerTags: normalizedMakerTags,[\s\S]{0,240}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);
+  assert.match(indexSource, /findNearDuplicateUpload\(fingerprints,\s*\{[\s\S]{0,280}?isCodexActor,[\s\S]{0,280}?themes: normalizedThemes,[\s\S]{0,280}?makerTags: normalizedMakerTags,[\s\S]{0,280}?userId,[\s\S]{0,160}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);
   const exactStart = indexSource.indexOf('const findExactUpload = async');
   const nearStart = indexSource.indexOf('const findNearDuplicateUpload = async');
   assert.ok(indexSource.slice(exactStart, nearStart).includes('hasMatchingReusableModerationTaxonomy({ uploadData, themes, makerTags })'));
@@ -494,5 +494,5 @@ test('near-duplicate lookup is same-uploader scoped before restrictive history c
   const end = indexSource.indexOf('const isFingerprintBlocked', start);
   const nearLookup = indexSource.slice(start, end);
   assert.ok(nearLookup.includes('isNearDuplicateReuseOwnedByUploader({ uploadData, userId })'));
-  assert.ok(indexSource.includes('findNearDuplicateUpload(fingerprints, { isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags, userId })'));
+  assert.match(indexSource, /findNearDuplicateUpload\(fingerprints,\s*\{[\s\S]{0,280}?userId,[\s\S]{0,160}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);
 });

@@ -376,8 +376,8 @@ test('moderateImage derives all quarantine decisions from production-deny identi
   const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));
   assert.match(moderate, /const isCodexActor = isCodexDevForProductionDeny\(decoded\)\s*\|\| await isKnownCodexDevActorUid/);
   assert.match(moderate, /isCodexActor \? null : await findExactModerationExample/);
-  assert.match(moderate, /findExactUpload\([^\n]+\{ isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags \}/);
-  assert.match(moderate, /findNearDuplicateUpload\([^\n]+\{ isCodexActor, themes: normalizedThemes, makerTags: normalizedMakerTags, userId \}/);
+  assert.match(moderate, /findExactUpload\(fingerprints\.sha256,\s*\{[\s\S]{0,240}?isCodexActor,[\s\S]{0,240}?themes: normalizedThemes,[\s\S]{0,240}?makerTags: normalizedMakerTags,[\s\S]{0,240}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);
+  assert.match(moderate, /findNearDuplicateUpload\(fingerprints,\s*\{[\s\S]{0,280}?isCodexActor,[\s\S]{0,280}?themes: normalizedThemes,[\s\S]{0,280}?makerTags: normalizedMakerTags,[\s\S]{0,280}?userId,[\s\S]{0,160}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);
   assert.match(moderate, /shouldCreateProductionReviewCase\(\{ isCodexActor/);
   assert.match(moderate, /\.\.\.\(isCodexActor \? \{ testActor: CODEX_DEV_ACTOR \} : \{\}\)/);
   assert.doesNotMatch(moderate, /isCodexDevUid\(userId\)/);

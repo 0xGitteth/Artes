@@ -90,7 +90,7 @@ import { createClaimInviteAtomically } from './claimInviteTransaction.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
-import { findBestReusableAcrossPages, findFirstUploadReviewCaseAcrossPages, findReusableAcrossPages, isUploadReviewCaseData, resolveCachedReviewCaseIdForUploader, reviewCaseMatchesFingerprint, reviewCaseReferencesUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
+import { findBestReusableAcrossPages, findFirstUploadReviewCaseAcrossPages, findReusableAcrossPages, isUploadReviewCaseData, resolveCachedReviewCaseIdForUploader, reviewCaseMatchesCurrentUploadEvidence, reviewCaseMatchesFingerprint, reviewCaseReferencesUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
 import { getOpenReviewCountAfterCaseExit, getReviewAccessDecision } from './reviewLifecycle.js';
 import { MODERATION_STATES, PUBLICATION_STATES, resolveModerationStateForResult, resolveUploadPublicationState } from './moderationLifecycle.js';
 import { getDeletedPublishedPostCleanupDecision, getModerationPendingMediaCleanupDecision, getModerationPreviewRetentionDecision, getOperationalModerationPreviewReviewCaseId, isOperationalModerationPreviewReviewCase, resolveOwnedModerationPreviewStoragePath } from './moderationPreviewStorage.js';
@@ -1176,6 +1176,49 @@ const findOpenReviewCase = async (userId) => {
   return doc ? { id: doc.id, data: doc.data() } : null;
 };
 
+
+const findOpenReviewCaseInTransaction = async ({
+  transaction,
+  userId,
+  fingerprints,
+  matchedUploadId = null,
+} = {}) => {
+  if (!transaction || !userId) return null;
+  const doc = await findFirstUploadReviewCaseAcrossPages({
+    fetchPage: async (cursor) => {
+      let query = db
+        .collection('reviewCases')
+        .where('userId', '==', userId)
+        .where('status', '==', 'inReview')
+        .limit(20);
+      if (cursor) query = query.startAfter(cursor);
+      return (await transaction.get(query)).docs;
+    },
+  });
+  if (!doc) return null;
+  const data = doc.data() || {};
+  const matchesCurrentUpload = await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData: data,
+    fingerprints,
+    matchedUploadId,
+    expectedOwnerUid: userId,
+    distanceBetween: hammingDistance,
+    threshold: dhashThreshold,
+    loadUpload: async (linkedUploadId) => {
+      const normalizedUploadId = String(linkedUploadId || '').trim();
+      if (!normalizedUploadId || normalizedUploadId.includes('/')) return null;
+      const linkedUploadSnap = await transaction.get(db.collection('uploads').doc(normalizedUploadId));
+      return linkedUploadSnap.exists ? (linkedUploadSnap.data() || {}) : null;
+    },
+  });
+  return {
+    id: doc.id,
+    ref: doc.ref,
+    data,
+    matchesCurrentUpload,
+  };
+};
+
 const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [], currentGeneration = 0 } = {}) => {
   const doc = await findReusableAcrossPages({
     isCodexActor,
@@ -1833,7 +1876,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const finalPolicyAppliedTriggers = policyResult.policyAppliedTriggers;
   const aiVisionLabels = policyResult.aiVisionLabels;
   aiSafetySignals = policyResult.aiSafetySignals;
-  let reviewCaseId = policyResult.reviewCaseId;
+  let reviewCaseId = null;
   let uploadId = null;
   let canRequestReview = false;
   let openReviewCase = null;
@@ -1844,143 +1887,32 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const policyRequiresReview = policyResult.shouldReview || policyResult.outcome === 'review';
   const routedFinalModeratorRejection = policyResult.previousModeratorExample?.routingApplied === true
     && ['rejectForbidden', 'reject'].includes(String(policyResult.previousModeratorExample?.action || ''));
-
-  if (userId && !routedFinalModeratorRejection && shouldCreateProductionReviewCase({ isCodexActor, forbiddenReasons: finalForbiddenReasons, shouldReview: policyRequiresReview })) {
-    try {
-      userModeration = await getUserModeration(userId);
-      const reviewAccess = getReviewAccessDecision({
-        reviewRightsLevel: userModeration?.data?.reviewRightsLevel,
-        openReviewCount: userModeration?.data?.openReviewCount,
-        cooldownUntil: resolveTimestamp(userModeration?.data?.cooldownUntil),
-      });
-      hasReviewRights = reviewAccess.hasReviewRights;
-      reviewCapacityAvailable = reviewAccess.reviewCapacityAvailable;
-      inCooldown = reviewAccess.inCooldown;
-      openReviewCase = await findOpenReviewCase(userId);
-      let openReviewCaseMatchesCurrentUpload = openReviewCase ? reviewCaseMatchesFingerprint({
-        reviewCaseData: openReviewCase.data,
-        fingerprints,
-        distanceBetween: hammingDistance,
-        threshold: dhashThreshold,
-      }) : false;
-      if (!openReviewCaseMatchesCurrentUpload && openReviewCase && matchedUpload?.id) {
-        openReviewCaseMatchesCurrentUpload = reviewCaseReferencesUpload({
-          reviewCaseData: openReviewCase.data,
-          uploadId: matchedUpload.id,
-        });
-      }
-      if (!openReviewCaseMatchesCurrentUpload && openReviewCase) {
-        const legacyReviewUploadIds = resolveReviewCaseUploadIds(openReviewCase.data).slice(0, 10);
-        for (const legacyReviewUploadId of legacyReviewUploadIds) {
-          const linkedUploadSnap = await db.collection('uploads').doc(legacyReviewUploadId).get();
-          if (!linkedUploadSnap.exists) continue;
-          const linkedFingerprints = linkedUploadSnap.data()?.fingerprints || null;
-          if (!linkedFingerprints) continue;
-          if (reviewCaseMatchesFingerprint({
-            reviewCaseData: { fingerprints: [linkedFingerprints] },
-            fingerprints,
-            distanceBetween: hammingDistance,
-            threshold: dhashThreshold,
-          })) {
-            openReviewCaseMatchesCurrentUpload = true;
-            break;
-          }
-        }
-      }
-      if (openReviewCaseMatchesCurrentUpload) {
-        reviewCaseId = openReviewCase.id;
-      }
-      if (!reviewCaseId && !openReviewCase && !inCooldown) {
-        if (hasReviewRights && reviewCapacityAvailable) {
-          const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-          const reviewRef = db.collection('reviewCases').doc();
-          let persistedOrdinaryReview = false;
-          await db.runTransaction(async (transaction) => {
-            persistedOrdinaryReview = false;
-            if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
-            const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
-            if (freshModerationScope.generation !== requestModerationGeneration) {
-              const error = new Error('Fresh evaluation superseded this moderation request');
-              error.status = 409;
-              error.code = 'fresh_evaluation_superseded_during_request';
-              throw error;
-            }
-            const freshUserModerationSnap = await transaction.get(userModeration.ref);
-            const freshUserModerationData = freshUserModerationSnap.exists
-              ? (freshUserModerationSnap.data() || {})
-              : {};
-            const freshReviewAccess = getReviewAccessDecision({
-              reviewRightsLevel: freshUserModerationData.reviewRightsLevel,
-              openReviewCount: freshUserModerationData.openReviewCount,
-              cooldownUntil: resolveTimestamp(freshUserModerationData.cooldownUntil),
-            });
-            hasReviewRights = freshReviewAccess.hasReviewRights;
-            reviewCapacityAvailable = freshReviewAccess.reviewCapacityAvailable;
-            inCooldown = freshReviewAccess.inCooldown;
-            if (!freshReviewAccess.allowed) return;
-            transaction.create(reviewRef, {
-            caseType: 'upload',
-            userId,
-            status: 'inReview',
-            decision: null,
-            fingerprints: [fingerprints],
-            linkedUploadIds: [],
-            reviewReason: finalForbiddenReasons.length > 0 ? 'forbiddenOutcomeAutoReview' : 'policyReviewAuto',
-            ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-            aiSummary: buildAiSummary({
-              classification: null,
-              shouldReview: null,
-              forbiddenReasons: finalForbiddenReasons,
-              appliedTriggers: finalAppliedTriggers,
-              suggestedTriggers: finalSuggestedTriggers,
-              userSelectedTaxonomy: {
-                themes: normalizedThemes,
-                triggers: normalizedMakerTags,
-              },
-              aiSuggestedTaxonomy: {
-                triggers: finalSuggestedTriggers,
-              },
-              aiSafetySignals,
-              aiVisionLabels,
-              policyAppliedTriggers: finalPolicyAppliedTriggers,
-              moderationSignals: policyResult.moderationSignals,
-            }),
-            createdAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-            });
-            transaction.set(userModeration.ref, { openReviewCount: 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-            persistedOrdinaryReview = true;
-          });
-          if (persistedOrdinaryReview) {
-            reviewCaseId = reviewRef.id;
-            reviewCreated = true;
-          } else if (!reviewCapacityAvailable) {
-            openReviewCase = await findOpenReviewCase(userId);
-            if (openReviewCase && reviewCaseMatchesFingerprint({
-              reviewCaseData: openReviewCase.data,
-              fingerprints,
-              distanceBetween: hammingDistance,
-              threshold: dhashThreshold,
-            })) {
-              reviewCaseId = openReviewCase.id;
-            }
-          }
-        }
-      }
-    } catch (error) {
-      if (error?.code === 'fresh_evaluation_superseded_during_request') throw error;
-      logger.error('User moderation check mislukt.', error);
-    }
-  }
-
-  canRequestReview = !isCodexActor
+  const shouldFinalizeAutomaticReview = Boolean(
+    userId
     && !routedFinalModeratorRejection
-    && (finalForbiddenReasons.length > 0 || policyRequiresReview)
-    && hasReviewRights
-    && reviewCapacityAvailable
-    && !inCooldown
-    && !openReviewCase
-    && !reviewCreated;
+    && shouldCreateProductionReviewCase({
+      isCodexActor,
+      forbiddenReasons: finalForbiddenReasons,
+      shouldReview: policyRequiresReview,
+    })
+  );
+  const automaticReviewRef = shouldFinalizeAutomaticReview
+    ? db.collection('reviewCases').doc()
+    : null;
+  const automaticReviewUserModerationRef = shouldFinalizeAutomaticReview
+    ? db.collection('userModeration').doc(userId)
+    : null;
+  const matchedUploadOwnerUid = String(
+    matchedUpload?.data?.uploaderUid
+    || matchedUpload?.data?.userId
+    || matchedUpload?.data?.ownerUid
+    || matchedUpload?.data?.userUid
+    || ''
+  ).trim();
+  const ownedMatchedUploadId = matchedUpload?.id
+    && matchedUploadOwnerUid === String(userId || '').trim()
+    ? matchedUpload.id
+    : null;
 
   const previousModeratorExample = policyResult.previousModeratorExample;
   const effectiveShouldReview = policyRequiresReview;
@@ -2125,13 +2057,6 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         uploaderUid: userId || null,
         moderationGeneration: requestModerationGeneration,
         moderationScopeKey: requestModerationScope.scopeKey,
-        moderationState: resolveModerationStateForResult({
-          outcome,
-          shouldReview: effectiveShouldReview,
-          publishBlocked,
-          reviewCaseId,
-          requiresUploaderAcceptance: routedUserCorrection,
-        }),
         publicationState: PUBLICATION_STATES.pending,
         ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
         outcome,
@@ -2148,7 +2073,6 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         aiVisionLabels: response.aiVisionLabels,
         policyAppliedTriggers: response.policyAppliedTriggers,
         geminiDiagnostics: response.geminiDiagnostics || null,
-        reviewCaseId: reviewCaseId || null,
         previousModeratorExample,
         ...(routedUserCorrection ? {
           correctedTaxonomy: routedUserCorrectionTaxonomy,
@@ -2178,8 +2102,38 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         updatedAt: FieldValue.serverTimestamp(),
       };
 
-      let finalizationOutcome = 'pending';
-      await db.runTransaction(async (transaction) => {
+      let automaticReviewUploaderSnapshot = null;
+      if (shouldFinalizeAutomaticReview) {
+        try {
+          automaticReviewUploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
+        } catch (error) {
+          logger.warn('Automatic review uploader snapshot could not be refreshed.', {
+            userId,
+            error: error?.message || String(error),
+          });
+        }
+      }
+      const automaticReviewReason = finalForbiddenReasons.length > 0
+        ? 'forbiddenOutcomeAutoReview'
+        : 'policyReviewAuto';
+      const automaticReviewAiSummary = shouldFinalizeAutomaticReview
+        ? buildAiSummary({
+            classification,
+            shouldReview: effectiveShouldReview,
+            forbiddenReasons: finalForbiddenReasons,
+            appliedTriggers: finalAppliedTriggers,
+            suggestedTriggers: finalSuggestedTriggers,
+            moderationSignals: response.moderationSignals,
+            userSelectedTaxonomy: response.userSelectedTaxonomy,
+            aiSuggestedTaxonomy: response.aiSuggestedTaxonomy,
+            aiSafetySignals: response.aiSafetySignals,
+            aiVisionLabels: response.aiVisionLabels,
+            policyAppliedTriggers: response.policyAppliedTriggers,
+            geminiDiagnostics: response.geminiDiagnostics || null,
+          })
+        : null;
+
+      const finalizationResult = await db.runTransaction(async (transaction) => {
         const uploadSnap = await transaction.get(uploadRef);
         if (!uploadSnap.exists) {
           const error = new Error('Moderation media anchor disappeared before finalization');
@@ -2210,34 +2164,143 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
             mediaCleanupReason: 'historical_registry_suppressed',
             updatedAt: FieldValue.serverTimestamp(),
           }, { merge: true });
-          finalizationOutcome = 'suppressed';
-          return;
+          return { outcome: 'suppressed' };
         }
         if (freshModerationScope.generation !== requestModerationGeneration) {
           transaction.set(uploadRef, {
             mediaState: 'cleanup_pending',
             mediaCleanupAfter: Timestamp.fromMillis(Date.now()),
             mediaCleanupReason: 'moderation_generation_superseded',
-            moderationState: 'superseded',
+            moderationState: MODERATION_STATES.superseded,
             updatedAt: FieldValue.serverTimestamp(),
           }, { merge: true });
-          finalizationOutcome = 'superseded';
-          return;
+          return { outcome: 'superseded' };
+        }
+
+        let transactionReviewCaseId = null;
+        let transactionReviewCreated = false;
+        let transactionOpenReviewCase = null;
+        let transactionHasReviewRights = true;
+        let transactionReviewCapacityAvailable = true;
+        let transactionInCooldown = false;
+
+        if (shouldFinalizeAutomaticReview) {
+          const freshUserModerationSnap = await transaction.get(automaticReviewUserModerationRef);
+          const freshUserModerationData = freshUserModerationSnap.exists
+            ? (freshUserModerationSnap.data() || {})
+            : {};
+          transactionOpenReviewCase = await findOpenReviewCaseInTransaction({
+            transaction,
+            userId,
+            fingerprints,
+            matchedUploadId: ownedMatchedUploadId,
+          });
+          // The transactionally observed upload-review case is capacity authority.
+          // openReviewCount is a mirrored counter and may be stale after legacy failures.
+          const effectiveOpenReviewCount = transactionOpenReviewCase ? 1 : 0;
+          const freshReviewAccess = getReviewAccessDecision({
+            reviewRightsLevel: freshUserModerationData.reviewRightsLevel,
+            openReviewCount: effectiveOpenReviewCount,
+            cooldownUntil: resolveTimestamp(freshUserModerationData.cooldownUntil),
+          });
+          transactionHasReviewRights = freshReviewAccess.hasReviewRights;
+          transactionReviewCapacityAvailable = freshReviewAccess.reviewCapacityAvailable
+            && !transactionOpenReviewCase;
+          transactionInCooldown = freshReviewAccess.inCooldown;
+
+          if (transactionOpenReviewCase && Number(freshUserModerationData.openReviewCount || 0) < 1) {
+            transaction.set(automaticReviewUserModerationRef, {
+              ...(freshUserModerationSnap.exists ? {} : {
+                reviewRightsLevel: 1,
+                cooldownUntil: null,
+                falseAppealCount: 0,
+              }),
+              openReviewCount: 1,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+
+          if (transactionOpenReviewCase?.matchesCurrentUpload) {
+            transactionReviewCaseId = transactionOpenReviewCase.id;
+            transaction.set(transactionOpenReviewCase.ref, {
+              linkedUploadIds: FieldValue.arrayUnion(uploadRef.id),
+              fingerprints: FieldValue.arrayUnion(fingerprints),
+              reviewReason: automaticReviewReason,
+              ...(automaticReviewUploaderSnapshot ? { uploaderSnapshot: automaticReviewUploaderSnapshot } : {}),
+              aiSummary: automaticReviewAiSummary,
+              previousModeratorExample: previousModeratorExample || null,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          } else if (!transactionOpenReviewCase && freshReviewAccess.allowed) {
+            transactionReviewCaseId = automaticReviewRef.id;
+            transactionReviewCreated = true;
+            transactionReviewCapacityAvailable = false;
+            transaction.create(automaticReviewRef, {
+              caseType: 'upload',
+              userId,
+              status: 'inReview',
+              decision: null,
+              uploadId: uploadRef.id,
+              linkedUploadIds: [uploadRef.id],
+              fingerprints: [fingerprints],
+              reviewReason: automaticReviewReason,
+              ...(automaticReviewUploaderSnapshot ? { uploaderSnapshot: automaticReviewUploaderSnapshot } : {}),
+              aiSummary: automaticReviewAiSummary,
+              previousModeratorExample: previousModeratorExample || null,
+              createdAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+            transaction.set(automaticReviewUserModerationRef, {
+              ...(freshUserModerationSnap.exists ? {} : {
+                reviewRightsLevel: 1,
+                cooldownUntil: null,
+                falseAppealCount: 0,
+              }),
+              openReviewCount: 1,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
         }
 
         transaction.set(uploadRef, {
           ...uploadPayload,
+          moderationState: resolveModerationStateForResult({
+            outcome,
+            shouldReview: effectiveShouldReview,
+            publishBlocked,
+            reviewCaseId: transactionReviewCaseId,
+            requiresUploaderAcceptance: routedUserCorrection,
+          }),
+          reviewCaseId: transactionReviewCaseId || null,
+          ...(transactionReviewCaseId ? { reviewStatus: 'inReview' } : {}),
           mediaState: 'ready',
           mediaCleanupAfter: FieldValue.delete(),
           mediaCleanupReason: FieldValue.delete(),
           mediaCleanupClaimId: FieldValue.delete(),
           mediaCleanupClaimedAt: FieldValue.delete(),
         }, { merge: true });
-        finalizationOutcome = 'ready';
+        return {
+          outcome: 'ready',
+          reviewCaseId: transactionReviewCaseId,
+          reviewCreated: transactionReviewCreated,
+          openReviewCaseId: transactionOpenReviewCase?.id || null,
+          hasReviewRights: transactionHasReviewRights,
+          reviewCapacityAvailable: transactionReviewCapacityAvailable,
+          inCooldown: transactionInCooldown,
+        };
       });
 
+      const finalizationOutcome = finalizationResult?.outcome || 'pending';
       if (finalizationOutcome === 'ready') {
         uploadId = uploadRef.id;
+        reviewCaseId = finalizationResult.reviewCaseId || null;
+        reviewCreated = finalizationResult.reviewCreated === true;
+        openReviewCase = finalizationResult.openReviewCaseId
+          ? { id: finalizationResult.openReviewCaseId }
+          : null;
+        hasReviewRights = finalizationResult.hasReviewRights !== false;
+        reviewCapacityAvailable = finalizationResult.reviewCapacityAvailable !== false;
+        inCooldown = finalizationResult.inCooldown === true;
       } else if (finalizationOutcome === 'suppressed') {
         uploadSuppressedByHistoricalRegistry = true;
         persistedPreview = null;
@@ -2272,45 +2335,25 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     }
     if (error?.code === 'fresh_evaluation_superseded_during_request') throw error;
     logger.error('Upload opslaan mislukt.', error);
+    const durablePersistenceError = new Error('Moderation result could not be durably persisted');
+    durablePersistenceError.status = Number(error?.status) >= 400 && Number(error?.status) < 600
+      ? Number(error.status)
+      : 500;
+    durablePersistenceError.code = error?.code || 'moderation_upload_persistence_failed';
+    throw durablePersistenceError;
   }
 
-  if (reviewCaseId && uploadId) {
-    try {
-      const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-      await db.runTransaction(async (transaction) => {
-        if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
-        const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
-        if (freshModerationScope.generation !== requestModerationGeneration) return;
-        transaction.set(db.collection('reviewCases').doc(reviewCaseId),
-        {
-          linkedUploadIds: FieldValue.arrayUnion(uploadId),
-          fingerprints: FieldValue.arrayUnion(fingerprints),
-          reviewReason: finalForbiddenReasons.length > 0 ? 'forbiddenOutcomeAutoReview' : 'policyReviewAuto',
-          ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-          aiSummary: buildAiSummary({
-            classification,
-            shouldReview: effectiveShouldReview,
-            forbiddenReasons: finalForbiddenReasons,
-            appliedTriggers: finalAppliedTriggers,
-            suggestedTriggers: finalSuggestedTriggers,
-            moderationSignals: response.moderationSignals,
-            userSelectedTaxonomy: response.userSelectedTaxonomy,
-            aiSuggestedTaxonomy: response.aiSuggestedTaxonomy,
-            aiSafetySignals: response.aiSafetySignals,
-            aiVisionLabels: response.aiVisionLabels,
-            policyAppliedTriggers: response.policyAppliedTriggers,
-            geminiDiagnostics: response.geminiDiagnostics || null,
-          }),
-          previousModeratorExample,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-        );
-      });
-    } catch (error) {
-      logger.error('Review case koppelen mislukt.', error);
-    }
-  }
+  canRequestReview = Boolean(uploadId)
+    && !isCodexActor
+    && !routedFinalModeratorRejection
+    && (finalForbiddenReasons.length > 0 || policyRequiresReview)
+    && hasReviewRights
+    && reviewCapacityAvailable
+    && !inCooldown
+    && !openReviewCase
+    && !reviewCreated;
+  response.canRequestReview = canRequestReview;
+  response.reviewCaseId = reviewCaseId;
 
   response.uploadId = uploadId;
   response.previewField = previewField;

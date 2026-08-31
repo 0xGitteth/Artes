@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findBestReusableAcrossPages, findFirstUploadReviewCaseAcrossPages, findReusableAcrossPages, isUploadReviewCaseData, resolveCachedReviewCaseIdForUploader, reviewCaseMatchesFingerprint, reviewCaseReferencesUpload, shouldCreateProductionReviewCase } from '../uploadReuseIsolation.js';
+import { findBestReusableAcrossPages, findFirstUploadReviewCaseAcrossPages, findReusableAcrossPages, isUploadReviewCaseData, resolveCachedReviewCaseIdForUploader, reviewCaseMatchesCurrentUploadEvidence, reviewCaseMatchesFingerprint, reviewCaseReferencesUpload, shouldCreateProductionReviewCase } from '../uploadReuseIsolation.js';
 
 test('reasonless policy review creates a production review case', () => {
   assert.equal(shouldCreateProductionReviewCase({ isCodexActor: false, forbiddenReasons: [], shouldReview: true }), true);
@@ -20,6 +20,71 @@ test('cached review case ids are never trusted as ownership proof', () => {
   assert.equal(resolveCachedReviewCaseIdForUploader({ uploadData, userId: 'uploader-b' }), null);
   assert.equal(resolveCachedReviewCaseIdForUploader({ uploadData: { reviewCaseId: 'legacy-case' }, userId: 'uploader-a' }), null);
   assert.equal(resolveCachedReviewCaseIdForUploader({ uploadData, userId: 'uploader-a', isCodexActor: true }), null);
+});
+
+
+test('current-upload review evidence requires the expected review-case owner', async () => {
+  const fingerprints = { sha256: 'sha-a', dhash: '0000', dhashPrefix: '0000' };
+  assert.equal(await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData: { userId: 'uploader-a', fingerprints: [fingerprints] },
+    fingerprints,
+    expectedOwnerUid: 'uploader-a',
+  }), true);
+  assert.equal(await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData: { userId: 'uploader-b', fingerprints: [fingerprints] },
+    fingerprints,
+    expectedOwnerUid: 'uploader-a',
+  }), false);
+  assert.equal(await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData: { fingerprints: [fingerprints] },
+    fingerprints,
+    expectedOwnerUid: 'uploader-a',
+  }), false);
+});
+
+test('legacy linked-upload fallback only trusts same-owner fingerprint evidence', async () => {
+  const current = { sha256: 'sha-current', dhash: '0002', dhashPrefix: '0000' };
+  const linked = { fingerprints: { sha256: 'other', dhash: '0001', dhashPrefix: '0000' } };
+  const reviewCaseData = { userId: 'uploader-a', linkedUploadIds: ['linked-a'] };
+  assert.equal(await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData,
+    fingerprints: current,
+    expectedOwnerUid: 'uploader-a',
+    distanceBetween: () => 1,
+    threshold: 8,
+    loadUpload: async () => ({ ...linked, userId: 'uploader-a' }),
+  }), true);
+  assert.equal(await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData,
+    fingerprints: current,
+    expectedOwnerUid: 'uploader-a',
+    distanceBetween: () => 1,
+    threshold: 8,
+    loadUpload: async () => ({ ...linked, userId: 'uploader-b' }),
+  }), false);
+  assert.equal(await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData,
+    fingerprints: current,
+    expectedOwnerUid: 'uploader-a',
+    distanceBetween: () => 1,
+    threshold: 8,
+    loadUpload: async () => linked,
+  }), false);
+});
+
+test('owned matched-upload references can recover a fingerprintless open review case', async () => {
+  assert.equal(await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData: { userId: 'uploader-a', uploadId: 'upload-a' },
+    fingerprints: { sha256: 'new' },
+    matchedUploadId: 'upload-a',
+    expectedOwnerUid: 'uploader-a',
+  }), true);
+  assert.equal(await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData: { userId: 'uploader-a', uploadId: 'upload-a' },
+    fingerprints: { sha256: 'new' },
+    matchedUploadId: null,
+    expectedOwnerUid: 'uploader-a',
+  }), false);
 });
 
 test('exact cache pagination skips unusable candidates and continues to a valid cache', async () => {

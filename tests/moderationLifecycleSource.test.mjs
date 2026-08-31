@@ -7,9 +7,14 @@ const source = fs.readFileSync(new URL('../functions/index.js', import.meta.url)
 test('all review-opening paths share the canonical review access gate', () => {
   assert.match(source, /from '\.\/reviewLifecycle\.js'/);
   const calls = source.match(/getReviewAccessDecision\(\{/g) || [];
-  assert.ok(calls.length >= 4, `expected at least four shared review gates, found ${calls.length}`);
+  assert.ok(calls.length >= 3, `expected canonical review gates, found ${calls.length}`);
   assert.match(source, /correctionReviewAccess = getReviewAccessDecision/);
   assert.match(source, /freshReviewAccess = getReviewAccessDecision/);
+  const automaticStart = source.indexOf('const finalizationResult = await db.runTransaction');
+  const automaticEnd = source.indexOf("if (finalizationOutcome === 'ready')", automaticStart);
+  const automaticSource = source.slice(automaticStart, automaticEnd);
+  assert.match(automaticSource, /freshReviewAccess = getReviewAccessDecision/);
+  assert.match(automaticSource, /const effectiveOpenReviewCount = transactionOpenReviewCase \? 1 : 0/);
 });
 
 test('queueFreshEvaluation releases upload review capacity transactionally', () => {

@@ -29,6 +29,49 @@ export const reviewCaseMatchesFingerprint = ({ reviewCaseData = {}, fingerprints
   });
 };
 
+
+export const reviewCaseMatchesCurrentUploadEvidence = async ({
+  reviewCaseData = {},
+  fingerprints = {},
+  matchedUploadId = null,
+  expectedOwnerUid = null,
+  distanceBetween = null,
+  threshold = 0,
+  loadUpload = null,
+} = {}) => {
+  const expectedOwner = String(expectedOwnerUid || '').trim();
+  const reviewCaseOwner = String(reviewCaseData?.userId || '').trim();
+  if (expectedOwner && reviewCaseOwner !== expectedOwner) return false;
+  if (reviewCaseMatchesFingerprint({ reviewCaseData, fingerprints, distanceBetween, threshold })) return true;
+  if (matchedUploadId && reviewCaseReferencesUpload({ reviewCaseData, uploadId: matchedUploadId })) return true;
+  if (typeof loadUpload !== 'function') return false;
+
+  const linkedUploadIds = [...new Set([
+    reviewCaseData?.uploadId,
+    ...(Array.isArray(reviewCaseData?.linkedUploadIds) ? reviewCaseData.linkedUploadIds : []),
+  ].map((value) => String(value || '').trim()).filter((value) => value && !value.includes('/')))].slice(0, 10);
+
+  for (const linkedUploadId of linkedUploadIds) {
+    const linkedUpload = await loadUpload(linkedUploadId);
+    if (!linkedUpload || typeof linkedUpload !== 'object') continue;
+    const linkedOwner = String(
+      linkedUpload?.uploaderUid
+      || linkedUpload?.userId
+      || linkedUpload?.ownerUid
+      || linkedUpload?.userUid
+      || ''
+    ).trim();
+    if (expectedOwner && linkedOwner !== expectedOwner) continue;
+    if (reviewCaseMatchesFingerprint({
+      reviewCaseData: { fingerprints: [linkedUpload?.fingerprints] },
+      fingerprints,
+      distanceBetween,
+      threshold,
+    })) return true;
+  }
+  return false;
+};
+
 export const selectExactReusableUpload = (uploads = [], isCodexActor = false) => (
   uploads.find((upload) => isUploadReusableForActor(upload, isCodexActor)) || null
 );

@@ -179,9 +179,10 @@ test("reopened correction reviews restore the user's open review counter", () =>
 
 test('reasonless review outcomes create cases even without forbidden reasons', () => {
   assert.ok(indexSource.includes("const policyRequiresReview = policyResult.shouldReview || policyResult.outcome === 'review';"));
-  assert.ok(indexSource.includes('shouldCreateProductionReviewCase({ isCodexActor, forbiddenReasons: finalForbiddenReasons, shouldReview: policyRequiresReview })'));
-  assert.ok(indexSource.includes('(finalForbiddenReasons.length > 0 || policyRequiresReview)'));
-  assert.ok(indexSource.includes("finalForbiddenReasons.length > 0 ? 'forbiddenOutcomeAutoReview' : 'policyReviewAuto'"));
+  assert.match(indexSource, /shouldFinalizeAutomaticReview = Boolean\([\s\S]{0,320}?shouldCreateProductionReviewCase\(\{[\s\S]{0,180}?shouldReview: policyRequiresReview/);
+  assert.ok(indexSource.includes("? 'forbiddenOutcomeAutoReview'"));
+  assert.ok(indexSource.includes(": 'policyReviewAuto';"));
+  assert.ok(indexSource.includes('transaction.create(automaticReviewRef, {'));
 });
 
 test('visible AI checks preserve policy-applied trigger records through publication', () => {
@@ -253,10 +254,15 @@ test('correction acceptance revalidates active case provenance inside the transa
   assert.ok(indexSource.includes('requiresUploaderAcceptance: false'));
 });
 
-test('manual upload review cases persist fingerprints and report cases are filtered from upload reuse', () => {
-  assert.ok(indexSource.includes('fingerprints: created'));
-  assert.ok(indexSource.includes('findFirstUploadReviewCaseAcrossPages'));
-  assert.ok(indexSource.includes('resolveReviewCaseUploadIds(openReviewCase.data).slice(0, 10)'));
+test('manual upload review persists fingerprints while automatic legacy recovery stays owner-scoped', () => {
+  const manualStart = indexSource.indexOf('export const requestUploadReviewCase');
+  const manualEnd = indexSource.indexOf('export const getModerationExamplesForCase', manualStart);
+  const manualSource = indexSource.slice(manualStart, manualEnd);
+  assert.ok(manualSource.includes('fingerprints: created'));
+  assert.ok(manualSource.includes('findFirstUploadReviewCaseAcrossPages'));
+  assert.ok(indexSource.includes('reviewCaseMatchesCurrentUploadEvidence({'));
+  assert.ok(indexSource.includes('expectedOwnerUid: userId'));
+  assert.ok(indexSource.includes('linkedUploadSnap = await transaction.get'));
 });
 
 
@@ -300,14 +306,18 @@ test('manual review transaction rechecks a concurrently linked upload case', () 
 });
 
 
-test('automatic review creation rechecks review rights, capacity and cooldown transactionally', () => {
-  assert.ok(indexSource.includes('let hasReviewRights = true'));
-  assert.ok(indexSource.includes('let reviewCapacityAvailable = true'));
-  assert.ok(indexSource.includes('freshUserModerationSnap = await transaction.get(userModeration.ref)'));
-  assert.ok(indexSource.includes('const freshReviewAccess = getReviewAccessDecision({'));
-  assert.ok(indexSource.includes('reviewCapacityAvailable = freshReviewAccess.reviewCapacityAvailable'));
-  assert.ok(indexSource.includes('if (!freshReviewAccess.allowed) return'));
-  assert.match(indexSource, /canRequestReview = !isCodexActor[\s\S]*&& hasReviewRights[\s\S]*&& reviewCapacityAvailable/);
+test('automatic review creation is finalized atomically with the durable upload', () => {
+  const start = indexSource.indexOf('const finalizationResult = await db.runTransaction');
+  assert.notEqual(start, -1);
+  const end = indexSource.indexOf("if (finalizationOutcome === 'ready')", start);
+  const finalizationSource = indexSource.slice(start, end);
+  assert.ok(finalizationSource.includes('freshUserModerationSnap = await transaction.get(automaticReviewUserModerationRef)'));
+  assert.ok(finalizationSource.includes('findOpenReviewCaseInTransaction({'));
+  assert.ok(finalizationSource.includes('const freshReviewAccess = getReviewAccessDecision({'));
+  assert.ok(finalizationSource.includes('transaction.create(automaticReviewRef, {'));
+  assert.ok(finalizationSource.includes('openReviewCount: 1'));
+  assert.ok(finalizationSource.includes('transaction.set(uploadRef, {'));
+  assert.ok(finalizationSource.includes('reviewCaseId: transactionReviewCaseId || null'));
 });
 
 test('manual upload review creation enforces quota state in the same transaction', () => {

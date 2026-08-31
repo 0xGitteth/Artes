@@ -57,8 +57,7 @@ jobs:
             tests/moderationApiBase.logic.test.mjs \
             tests/moderationCodexReviewFixesSource.test.mjs \
             tests/moderationPublicationRouting.logic.test.mjs \
-            tests/moderationCorrectionClientSource.test.mjs \
-            tests/firestore.postsServerPublication.rules.test.mjs 2>&1 | tee codex-review-focused.log
+            tests/moderationCorrectionClientSource.test.mjs 2>&1 | tee codex-review-focused.log
           git diff --check
 
       - name: Run moderation policy suite

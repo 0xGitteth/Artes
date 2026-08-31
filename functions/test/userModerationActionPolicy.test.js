@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canPublishUpload, canUserPublishPublicPost, getUserPublicPostPublishDecision, requiresMessageIdForAction } from '../userModerationActionPolicy.js';
+import { canManageApprovedUploadPrompt, canPublishUpload, canSaveDraftUpload, canUserPublishPublicPost, getUserPublicPostPublishDecision, requiresMessageIdForAction } from '../userModerationActionPolicy.js';
 
 const safeAllowedState = {
   outcome: 'allowed',
@@ -146,4 +146,26 @@ test('public post publishing denies underage Didit or IDV status with safe code'
     allowed: false,
     code: 'underage',
   });
+});
+
+
+test('canonical allowed state is publication authority rather than stale evidence', () => {
+  assert.equal(canPublishUpload({
+    moderationState: 'allowed',
+    publicationState: 'pending',
+    mediaState: 'ready',
+    outcome: 'forbidden',
+    publishBlocked: true,
+    forbiddenReasons: [{ reason: 'stale evidence' }],
+  }), true);
+});
+
+test('draft and publication-prompt actions are lifecycle scoped', () => {
+  const pending = { moderationState: 'allowed', publicationState: 'pending', mediaState: 'ready' };
+  assert.equal(canSaveDraftUpload(pending), true);
+  assert.equal(canManageApprovedUploadPrompt(pending), true);
+  assert.equal(canSaveDraftUpload({ ...pending, publicationState: 'draft' }), true);
+  assert.equal(canManageApprovedUploadPrompt({ ...pending, publicationState: 'draft' }), false);
+  assert.equal(canSaveDraftUpload({ ...pending, publicationState: 'published' }), false);
+  assert.equal(canManageApprovedUploadPrompt({ ...pending, publicationState: 'discarded' }), false);
 });

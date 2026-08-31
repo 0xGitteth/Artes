@@ -8224,7 +8224,7 @@ function UploadModal({
         if (!response.ok) throw new Error(data?.error || 'Opslaan van correctie mislukt.');
         setCorrectionAcceptedAt(Timestamp.now());
         setResumeUpload((previous) => (previous?.id === correctionUploadId
-          ? { ...previous, reviewStatus: 'approved', publicationStatus: 'correction_accepted', requiresUploaderAcceptance: false }
+          ? { ...previous, moderationState: 'allowed', publicationState: 'pending', reviewStatus: 'approved', publicationStatus: 'correction_accepted', requiresUploaderAcceptance: false }
           : previous));
       } catch (error) {
         setErrors((prev) => ({ ...prev, moderation: error?.message || 'Correctie opslaan mislukt.' }));

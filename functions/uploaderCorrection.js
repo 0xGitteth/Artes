@@ -1,7 +1,7 @@
+import { isUploadLifecycleCorrectionPending } from './moderationLifecycle.js';
+
 export const UPLOADER_CORRECTION_ACTIONS = new Set(['acceptCorrection', 'rejectCorrection']);
 
-const BLOCKED_OUTCOMES = new Set(['forbidden', 'explicit', 'reported', 'nocorrectionforbidden']);
-const BLOCKED_CLASSIFICATIONS = new Set(['reviewrequired', 'sensitivecorrection', 'review_required']);
 const ART_NUDE_THEME = 'Art Nude';
 const ADULT_ART_NUDE_TRIGGER = 'adultArtNude';
 const ADULT_EROTIC_SUGGESTIVE_TRIGGER = 'adultEroticSuggestive';
@@ -123,8 +123,7 @@ export function validateUploaderCorrectionAction({ action, upload = {}, userId }
     return { ok: false, error: 'Not authorized for this action', status: 403 };
   }
   if (upload?.requiresUploaderAcceptance !== true
-    || upload?.publicationStatus !== 'needs_user_correction'
-    || upload?.reviewStatus !== 'needs_user_correction') {
+    || !isUploadLifecycleCorrectionPending(upload)) {
     return { ok: false, error: 'Upload does not require uploader correction acceptance', status: 409 };
   }
   const moderatorAction = String(upload?.moderatorDecision?.action || '').trim();
@@ -144,13 +143,6 @@ export function validateUploaderCorrectionAction({ action, upload = {}, userId }
   };
   if (effectiveCorrectedTaxonomy.themes.length === 0 && effectiveCorrectedTaxonomy.triggers.length === 0) {
     return { ok: false, error: 'correctedTaxonomy is missing', status: 409 };
-  }
-
-  const outcome = String(upload?.outcome || '').trim().toLowerCase();
-  const classification = String(upload?.classification || '').trim().toLowerCase();
-  const shouldReview = upload?.shouldReview === true;
-  if (BLOCKED_OUTCOMES.has(outcome) || BLOCKED_CLASSIFICATIONS.has(classification) || shouldReview) {
-    return { ok: false, error: 'Upload is blocked by moderation policy', status: 409 };
   }
 
   return { ok: true, action: normalizedAction, correctedTaxonomy: effectiveCorrectedTaxonomy };

@@ -21,7 +21,7 @@ import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.j
 import { MODERATOR_DECISION_ACTIONS, isModeratorDecisionActionCompatible, normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
 import { applyAutomaticModeratorCorrectionToPostDraft, buildAcceptedCorrectionModerationState, buildModeratedPublicationTaxonomy, deriveAcceptedCorrectionAppliedTriggers, validateAcceptedCorrectionPublicationTaxonomy, validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { finalizeCorrectionReviewCasePlan, resolveCorrectionReviewReopenPlan, validateCorrectionAcceptancePlanProvenance, validateRoutedCorrectionAcceptanceProvenance } from './correctionReviewOwnership.js';
-import { canPublishUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
+import { canManageApprovedUploadPrompt, canPublishUpload, canSaveDraftUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { runUserModerationActionMutation } from './userModerationActionIsolation.js';
 import { deleteSupportResetMessagesPageAtomically } from './supportResetIsolation.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
@@ -92,6 +92,7 @@ import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
 import { findBestReusableAcrossPages, findFirstUploadReviewCaseAcrossPages, findReusableAcrossPages, isUploadReviewCaseData, resolveCachedReviewCaseIdForUploader, reviewCaseMatchesFingerprint, reviewCaseReferencesUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
 import { getOpenReviewCountAfterCaseExit, getReviewAccessDecision } from './reviewLifecycle.js';
+import { MODERATION_STATES, PUBLICATION_STATES, resolveModerationStateForResult, resolveUploadPublicationState } from './moderationLifecycle.js';
 import { getDeletedPublishedPostCleanupDecision, getModerationPendingMediaCleanupDecision, getModerationPreviewRetentionDecision, getOperationalModerationPreviewReviewCaseId, isOperationalModerationPreviewReviewCase, resolveOwnedModerationPreviewStoragePath } from './moderationPreviewStorage.js';
 import { buildPersistedModerationDraftState, buildPersistedPublicationConsentProof, normalizePersistedPublicationStringList, resolveTrustedModeratedImageUrl, sanitizePersistedPublicationCorrection, sanitizePersistedPublicationImageMeta } from './persistedPublication.js';
 import { cleanupCodexDevPostTrees } from './codexTestDataCleanup.js';
@@ -2124,6 +2125,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         uploaderUid: userId || null,
         moderationGeneration: requestModerationGeneration,
         moderationScopeKey: requestModerationScope.scopeKey,
+        moderationState: resolveModerationStateForResult({
+          outcome,
+          shouldReview: effectiveShouldReview,
+          publishBlocked,
+          reviewCaseId,
+          requiresUploaderAcceptance: routedUserCorrection,
+        }),
+        publicationState: PUBLICATION_STATES.pending,
         ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
         outcome,
         classification,
@@ -3411,6 +3420,8 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       }
       transaction.set(uploadRef, {
         reviewCaseId,
+        moderationState: MODERATION_STATES.reviewPending,
+        publicationState: PUBLICATION_STATES.pending,
         reviewStatus: 'inReview',
         reviewRequestedAt: FieldValue.serverTimestamp(),
         previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
@@ -3770,6 +3781,12 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
               }
             : buildAcceptedCorrectionModerationState();
         transaction.update(uploadRef, {
+          moderationState: !isApproved
+            ? MODERATION_STATES.rejected
+            : requiresUploaderAcceptance
+              ? MODERATION_STATES.correctionPending
+              : MODERATION_STATES.allowed,
+          publicationState: PUBLICATION_STATES.pending,
           reviewStatus: uploadReviewStatus,
           ...moderatorLifecycleState,
           uploaderCorrectionResponse: FieldValue.delete(),
@@ -4164,6 +4181,8 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
 
       linkedUploads.filter((item) => item.exists).forEach((linkedUpload) => {
         transaction.set(linkedUpload.ref, {
+          moderationState: MODERATION_STATES.superseded,
+          publicationState: PUBLICATION_STATES.pending,
           reviewStatus: nextStatus,
           publicationStatus: nextStatus,
           requiresUploaderAcceptance: false,
@@ -4432,18 +4451,14 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
           error.status = 409;
           throw error;
         }
-        if (action === 'saveDraft' && latestUpload?.reviewStatus !== 'approved') {
-          const error = new Error('Upload is not approved');
+        if (action === 'saveDraft' && !canSaveDraftUpload(latestUpload)) {
+          const error = new Error('Upload is not approved for draft persistence');
           error.status = 409;
           throw error;
         }
-        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && latestUpload?.reviewStatus !== 'approved') {
-          const error = new Error('Upload is not approved');
-          error.status = 409;
-          throw error;
-        }
-        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && latestPublicationStatus === 'published') {
-          const error = new Error('Upload is already published');
+        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload')
+          && !canManageApprovedUploadPrompt(latestUpload)) {
+          const error = new Error('Upload publication prompt is no longer actionable');
           error.status = 409;
           throw error;
         }
@@ -4680,6 +4695,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
 
         if (action === 'discardApprovedUpload') {
           transaction.set(uploadRef, {
+            publicationState: PUBLICATION_STATES.discarded,
             publicationStatus: 'discarded',
             publishStatus: 'discarded',
             discardedAt: FieldValue.serverTimestamp(),
@@ -4736,8 +4752,12 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
               ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
               : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
             correction: correctionPlan.nextCorrection,
+            moderationState: action === 'acceptCorrection'
+              ? MODERATION_STATES.allowed
+              : MODERATION_STATES.reviewPending,
+            publicationState: PUBLICATION_STATES.pending,
             publicationStatus: action === 'acceptCorrection' ? 'correction_accepted' : 'user_disagreed',
-            reviewStatus: action === 'acceptCorrection' ? 'approved' : 'needs_user_correction',
+            reviewStatus: action === 'acceptCorrection' ? 'approved' : 'inReview',
             requiresUploaderAcceptance: action !== 'acceptCorrection',
             previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
             ...(action === 'rejectCorrection' && correctionPlan.reviewCaseId ? { reviewCaseId: correctionPlan.reviewCaseId } : {}),
@@ -4821,6 +4841,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             });
           }
           transaction.set(uploadRef, {
+            publicationState: PUBLICATION_STATES.published,
             publicationStatus: 'published',
             publishStatus: 'published',
             publishedAt: FieldValue.serverTimestamp(),
@@ -4852,6 +4873,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             status: 'draft',
           });
           transaction.set(uploadRef, {
+            publicationState: PUBLICATION_STATES.draft,
             publicationStatus: 'draft',
             publishStatus: 'draft',
             draftId: draftRef.id,
@@ -6515,11 +6537,12 @@ const claimExpiredModerationPreview = async ({ uploadRef, nowMs = Date.now() } =
       }
     }
 
-    const publicationStatus = String(uploadData?.publicationStatus || uploadData?.publishStatus || '').trim();
+    const publicationLifecycle = resolveUploadPublicationState(uploadData);
+    const publicationStatus = publicationLifecycle.valid ? publicationLifecycle.state : null;
     const draftId = String(uploadData?.draftId || '').trim();
     let draftExists = false;
     let draftMatchesUpload = false;
-    if (publicationStatus === 'draft'
+    if (publicationStatus === PUBLICATION_STATES.draft
       && ownerUid
       && !ownerUid.includes('/')
       && draftId
@@ -6567,12 +6590,13 @@ const claimExpiredModerationPreview = async ({ uploadRef, nowMs = Date.now() } =
     const claimId = crypto.randomUUID();
     const reviewStatus = String(uploadData?.reviewStatus || '').trim();
     transaction.set(uploadRef, {
+      publicationState: PUBLICATION_STATES.expired,
       publicationStatus: 'expired',
       publishStatus: 'expired',
       previewExpiryClaimId: claimId,
       previewExpiryClaimedAt: FieldValue.serverTimestamp(),
       previewExpiryReason: decision.reason,
-      previewExpiredFromPublicationStatus: publicationStatus || null,
+      previewExpiredFromPublicationStatus: String(uploadData?.publicationStatus || uploadData?.publishStatus || publicationStatus || '').trim() || null,
       previewExpiredFromReviewStatus: reviewStatus || null,
       previewRetentionDeferredAt: FieldValue.delete(),
       previewRetentionDeferredReason: FieldValue.delete(),
@@ -6625,6 +6649,7 @@ const restorePublishedModerationPreviewClaim = async ({ uploadRef, claimId } = {
     if (String(uploadData?.previewExpiryClaimId || '').trim() !== String(claimId || '').trim()) return;
 
     transaction.set(uploadRef, {
+      publicationState: PUBLICATION_STATES.published,
       publicationStatus: 'published',
       publishStatus: 'published',
       postId: uploadRef.id,
@@ -6757,6 +6782,7 @@ const finalizePendingModerationPreviewMediaClaim = async ({
       const publicationStatus = String(uploadData?.publicationStatus || uploadData?.publishStatus || '').trim();
       transaction.set(uploadRef, {
         ...(publicationStatus === 'deleted_pending_cleanup' ? {
+          publicationState: PUBLICATION_STATES.discarded,
           publicationStatus: 'deleted',
           publishStatus: 'deleted',
         } : {}),
@@ -6948,6 +6974,7 @@ const finalizeDeletedPublishedPostMedia = async ({ postId, postData = {} } = {})
   } catch (error) {
     try {
       await uploadRef.set({
+        publicationState: PUBLICATION_STATES.discarded,
         publicationStatus: 'deleted_pending_cleanup',
         publishStatus: 'deleted_pending_cleanup',
         deletedPostAt: FieldValue.serverTimestamp(),
@@ -6971,6 +6998,7 @@ const finalizeDeletedPublishedPostMedia = async ({ postId, postData = {} } = {})
   }
 
   await uploadRef.set({
+    publicationState: PUBLICATION_STATES.discarded,
     publicationStatus: 'deleted',
     publishStatus: 'deleted',
     deletedPostAt: FieldValue.serverTimestamp(),

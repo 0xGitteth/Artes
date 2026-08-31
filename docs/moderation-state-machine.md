@@ -76,7 +76,7 @@ Canonical concepts:
 
 `outcome`, `shouldReview`, `publishBlocked` and classifier details are evidence/result fields. They are not independent publication authorities.
 
-During compatibility with existing documents, legacy `reviewStatus`, `publicationStatus` and `publishStatus` may be mirrored, but all server decisions should go through one lifecycle helper rather than reimplementing precedence rules.
+Canonical `moderationState` and `publicationState` are runtime authority on new writes. During compatibility with existing documents, legacy `reviewStatus`, `publicationStatus` and `publishStatus` are mirrored for existing clients and are interpreted only by the central lifecycle resolver when canonical state is absent. Canonical state wins over stale classifier evidence; malformed or conflicting lifecycle aliases fail closed. Server publication, correction, draft/prompt and media-retention decisions go through the shared lifecycle resolver rather than reimplementing precedence rules.
 
 ### 6. Review cases
 

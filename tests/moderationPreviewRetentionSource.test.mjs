@@ -30,7 +30,8 @@ test('garbage collection claims expiration transactionally before deleting media
 test('active reviews and drafts are rechecked instead of blindly deleted', () => {
   assert.ok(indexSource.includes('getOperationalModerationPreviewReviewCaseId(uploadData)'));
   assert.ok(indexSource.includes('isOperationalModerationPreviewReviewCase({'));
-  assert.ok(indexSource.includes("publicationStatus === 'draft'"));
+  assert.ok(indexSource.includes('resolveUploadPublicationState(uploadData)'));
+  assert.ok(indexSource.includes('publicationStatus === PUBLICATION_STATES.draft'));
   assert.ok(indexSource.includes("collection('drafts').doc(draftId)"));
   assert.ok(indexSource.includes('draftMatchesUpload'));
   assert.ok(indexSource.includes('previewRetentionDeferredReason: decision.reason'));

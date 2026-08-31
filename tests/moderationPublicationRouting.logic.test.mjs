@@ -49,3 +49,27 @@ test('ordinary allowed moderation result routes through its persisted upload', (
     currentModerationAllowed: true,
   }), 'moderated-upload');
 });
+
+
+test('resume routing prefers canonical lifecycle fields when present', () => {
+  assert.equal(resolvePersistedModerationPublicationUploadId({
+    isResumeFlow: true,
+    resumeUpload: {
+      id: 'canonical-upload',
+      moderationState: 'allowed',
+      publicationState: 'pending',
+      reviewStatus: 'rejected',
+      publicationStatus: 'blocked',
+    },
+  }), 'canonical-upload');
+  assert.equal(resolvePersistedModerationPublicationUploadId({
+    isResumeFlow: true,
+    resumeUpload: {
+      id: 'stale-upload',
+      moderationState: 'superseded',
+      publicationState: 'pending',
+      reviewStatus: 'approved',
+      publicationStatus: 'pending',
+    },
+  }), null);
+});

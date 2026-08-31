@@ -1,32 +1,10 @@
+import { PUBLICATION_STATES, resolveUploadModerationState, resolveUploadPublicationState } from './moderationLifecycle.js';
+
 const pickString = (...values) => values
   .map((value) => String(value || '').trim())
   .find(Boolean) || null;
 
 const normalizeStatus = (value) => String(value || '').trim();
-
-const KNOWN_EXPIRABLE_REVIEW_STATUSES = new Set([
-  '',
-  'approved',
-  'rejected',
-  'needs_user_correction',
-  'freshEvalQueued',
-  'closedNoFingerprint',
-]);
-
-const KNOWN_EXPIRABLE_PUBLICATION_STATUSES = new Set([
-  '',
-  'pending',
-  'correction_accepted',
-  'needs_user_correction',
-  'user_disagreed',
-  'blocked',
-  'discarded',
-  'deleted',
-  'deleted_pending_cleanup',
-  'freshEvalQueued',
-  'closedNoFingerprint',
-  'expired',
-]);
 
 const KNOWN_MEDIA_STATES = new Set(['pending', 'ready', 'cleanup_pending', 'deleted']);
 
@@ -171,26 +149,42 @@ export const getModerationPreviewRetentionDecision = ({
     return { action: 'preserve', reason: 'published_media_still_referenced', storagePath };
   }
 
-  const publicationStatus = normalizeStatus(uploadData?.publicationStatus || uploadData?.publishStatus);
+  const publication = resolveUploadPublicationState(uploadData);
   const reviewStatus = normalizeStatus(uploadData?.reviewStatus);
+  const moderation = resolveUploadModerationState(uploadData);
   const normalizedReviewCaseStatuses = Array.isArray(reviewCaseStatuses)
     ? reviewCaseStatuses.map(normalizeStatus).filter(Boolean)
     : [];
+  if (!publication.valid) {
+    return { action: 'defer', reason: 'unknown_lifecycle_state', storagePath };
+  }
 
-  if (publicationStatus === 'published') {
+  if (publication.state === PUBLICATION_STATES.published) {
     return { action: 'preserve', reason: 'published_state', storagePath };
   }
 
-  // Legacy recovery path. New media cleanup uses mediaState/mediaCleanupAfter.
-  if (publicationStatus === 'deleted_pending_cleanup') {
+  // Legacy post-deletion retry state is an explicit terminal cleanup signal and
+  // must outrank stale review metadata left on older uploads.
+  const legacyPublicationStatus = normalizeStatus(uploadData?.publicationStatus || uploadData?.publishStatus);
+  if (legacyPublicationStatus === 'deleted_pending_cleanup') {
     return { action: 'expire', reason: 'post_deleted_cleanup_pending', storagePath };
   }
 
-  if (reviewStatus === 'inReview' || normalizedReviewCaseStatuses.includes('inReview')) {
+  // A moderation state is required only when a document actually carries a
+  // canonical moderation field or a legacy review marker. This lets old draft
+  // and expiry records clean up without turning missing historic evidence into
+  // a new retention authority, while malformed review states still fail closed.
+  const moderationMustResolve = Boolean(normalizeStatus(uploadData?.moderationState) || reviewStatus);
+  if (moderationMustResolve && !moderation.valid) {
+    return { action: 'defer', reason: 'unknown_lifecycle_state', storagePath };
+  }
+
+  const legacyActiveReview = moderation.canonical !== true && reviewStatus === 'inReview';
+  if (legacyActiveReview || normalizedReviewCaseStatuses.includes('inReview')) {
     return { action: 'defer', reason: 'active_review', storagePath };
   }
 
-  if (publicationStatus === 'draft') {
+  if (publication.state === PUBLICATION_STATES.draft) {
     const draftId = pickString(uploadData?.draftId);
     if (!draftId) {
       return { action: 'defer', reason: 'legacy_draft_without_binding', storagePath };
@@ -202,11 +196,6 @@ export const getModerationPreviewRetentionDecision = ({
       return { action: 'defer', reason: 'draft_binding_mismatch', storagePath };
     }
     return { action: 'defer', reason: 'draft_still_exists', storagePath };
-  }
-
-  if (!KNOWN_EXPIRABLE_REVIEW_STATUSES.has(reviewStatus)
-    || !KNOWN_EXPIRABLE_PUBLICATION_STATUSES.has(publicationStatus)) {
-    return { action: 'defer', reason: 'unknown_lifecycle_state', storagePath };
   }
 
   return { action: 'expire', reason: 'retention_elapsed', storagePath };
@@ -229,8 +218,10 @@ export const getDeletedPublishedPostCleanupDecision = ({
   }
 
   const persistedPostId = pickString(uploadData?.postId);
-  const publicationStatus = pickString(uploadData?.publicationStatus, uploadData?.publishStatus);
-  const cleanupEligibleStatus = publicationStatus === 'published' || publicationStatus === 'deleted_pending_cleanup';
+  const publication = resolveUploadPublicationState(uploadData);
+  const legacyPublicationStatus = pickString(uploadData?.publicationStatus, uploadData?.publishStatus);
+  const cleanupEligibleStatus = legacyPublicationStatus === 'deleted_pending_cleanup'
+    || (publication.valid && publication.state === PUBLICATION_STATES.published);
   if (persistedPostId !== normalizedPostId || !cleanupEligibleStatus) {
     return { ok: false, reason: 'not_matching_published_upload' };
   }

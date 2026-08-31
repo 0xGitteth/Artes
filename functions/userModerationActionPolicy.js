@@ -1,48 +1,42 @@
-const APPROVED_PUBLICATION_STATUSES = new Set([
-  '',
-  'pending',
-  'correction_accepted',
-  'draft',
-  'published',
-]);
+import {
+  isUploadLifecycleDraftable,
+  isUploadLifecyclePromptManageable,
+  isUploadLifecyclePublishable,
+} from './moderationLifecycle.js';
 
 export function requiresMessageIdForAction(action) {
   return action === 'publishNow' || action === 'saveDraft' || action === 'dismiss';
 }
 
-export function canPublishUpload(upload = {}) {
+const hasReadyModerationMedia = (upload = {}) => {
   const mediaState = String(upload?.mediaState || '').trim();
-  if (mediaState && mediaState !== 'ready') return false;
+  return !mediaState || mediaState === 'ready';
+};
+
+const hasAcceptedCorrectionWhenPresent = (upload = {}) => {
+  if (!upload?.correctedTaxonomy) return true;
+  const responseStatus = String(upload?.uploaderCorrectionResponse?.status || '').trim();
+  return !responseStatus || responseStatus === 'accepted';
+};
+
+export function canPublishUpload(upload = {}) {
+  if (!hasReadyModerationMedia(upload)) return false;
   if (upload?.requiresUploaderAcceptance === true) return false;
+  if (!hasAcceptedCorrectionWhenPresent(upload)) return false;
+  return isUploadLifecyclePublishable(upload);
+}
 
-  const reviewStatus = String(upload?.reviewStatus || '').trim();
-  const publicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
+export function canSaveDraftUpload(upload = {}) {
+  return hasReadyModerationMedia(upload)
+    && upload?.requiresUploaderAcceptance !== true
+    && hasAcceptedCorrectionWhenPresent(upload)
+    && isUploadLifecycleDraftable(upload);
+}
 
-  if (upload?.correctedTaxonomy) {
-    const responseStatus = String(upload?.uploaderCorrectionResponse?.status || '').trim();
-    if (responseStatus && responseStatus !== 'accepted') return false;
-  }
-
-  // Once an upload has entered the persisted review/publication lifecycle,
-  // only explicitly approved states may publish. This prevents stale
-  // `outcome: allowed` data from bypassing later queue/review/closed states.
-  if (reviewStatus || publicationStatus) {
-    if (reviewStatus === 'approved') {
-      return APPROVED_PUBLICATION_STATUSES.has(publicationStatus);
-    }
-
-    // Preserve compatibility with already-published legacy uploads that do
-    // not carry a reviewStatus, while still failing closed for every other
-    // non-empty lifecycle combination.
-    return !reviewStatus && publicationStatus === 'published';
-  }
-
-  // The outcome fallback is only for the initial moderation result before
-  // any persisted review/publication lifecycle state has been assigned.
-  return upload?.outcome === 'allowed'
-    && upload?.shouldReview !== true
-    && upload?.publishBlocked !== true
-    && (!Array.isArray(upload?.forbiddenReasons) || upload.forbiddenReasons.length === 0);
+export function canManageApprovedUploadPrompt(upload = {}) {
+  return hasReadyModerationMedia(upload)
+    && upload?.requiresUploaderAcceptance !== true
+    && isUploadLifecyclePromptManageable(upload);
 }
 
 export function getUserPublicPostPublishDecision(user = null) {

@@ -327,3 +327,35 @@ test('ordinary publication re-adds mandatory policy labels and rejects missing p
   assert.equal(legacy.ok, false);
   assert.equal(legacy.code, 'moderated_taxonomy_missing');
 });
+
+
+test('canonical correction-pending state is authoritative over stale classifier evidence', () => {
+  const result = validateUploaderCorrectionAction({
+    action: 'acceptCorrection',
+    userId: 'u1',
+    upload: {
+      ...baseUpload,
+      moderationState: 'correction_pending',
+      publicationState: 'pending',
+      outcome: 'forbidden',
+      publishBlocked: true,
+      forbiddenReasons: [{ reason: 'stale evidence' }],
+    },
+  });
+  assert.equal(result.ok, true);
+});
+
+test('canonical non-correction lifecycle cannot accept a stale correction prompt', () => {
+  for (const moderationState of ['allowed', 'review_pending', 'rejected', 'superseded']) {
+    const result = validateUploaderCorrectionAction({
+      action: 'acceptCorrection',
+      userId: 'u1',
+      upload: {
+        ...baseUpload,
+        moderationState,
+        publicationState: 'pending',
+      },
+    });
+    assert.equal(result.ok, false, moderationState);
+  }
+});

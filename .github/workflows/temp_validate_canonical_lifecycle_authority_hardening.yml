@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/temp_validate_canonical_lifecycle_authority_hardening.yml
       - temp_harden_canonical_lifecycle_authority.py
+      - temp_fix_canonical_lifecycle_authority_assertions.py
   workflow_dispatch:
 
 permissions:
@@ -43,6 +44,9 @@ jobs:
 
       - name: Apply canonical lifecycle authority hardening
         run: python temp_harden_canonical_lifecycle_authority.py
+
+      - name: Align media source assertions with canonical lifecycle
+        run: python temp_fix_canonical_lifecycle_authority_assertions.py
 
       - name: Verify canonical lifecycle source invariants
         shell: bash
@@ -139,7 +143,7 @@ jobs:
 
       - name: Remove temporary harness and commit validated product changes
         run: |
-          rm -f temp_harden_canonical_lifecycle_authority.py .github/workflows/temp_validate_canonical_lifecycle_authority_hardening.yml
+          rm -f temp_harden_canonical_lifecycle_authority.py temp_fix_canonical_lifecycle_authority_assertions.py .github/workflows/temp_validate_canonical_lifecycle_authority_hardening.yml
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"

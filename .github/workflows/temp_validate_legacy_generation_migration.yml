@@ -103,7 +103,7 @@ jobs:
           git diff --check 2>&1 | tee diff-check.log
           grep -q "LEGACY_FRESH_EVALUATION_MIN_GENERATION" functions/legacyFreshEvaluationMigration.js
           grep -q "freshEvaluationOverrides" functions/scripts/migrateLegacyFreshEvaluationOverrides.js
-          grep -q "--verify" functions/scripts/migrateLegacyFreshEvaluationOverrides.js
+          grep -q -- "--verify" functions/scripts/migrateLegacyFreshEvaluationOverrides.js
           grep -q "moderation:migrate-legacy-overrides" package.json
           grep -q "moderation:verify-legacy-overrides" package.json
           ! grep -q "freshEvaluationOverrides" functions/index.js

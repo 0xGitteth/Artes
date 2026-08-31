@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canManageApprovedUploadPrompt, canPublishUpload, canSaveDraftUpload, canUserPublishPublicPost, getUserPublicPostPublishDecision, requiresMessageIdForAction } from '../userModerationActionPolicy.js';
+import { canManageApprovedUploadPrompt, canPublishUpload, canSaveDraftUpload, canUserPublishPublicPost, getServerPublicPostPublishDecision, getUserPublicPostPublishDecision, requiresMessageIdForAction } from '../userModerationActionPolicy.js';
 
 const safeAllowedState = {
   outcome: 'allowed',
@@ -148,6 +148,38 @@ test('public post publishing denies underage Didit or IDV status with safe code'
   });
 });
 
+test('server publication requires the same verified adult token claims as the former Firestore create rule', () => {
+  const user = { ageVerified: true, isAdult: true };
+  const validClaims = { email_verified: true, idvVerified: true, isAdult: true };
+  assert.deepEqual(getServerPublicPostPublishDecision({ user, tokenClaims: validClaims }), {
+    allowed: true,
+    code: 'allowed',
+  });
+  for (const claims of [
+    null,
+    { ...validClaims, email_verified: false },
+    { ...validClaims, idvVerified: false },
+    { ...validClaims, isAdult: false },
+    { email_verified: true, isAdult: true },
+  ]) {
+    assert.deepEqual(getServerPublicPostPublishDecision({ user, tokenClaims: claims }), {
+      allowed: false,
+      code: 'adult_verification_required',
+    });
+  }
+});
+
+test('server publication still respects underage or revoked document state even with valid token claims', () => {
+  const tokenClaims = { email_verified: true, idvVerified: true, isAdult: true };
+  assert.deepEqual(getServerPublicPostPublishDecision({
+    user: { ageVerified: true, isAdult: true, didit: { status: 'underage' } },
+    tokenClaims,
+  }), { allowed: false, code: 'underage' });
+  assert.deepEqual(getServerPublicPostPublishDecision({
+    user: { ageVerified: false, isAdult: true },
+    tokenClaims,
+  }), { allowed: false, code: 'adult_verification_required' });
+});
 
 test('canonical allowed state is publication authority rather than stale evidence', () => {
   assert.equal(canPublishUpload({
@@ -159,7 +191,6 @@ test('canonical allowed state is publication authority rather than stale evidenc
     forbiddenReasons: [{ reason: 'stale evidence' }],
   }), true);
 });
-
 
 test('canonical lifecycle cannot be vetoed by stale legacy status mirrors', () => {
   const canonical = {

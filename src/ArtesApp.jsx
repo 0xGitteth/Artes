@@ -126,6 +126,7 @@ import AppLogo from './components/branding/AppLogo';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { selectPendingApprovedUploadReminder } from './utils/pendingApprovedUpload';
 import { resolvePersistedModerationPublicationUploadId } from './utils/moderationPublicationRouting';
+import { resolveModerationApiBase } from './utils/moderationApiBase';
 import { isClientUploadCorrectionPending, isClientUploadDiscarded } from './utils/moderationUploadLifecycle';
 import { resolvePolicyAppliedTriggersForPublication } from './utils/moderationAppliedTriggerRouting';
 import { resolveModerationDraftAuthor } from './utils/moderationDraftAuthor';
@@ -1098,15 +1099,7 @@ export default function ArtesApp() {
     setRequestedActiveProfileId(nextProfileId);
   }, []);
 
-  const moderationApiBase = useMemo(() => {
-    const explicitBase = import.meta.env.VITE_MODERATION_API_BASE;
-    if (explicitBase) return explicitBase;
-    const moderationUrl = import.meta.env.VITE_MODERATION_FUNCTION_URL;
-    if (moderationUrl && moderationUrl.includes('/moderateImage')) {
-      return moderationUrl.replace('/moderateImage', '');
-    }
-    return moderationUrl || '';
-  }, []);
+  const moderationApiBase = useMemo(() => resolveModerationApiBase(import.meta.env), []);
   const functionsBase = useMemo(() => {
     const explicitBase = import.meta.env.VITE_FUNCTIONS_BASE_URL || import.meta.env.VITE_FUNCTIONS_BASE;
     if (explicitBase) return explicitBase;

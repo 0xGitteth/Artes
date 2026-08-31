@@ -21,7 +21,7 @@ import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.j
 import { MODERATOR_DECISION_ACTIONS, isModeratorDecisionActionCompatible, normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
 import { applyAutomaticModeratorCorrectionToPostDraft, buildAcceptedCorrectionModerationState, buildModeratedPublicationTaxonomy, deriveAcceptedCorrectionAppliedTriggers, validateAcceptedCorrectionPublicationTaxonomy, validateUploaderCorrectionAction } from './uploaderCorrection.js';
 import { finalizeCorrectionReviewCasePlan, resolveCorrectionReviewReopenPlan, validateCorrectionAcceptancePlanProvenance, validateRoutedCorrectionAcceptanceProvenance } from './correctionReviewOwnership.js';
-import { canManageApprovedUploadPrompt, canPublishUpload, canSaveDraftUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
+import { canManageApprovedUploadPrompt, canPublishUpload, canSaveDraftUpload, getServerPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { runUserModerationActionMutation } from './userModerationActionIsolation.js';
 import { deleteSupportResetMessagesPageAtomically } from './supportResetIsolation.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
@@ -4663,7 +4663,10 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
 
         let publicationPlan = null;
         if (postRef) {
-          const publishDecision = getUserPublicPostPublishDecision(latestUserSnap?.exists ? latestUserSnap.data() : null);
+          const publishDecision = getServerPublicPostPublishDecision({
+            user: latestUserSnap?.exists ? latestUserSnap.data() : null,
+            tokenClaims: decoded,
+          });
           if (!publishDecision.allowed) {
             const error = new Error(publishDecision.code);
             error.status = 403;

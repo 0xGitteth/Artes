@@ -23,7 +23,8 @@ test('rejecting a correction immediately switches the client to terminal review 
 
 test('resume correction acceptance refreshes persisted state and still routes by upload id', () => {
   assert.match(source, /setResumeUpload\(\(previous\) => \(previous\?\.id === correctionUploadId/);
-  assert.match(source, /reviewStatus: 'approved', publicationStatus: 'correction_accepted'/);
+  assert.match(source, /moderationState: 'allowed', publicationState: 'pending', requiresUploaderAcceptance: false/);
+  assert.doesNotMatch(source, /moderationState: 'allowed', publicationState: 'pending', reviewStatus: 'approved', publicationStatus: 'correction_accepted'/);
   assert.match(source, /currentModerationUploadId = String\(moderationData\?\.uploadId \|\| reviewUploadId \|\| resumeUpload\?\.id/);
 });
 

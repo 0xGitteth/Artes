@@ -36,19 +36,26 @@ test('canonical lifecycle is authoritative over stale classifier evidence', () =
   }), true);
 });
 
-test('canonical lifecycle fails closed on conflicting legacy operational state', () => {
-  assert.equal(resolveUploadLifecycle({
+test('canonical lifecycle ignores stale legacy mirrors on modern uploads', () => {
+  const pending = resolveUploadLifecycle({
     moderationState: 'allowed',
     publicationState: 'pending',
     reviewStatus: 'rejected',
     publicationStatus: 'blocked',
-  }).valid, false);
-  assert.equal(resolveUploadLifecycle({
+  });
+  assert.equal(pending.valid, true);
+  assert.equal(pending.moderationState, MODERATION_STATES.allowed);
+  assert.equal(pending.publicationState, PUBLICATION_STATES.pending);
+
+  const published = resolveUploadLifecycle({
     moderationState: 'allowed',
     publicationState: 'published',
-    reviewStatus: 'approved',
-    publicationStatus: 'discarded',
-  }).valid, false);
+    reviewStatus: 'rejected',
+    publicationStatus: 'future_legacy_state',
+  });
+  assert.equal(published.valid, true);
+  assert.equal(published.moderationState, MODERATION_STATES.allowed);
+  assert.equal(published.publicationState, PUBLICATION_STATES.published);
 });
 
 test('unknown canonical lifecycle values fail closed', () => {

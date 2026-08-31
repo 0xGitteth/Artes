@@ -1,4 +1,8 @@
-const PERSISTED_RESUME_PUBLICATION_STATUSES = new Set(['pending', 'correction_accepted']);
+import {
+  CLIENT_MODERATION_STATES,
+  CLIENT_PUBLICATION_STATES,
+  resolveClientUploadLifecycle,
+} from './moderationUploadLifecycle.js';
 
 const clean = (value) => String(value || '').trim();
 
@@ -13,18 +17,13 @@ export function resolvePersistedModerationPublicationUploadId({
   if (acceptedModeratorCorrection && persistedReviewUploadId) return persistedReviewUploadId;
 
   const resumeUploadId = clean(resumeUpload?.id);
-  const resumeModerationAllowed = resumeUpload?.moderationState
-    ? clean(resumeUpload.moderationState) === 'allowed'
-    : resumeUpload?.reviewStatus === 'approved';
-  const canonicalPublicationState = clean(resumeUpload?.publicationState);
-  const resumePublicationPending = canonicalPublicationState
-    ? canonicalPublicationState === 'pending'
-    : PERSISTED_RESUME_PUBLICATION_STATUSES.has(clean(resumeUpload?.publicationStatus || resumeUpload?.publishStatus));
+  const resumeLifecycle = resolveClientUploadLifecycle(resumeUpload || {});
   if (
     isResumeFlow
     && resumeUploadId
-    && resumeModerationAllowed
-    && resumePublicationPending
+    && resumeLifecycle.valid
+    && resumeLifecycle.moderationState === CLIENT_MODERATION_STATES.allowed
+    && resumeLifecycle.publicationState === CLIENT_PUBLICATION_STATES.pending
   ) {
     return resumeUploadId;
   }

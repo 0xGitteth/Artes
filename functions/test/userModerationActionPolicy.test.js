@@ -160,6 +160,21 @@ test('canonical allowed state is publication authority rather than stale evidenc
   }), true);
 });
 
+
+test('canonical lifecycle cannot be vetoed by stale legacy status mirrors', () => {
+  const canonical = {
+    moderationState: 'allowed',
+    publicationState: 'pending',
+    mediaState: 'ready',
+    reviewStatus: 'rejected',
+    publicationStatus: 'blocked',
+    publishStatus: 'discarded',
+  };
+  assert.equal(canPublishUpload(canonical), true);
+  assert.equal(canSaveDraftUpload(canonical), true);
+  assert.equal(canManageApprovedUploadPrompt(canonical), true);
+});
+
 test('draft and publication-prompt actions are lifecycle scoped', () => {
   const pending = { moderationState: 'allowed', publicationState: 'pending', mediaState: 'ready' };
   assert.equal(canSaveDraftUpload(pending), true);

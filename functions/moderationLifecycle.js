@@ -117,10 +117,8 @@ export const resolveUploadModerationState = (upload = {}) => {
     if (!VALID_MODERATION_STATES.has(explicit)) {
       return { valid: false, state: null, canonical: true, reason: 'unknown_moderation_state' };
     }
-    const legacyOperationalState = deriveLegacyModerationState(upload, { includeEvidence: false });
-    if (legacyOperationalState && legacyOperationalState !== explicit) {
-      return { valid: false, state: null, canonical: true, reason: 'moderation_state_conflict' };
-    }
+    // Canonical state is the server-owned authority. Legacy fields remain
+    // compatibility mirrors only and cannot override a modern document.
     return { valid: true, state: explicit, canonical: true, reason: 'canonical' };
   }
 
@@ -132,20 +130,15 @@ export const resolveUploadModerationState = (upload = {}) => {
 
 export const resolveUploadPublicationState = (upload = {}) => {
   const explicit = clean(upload?.publicationState);
-  const legacyRaw = clean(upload?.publicationStatus || upload?.publishStatus);
-  const legacyState = deriveLegacyPublicationState(upload);
   if (explicit) {
     if (!VALID_PUBLICATION_STATES.has(explicit)) {
       return { valid: false, state: null, canonical: true, reason: 'unknown_publication_state' };
     }
-    if (legacyRaw && !legacyState) {
-      return { valid: false, state: null, canonical: true, reason: 'unknown_legacy_publication_state' };
-    }
-    if (legacyRaw && legacyState !== explicit) {
-      return { valid: false, state: null, canonical: true, reason: 'publication_state_conflict' };
-    }
+    // publicationStatus/publishStatus are legacy mirrors. Once canonical
+    // publicationState exists they are no longer operational authority.
     return { valid: true, state: explicit, canonical: true, reason: 'canonical' };
   }
+  const legacyState = deriveLegacyPublicationState(upload);
   return legacyState
     ? { valid: true, state: legacyState, canonical: false, reason: 'legacy' }
     : { valid: false, state: null, canonical: false, reason: 'publication_state_unresolved' };

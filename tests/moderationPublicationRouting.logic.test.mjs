@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolvePersistedModerationPublicationUploadId } from '../src/utils/moderationPublicationRouting.js';
 
-test('resume publication uses persisted pending upload', () => {
+test('legacy resume publication uses persisted pending upload', () => {
   assert.equal(resolvePersistedModerationPublicationUploadId({
     isResumeFlow: true,
     resumeUpload: { id: 'u1', reviewStatus: 'approved', publicationStatus: 'pending' },
   }), 'u1');
 });
 
-test('resume publication also finalizes accepted corrections', () => {
+test('legacy resume publication also finalizes accepted corrections', () => {
   assert.equal(resolvePersistedModerationPublicationUploadId({
     isResumeFlow: true,
     resumeUpload: { id: 'u1', reviewStatus: 'approved', publicationStatus: 'correction_accepted' },
@@ -18,24 +18,19 @@ test('resume publication also finalizes accepted corrections', () => {
 
 test('fresh exact-match accepted correction publishes through persisted upload', () => {
   assert.equal(resolvePersistedModerationPublicationUploadId({
-    isResumeFlow: false,
     reviewUploadId: 'exact-upload',
     acceptedModeratorCorrection: true,
   }), 'exact-upload');
 });
 
 test('ordinary fresh upload does not route through persisted upload endpoint', () => {
-  assert.equal(resolvePersistedModerationPublicationUploadId({
-    isResumeFlow: false,
-    reviewUploadId: 'ordinary-upload',
-    acceptedModeratorCorrection: false,
-  }), null);
+  assert.equal(resolvePersistedModerationPublicationUploadId({ reviewUploadId: 'ordinary-upload' }), null);
 });
 
 test('accepted moderator correction routes persisted publication even when resume state is stale', () => {
   assert.equal(resolvePersistedModerationPublicationUploadId({
     isResumeFlow: true,
-    resumeUpload: { id: 'u1', reviewStatus: 'needs_user_correction', publicationStatus: 'needs_user_correction' },
+    resumeUpload: { id: 'u1', moderationState: 'correction_pending', publicationState: 'pending' },
     reviewUploadId: 'u1',
     acceptedModeratorCorrection: true,
     currentModerationAllowed: true,
@@ -44,14 +39,12 @@ test('accepted moderator correction routes persisted publication even when resum
 
 test('ordinary allowed moderation result routes through its persisted upload', () => {
   assert.equal(resolvePersistedModerationPublicationUploadId({
-    isResumeFlow: false,
     reviewUploadId: 'moderated-upload',
     currentModerationAllowed: true,
   }), 'moderated-upload');
 });
 
-
-test('resume routing prefers canonical lifecycle fields when present', () => {
+test('resume routing uses canonical lifecycle authority over stale mirrors', () => {
   assert.equal(resolvePersistedModerationPublicationUploadId({
     isResumeFlow: true,
     resumeUpload: {
@@ -67,6 +60,16 @@ test('resume routing prefers canonical lifecycle fields when present', () => {
     resumeUpload: {
       id: 'stale-upload',
       moderationState: 'superseded',
+      publicationState: 'pending',
+      reviewStatus: 'approved',
+      publicationStatus: 'pending',
+    },
+  }), null);
+  assert.equal(resolvePersistedModerationPublicationUploadId({
+    isResumeFlow: true,
+    resumeUpload: {
+      id: 'unknown-upload',
+      moderationState: 'future_state',
       publicationState: 'pending',
       reviewStatus: 'approved',
       publicationStatus: 'pending',

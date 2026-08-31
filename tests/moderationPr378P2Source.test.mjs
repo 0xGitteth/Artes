@@ -8,7 +8,7 @@ const firestoreRulesSource = readFileSync(new URL('../firestore.rules', import.m
 
 test('upload document is the durable preview anchor before Storage is touched', () => {
   const start = indexSource.indexOf("const uploadRef = db.collection('uploads').doc();");
-  const end = indexSource.indexOf('if (reviewCaseId && uploadId)', start);
+  const end = indexSource.indexOf("const finalizationOutcome = finalizationResult?.outcome || 'pending';", start);
   const source = indexSource.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.ok(source.indexOf("mediaState: 'pending'") < source.indexOf('persistedPreview = await persistModerationPreview({'));

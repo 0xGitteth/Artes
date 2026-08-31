@@ -126,6 +126,7 @@ import AppLogo from './components/branding/AppLogo';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { selectPendingApprovedUploadReminder } from './utils/pendingApprovedUpload';
 import { resolvePersistedModerationPublicationUploadId } from './utils/moderationPublicationRouting';
+import { isClientUploadCorrectionPending, isClientUploadDiscarded } from './utils/moderationUploadLifecycle';
 import { resolvePolicyAppliedTriggersForPublication } from './utils/moderationAppliedTriggerRouting';
 import { resolveModerationDraftAuthor } from './utils/moderationDraftAuthor';
 
@@ -2231,19 +2232,31 @@ export default function ArtesApp() {
 
     const loadPendingApprovedUpload = async () => {
       try {
-        const snapshot = await getDocs(query(
-          collection(db, 'uploads'),
-          where('userId', '==', authUser.uid),
-          where('reviewStatus', '==', 'approved'),
-          limit(10),
-        ));
-        if (!active || snapshot.empty) {
+        const [canonicalSnapshot, legacySnapshot] = await Promise.all([
+          getDocs(query(
+            collection(db, 'uploads'),
+            where('userId', '==', authUser.uid),
+            where('moderationState', '==', 'allowed'),
+            where('publicationState', '==', 'pending'),
+            limit(10),
+          )),
+          getDocs(query(
+            collection(db, 'uploads'),
+            where('userId', '==', authUser.uid),
+            where('reviewStatus', '==', 'approved'),
+            limit(10),
+          )),
+        ]);
+        const pendingDocs = Array.from(new Map(
+          [...canonicalSnapshot.docs, ...legacySnapshot.docs].map((docSnap) => [docSnap.id, docSnap])
+        ).values());
+        if (!active || pendingDocs.length === 0) {
           setPendingApprovedReminder(null);
           return;
         }
 
         const uploads = [];
-        for (const docSnap of snapshot.docs) {
+        for (const docSnap of pendingDocs) {
           const upload = { id: docSnap.id, ...docSnap.data() };
           const postSnap = await getDoc(doc(db, 'posts', docSnap.id));
           uploads.push({
@@ -7971,7 +7984,7 @@ function UploadModal({
           return;
         }
         const uploadData = uploadSnap.data() || {};
-        if (String(uploadData.publicationStatus || uploadData.publishStatus || '').trim() === 'discarded') {
+        if (isClientUploadDiscarded(uploadData)) {
           setResumeUpload(null);
           setResumeError('Deze goedgekeurde upload is verworpen en kan niet meer hervat worden.');
           return;
@@ -8064,7 +8077,7 @@ function UploadModal({
         setRequiredThemes([]);
         setShouldReview(false);
         setShowSuggestionUI(false);
-        const needsAcceptance = uploadData.requiresUploaderAcceptance === true && uploadData.publicationStatus === 'needs_user_correction';
+        const needsAcceptance = isClientUploadCorrectionPending(uploadData);
         if (needsAcceptance && moderatorTaxonomy) {
           setTaxonomyCorrection({
             type: TAXONOMY_CORRECTION_TYPES.SAFE,
@@ -8224,7 +8237,7 @@ function UploadModal({
         if (!response.ok) throw new Error(data?.error || 'Opslaan van correctie mislukt.');
         setCorrectionAcceptedAt(Timestamp.now());
         setResumeUpload((previous) => (previous?.id === correctionUploadId
-          ? { ...previous, moderationState: 'allowed', publicationState: 'pending', reviewStatus: 'approved', publicationStatus: 'correction_accepted', requiresUploaderAcceptance: false }
+          ? { ...previous, moderationState: 'allowed', publicationState: 'pending', requiresUploaderAcceptance: false }
           : previous));
       } catch (error) {
         setErrors((prev) => ({ ...prev, moderation: error?.message || 'Correctie opslaan mislukt.' }));

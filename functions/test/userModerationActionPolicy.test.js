@@ -9,6 +9,14 @@ const safeAllowedState = {
   forbiddenReasons: [],
 };
 
+test('explicit moderation media must be ready before publication', () => {
+  for (const mediaState of ['pending', 'cleanup_pending', 'deleted']) {
+    assert.equal(canPublishUpload({ ...safeAllowedState, mediaState }), false);
+  }
+  assert.equal(canPublishUpload({ ...safeAllowedState, mediaState: 'ready' }), true);
+  assert.equal(canPublishUpload(safeAllowedState), true, 'legacy uploads without mediaState remain compatible');
+});
+
 test('publishNow is denied when requiresUploaderAcceptance is true', () => {
   assert.equal(canPublishUpload({ reviewStatus: 'approved', requiresUploaderAcceptance: true }), false);
 });

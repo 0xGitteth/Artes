@@ -6,15 +6,24 @@ const indexSource = readFileSync(new URL('../functions/index.js', import.meta.ur
 const persistedSource = readFileSync(new URL('../functions/persistedPublication.js', import.meta.url), 'utf8');
 const firestoreRulesSource = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
 
-test('preview persistence creates durable cleanup anchor before Storage write and clears it after durable upload persistence', () => {
-  const start = indexSource.indexOf('const persistModerationPreview = async');
-  const end = indexSource.indexOf('const ensureJsonBody', start);
+test('upload document is the durable preview anchor before Storage is touched', () => {
+  const start = indexSource.indexOf("const uploadRef = db.collection('uploads').doc();");
+  const end = indexSource.indexOf('if (reviewCaseId && uploadId)', start);
   const source = indexSource.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.ok(source.indexOf('await cleanupTaskRef.create({') < source.indexOf('await bucket.file(storagePath).save(buffer'));
-  assert.ok(indexSource.includes('if (persistedUpload) await clearModerationPreviewCleanupAnchor(uploadRef.id);'));
-  assert.ok(indexSource.includes("db.collection('moderationPreviewCleanupTasks')"));
-  assert.ok(indexSource.includes('getModerationPreviewCleanupTaskDecision({'));
+  assert.ok(source.indexOf("mediaState: 'pending'") < source.indexOf('persistedPreview = await persistModerationPreview({'));
+  assert.ok(source.indexOf('transaction.create(uploadRef, {') < source.indexOf('persistedPreview = await persistModerationPreview({'));
+  assert.ok(source.includes("mediaState: 'ready'"));
+  assert.ok(source.includes('mediaCleanupAfter: FieldValue.delete()'));
+  assert.ok(source.includes("mediaCleanupReason: 'moderation_generation_superseded'"));
+});
+
+test('preview cleanup has one upload-owned authority rather than a parallel cleanup-task collection', () => {
+  assert.equal(indexSource.includes('moderationPreviewCleanupTasks'), false);
+  assert.equal(firestoreRulesSource.includes('moderationPreviewCleanupTasks'), false);
+  assert.ok(indexSource.includes(".where('mediaCleanupAfter', '<=', now)"));
+  assert.ok(indexSource.includes('processPendingModerationPreviewMedia({'));
+  assert.ok(indexSource.includes('mediaCleanupClaimId'));
 });
 
 test('preview retention ignores correction provenance and validates operational case ownership/reference', () => {
@@ -34,9 +43,4 @@ test('persisted publication has one timestamp rehydration boundary for consent a
   assert.ok(persistedSource.includes('PUBLIC_UPLOAD_CONSENT_TIMESTAMP_FIELDS'));
   assert.ok(persistedSource.includes('PUBLIC_CREDIT_TIMESTAMP_FIELDS'));
   assert.ok(persistedSource.includes('PUBLIC_CORRECTION_TIMESTAMP_FIELDS'));
-});
-
-
-test('preview cleanup anchors are explicitly server-only in Firestore rules', () => {
-  assert.match(firestoreRulesSource, /match \/moderationPreviewCleanupTasks\/\{taskId\} \{\s*allow read, write: if false;\s*\}/);
 });

@@ -13,7 +13,8 @@ test('published-post cleanup failures durably enter scheduled cleanup lifecycle'
   const body = indexSource.slice(start, end);
   assert.ok(body.includes("publicationStatus: 'deleted_pending_cleanup'"));
   assert.ok(body.includes("publishStatus: 'deleted_pending_cleanup'"));
-  assert.ok(body.includes('previewRetentionExpiresAt: Timestamp.fromMillis(Date.now())'));
+  assert.ok(body.includes("mediaState: 'cleanup_pending'"));
+  assert.ok(body.includes('mediaCleanupAfter: Timestamp.fromMillis(Date.now())'));
   assert.ok(body.includes("cleanup.reason !== 'no_owned_preview'"));
   assert.ok(helperSource.includes("'deleted_pending_cleanup'"));
 });

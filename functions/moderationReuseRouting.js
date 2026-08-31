@@ -6,6 +6,8 @@ import {
 export const isReusableModerationCache = (uploadData, expectedPromptVersion, currentGeneration = 0) => {
   const expected = String(expectedPromptVersion || '').trim();
   if (!expected) return false;
+  const mediaState = String(uploadData?.mediaState || '').trim();
+  if (mediaState && mediaState !== 'ready') return false;
   const diagnostics = uploadData?.geminiDiagnostics || null;
   const cachedVersion = String(diagnostics?.promptVersion || '').trim();
   if (cachedVersion !== expected) return false;

@@ -36,7 +36,9 @@ test('queueFreshEvaluation cannot retarget a different upload or uploader while 
   const start = source.indexOf('export const moderatorQueueFreshEvaluation');
   const end = source.indexOf('export const userModerationAction', start);
   const queueSource = source.slice(start, end);
-  assert.match(queueSource, /reviewCaseUploadIds = resolveReviewCaseUploadIds/);
+  assert.match(queueSource, /initialReviewCaseUploadIds = resolveReviewCaseUploadIds/);
+  assert.match(queueSource, /initialUploadSetKey !== freshUploadSetKey/);
+  assert.match(queueSource, /initialCaseOwnerId !== freshCaseOwnerId/);
   assert.match(queueSource, /review_case_upload_mismatch/);
   assert.match(queueSource, /freshReviewCaseUploadIds = resolveReviewCaseUploadIds/);
   assert.match(queueSource, /review_case_upload_changed/);
@@ -67,7 +69,9 @@ test('fresh-evaluation routing boundary is committed atomically', () => {
   const start = source.indexOf('export const moderatorQueueFreshEvaluation');
   const end = source.indexOf('export const userModerationAction', start);
   const queueSource = source.slice(start, end);
-  assert.match(queueSource, /transaction\.set\(queueModerationExampleRef, queueExamplePayload/);
+  assert.match(queueSource, /transaction\.set\(queueModerationExampleRef,\s*\{/);
+  assert.match(queueSource, /\.\.\.queueExamplePayload/);
+  assert.match(queueSource, /moderationScopeGenerations: nextGenerations/);
   assert.doesNotMatch(queueSource, /await db\.collection\('moderationExamples'\).*queueFreshEvaluation/s);
   assert.doesNotMatch(queueSource, /moderationExample write skipped/);
 });

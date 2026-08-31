@@ -92,7 +92,7 @@ import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
 import { findBestReusableAcrossPages, findFirstUploadReviewCaseAcrossPages, findReusableAcrossPages, isUploadReviewCaseData, resolveCachedReviewCaseIdForUploader, reviewCaseMatchesFingerprint, reviewCaseReferencesUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
 import { getOpenReviewCountAfterCaseExit, getReviewAccessDecision } from './reviewLifecycle.js';
-import { getDeletedPublishedPostCleanupDecision, getModerationPreviewCleanupTaskDecision, getModerationPreviewRetentionDecision, getOperationalModerationPreviewReviewCaseId, isOperationalModerationPreviewReviewCase, resolveOwnedModerationPreviewStoragePath } from './moderationPreviewStorage.js';
+import { getDeletedPublishedPostCleanupDecision, getModerationPendingMediaCleanupDecision, getModerationPreviewRetentionDecision, getOperationalModerationPreviewReviewCaseId, isOperationalModerationPreviewReviewCase, resolveOwnedModerationPreviewStoragePath } from './moderationPreviewStorage.js';
 import { buildPersistedModerationDraftState, buildPersistedPublicationConsentProof, normalizePersistedPublicationStringList, resolveTrustedModeratedImageUrl, sanitizePersistedPublicationCorrection, sanitizePersistedPublicationImageMeta } from './persistedPublication.js';
 import { cleanupCodexDevPostTrees } from './codexTestDataCleanup.js';
 import { validateModerationPublicationAuthorProfile } from './moderationPublicationAuthor.js';
@@ -115,9 +115,10 @@ const moderationPreviewGcBatchSize = Number.isFinite(configuredModerationPreview
 const buildModerationPreviewRetentionExpiry = (nowMs = Date.now()) => Timestamp.fromMillis(
   Number(nowMs) + moderationPreviewRetentionMs
 );
-const moderationPreviewOrphanCleanupDelayMs = 24 * 60 * 60 * 1000;
-const buildModerationPreviewOrphanCleanupExpiry = (nowMs = Date.now()) => Timestamp.fromMillis(
-  Number(nowMs) + moderationPreviewOrphanCleanupDelayMs
+const moderationPreviewPendingCleanupDelayMs = 24 * 60 * 60 * 1000;
+const moderationPreviewCleanupRetryMs = 6 * 60 * 60 * 1000;
+const buildModerationPreviewPendingCleanupExpiry = (nowMs = Date.now()) => Timestamp.fromMillis(
+  Number(nowMs) + moderationPreviewPendingCleanupDelayMs
 );
 
 const ADULT_ART_NUDE_TRIGGER = 'adultArtNude';
@@ -992,64 +993,34 @@ const parseImageDataUrl = (image) => {
   return { buffer, mimeType };
 };
 
-const getModerationPreviewCleanupTaskRef = (uploadId) => db
-  .collection('moderationPreviewCleanupTasks')
-  .doc(String(uploadId || '').trim());
-
-const clearModerationPreviewCleanupAnchor = async (uploadId) => {
-  const normalizedUploadId = String(uploadId || '').trim();
-  if (!normalizedUploadId) return false;
-  try {
-    await getModerationPreviewCleanupTaskRef(normalizedUploadId).delete();
-    return true;
-  } catch (error) {
-    logger.warn('Moderation preview cleanup anchor could not be cleared immediately.', {
-      uploadId: normalizedUploadId,
-      error: error?.message || String(error),
-    });
-    return false;
-  }
-};
-
-const persistModerationPreview = async ({ buffer, mimeType, userId, uploadId }) => {
-  if (!buffer || !mimeType) return null;
+const buildModerationPreviewStoragePath = ({ mimeType, userId, uploadId }) => {
   const normalizedUserId = String(userId || '').trim();
   const normalizedUploadId = String(uploadId || '').trim();
   if (!normalizedUserId || normalizedUserId.includes('/') || !normalizedUploadId || normalizedUploadId.includes('/')) {
     throw new Error('Moderation preview requires a valid owner and upload id');
   }
+  const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+  return `moderation-previews/${normalizedUserId}/${normalizedUploadId}.${extension}`;
+};
+
+const persistModerationPreview = async ({ buffer, mimeType, userId, uploadId, storagePath: expectedStoragePath = null }) => {
+  if (!buffer || !mimeType) return null;
+  const storagePath = buildModerationPreviewStoragePath({ mimeType, userId, uploadId });
+  if (expectedStoragePath && String(expectedStoragePath).trim() !== storagePath) {
+    throw new Error('Moderation preview storage binding changed');
+  }
 
   const bucket = admin.storage().bucket();
-  const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
-  const storagePath = `moderation-previews/${normalizedUserId}/${normalizedUploadId}.${extension}`;
   const token = crypto.randomUUID();
-  const cleanupTaskRef = getModerationPreviewCleanupTaskRef(normalizedUploadId);
-
-  // The cleanup anchor exists before Storage is touched. If the later upload
-  // write and compensating delete both fail, scheduled cleanup still has a
-  // durable server-owned record for this object.
-  await cleanupTaskRef.create({
-    uploadId: normalizedUploadId,
-    ownerUid: normalizedUserId,
-    storagePath,
-    cleanupAfter: buildModerationPreviewOrphanCleanupExpiry(),
-    createdAt: FieldValue.serverTimestamp(),
-  });
-
-  try {
-    await bucket.file(storagePath).save(buffer, {
-      contentType: mimeType,
-      resumable: false,
+  await bucket.file(storagePath).save(buffer, {
+    contentType: mimeType,
+    resumable: false,
+    metadata: {
       metadata: {
-        metadata: {
-          firebaseStorageDownloadTokens: token,
-        },
+        firebaseStorageDownloadTokens: token,
       },
-    });
-  } catch (error) {
-    await clearModerationPreviewCleanupAnchor(normalizedUploadId);
-    throw error;
-  }
+    },
+  });
 
   const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
   return {
@@ -1057,6 +1028,36 @@ const persistModerationPreview = async ({ buffer, mimeType, userId, uploadId }) 
     imageUrl,
     imageRef: storagePath,
   };
+};
+
+const markModerationPreviewCleanupPending = async ({ uploadRef, reason, nowMs = Date.now() } = {}) => {
+  if (!uploadRef) return false;
+  try {
+    let marked = false;
+    await db.runTransaction(async (transaction) => {
+      const uploadSnap = await transaction.get(uploadRef);
+      if (!uploadSnap.exists) return;
+      const uploadData = uploadSnap.data() || {};
+      const mediaState = String(uploadData?.mediaState || '').trim();
+      if (mediaState !== 'pending' && mediaState !== 'cleanup_pending') return;
+      if (!resolveOwnedModerationPreviewStoragePath(uploadData)) return;
+      transaction.set(uploadRef, {
+        mediaState: 'cleanup_pending',
+        mediaCleanupAfter: Timestamp.fromMillis(Number(nowMs)),
+        mediaCleanupReason: String(reason || 'upload_not_finalized'),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      marked = true;
+    });
+    return marked;
+  } catch (error) {
+    logger.warn('Moderation preview cleanup retry could not be scheduled immediately.', {
+      uploadId: uploadRef.id,
+      reason: String(reason || ''),
+      error: error?.message || String(error),
+    });
+    return false;
+  }
 };
 
 const ensureJsonBody = (req) => {
@@ -2035,118 +2036,214 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
   const uploadRef = db.collection('uploads').doc();
   let persistedPreview = null;
-  let previewCreatedByRequest = false;
   let previewField = null;
+  let uploadStubCreated = false;
+  let uploadSuppressedByHistoricalRegistry = false;
+  let plannedPreviewStoragePath = null;
   try {
-    persistedPreview = await persistModerationPreview({
-      buffer: parsed.buffer,
+    plannedPreviewStoragePath = buildModerationPreviewStoragePath({
       mimeType: parsed.mimeType,
       userId,
       uploadId: uploadRef.id,
     });
-    previewCreatedByRequest = Boolean(persistedPreview?.storagePath);
-    if (persistedPreview?.imageUrl) {
-      persistedPreview.previewUrl = persistedPreview.imageUrl;
-      previewField = 'imageUrl';
-    }
+    const pendingCleanupAfter = buildModerationPreviewPendingCleanupExpiry();
 
-    const routedUserCorrection = outcome === 'needsCorrection'
-      && previousModeratorExample?.routingApplied === true
-      && previousModeratorExample?.action === 'requestUserCorrection'
-      && response.moderatorCorrectedTaxonomy
-      && typeof response.moderatorCorrectedTaxonomy === 'object';
-    const routedUserCorrectionTaxonomy = routedUserCorrection ? response.moderatorCorrectedTaxonomy : null;
-    const routedUserCorrectionReviewCaseId = routedUserCorrection
-      ? (matchedModerationExample?.data?.reviewCaseId || null)
-      : null;
-    const routedUserCorrectionReviewCaseOwnerUid = routedUserCorrection
-      ? (matchedModerationExample?.data?.uploaderUid || matchedModerationExample?.data?.userId || null)
-      : null;
-
-    const uploadPayload = {
-      userId: userId || null,
-      uploaderUid: userId || null,
-      moderationGeneration: requestModerationGeneration,
-      moderationScopeKey: requestModerationScope.scopeKey,
-      ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
-      outcome,
-      classification,
-      shouldReview: effectiveShouldReview,
-      publishBlocked,
-      moderationSignals: response.moderationSignals || null,
-      appliedTriggers: finalAppliedTriggers,
-      suggestedTriggers: finalSuggestedTriggers,
-      forbiddenReasons: finalForbiddenReasons,
-      userSelectedTaxonomy: response.userSelectedTaxonomy,
-      aiSuggestedTaxonomy: response.aiSuggestedTaxonomy,
-      aiSafetySignals: response.aiSafetySignals,
-      aiVisionLabels: response.aiVisionLabels,
-      policyAppliedTriggers: response.policyAppliedTriggers,
-      geminiDiagnostics: response.geminiDiagnostics || null,
-      reviewCaseId: reviewCaseId || null,
-      previousModeratorExample,
-      ...(routedUserCorrection ? {
-        correctedTaxonomy: routedUserCorrectionTaxonomy,
-        moderatorDecision: {
-          action: 'requestUserCorrection',
-          reasonCode: matchedModerationExample?.data?.moderatorDecision?.reasonCode || null,
-          correctedTaxonomy: routedUserCorrectionTaxonomy,
-          requiresUploaderAcceptance: true,
-          finalPolicyOutcome: 'allowed',
-        },
-        requiresUploaderAcceptance: true,
-        publicationStatus: 'needs_user_correction',
-        reviewStatus: 'needs_user_correction',
-        correctionReviewCaseId: routedUserCorrectionReviewCaseId,
-        correctionReviewCaseOwnerUid: routedUserCorrectionReviewCaseOwnerUid,
-      } : {}),
-      fingerprints,
-      matchedUploadId: matchedUpload?.id || null,
-      ...(persistedPreview?.imageUrl ? { imageUrl: persistedPreview.imageUrl } : {}),
-      ...(persistedPreview?.previewUrl ? { previewUrl: persistedPreview.previewUrl } : {}),
-      ...(persistedPreview?.imageRef ? { imageRef: persistedPreview.imageRef } : {}),
-      ...(persistedPreview?.storagePath ? {
-        storagePath: persistedPreview.storagePath,
-        previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
-      } : {}),
-      createdAt: FieldValue.serverTimestamp(),
-    };
-    let persistedUpload = false;
-    let uploadSuppressedByHistoricalRegistry = false;
+    // The upload is the durable media anchor. Storage is never touched until
+    // this server-owned stub has committed behind the current generation fence.
     await db.runTransaction(async (transaction) => {
-      persistedUpload = false;
+      uploadStubCreated = false;
       uploadSuppressedByHistoricalRegistry = false;
-      if (!isCodexActor && await isKnownCodexDevActorUid({ db, uid: userId, transaction })) {
+      const newlyDenied = !isCodexActor
+        && await isKnownCodexDevActorUid({ db, uid: userId, transaction });
+      const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
+      if (newlyDenied) {
         uploadSuppressedByHistoricalRegistry = true;
         return;
       }
-      const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
       if (freshModerationScope.generation !== requestModerationGeneration) {
         const error = new Error('Fresh evaluation superseded this moderation request');
         error.status = 409;
         error.code = 'fresh_evaluation_superseded_during_request';
         throw error;
       }
-      transaction.create(uploadRef, uploadPayload);
-      persistedUpload = true;
+      transaction.create(uploadRef, {
+        userId: userId || null,
+        uploaderUid: userId || null,
+        moderationGeneration: requestModerationGeneration,
+        moderationScopeKey: requestModerationScope.scopeKey,
+        fingerprints,
+        mediaState: 'pending',
+        storagePath: plannedPreviewStoragePath,
+        imageRef: plannedPreviewStoragePath,
+        mediaCleanupAfter: pendingCleanupAfter,
+        mediaCleanupReason: 'upload_not_finalized',
+        ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      uploadStubCreated = true;
     });
-    uploadId = persistedUpload ? uploadRef.id : null;
-    if (persistedUpload) await clearModerationPreviewCleanupAnchor(uploadRef.id);
 
-    if (uploadSuppressedByHistoricalRegistry && previewCreatedByRequest && persistedPreview?.storagePath) {
+    if (uploadStubCreated) {
       try {
-        await admin.storage().bucket().file(persistedPreview.storagePath).delete({ ignoreNotFound: true });
+        persistedPreview = await persistModerationPreview({
+          buffer: parsed.buffer,
+          mimeType: parsed.mimeType,
+          userId,
+          uploadId: uploadRef.id,
+          storagePath: plannedPreviewStoragePath,
+        });
       } catch (error) {
-        logger.error('Historically quarantined moderation preview cleanup failed.', {
-          uid: userId,
-          storagePath: persistedPreview.storagePath,
-          error: error?.message || String(error),
+        await markModerationPreviewCleanupPending({
+          uploadRef,
+          reason: 'storage_write_failed',
         });
         throw error;
       }
-      await clearModerationPreviewCleanupAnchor(uploadRef.id);
-      persistedPreview = null;
-      previewField = null;
+
+      if (persistedPreview?.imageUrl) {
+        persistedPreview.previewUrl = persistedPreview.imageUrl;
+        previewField = 'imageUrl';
+      }
+
+      const routedUserCorrection = outcome === 'needsCorrection'
+        && previousModeratorExample?.routingApplied === true
+        && previousModeratorExample?.action === 'requestUserCorrection'
+        && response.moderatorCorrectedTaxonomy
+        && typeof response.moderatorCorrectedTaxonomy === 'object';
+      const routedUserCorrectionTaxonomy = routedUserCorrection ? response.moderatorCorrectedTaxonomy : null;
+      const routedUserCorrectionReviewCaseId = routedUserCorrection
+        ? (matchedModerationExample?.data?.reviewCaseId || null)
+        : null;
+      const routedUserCorrectionReviewCaseOwnerUid = routedUserCorrection
+        ? (matchedModerationExample?.data?.uploaderUid || matchedModerationExample?.data?.userId || null)
+        : null;
+
+      const uploadPayload = {
+        userId: userId || null,
+        uploaderUid: userId || null,
+        moderationGeneration: requestModerationGeneration,
+        moderationScopeKey: requestModerationScope.scopeKey,
+        ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
+        outcome,
+        classification,
+        shouldReview: effectiveShouldReview,
+        publishBlocked,
+        moderationSignals: response.moderationSignals || null,
+        appliedTriggers: finalAppliedTriggers,
+        suggestedTriggers: finalSuggestedTriggers,
+        forbiddenReasons: finalForbiddenReasons,
+        userSelectedTaxonomy: response.userSelectedTaxonomy,
+        aiSuggestedTaxonomy: response.aiSuggestedTaxonomy,
+        aiSafetySignals: response.aiSafetySignals,
+        aiVisionLabels: response.aiVisionLabels,
+        policyAppliedTriggers: response.policyAppliedTriggers,
+        geminiDiagnostics: response.geminiDiagnostics || null,
+        reviewCaseId: reviewCaseId || null,
+        previousModeratorExample,
+        ...(routedUserCorrection ? {
+          correctedTaxonomy: routedUserCorrectionTaxonomy,
+          moderatorDecision: {
+            action: 'requestUserCorrection',
+            reasonCode: matchedModerationExample?.data?.moderatorDecision?.reasonCode || null,
+            correctedTaxonomy: routedUserCorrectionTaxonomy,
+            requiresUploaderAcceptance: true,
+            finalPolicyOutcome: 'allowed',
+          },
+          requiresUploaderAcceptance: true,
+          publicationStatus: 'needs_user_correction',
+          reviewStatus: 'needs_user_correction',
+          correctionReviewCaseId: routedUserCorrectionReviewCaseId,
+          correctionReviewCaseOwnerUid: routedUserCorrectionReviewCaseOwnerUid,
+        } : {}),
+        fingerprints,
+        matchedUploadId: matchedUpload?.id || null,
+        ...(persistedPreview?.imageUrl ? { imageUrl: persistedPreview.imageUrl } : {}),
+        ...(persistedPreview?.previewUrl ? { previewUrl: persistedPreview.previewUrl } : {}),
+        ...(persistedPreview?.imageRef ? { imageRef: persistedPreview.imageRef } : {}),
+        ...(persistedPreview?.storagePath ? {
+          storagePath: persistedPreview.storagePath,
+          previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
+        } : {}),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+
+      let finalizationOutcome = 'pending';
+      await db.runTransaction(async (transaction) => {
+        const uploadSnap = await transaction.get(uploadRef);
+        if (!uploadSnap.exists) {
+          const error = new Error('Moderation media anchor disappeared before finalization');
+          error.status = 409;
+          error.code = 'moderation_media_anchor_missing';
+          throw error;
+        }
+        const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
+        const newlyDenied = !isCodexActor
+          && await isKnownCodexDevActorUid({ db, uid: userId, transaction });
+        const stubData = uploadSnap.data() || {};
+        const stubOwnerUid = String(stubData?.userId || stubData?.uploaderUid || '').trim();
+        const stubStoragePath = resolveOwnedModerationPreviewStoragePath(stubData);
+        const stubMediaState = String(stubData?.mediaState || '').trim();
+        if (stubOwnerUid !== String(userId || '').trim()
+          || stubStoragePath !== plannedPreviewStoragePath
+          || stubMediaState !== 'pending') {
+          const error = new Error('Moderation media anchor changed before finalization');
+          error.status = 409;
+          error.code = 'moderation_media_anchor_changed';
+          throw error;
+        }
+
+        if (newlyDenied) {
+          transaction.set(uploadRef, {
+            mediaState: 'cleanup_pending',
+            mediaCleanupAfter: Timestamp.fromMillis(Date.now()),
+            mediaCleanupReason: 'historical_registry_suppressed',
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+          finalizationOutcome = 'suppressed';
+          return;
+        }
+        if (freshModerationScope.generation !== requestModerationGeneration) {
+          transaction.set(uploadRef, {
+            mediaState: 'cleanup_pending',
+            mediaCleanupAfter: Timestamp.fromMillis(Date.now()),
+            mediaCleanupReason: 'moderation_generation_superseded',
+            moderationState: 'superseded',
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+          finalizationOutcome = 'superseded';
+          return;
+        }
+
+        transaction.set(uploadRef, {
+          ...uploadPayload,
+          mediaState: 'ready',
+          mediaCleanupAfter: FieldValue.delete(),
+          mediaCleanupReason: FieldValue.delete(),
+          mediaCleanupClaimId: FieldValue.delete(),
+          mediaCleanupClaimedAt: FieldValue.delete(),
+        }, { merge: true });
+        finalizationOutcome = 'ready';
+      });
+
+      if (finalizationOutcome === 'ready') {
+        uploadId = uploadRef.id;
+      } else if (finalizationOutcome === 'suppressed') {
+        uploadSuppressedByHistoricalRegistry = true;
+        persistedPreview = null;
+        previewField = null;
+      } else if (finalizationOutcome === 'superseded') {
+        const error = new Error('Fresh evaluation superseded this moderation request');
+        error.status = 409;
+        error.code = 'fresh_evaluation_superseded_during_request';
+        throw error;
+      } else {
+        const error = new Error('Moderation upload did not reach a durable ready state');
+        error.status = 500;
+        error.code = 'moderation_upload_not_finalized';
+        throw error;
+      }
     }
 
     if (process.env.NODE_ENV === 'development') {
@@ -2154,20 +2251,15 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         uploadId,
         reviewCaseId: reviewCaseId || null,
         previewField,
+        mediaState: uploadId ? 'ready' : (uploadSuppressedByHistoricalRegistry ? 'cleanup_pending' : null),
       });
     }
   } catch (error) {
-    if (previewCreatedByRequest && !uploadId && persistedPreview?.storagePath) {
-      try {
-        await admin.storage().bucket().file(persistedPreview.storagePath).delete({ ignoreNotFound: true });
-        await clearModerationPreviewCleanupAnchor(uploadRef.id);
-      } catch (cleanupError) {
-        logger.error('Unpersisted moderation preview cleanup failed.', {
-          uid: userId,
-          storagePath: persistedPreview.storagePath,
-          error: cleanupError?.message || String(cleanupError),
-        });
-      }
+    if (uploadStubCreated && !uploadId) {
+      await markModerationPreviewCleanupPending({
+        uploadRef,
+        reason: error?.code || 'upload_finalization_failed',
+      });
     }
     if (error?.code === 'fresh_evaluation_superseded_during_request') throw error;
     logger.error('Upload opslaan mislukt.', error);
@@ -3905,6 +3997,12 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       res.status(409).json({ error: 'Fresh evaluation requires an upload review case' });
       return;
     }
+    const initialCaseOwnerId = pickString(
+      initialReviewCaseData?.userId,
+      initialReviewCaseData?.uploaderUid,
+      initialReviewCaseData?.ownerUid,
+      initialReviewCaseData?.uploaderSnapshot?.uid,
+    );
     const initialReviewCaseUploadIds = resolveReviewCaseUploadIds(initialReviewCaseData);
     if (uploadIdFromBody && initialReviewCaseUploadIds.length > 0 && !initialReviewCaseUploadIds.includes(uploadIdFromBody)) {
       const error = new Error('uploadId does not belong to this review case');
@@ -3934,7 +4032,27 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
         throw error;
       }
 
+      const freshCaseOwnerId = pickString(
+        freshReviewCaseData?.userId,
+        freshReviewCaseData?.uploaderUid,
+        freshReviewCaseData?.ownerUid,
+        freshReviewCaseData?.uploaderSnapshot?.uid,
+      );
       const freshReviewCaseUploadIds = resolveReviewCaseUploadIds(freshReviewCaseData);
+      const initialUploadSetKey = [...new Set(initialReviewCaseUploadIds)].sort().join('\n');
+      const freshUploadSetKey = [...new Set(freshReviewCaseUploadIds)].sort().join('\n');
+      if (initialUploadSetKey !== freshUploadSetKey) {
+        const error = new Error('Review case uploads changed while queuing fresh evaluation');
+        error.status = 409;
+        error.code = 'review_case_upload_changed';
+        throw error;
+      }
+      if (initialCaseOwnerId !== freshCaseOwnerId) {
+        const error = new Error('Review case owner changed while queuing fresh evaluation');
+        error.status = 409;
+        error.code = 'review_case_owner_changed';
+        throw error;
+      }
       if (uploadIdFromBody && freshReviewCaseUploadIds.length > 0 && !freshReviewCaseUploadIds.includes(uploadIdFromBody)) {
         const error = new Error('Review case upload changed while queuing fresh evaluation');
         error.status = 409;
@@ -3963,10 +4081,7 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
         }));
 
       const freshCaseUserId = pickString(
-        freshReviewCaseData?.userId,
-        freshReviewCaseData?.uploaderUid,
-        freshReviewCaseData?.ownerUid,
-        freshReviewCaseData?.uploaderSnapshot?.uid,
+        freshCaseOwnerId,
         ...linkedUploads.map((item) => ownerForUpload(item.data)),
       );
       for (const linkedUpload of linkedUploads) {
@@ -6461,6 +6576,10 @@ const claimExpiredModerationPreview = async ({ uploadRef, nowMs = Date.now() } =
       previewExpiredFromReviewStatus: reviewStatus || null,
       previewRetentionDeferredAt: FieldValue.delete(),
       previewRetentionDeferredReason: FieldValue.delete(),
+      previewRetentionExpiresAt: FieldValue.delete(),
+      mediaState: 'cleanup_pending',
+      mediaCleanupAfter: Timestamp.fromMillis(Number(nowMs) + moderationPreviewCleanupRetryMs),
+      mediaCleanupReason: 'retention_elapsed',
     }, { merge: true });
     result = {
       ...decision,
@@ -6484,6 +6603,11 @@ const finalizeExpiredModerationPreviewClaim = async ({ uploadRef, claimId, clean
         previewUrl: FieldValue.delete(),
         imageRef: FieldValue.delete(),
         storagePath: FieldValue.delete(),
+        mediaState: 'deleted',
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
         previewCleanedAt: FieldValue.serverTimestamp(),
         previewExpiredAt: FieldValue.serverTimestamp(),
       } : {}),
@@ -6504,6 +6628,11 @@ const restorePublishedModerationPreviewClaim = async ({ uploadRef, claimId } = {
       publicationStatus: 'published',
       publishStatus: 'published',
       postId: uploadRef.id,
+      mediaState: 'ready',
+      mediaCleanupAfter: FieldValue.delete(),
+      mediaCleanupReason: FieldValue.delete(),
+      mediaCleanupClaimId: FieldValue.delete(),
+      mediaCleanupClaimedAt: FieldValue.delete(),
       previewRetentionExpiresAt: FieldValue.delete(),
       previewExpiryClaimId: FieldValue.delete(),
       previewExpiryRaceRecoveredAt: FieldValue.serverTimestamp(),
@@ -6519,7 +6648,7 @@ const processExpiredModerationPreview = async ({ uploadRef, nowMs = Date.now() }
     uploadId: uploadRef.id,
     uploadData: claim.uploadData,
   });
-  if (cleanup.deleted) {
+  if (cleanup.deleted || cleanup.reason === 'no_owned_preview') {
     await finalizeExpiredModerationPreviewClaim({ uploadRef, claimId: claim.claimId, cleaned: true });
     return { action: 'expired', reason: claim.reason, storagePath: cleanup.storagePath };
   }
@@ -6531,6 +6660,177 @@ const processExpiredModerationPreview = async ({ uploadRef, nowMs = Date.now() }
 
   await finalizeExpiredModerationPreviewClaim({ uploadRef, claimId: claim.claimId, cleaned: false });
   return { action: 'clear_retention', reason: cleanup.reason || 'preview_missing' };
+};
+
+const claimPendingModerationPreviewMedia = async ({ uploadRef, nowMs = Date.now() } = {}) => {
+  let result = { action: 'skip', reason: 'not_due' };
+  await db.runTransaction(async (transaction) => {
+    const uploadSnap = await transaction.get(uploadRef);
+    if (!uploadSnap.exists) {
+      result = { action: 'skip', reason: 'upload_missing' };
+      return;
+    }
+    const uploadData = uploadSnap.data() || {};
+    const decision = getModerationPendingMediaCleanupDecision({
+      uploadId: uploadRef.id,
+      uploadData,
+      nowMs,
+    });
+
+    if (decision.action === 'clear_schedule') {
+      transaction.set(uploadRef, {
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+      }, { merge: true });
+      result = decision;
+      return;
+    }
+    if (decision.action !== 'cleanup') {
+      result = decision;
+      return;
+    }
+
+    const [productionPostSnap, codexDevPostSnap] = await Promise.all([
+      transaction.get(db.collection('posts').doc(uploadRef.id)),
+      transaction.get(db.collection('codexDevPosts').doc(uploadRef.id)),
+    ]);
+    if (productionPostSnap.exists || codexDevPostSnap.exists) {
+      transaction.set(uploadRef, {
+        mediaState: 'ready',
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+        mediaCleanupRecoveredAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      result = { action: 'preserve', reason: 'published_media_still_referenced', storagePath: decision.storagePath };
+      return;
+    }
+
+    const claimId = crypto.randomUUID();
+    transaction.set(uploadRef, {
+      mediaState: 'cleanup_pending',
+      mediaCleanupClaimId: claimId,
+      mediaCleanupClaimedAt: FieldValue.serverTimestamp(),
+      mediaCleanupAfter: Timestamp.fromMillis(Number(nowMs) + moderationPreviewCleanupRetryMs),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    result = {
+      action: 'cleanup',
+      reason: decision.reason,
+      storagePath: decision.storagePath,
+      claimId,
+      uploadData,
+    };
+  });
+  return result;
+};
+
+const finalizePendingModerationPreviewMediaClaim = async ({
+  uploadRef,
+  claimId,
+  cleaned = false,
+  preserved = false,
+  nowMs = Date.now(),
+} = {}) => {
+  await db.runTransaction(async (transaction) => {
+    const uploadSnap = await transaction.get(uploadRef);
+    if (!uploadSnap.exists) return;
+    const uploadData = uploadSnap.data() || {};
+    if (String(uploadData?.mediaCleanupClaimId || '').trim() !== String(claimId || '').trim()) return;
+
+    if (preserved) {
+      transaction.set(uploadRef, {
+        mediaState: 'ready',
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+        mediaCleanupRecoveredAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return;
+    }
+
+    if (cleaned) {
+      const publicationStatus = String(uploadData?.publicationStatus || uploadData?.publishStatus || '').trim();
+      transaction.set(uploadRef, {
+        ...(publicationStatus === 'deleted_pending_cleanup' ? {
+          publicationStatus: 'deleted',
+          publishStatus: 'deleted',
+        } : {}),
+        mediaState: 'deleted',
+        imageUrl: FieldValue.delete(),
+        previewUrl: FieldValue.delete(),
+        imageRef: FieldValue.delete(),
+        storagePath: FieldValue.delete(),
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+        previewRetentionExpiresAt: FieldValue.delete(),
+        previewExpiryClaimId: FieldValue.delete(),
+        previewCleanedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return;
+    }
+
+    transaction.set(uploadRef, {
+      mediaState: 'cleanup_pending',
+      mediaCleanupAfter: Timestamp.fromMillis(Number(nowMs) + moderationPreviewCleanupRetryMs),
+      mediaCleanupClaimId: FieldValue.delete(),
+      mediaCleanupClaimedAt: FieldValue.delete(),
+      mediaCleanupRetryScheduledAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+};
+
+const processPendingModerationPreviewMedia = async ({ uploadRef, nowMs = Date.now() } = {}) => {
+  const claim = await claimPendingModerationPreviewMedia({ uploadRef, nowMs });
+  if (claim.action !== 'cleanup') return claim;
+
+  try {
+    const cleanup = await cleanupModerationPreviewForUpload({
+      uploadId: uploadRef.id,
+      uploadData: claim.uploadData,
+    });
+    if (cleanup.deleted || cleanup.reason === 'no_owned_preview') {
+      await finalizePendingModerationPreviewMediaClaim({
+        uploadRef,
+        claimId: claim.claimId,
+        cleaned: true,
+        nowMs,
+      });
+      return { action: 'cleaned', reason: claim.reason, storagePath: cleanup.storagePath || claim.storagePath };
+    }
+    if (cleanup.reason === 'published_media_still_referenced') {
+      await finalizePendingModerationPreviewMediaClaim({
+        uploadRef,
+        claimId: claim.claimId,
+        preserved: true,
+        nowMs,
+      });
+      return { action: 'preserve', reason: cleanup.reason, storagePath: cleanup.storagePath };
+    }
+    await finalizePendingModerationPreviewMediaClaim({
+      uploadRef,
+      claimId: claim.claimId,
+      cleaned: false,
+      nowMs,
+    });
+    return { action: 'defer', reason: cleanup.reason || 'cleanup_not_completed' };
+  } catch (error) {
+    await finalizePendingModerationPreviewMediaClaim({
+      uploadRef,
+      claimId: claim.claimId,
+      cleaned: false,
+      nowMs,
+    });
+    throw error;
+  }
 };
 
 export const cleanupExpiredModerationPreviews = onSchedule({
@@ -6575,51 +6875,32 @@ export const cleanupExpiredModerationPreviews = onSchedule({
     }
   }
 
-  const orphanSnapshot = await db.collection('moderationPreviewCleanupTasks')
-    .where('cleanupAfter', '<=', now)
-    .orderBy('cleanupAfter', 'asc')
+  const pendingMediaSnapshot = await db.collection('uploads')
+    .where('mediaCleanupAfter', '<=', now)
+    .orderBy('mediaCleanupAfter', 'asc')
     .limit(moderationPreviewGcBatchSize)
     .get();
-  summary.orphanTasksScanned = orphanSnapshot.size;
-  summary.orphanTasksDeleted = 0;
-  summary.orphanTasksPreserved = 0;
-  summary.orphanTasksDeferred = 0;
-  summary.orphanTasksFailed = 0;
+  summary.pendingMediaScanned = pendingMediaSnapshot.size;
+  summary.pendingMediaCleaned = 0;
+  summary.pendingMediaPreserved = 0;
+  summary.pendingMediaDeferred = 0;
+  summary.pendingMediaSkipped = 0;
+  summary.pendingMediaFailed = 0;
 
-  for (const taskSnap of orphanSnapshot.docs) {
+  for (const docSnap of pendingMediaSnapshot.docs) {
     try {
-      const taskData = taskSnap.data() || {};
-      const uploadId = String(taskData?.uploadId || taskSnap.id || '').trim();
-      const uploadSnap = uploadId ? await db.collection('uploads').doc(uploadId).get() : null;
-      const decision = getModerationPreviewCleanupTaskDecision({
-        taskId: taskSnap.id,
-        taskData,
-        uploadExists: Boolean(uploadSnap?.exists),
-        uploadData: uploadSnap?.exists ? (uploadSnap.data() || {}) : {},
+      const result = await processPendingModerationPreviewMedia({
+        uploadRef: docSnap.ref,
+        nowMs: now.toMillis(),
       });
-
-      if (decision.action === 'preserve_upload' || decision.action === 'drop_task') {
-        await taskSnap.ref.delete();
-        summary.orphanTasksPreserved += decision.action === 'preserve_upload' ? 1 : 0;
-        summary.orphanTasksDeleted += decision.action === 'drop_task' ? 1 : 0;
-        continue;
-      }
-      if (decision.action === 'defer') {
-        summary.orphanTasksDeferred += 1;
-        continue;
-      }
-      if (decision.action !== 'delete_orphan') {
-        summary.orphanTasksDeferred += 1;
-        continue;
-      }
-
-      await admin.storage().bucket().file(decision.storagePath).delete({ ignoreNotFound: true });
-      await taskSnap.ref.delete();
-      summary.orphanTasksDeleted += 1;
+      if (result.action === 'cleaned') summary.pendingMediaCleaned += 1;
+      else if (result.action === 'preserve') summary.pendingMediaPreserved += 1;
+      else if (result.action === 'defer') summary.pendingMediaDeferred += 1;
+      else summary.pendingMediaSkipped += 1;
     } catch (error) {
-      summary.orphanTasksFailed += 1;
-      logger.error('Orphaned moderation preview cleanup failed.', {
-        cleanupTaskId: taskSnap.id,
+      summary.pendingMediaFailed += 1;
+      logger.error('Pending moderation preview cleanup failed.', {
+        uploadId: docSnap.id,
         error: error?.message || String(error),
       });
     }
@@ -6671,7 +6952,10 @@ const finalizeDeletedPublishedPostMedia = async ({ postId, postData = {} } = {})
         publishStatus: 'deleted_pending_cleanup',
         deletedPostAt: FieldValue.serverTimestamp(),
         previewCleanupRetryScheduledAt: FieldValue.serverTimestamp(),
-        previewRetentionExpiresAt: Timestamp.fromMillis(Date.now()),
+        mediaState: 'cleanup_pending',
+        mediaCleanupAfter: Timestamp.fromMillis(Date.now()),
+        mediaCleanupReason: 'deleted_post_cleanup_failed',
+        previewRetentionExpiresAt: FieldValue.delete(),
       }, { merge: true });
     } catch (scheduleError) {
       logger.error('Deleted published preview retry scheduling failed.', {
@@ -6694,6 +6978,11 @@ const finalizeDeletedPublishedPostMedia = async ({ postId, postData = {} } = {})
     previewUrl: FieldValue.delete(),
     imageRef: FieldValue.delete(),
     storagePath: FieldValue.delete(),
+    mediaState: 'deleted',
+    mediaCleanupAfter: FieldValue.delete(),
+    mediaCleanupReason: FieldValue.delete(),
+    mediaCleanupClaimId: FieldValue.delete(),
+    mediaCleanupClaimedAt: FieldValue.delete(),
     previewCleanedAt: FieldValue.serverTimestamp(),
     previewRetentionExpiresAt: FieldValue.delete(),
     previewExpiryClaimId: FieldValue.delete(),
@@ -6744,6 +7033,11 @@ export const onModerationUploadDiscarded = onDocumentUpdated({
     previewUrl: FieldValue.delete(),
     imageRef: FieldValue.delete(),
     storagePath: FieldValue.delete(),
+    mediaState: 'deleted',
+    mediaCleanupAfter: FieldValue.delete(),
+    mediaCleanupReason: FieldValue.delete(),
+    mediaCleanupClaimId: FieldValue.delete(),
+    mediaCleanupClaimedAt: FieldValue.delete(),
     previewCleanedAt: FieldValue.serverTimestamp(),
     previewRetentionExpiresAt: FieldValue.delete(),
     previewExpiryClaimId: FieldValue.delete(),

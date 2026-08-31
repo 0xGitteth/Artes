@@ -453,7 +453,21 @@ test('moderation and moderator claim writes serialize registry reads with produc
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));
   assert.match(moderate, /runTransaction[^]*isKnownCodexDevActorUid\(\{ db, uid: userId, transaction \}\)[^]*transaction\.create\(reviewRef/);
-  assert.match(moderate, /runTransaction[^]*!isCodexActor && await isKnownCodexDevActorUid[^]*transaction\.create\(uploadRef/);
+  const mediaAnchor = moderate.slice(
+    moderate.indexOf("const uploadRef = db.collection('uploads').doc();"),
+    moderate.indexOf('if (reviewCaseId && uploadId)'),
+  );
+  const anchorTransaction = mediaAnchor.indexOf('await db.runTransaction');
+  const anchorRegistryGuard = mediaAnchor.indexOf('await isKnownCodexDevActorUid({ db, uid: userId, transaction })', anchorTransaction);
+  const anchorCreate = mediaAnchor.indexOf('transaction.create(uploadRef', anchorTransaction);
+  assert.ok(anchorTransaction !== -1 && anchorTransaction < anchorRegistryGuard && anchorRegistryGuard < anchorCreate,
+    'durable upload anchor serializes the historical-registry read before creation');
+  const finalizationTransaction = mediaAnchor.indexOf('await db.runTransaction', anchorCreate);
+  const finalizationRegistryGuard = mediaAnchor.indexOf('await isKnownCodexDevActorUid({ db, uid: userId, transaction })', finalizationTransaction);
+  const suppressionCleanup = mediaAnchor.indexOf("mediaCleanupReason: 'historical_registry_suppressed'", finalizationRegistryGuard);
+  const readyMutation = mediaAnchor.indexOf("mediaState: 'ready'", suppressionCleanup);
+  assert.ok(finalizationTransaction < finalizationRegistryGuard && finalizationRegistryGuard < suppressionCleanup && suppressionCleanup < readyMutation,
+    'post-Storage finalization rechecks the registry before either cleanup scheduling or ready state');
   const approve = source.slice(source.indexOf('export const moderatorApproveClaimRequest'), source.indexOf('export const getVouchRequests'));
   assert.match(approve, /denyActorUid: requestedByUid/);
   assert.match(approve, /freshRequestSnap[^]*isKnownCodexDevActorUid\(\{ db, uid: freshRequestedByUid, transaction \}\)/);
@@ -484,10 +498,20 @@ test('latest historical-registry races are guarded at their final authoritative 
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const moderate = section('export const moderateImage', 'export const isModerator');
-  const suppression = moderate.indexOf('uploadSuppressedByHistoricalRegistry = true');
-  const previewDelete = moderate.indexOf("file(persistedPreview.storagePath).delete({ ignoreNotFound: true })");
-  assert.ok(suppression < previewDelete, 'only authoritative historical suppression triggers preview cleanup');
-  assert.match(moderate, /previewCreatedByRequest && persistedPreview\?\.storagePath/);
+  const mediaAnchorStart = moderate.indexOf("const uploadRef = db.collection('uploads').doc();");
+  const mediaAnchorEnd = moderate.indexOf('if (reviewCaseId && uploadId)', mediaAnchorStart);
+  const mediaAnchor = moderate.slice(mediaAnchorStart, mediaAnchorEnd);
+  const finalizationStart = mediaAnchor.indexOf('await db.runTransaction', mediaAnchor.indexOf('transaction.create(uploadRef'));
+  const finalRegistryGuard = mediaAnchor.indexOf('await isKnownCodexDevActorUid({ db, uid: userId, transaction })', finalizationStart);
+  const cleanupPending = mediaAnchor.indexOf("mediaState: 'cleanup_pending'", finalRegistryGuard);
+  const historicalCleanupReason = mediaAnchor.indexOf("mediaCleanupReason: 'historical_registry_suppressed'", cleanupPending);
+  const readyState = mediaAnchor.indexOf("mediaState: 'ready'", historicalCleanupReason);
+  assert.ok(mediaAnchorStart !== -1 && finalizationStart !== -1 && finalRegistryGuard < cleanupPending
+    && cleanupPending < historicalCleanupReason && historicalCleanupReason < readyState,
+    'late historical denial is serialized before ready state and hands cleanup to the upload anchor');
+  assert.match(mediaAnchor, /finalizationOutcome === 'suppressed'[\s\S]*uploadSuppressedByHistoricalRegistry = true[\s\S]*persistedPreview = null/);
+  assert.doesNotMatch(mediaAnchor, /file\(persistedPreview\.storagePath\)\.delete/,
+    'request path must not bypass upload-owned cleanup authority with a direct Storage delete');
 
   const report = section('export const reportPost', 'export const requestUploadReviewCase');
   assert.ok(report.indexOf('db.runTransaction') < report.indexOf('transaction.create(reviewRef'));

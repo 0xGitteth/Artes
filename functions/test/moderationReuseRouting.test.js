@@ -31,6 +31,14 @@ test('only successful contract-validated caches from the active Gemini prompt ar
   assert.equal(isReusableModerationCache({ geminiDiagnostics: reusableDiagnostics }, 'gemini_moderation_v2'), true);
 });
 
+test('explicit pending or cleanup media is never reusable as moderation evidence', () => {
+  for (const mediaState of ['pending', 'cleanup_pending', 'deleted']) {
+    assert.equal(isReusableModerationCache({ mediaState, geminiDiagnostics: reusableDiagnostics }, 'gemini_moderation_v2'), false);
+  }
+  assert.equal(isReusableModerationCache({ mediaState: 'ready', geminiDiagnostics: reusableDiagnostics }, 'gemini_moderation_v2'), true);
+  assert.equal(isReusableModerationCache({ geminiDiagnostics: reusableDiagnostics }, 'gemini_moderation_v2'), true, 'legacy cache without mediaState remains compatible');
+});
+
 test('cache reuse is fenced by the current moderation generation', () => {
   assert.equal(isReusableModerationCache({
     moderationGeneration: 2,

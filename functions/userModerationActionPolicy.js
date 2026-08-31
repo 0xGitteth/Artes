@@ -11,6 +11,8 @@ export function requiresMessageIdForAction(action) {
 }
 
 export function canPublishUpload(upload = {}) {
+  const mediaState = String(upload?.mediaState || '').trim();
+  if (mediaState && mediaState !== 'ready') return false;
   if (upload?.requiresUploaderAcceptance === true) return false;
 
   const reviewStatus = String(upload?.reviewStatus || '').trim();

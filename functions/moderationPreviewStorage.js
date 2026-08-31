@@ -28,6 +28,30 @@ const KNOWN_EXPIRABLE_PUBLICATION_STATUSES = new Set([
   'expired',
 ]);
 
+const KNOWN_MEDIA_STATES = new Set(['pending', 'ready', 'cleanup_pending', 'deleted']);
+
+const timestampToMillis = (value) => {
+  if (!value) return null;
+  if (typeof value.toMillis === 'function') {
+    const millis = value.toMillis();
+    return Number.isFinite(millis) ? millis : null;
+  }
+  if (value instanceof Date) {
+    const millis = value.getTime();
+    return Number.isFinite(millis) ? millis : null;
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'object') {
+    const seconds = Number(value.seconds ?? value._seconds);
+    const nanoseconds = Number(value.nanoseconds ?? value._nanoseconds ?? 0);
+    if (Number.isFinite(seconds) && Number.isFinite(nanoseconds)) {
+      return (seconds * 1000) + Math.floor(nanoseconds / 1_000_000);
+    }
+  }
+  const parsed = Date.parse(String(value));
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
 export const resolveOwnedModerationPreviewStoragePath = (upload = {}) => {
   const ownerUid = pickString(upload?.userId, upload?.uploaderUid, upload?.ownerUid, upload?.userUid);
   if (!ownerUid || ownerUid.includes('/')) return null;
@@ -45,6 +69,57 @@ export const resolveOwnedModerationPreviewStoragePath = (upload = {}) => {
   return storagePath;
 };
 
+export const resolveModerationPreviewMediaState = (uploadData = {}) => {
+  const explicitState = normalizeStatus(uploadData?.mediaState);
+  if (explicitState) return KNOWN_MEDIA_STATES.has(explicitState) ? explicitState : 'unknown';
+  return resolveOwnedModerationPreviewStoragePath(uploadData) ? 'legacy_ready' : 'none';
+};
+
+export const getModerationPendingMediaCleanupDecision = ({
+  uploadId,
+  uploadData = {},
+  nowMs = Date.now(),
+} = {}) => {
+  const normalizedUploadId = pickString(uploadId);
+  if (!normalizedUploadId || normalizedUploadId.includes('/')) {
+    return { action: 'defer', reason: 'invalid_upload_id' };
+  }
+
+  const mediaState = resolveModerationPreviewMediaState(uploadData);
+  if (mediaState === 'ready' || mediaState === 'deleted') {
+    return { action: 'clear_schedule', reason: 'media_state_terminal_or_ready' };
+  }
+  if (mediaState === 'legacy_ready' || mediaState === 'none') {
+    return { action: 'skip', reason: 'not_pending_media' };
+  }
+  if (mediaState === 'unknown') {
+    return { action: 'defer', reason: 'unknown_media_state' };
+  }
+  if (mediaState !== 'pending' && mediaState !== 'cleanup_pending') {
+    return { action: 'defer', reason: 'unsupported_media_state' };
+  }
+
+  const storagePath = resolveOwnedModerationPreviewStoragePath(uploadData);
+  if (!storagePath) return { action: 'defer', reason: 'invalid_owned_preview' };
+  const filename = storagePath.split('/')[2] || '';
+  if (!filename.startsWith(`${normalizedUploadId}.`)) {
+    return { action: 'defer', reason: 'upload_storage_binding_mismatch', storagePath };
+  }
+
+  const cleanupAfterMs = timestampToMillis(uploadData?.mediaCleanupAfter);
+  if (!Number.isFinite(cleanupAfterMs)) {
+    return { action: 'defer', reason: 'missing_cleanup_schedule', storagePath };
+  }
+  if (cleanupAfterMs > Number(nowMs)) {
+    return { action: 'skip', reason: 'not_due', storagePath };
+  }
+
+  return {
+    action: 'cleanup',
+    reason: mediaState === 'pending' ? 'pending_upload_abandoned' : 'cleanup_retry_due',
+    storagePath,
+  };
+};
 
 export const getOperationalModerationPreviewReviewCaseId = (uploadData = {}) => (
   pickString(uploadData?.reviewCaseId)
@@ -71,39 +146,6 @@ export const isOperationalModerationPreviewReviewCase = ({
   return referencedUploadIds.has(normalizedUploadId);
 };
 
-export const getModerationPreviewCleanupTaskDecision = ({
-  taskId,
-  taskData = {},
-  uploadExists = false,
-  uploadData = {},
-} = {}) => {
-  const normalizedTaskId = pickString(taskId);
-  const uploadId = pickString(taskData?.uploadId);
-  const ownerUid = pickString(taskData?.ownerUid);
-  const storagePath = resolveOwnedModerationPreviewStoragePath({
-    userId: ownerUid,
-    storagePath: taskData?.storagePath,
-  });
-  if (!normalizedTaskId || !uploadId || normalizedTaskId !== uploadId || !ownerUid || !storagePath) {
-    return { action: 'drop_task', reason: 'invalid_cleanup_anchor' };
-  }
-
-  if (!uploadExists) {
-    return { action: 'delete_orphan', reason: 'upload_missing', storagePath };
-  }
-
-  const uploadOwnerUid = pickString(uploadData?.userId, uploadData?.uploaderUid, uploadData?.ownerUid, uploadData?.userUid);
-  const uploadStoragePath = resolveOwnedModerationPreviewStoragePath(uploadData);
-  if (uploadOwnerUid === ownerUid && uploadStoragePath === storagePath) {
-    return { action: 'preserve_upload', reason: 'upload_owns_preview', storagePath };
-  }
-
-  // A server-owned task that disagrees with an existing upload is not enough
-  // proof to delete media. Keep it for operator inspection rather than risking
-  // a valid upload object.
-  return { action: 'defer', reason: 'upload_binding_mismatch', storagePath };
-};
-
 export const getModerationPreviewRetentionDecision = ({
   uploadData = {},
   productionPostExists = false,
@@ -115,6 +157,14 @@ export const getModerationPreviewRetentionDecision = ({
   const storagePath = resolveOwnedModerationPreviewStoragePath(uploadData);
   if (!storagePath) {
     return { action: 'clear_retention', reason: 'no_owned_preview' };
+  }
+
+  const mediaState = resolveModerationPreviewMediaState(uploadData);
+  if (mediaState === 'deleted') {
+    return { action: 'clear_retention', reason: 'media_already_deleted' };
+  }
+  if (mediaState === 'pending' || mediaState === 'cleanup_pending' || mediaState === 'unknown') {
+    return { action: 'defer', reason: 'media_not_ready', storagePath };
   }
 
   if (productionPostExists || codexDevPostExists) {
@@ -131,8 +181,7 @@ export const getModerationPreviewRetentionDecision = ({
     return { action: 'preserve', reason: 'published_state', storagePath };
   }
 
-  // A post-deletion cleanup failure is an explicit terminal media state. Do not
-  // let stale review metadata defer cleanup once the post itself is gone.
+  // Legacy recovery path. New media cleanup uses mediaState/mediaCleanupAfter.
   if (publicationStatus === 'deleted_pending_cleanup') {
     return { action: 'expire', reason: 'post_deleted_cleanup_pending', storagePath };
   }

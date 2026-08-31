@@ -28,7 +28,8 @@ test('garbage collection claims expiration transactionally before deleting media
 });
 
 test('active reviews and drafts are rechecked instead of blindly deleted', () => {
-  assert.ok(indexSource.includes('getModerationPreviewReviewCaseIds(uploadData)'));
+  assert.ok(indexSource.includes('getOperationalModerationPreviewReviewCaseId(uploadData)'));
+  assert.ok(indexSource.includes('isOperationalModerationPreviewReviewCase({'));
   assert.ok(indexSource.includes("publicationStatus === 'draft'"));
   assert.ok(indexSource.includes("collection('drafts').doc(draftId)"));
   assert.ok(indexSource.includes('draftMatchesUpload'));
@@ -40,7 +41,7 @@ test('draft and publication lifecycle refresh or remove retention metadata delib
   assert.ok(indexSource.includes("publishStatus: 'draft'"));
   assert.ok(indexSource.includes("publishStatus: 'published'"));
   assert.ok(indexSource.includes('previewRetentionExpiresAt: FieldValue.delete()'));
-  assert.ok(indexSource.includes('previewRetentionExpiresAt: Timestamp.fromMillis(Date.now())'));
+  assert.ok(indexSource.includes('mediaCleanupAfter: Timestamp.fromMillis(Date.now())'));
 });
 
 test('published-race recovery keeps referenced media instead of deleting it', () => {

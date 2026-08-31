@@ -1,6 +1,6 @@
 # Artes moderation state machine
 
-Status: canonical implementation contract for the moderation-policy-v2 branch.
+Status: canonical implementation contract for the moderation architecture simplification PR.
 
 ## Goal
 

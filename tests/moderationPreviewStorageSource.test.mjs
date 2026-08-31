@@ -6,7 +6,9 @@ const indexSource = fs.readFileSync(new URL('../functions/index.js', import.meta
 const rulesSource = fs.readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
 
 test('moderation preview lifecycle cleans failed persistence, upload deletion and user discard', () => {
-  assert.ok(indexSource.includes('Unpersisted moderation preview cleanup failed.'));
+  assert.ok(indexSource.includes("mediaState: 'pending'"));
+  assert.ok(indexSource.includes("mediaState: 'cleanup_pending'"));
+  assert.ok(indexSource.includes("mediaState: 'ready'"));
   assert.ok(indexSource.includes("document: 'uploads/{uploadId}'"));
   assert.ok(indexSource.includes('export const onModerationUploadDeleted = onDocumentDeleted'));
   assert.ok(indexSource.includes('export const onModerationUploadDiscarded = onDocumentUpdated'));

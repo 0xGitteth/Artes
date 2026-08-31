@@ -30,14 +30,22 @@ test('authoritative upload transitions persist canonical moderation and publicat
   assert.match(indexSource, /publicationState: PUBLICATION_STATES\.expired/);
 });
 
-test('user actions no longer make direct reviewStatus approval decisions', () => {
+test('user actions use canonical lifecycle helpers in preflight and authoritative transaction', () => {
   const start = indexSource.indexOf('export const userModerationAction');
   const end = indexSource.indexOf('export const getContributorByAliasCallable', start);
   const actionSource = indexSource.slice(start, end);
+  assert.match(actionSource, /canPublishUpload\(upload\)/);
+  assert.match(actionSource, /canSaveDraftUpload\(upload\)/);
+  assert.match(actionSource, /canManageApprovedUploadPrompt\(upload\)/);
   assert.match(actionSource, /canPublishUpload\(latestUpload\)/);
   assert.match(actionSource, /canSaveDraftUpload\(latestUpload\)/);
   assert.match(actionSource, /canManageApprovedUploadPrompt\(latestUpload\)/);
+  assert.match(actionSource, /latestPublicationLifecycle = resolveUploadPublicationState\(latestUpload\)/);
+  assert.match(actionSource, /latestPublicationLifecycle\.state === PUBLICATION_STATES\.published/);
+  assert.doesNotMatch(actionSource, /upload\?\.reviewStatus !== 'approved'/);
   assert.doesNotMatch(actionSource, /latestUpload\?\.reviewStatus !== 'approved'/);
+  assert.doesNotMatch(actionSource, /initialPublicationStatus/);
+  assert.doesNotMatch(actionSource, /latestPublicationStatus/);
 });
 
 test('correction rejection mirrors its newly active operational review case', () => {
@@ -55,4 +63,17 @@ test('media retention consumes canonical lifecycle while active-review retention
   assert.match(retentionSource, /publication\.state === PUBLICATION_STATES\.published/);
   assert.match(retentionSource, /normalizedReviewCaseStatuses\.includes\('inReview'\)/);
   assert.match(retentionSource, /moderationMustResolve/);
+});
+
+
+test('discard cleanup trigger follows canonical publication state without bypassing media cleanup authority', () => {
+  const start = indexSource.indexOf('export const onModerationUploadDiscarded');
+  const end = indexSource.indexOf('export const onProductionPostDeleted', start);
+  const triggerSource = indexSource.slice(start, end);
+  assert.match(triggerSource, /resolveUploadPublicationState\(before\)/);
+  assert.match(triggerSource, /resolveUploadPublicationState\(after\)/);
+  assert.match(triggerSource, /afterPublication\.state !== PUBLICATION_STATES\.discarded/);
+  assert.match(triggerSource, /afterMediaState && afterMediaState !== 'ready'/);
+  assert.doesNotMatch(triggerSource, /beforeStatus/);
+  assert.doesNotMatch(triggerSource, /afterStatus/);
 });

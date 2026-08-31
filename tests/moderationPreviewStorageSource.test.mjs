@@ -12,7 +12,9 @@ test('moderation preview lifecycle cleans failed persistence, upload deletion an
   assert.ok(indexSource.includes("document: 'uploads/{uploadId}'"));
   assert.ok(indexSource.includes('export const onModerationUploadDeleted = onDocumentDeleted'));
   assert.ok(indexSource.includes('export const onModerationUploadDiscarded = onDocumentUpdated'));
-  assert.ok(indexSource.includes("afterStatus !== 'discarded'"));
+  assert.ok(indexSource.includes('afterPublication = resolveUploadPublicationState(after)'));
+  assert.ok(indexSource.includes('afterPublication.state !== PUBLICATION_STATES.discarded'));
+  assert.ok(indexSource.includes("afterMediaState && afterMediaState !== 'ready'"));
 });
 
 test('preview deletion preserves media while a deterministic post still references the upload id', () => {
@@ -37,7 +39,9 @@ test('post deletion finalizes matching published upload media without cross-owne
 });
 
 test('a deleted published post cannot be resurrected from stale upload state', () => {
-  assert.ok(indexSource.includes("latestPublicationStatus === 'published' && !latestPostSnap?.exists"));
+  assert.ok(indexSource.includes('latestPublicationLifecycle = resolveUploadPublicationState(latestUpload)'));
+  assert.ok(indexSource.includes('latestPublicationLifecycle.state === PUBLICATION_STATES.published'));
+  assert.ok(indexSource.includes('&& !latestPostSnap?.exists'));
   assert.ok(indexSource.includes("error.code = 'published_post_deleted'"));
 });
 

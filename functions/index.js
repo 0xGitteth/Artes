@@ -4340,17 +4340,13 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       res.status(409).json({ error: 'Upload is not approved' });
       return;
     }
-    if (action === 'saveDraft' && upload?.reviewStatus !== 'approved') {
-      res.status(409).json({ error: 'Upload is not approved' });
+    if (action === 'saveDraft' && !canSaveDraftUpload(upload)) {
+      res.status(409).json({ error: 'Upload is not approved for draft persistence' });
       return;
     }
-    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && upload?.reviewStatus !== 'approved') {
-      res.status(409).json({ error: 'Upload is not approved' });
-      return;
-    }
-    const initialPublicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
-    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && initialPublicationStatus === 'published') {
-      res.status(409).json({ error: 'Upload is already published' });
+    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload')
+      && !canManageApprovedUploadPrompt(upload)) {
+      res.status(409).json({ error: 'Upload publication prompt is no longer actionable' });
       return;
     }
     if (action === 'acceptCorrection' || action === 'rejectCorrection') {
@@ -4439,8 +4435,11 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
           }));
         }
 
-        const latestPublicationStatus = String(latestUpload?.publicationStatus || latestUpload?.publishStatus || '').trim();
-        if (postRef && latestPublicationStatus === 'published' && !latestPostSnap?.exists) {
+        const latestPublicationLifecycle = resolveUploadPublicationState(latestUpload);
+        if (postRef
+          && latestPublicationLifecycle.valid
+          && latestPublicationLifecycle.state === PUBLICATION_STATES.published
+          && !latestPostSnap?.exists) {
           const error = new Error('Published post was deleted and cannot be recreated from stale upload state');
           error.status = 409;
           error.code = 'published_post_deleted';
@@ -7046,9 +7045,15 @@ export const onModerationUploadDiscarded = onDocumentUpdated({
 }, async (event) => {
   const before = event.data?.before?.data?.() || {};
   const after = event.data?.after?.data?.() || {};
-  const beforeStatus = String(before?.publicationStatus || before?.publishStatus || '').trim();
-  const afterStatus = String(after?.publicationStatus || after?.publishStatus || '').trim();
-  if (afterStatus !== 'discarded' || beforeStatus === 'discarded') return;
+  const beforePublication = resolveUploadPublicationState(before);
+  const afterPublication = resolveUploadPublicationState(after);
+  const afterMediaState = String(after?.mediaState || '').trim();
+  if (!afterPublication.valid || afterPublication.state !== PUBLICATION_STATES.discarded) return;
+  if (beforePublication.valid && beforePublication.state === PUBLICATION_STATES.discarded) return;
+  // User-discard cleanup should only claim media that is still ready (or a
+  // legacy upload without mediaState). Post-deletion cleanup failures already
+  // use cleanup_pending and must stay on the upload-owned retry path.
+  if (afterMediaState && afterMediaState !== 'ready') return;
 
   const cleanup = await cleanupModerationPreviewForUpload({
     uploadId: event.params.uploadId,

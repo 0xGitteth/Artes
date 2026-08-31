@@ -92,4 +92,56 @@ test_source = replace_once(
 )
 test_path.write_text(test_source, encoding='utf-8')
 
+
+# The media-anchor refactor deliberately moves upload creation before Storage.
+# Keep the Codex isolation regression semantic: both the durable-anchor create
+# and the post-Storage finalization must serialize the historical-registry read
+# with their authoritative mutation. A late denial schedules upload-owned
+# cleanup instead of directly deleting Storage from the request path.
+codex_test_path = Path('tests/codexDevIsolation.test.mjs')
+codex_source = codex_test_path.read_text(encoding='utf-8')
+codex_source = replace_once(
+    codex_source,
+    "  assert.match(moderate, /runTransaction[^]*!isCodexActor && await isKnownCodexDevActorUid[^]*transaction\\.create\\(uploadRef/);\n",
+    "  const mediaAnchor = moderate.slice(\n"
+    "    moderate.indexOf(\"const uploadRef = db.collection('uploads').doc();\"),\n"
+    "    moderate.indexOf('if (reviewCaseId && uploadId)'),\n"
+    "  );\n"
+    "  const anchorTransaction = mediaAnchor.indexOf('await db.runTransaction');\n"
+    "  const anchorRegistryGuard = mediaAnchor.indexOf('await isKnownCodexDevActorUid({ db, uid: userId, transaction })', anchorTransaction);\n"
+    "  const anchorCreate = mediaAnchor.indexOf('transaction.create(uploadRef', anchorTransaction);\n"
+    "  assert.ok(anchorTransaction !== -1 && anchorTransaction < anchorRegistryGuard && anchorRegistryGuard < anchorCreate,\n"
+    "    'durable upload anchor serializes the historical-registry read before creation');\n"
+    "  const finalizationTransaction = mediaAnchor.indexOf('await db.runTransaction', anchorCreate);\n"
+    "  const finalizationRegistryGuard = mediaAnchor.indexOf('await isKnownCodexDevActorUid({ db, uid: userId, transaction })', finalizationTransaction);\n"
+    "  const suppressionCleanup = mediaAnchor.indexOf(\"mediaCleanupReason: 'historical_registry_suppressed'\", finalizationRegistryGuard);\n"
+    "  const readyMutation = mediaAnchor.indexOf(\"mediaState: 'ready'\", suppressionCleanup);\n"
+    "  assert.ok(finalizationTransaction < finalizationRegistryGuard && finalizationRegistryGuard < suppressionCleanup && suppressionCleanup < readyMutation,\n"
+    "    'post-Storage finalization rechecks the registry before either cleanup scheduling or ready state');\n",
+    'Codex media-anchor transaction assertion',
+)
+codex_source = replace_once(
+    codex_source,
+    "  const suppression = moderate.indexOf('uploadSuppressedByHistoricalRegistry = true');\n"
+    "  const previewDelete = moderate.indexOf(\"file(persistedPreview.storagePath).delete({ ignoreNotFound: true })\");\n"
+    "  assert.ok(suppression < previewDelete, 'only authoritative historical suppression triggers preview cleanup');\n"
+    "  assert.match(moderate, /previewCreatedByRequest && persistedPreview\\?\\.storagePath/);\n",
+    "  const mediaAnchorStart = moderate.indexOf(\"const uploadRef = db.collection('uploads').doc();\");\n"
+    "  const mediaAnchorEnd = moderate.indexOf('if (reviewCaseId && uploadId)', mediaAnchorStart);\n"
+    "  const mediaAnchor = moderate.slice(mediaAnchorStart, mediaAnchorEnd);\n"
+    "  const finalizationStart = mediaAnchor.indexOf('await db.runTransaction', mediaAnchor.indexOf('transaction.create(uploadRef'));\n"
+    "  const finalRegistryGuard = mediaAnchor.indexOf('await isKnownCodexDevActorUid({ db, uid: userId, transaction })', finalizationStart);\n"
+    "  const cleanupPending = mediaAnchor.indexOf(\"mediaState: 'cleanup_pending'\", finalRegistryGuard);\n"
+    "  const historicalCleanupReason = mediaAnchor.indexOf(\"mediaCleanupReason: 'historical_registry_suppressed'\", cleanupPending);\n"
+    "  const readyState = mediaAnchor.indexOf(\"mediaState: 'ready'\", historicalCleanupReason);\n"
+    "  assert.ok(mediaAnchorStart !== -1 && finalizationStart !== -1 && finalRegistryGuard < cleanupPending\n"
+    "    && cleanupPending < historicalCleanupReason && historicalCleanupReason < readyState,\n"
+    "    'late historical denial is serialized before ready state and hands cleanup to the upload anchor');\n"
+    "  assert.match(mediaAnchor, /finalizationOutcome === 'suppressed'[\\s\\S]*uploadSuppressedByHistoricalRegistry = true[\\s\\S]*persistedPreview = null/);\n"
+    "  assert.doesNotMatch(mediaAnchor, /file\\(persistedPreview\\.storagePath\\)\\.delete/,\n"
+    "    'request path must not bypass upload-owned cleanup authority with a direct Storage delete');\n",
+    'Codex late suppression media cleanup assertion',
+)
+codex_test_path.write_text(codex_source, encoding='utf-8')
+
 print('queue snapshot consistency and semantic source assertions applied')

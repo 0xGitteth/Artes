@@ -8,6 +8,7 @@ on:
       - .github/workflows/temp_validate_canonical_moderation_lifecycle.yml
       - temp_apply_canonical_moderation_lifecycle.py
       - temp_fix_canonical_lifecycle_harness.py
+      - temp_fix_canonical_lifecycle_source_assertions.py
   workflow_dispatch:
 
 permissions:
@@ -47,6 +48,9 @@ jobs:
 
       - name: Harden legacy cleanup and correction compatibility
         run: python temp_fix_canonical_lifecycle_harness.py
+
+      - name: Align canonical lifecycle source assertions
+        run: python temp_fix_canonical_lifecycle_source_assertions.py
 
       - name: Verify canonical lifecycle source invariants
         shell: bash
@@ -141,7 +145,7 @@ jobs:
 
       - name: Remove temporary harness and commit validated product changes
         run: |
-          rm -f temp_apply_canonical_moderation_lifecycle.py temp_fix_canonical_lifecycle_harness.py .github/workflows/temp_validate_canonical_moderation_lifecycle.yml
+          rm -f temp_apply_canonical_moderation_lifecycle.py temp_fix_canonical_lifecycle_harness.py temp_fix_canonical_lifecycle_source_assertions.py .github/workflows/temp_validate_canonical_moderation_lifecycle.yml
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"

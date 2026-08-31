@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { Timestamp } from 'firebase-admin/firestore';
 import {
   isModerationGenerationCurrent,
   collectModerationFingerprintEntries,
@@ -188,7 +187,10 @@ test('JSON consent timestamps and managed-profile publication stay on the persis
     seconds: 1_700_000_000,
     nanoseconds: 123,
   };
-  assert.equal(rehydratePersistedPublicationTimestamp(transported) instanceof Timestamp, true);
+  const hydratedTimestamp = rehydratePersistedPublicationTimestamp(transported);
+  assert.equal(typeof hydratedTimestamp?.toMillis, 'function');
+  assert.equal(hydratedTimestamp?.seconds, 1_700_000_000);
+  assert.equal(hydratedTimestamp?.nanoseconds, 123);
 
   const author = validateModerationPublicationAuthorProfile({
     userId: 'owner-a',

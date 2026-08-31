@@ -12,6 +12,8 @@
     "start": "node server/index.js",
     "test:rules": "firebase emulators:exec --only firestore,storage \"node tests/firestore.postsServerPublication.rules.test.mjs && node tests/firestore.publicUsers.rules.test.mjs && node tests/firestore.codexMarkerIsolation.rules.test.mjs && node tests/storage.profileImages.rules.test.mjs && node tests/storage.uploads.rules.test.mjs\"",
     "cleanup-upload-history": "node functions/scripts/cleanupUploadFingerprintHistory.js",
+    "moderation:migrate-legacy-overrides": "node functions/scripts/migrateLegacyFreshEvaluationOverrides.js --apply",
+    "moderation:verify-legacy-overrides": "node functions/scripts/migrateLegacyFreshEvaluationOverrides.js --verify",
     "test": "npm run test:rules",
     "backfill-public-users": "node functions/scripts/backfillPublicUsersFromUsers.js",
     "test:backfill-public-users": "node tests/backfillPublicUsersFromUsers.test.mjs",

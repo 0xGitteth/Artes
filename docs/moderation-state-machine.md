@@ -180,6 +180,14 @@ The deployment gate must confirm that no valid outstanding legacy override lacks
 
 New runtime code must not depend on the newer branch-only boundary/floor arrays having ever reached production.
 
+
+Migration utility in this PR:
+
+- `npm run moderation:migrate-legacy-overrides` scans all outstanding legacy overrides, recovers represented fingerprint scopes from the override/upload/review evidence, and raises only missing scope generations to one. It deliberately does **not** clear legacy overrides.
+- `npm run moderation:verify-legacy-overrides` is the read-only deployment gate. It fails while any represented valid scope is still below generation one and reports unresolved legacy records separately for inspection.
+
+Run the migration explicitly against the intended environment, then run the verification command before enabling the new runtime in production. The PR validation suite tests the migration logic but never executes this data migration against production.
+
 ## Required adversarial regression matrix
 
 The implementation is not complete until tests cover at least:

@@ -52,6 +52,20 @@ export function getUserPublicPostPublishDecision(user = null) {
   return { allowed: true, code: 'allowed' };
 }
 
+export function getServerPublicPostPublishDecision({ user = null, tokenClaims = null } = {}) {
+  const userDecision = getUserPublicPostPublishDecision(user);
+  if (!userDecision.allowed) return userDecision;
+  if (!tokenClaims || typeof tokenClaims !== 'object') {
+    return { allowed: false, code: 'adult_verification_required' };
+  }
+  if (tokenClaims.email_verified !== true
+    || tokenClaims.idvVerified !== true
+    || tokenClaims.isAdult !== true) {
+    return { allowed: false, code: 'adult_verification_required' };
+  }
+  return { allowed: true, code: 'allowed' };
+}
+
 export function canUserPublishPublicPost(user = null) {
   return getUserPublicPostPublishDecision(user).allowed;
 }

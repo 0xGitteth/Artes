@@ -160,7 +160,11 @@ test('durable media ordering surfaces Storage/finalization failures and schedule
     reason: 'pending_upload_abandoned',
     storagePath: 'moderation-previews/u1/upload-a.jpg',
   });
-  assert.match(indexSource, /export const cleanupPendingModerationMedia = onSchedule\(\{/);
+  assert.match(indexSource, /export const cleanupExpiredModerationPreviews = onSchedule\(\{/);
+  const cleanupSchedulerStart = indexSource.indexOf('export const cleanupExpiredModerationPreviews = onSchedule({');
+  assert.ok(cleanupSchedulerStart >= 0);
+  assert.ok(indexSource.indexOf('getModerationPendingMediaCleanupDecision({', cleanupSchedulerStart) > cleanupSchedulerStart,
+    'the scheduled cleanup run also applies pending-media cleanup decisions');
 });
 
 test('correction provenance stays separate from operational preview-retention authority', () => {

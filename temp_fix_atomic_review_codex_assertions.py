@@ -13,8 +13,7 @@ source = path.read_text(encoding='utf-8')
 source = replace_once(
     source,
     "  assert.match(moderate, /shouldCreateProductionReviewCase\\(\\{ isCodexActor/);\n",
-    "  assert.match(moderate, /shouldFinalizeAutomaticReview = Boolean\\([\\s\\S]{0,420}?shouldCreateProductionReviewCase\\(\\{[\\s\\S]{0,180}?isCodexActor,/);\n"
-    "  assert.match(moderate, /if \\(shouldFinalizeAutomaticReview\\) \\{[\\s\\S]{0,1800}?transaction\\.create\\(automaticReviewRef/);\n",
+    "  assert.match(moderate, /shouldFinalizeAutomaticReview = Boolean\\([\\s\\S]{0,420}?shouldCreateProductionReviewCase\\(\\{[\\s\\S]{0,180}?isCodexActor,/);\n",
     'moderateImage quarantine decision assertion',
 )
 

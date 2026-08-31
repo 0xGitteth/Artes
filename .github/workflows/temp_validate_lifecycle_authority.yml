@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/temp_validate_lifecycle_authority.yml
       - temp_unify_client_server_lifecycle_authority.py
+      - temp_fix_lifecycle_source_assertions.py
   workflow_dispatch:
 
 permissions:
@@ -44,6 +45,9 @@ jobs:
       - name: Apply lifecycle authority refactor
         run: python temp_unify_client_server_lifecycle_authority.py
 
+      - name: Align lifecycle source assertions
+        run: python temp_fix_lifecycle_source_assertions.py
+
       - name: Verify focused lifecycle regressions
         shell: bash
         run: |
@@ -51,6 +55,8 @@ jobs:
           node --test \
             functions/test/moderationLifecycle.test.js \
             functions/test/userModerationActionPolicy.test.js \
+            tests/moderationPr378P2Source.test.mjs \
+            tests/moderationPreviewRetentionSelfReviewSource.test.mjs \
             tests/moderationUploadLifecycle.logic.test.mjs \
             tests/pendingApprovedUpload.logic.test.mjs \
             tests/moderationPublicationRouting.logic.test.mjs \
@@ -126,7 +132,7 @@ jobs:
 
       - name: Remove temporary harness and commit validated product changes
         run: |
-          rm -f temp_unify_client_server_lifecycle_authority.py .github/workflows/temp_validate_lifecycle_authority.yml
+          rm -f temp_unify_client_server_lifecycle_authority.py temp_fix_lifecycle_source_assertions.py .github/workflows/temp_validate_lifecycle_authority.yml
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"

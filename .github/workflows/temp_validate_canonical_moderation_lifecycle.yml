@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/temp_validate_canonical_moderation_lifecycle.yml
       - temp_apply_canonical_moderation_lifecycle.py
+      - temp_fix_canonical_lifecycle_harness.py
   workflow_dispatch:
 
 permissions:
@@ -43,6 +44,9 @@ jobs:
 
       - name: Apply canonical lifecycle refactor
         run: python temp_apply_canonical_moderation_lifecycle.py
+
+      - name: Harden legacy cleanup and correction compatibility
+        run: python temp_fix_canonical_lifecycle_harness.py
 
       - name: Verify canonical lifecycle source invariants
         shell: bash
@@ -123,6 +127,7 @@ jobs:
           grep -q "publicationState: PUBLICATION_STATES.published" functions/index.js
           grep -q "isUploadLifecyclePublishable" functions/userModerationActionPolicy.js
           grep -q "isUploadLifecycleCorrectionPending" functions/uploaderCorrection.js
+          grep -q "resolveUploadPublicationState" functions/moderationPreviewStorage.js
           ! grep -q "latestUpload?.reviewStatus !== 'approved'" functions/index.js
 
       - name: Preserve validation failure output
@@ -136,7 +141,7 @@ jobs:
 
       - name: Remove temporary harness and commit validated product changes
         run: |
-          rm -f temp_apply_canonical_moderation_lifecycle.py .github/workflows/temp_validate_canonical_moderation_lifecycle.yml
+          rm -f temp_apply_canonical_moderation_lifecycle.py temp_fix_canonical_lifecycle_harness.py .github/workflows/temp_validate_canonical_moderation_lifecycle.yml
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"

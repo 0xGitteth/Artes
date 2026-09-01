@@ -1,0 +1,40 @@
+name: Temporary validate moderation 35819
+
+on:
+  push:
+    branches:
+      - temp/validate-moderation-35819
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+      - name: Moderation policy suite
+        run: npm run test:moderation-policy
+      - name: All Functions tests
+        run: node --test functions/test/*.test.js
+      - name: Moderation architecture and client regressions
+        run: node --test tests/moderation*.test.mjs tests/moderation-taxonomy-fixture.test.mjs
+      - name: Firestore and Storage rules
+        run: npm run test:rules
+      - name: Codex Dev isolation
+        run: npm run test:codex-dev-isolation
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+      - name: Structural diff check
+        run: git diff --check

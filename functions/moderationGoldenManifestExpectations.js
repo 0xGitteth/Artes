@@ -159,9 +159,13 @@ export const validateGoldenExpansionManifest = (manifest) => {
     if (!['release_gate', 'confidence_expansion'].includes(item?.tier)) {
       failures.push(`${prefix}.tier must be release_gate or confidence_expansion`);
     }
-    if ((item?.status === 'existing' || item?.status === 'ready') && !item?.file) {
-      failures.push(`${prefix}.file is required when status=${item?.status}`);
+
+    const hasLocalSource = typeof item?.file === 'string' && item.file.trim().length > 0;
+    const hasGcsSource = typeof item?.gcsUri === 'string' && item.gcsUri.startsWith('gs://');
+    if ((item?.status === 'existing' || item?.status === 'ready') && !hasLocalSource && !hasGcsSource) {
+      failures.push(`${prefix} requires file or gs:// gcsUri when status=${item?.status}`);
     }
+    if (hasLocalSource && hasGcsSource) failures.push(`${prefix} must use only one fixture source`);
     if (!item?.expected || typeof item.expected !== 'object') failures.push(`${prefix}.expected is required`);
   });
 

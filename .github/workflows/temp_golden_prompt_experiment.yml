@@ -45,7 +45,7 @@ jobs:
           workload_identity_provider: projects/712508684856/locations/global/workloadIdentityPools/github-actions/providers/github
           service_account: artes-moderation-golden@artes-staging.iam.gserviceaccount.com
 
-      - name: Run SAFE live classifier case
+      - name: Run full live golden classifier experiment
         env:
           ENABLE_GEMINI_CLASSIFIER: 'true'
           GOOGLE_CLOUD_PROJECT: artes-staging
@@ -53,9 +53,33 @@ jobs:
           GEMINI_MODEL: gemini-2.5-flash
         run: |
           node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
           import { readFile } from 'node:fs/promises';
           import { runGeminiClassifier } from './functions/geminiModerationClassifier.js';
-          const file = 'testing/moderation_goldens_v1/images/safe/SAFE_01.jpg';
-          const result = await runGeminiClassifier({ buffer: await readFile(file), mimeType: 'image/jpeg' });
-          console.log(JSON.stringify({ id: 'SAFE_01', parsed: result.parsed, diagnostics: result.diagnostics }, null, 2));
+          const cases = [
+            ['SAFE_01','testing/moderation_goldens_v1/images/safe/SAFE_01.jpg'],
+            ['BOUDOIR_01','testing/moderation_goldens_v1/images/boudoir/BOUDOIR_01.jpg'],
+            ['BORDERLINE_01','testing/moderation_goldens_v1/images/borderline/BORDERLINE_01.jpg'],
+            ['EXPLICIT_01','testing/moderation_goldens_v1/images/explicit/EXPLICIT_01.jpg'],
+          ];
+          const byId = {};
+          for (const [id, file] of cases) {
+            const result = await runGeminiClassifier({ buffer: await readFile(file), mimeType: 'image/jpeg' });
+            byId[id] = result;
+            console.log(JSON.stringify({ id, parsed: result.parsed, diagnostics: result.diagnostics }, null, 2));
+          }
+          const safe = byId.SAFE_01.parsed;
+          assert.equal(safe?.adultDecision, 'none');
+          assert.equal(safe?.forbiddenReasons?.length, 0);
+          assert.ok(safe?.triggers?.some((t) => t.trigger === 'adultEroticSuggestive'));
+          assert.ok(safe?.triggers?.some((t) => t.trigger === 'kinkBdsm'));
+          const boudoir = byId.BOUDOIR_01;
+          assert.ok(boudoir.parsed || boudoir.diagnostics?.safetyBlocked === true);
+          const borderline = byId.BORDERLINE_01.parsed;
+          assert.equal(borderline?.adultDecision, 'borderline');
+          assert.ok(!borderline?.forbiddenReasons?.includes('sexualExplicit'));
+          const explicit = byId.EXPLICIT_01.parsed;
+          assert.equal(explicit?.adultDecision, 'explicit');
+          assert.ok(explicit?.forbiddenReasons?.includes('sexualExplicit'));
+          console.log('FULL_EXPERIMENT_ASSERTIONS_PASSED');
           NODE

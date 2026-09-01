@@ -34,12 +34,16 @@ jobs:
           s = p.read_text()
           covered_needle = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
           covered_repl = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'adultDecision describes nudity/explicitness only; adult-only sexual context is represented by triggers.',\n  '- Covered lingerie/underwear remains adultDecision=\\\"none\\\" when breasts, nipples, genitals and buttocks are not exposed and the image does not create the visual appearance of nudity.',\n  '- BDSM equipment, rope, restraints, fetish styling, erotic posing or sexual suggestion NEVER by themselves count as implied nudity. They may require adultEroticSuggestive/kinkBdsm triggers while adultDecision stays \\\"none\\\".',\n  '- Do not infer nudity merely because a clothed BDSM/kink image is sexual or fetishistic.',\n  '- Use adultDecision=\\\"borderline\\\" only when the visible body/clothing/crop itself shows or clearly creates the appearance of nudity under the explicit nudity rules above.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
-          explicit_needle = "  '- \\\"explicit\\\": a clear sexual act is visible, such as penetration, oral sex, masturbation, genital stimulation, or another unambiguous sex act.',\n  '',\n  'For Artes, classify the following as adultDecision=\\\"borderline\\\" when no explicit sexual act is visible:',"
-          explicit_repl = "  '- \\\"explicit\\\": a clear sexual act is visible, such as penetration, oral sex, masturbation, genital stimulation, or another unambiguous sex act.',\n  '- Visible genitals alone are NOT a sexual act. A close-up of exposed genitals, including visible natural moisture or a droplet/fluid, stays \\\"borderline\\\" unless the image also visibly shows touching/stimulation, penetration, oral contact, masturbation or another unambiguous sex act.',\n  '- Do not infer masturbation, stimulation or penetration from arousal, wetness, bodily fluid, pose, framing or a genital close-up alone. The act itself must be visibly evidenced.',\n  '',\n  'For Artes, classify the following as adultDecision=\\\"borderline\\\" when no explicit sexual act is visible:',"
-          if covered_needle not in s or explicit_needle not in s:
-              raise SystemExit('prompt insertion point not found')
+          explicit_line = '''  '- "explicit": a clear sexual act is visible, such as penetration, oral sex, masturbation, genital stimulation, or another unambiguous sex act.', '''.rstrip()
+          explicit_add = '''
+  '- Visible genitals alone are NOT a sexual act. A close-up of exposed genitals, including visible natural moisture or a droplet/fluid, stays "borderline" unless the image also visibly shows touching/stimulation, penetration, oral contact, masturbation or another unambiguous sex act.',
+  '- Do not infer masturbation, stimulation or penetration from arousal, wetness, bodily fluid, pose, framing or a genital close-up alone. The act itself must be visibly evidenced.', '''.rstrip()
+          if covered_needle not in s:
+              raise SystemExit('covered prompt insertion point not found')
+          if explicit_line not in s:
+              raise SystemExit('explicit prompt insertion point not found')
           s = s.replace(covered_needle, covered_repl, 1)
-          s = s.replace(explicit_needle, explicit_repl, 1)
+          s = s.replace(explicit_line, explicit_line + explicit_add, 1)
           p.write_text(s)
           PY
 

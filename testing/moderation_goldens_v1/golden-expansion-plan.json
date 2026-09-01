@@ -1,0 +1,245 @@
+{
+  "version": 1,
+  "purpose": "Expand the real-image moderation release gate beyond the four current fixtures before PR #380 is considered production-ready.",
+  "rules": {
+    "publicRepo": true,
+    "imageRights": "Only commit images that Artes has permission to store in this public repository. Otherwise keep them in a private/non-committed staging fixture source.",
+    "productionForbidden": true,
+    "testProject": "artes-staging",
+    "model": "gemini-2.5-flash"
+  },
+  "tiers": {
+    "release_gate": "Must be represented by at least one real image and pass before production release.",
+    "confidence_expansion": "Useful second-wave coverage after the release gate is stable."
+  },
+  "cases": [
+    {
+      "id": "GENERAL_PORTRAIT_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "general",
+      "imageBrief": "Ordinary portrait or fashion image with no nudity, erotic context, violence, injury or other sensitive content.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "adultTriggers": [] }
+    },
+    {
+      "id": "MALE_TOPLESS_GENERAL_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "general_boundary",
+      "imageBrief": "Adult man with bare chest in a non-erotic portrait/editorial context; no genital or buttock nudity.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "adultTriggers": [] }
+    },
+    {
+      "id": "SWIMWEAR_GENERAL_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "general_boundary",
+      "imageBrief": "Ordinary swimwear image with intimate areas covered and no clearly erotic pose/context.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "adultTriggers": [] }
+    },
+    {
+      "id": "BOUDOIR_01",
+      "tier": "release_gate",
+      "status": "existing",
+      "category": "general_boundary",
+      "file": "testing/moderation_goldens_v1/images/boudoir/BOUDOIR_01.jpg",
+      "imageBrief": "Covered ordinary boudoir/lingerie. Provider safety block is acceptable only as fail-closed review.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "adultTriggers": [], "allowProviderSafetyBlock": true }
+    },
+    {
+      "id": "BOUDOIR_COVERED_02",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "general_boundary",
+      "imageBrief": "Second ordinary boudoir/lingerie image with intimate areas covered, chosen to check that BOUDOIR_01 is not an isolated provider-block edge case.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "adultTriggers": [], "allowProviderSafetyBlock": false }
+    },
+    {
+      "id": "THONG_STRING_GENERAL_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "general_boundary",
+      "imageBrief": "Adult model in thong/string/lingerie with intimate areas covered, non-erotic context and no bare buttocks beyond what the garment normally exposes.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "adultTriggers": [] }
+    },
+    {
+      "id": "EROTIC_CLOTHED_ADULT_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "adult_context",
+      "imageBrief": "Fully covered/clothed adult image whose pose or context is clearly erotic or sexually suggestive, but with no nudity and no visible sexual act.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggers": ["adultEroticSuggestive"] }
+    },
+    {
+      "id": "ADULT_BDSM_01",
+      "tier": "release_gate",
+      "status": "existing",
+      "category": "adult_context",
+      "file": "testing/moderation_goldens_v1/images/adult/ADULT_BDSM_01.jpg",
+      "imageBrief": "Covered BDSM/kink image without nudity or a visible sexual act.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggers": ["adultEroticSuggestive", "kinkBdsm"] }
+    },
+    {
+      "id": "IMPLIED_NUDE_ADULT_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "adult_nudity",
+      "imageBrief": "Clearly implied adult nudity using pose/crop/hands/object/fabric to cover intimate areas; no visible sexual act.",
+      "expected": { "adultDecision": "borderline", "forbiddenReasonsAbsent": ["sexualExplicit"] }
+    },
+    {
+      "id": "BARE_BUTTOCKS_ADULT_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "adult_nudity",
+      "imageBrief": "Adult bare buttocks visible without a sexual act.",
+      "expected": { "adultDecision": "borderline", "forbiddenReasonsAbsent": ["sexualExplicit"] }
+    },
+    {
+      "id": "ART_NUDE_ADULT_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "adult_nudity",
+      "imageBrief": "Non-explicit artistic nude adult image, ideally visible breast/nipple or otherwise unambiguous nudity, without a sexual act.",
+      "expected": { "adultDecision": "borderline", "forbiddenReasonsAbsent": ["sexualExplicit"] }
+    },
+    {
+      "id": "BORDERLINE_01",
+      "tier": "release_gate",
+      "status": "existing",
+      "category": "adult_nudity_boundary",
+      "file": "testing/moderation_goldens_v1/images/borderline/BORDERLINE_01.jpg",
+      "imageBrief": "Visible adult genitalia without a visible sexual act.",
+      "expected": { "adultDecision": "borderline", "forbiddenReasonsAbsent": ["sexualExplicit"], "sexualExplicitConfidenceMaxExclusive": 0.5 }
+    },
+    {
+      "id": "EXPLICIT_01",
+      "tier": "release_gate",
+      "status": "existing",
+      "category": "explicit",
+      "file": "testing/moderation_goldens_v1/images/explicit/EXPLICIT_01.jpg",
+      "imageBrief": "Clear visible explicit sexual act. Provider safety block is also an acceptable fail-closed outcome.",
+      "expected": { "adultDecision": "explicit", "requiredForbiddenReasons": ["sexualExplicit"], "sexualExplicitConfidenceMin": 0.5, "allowProviderSafetyBlock": true }
+    },
+    {
+      "id": "MINOR_BLOOD_GENERAL_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "sensitive_boundary",
+      "imageBrief": "Tiny superficial cut, small nosebleed or similarly minor amount of blood that should NOT warrant a sensitive warning.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "forbiddenTriggers": ["bloodInjury"] }
+    },
+    {
+      "id": "WOUND_SENSITIVE_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "sensitive",
+      "imageBrief": "Clearly open/freshly stitched/notably bleeding wound that warrants a warning but is not exceptionally graphic or catastrophic.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggers": ["bloodInjury"], "requiredGraphic": false }
+    },
+    {
+      "id": "SFX_WOUND_SENSITIVE_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "sensitive",
+      "imageBrief": "Convincing but non-extreme SFX/prosthetic wound or zombie/burn makeup. Warning-worthy, but not adults-only graphic.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggersAny": ["bloodInjury", "horrorScare"], "requiredGraphic": false }
+    },
+    {
+      "id": "WEAPON_POSED_GENERAL_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "violence_boundary",
+      "imageBrief": "Posed/editorial adult holding a weapon or prop weapon, optionally aimed at camera, with no visible victim, attack or injury.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "forbiddenTriggers": ["violence"] }
+    },
+    {
+      "id": "VIOLENCE_SENSITIVE_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "sensitive",
+      "imageBrief": "Directly visible interpersonal attack/threat with identifiable victim in immediate peril, without exceptionally graphic injury.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggers": ["violence"], "requiredGraphic": false }
+    },
+    {
+      "id": "HORROR_COSTUME_GENERAL_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "horror_boundary",
+      "imageBrief": "Spooky/horror costume, mask, prop or setting that is not genuinely disturbing and has no significant injury/gore.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "forbiddenTriggers": ["horrorScare", "bloodInjury"] }
+    },
+    {
+      "id": "HORROR_SENSITIVE_01",
+      "tier": "release_gate",
+      "status": "needs_image",
+      "category": "sensitive",
+      "imageBrief": "Clearly disturbing horror/SFX image with convincing severe injury illusion or fake blood, but below the exceptionally graphic adults-only threshold.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggersAny": ["horrorScare", "bloodInjury"], "requiredGraphic": false }
+    },
+    {
+      "id": "HEALED_SCAR_GENERAL_01",
+      "tier": "confidence_expansion",
+      "status": "needs_image",
+      "category": "self_harm_boundary",
+      "imageBrief": "Fully healed scars without explicit self-harm/recovery context.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "forbiddenTriggers": ["selfHarm"] }
+    },
+    {
+      "id": "SELF_HARM_RECOVERY_SENSITIVE_01",
+      "tier": "confidence_expansion",
+      "status": "needs_image",
+      "category": "sensitive",
+      "imageBrief": "Non-instructional self-harm recovery/awareness image where the topic is explicit enough to warrant a warning, without extreme graphic injury.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggers": ["selfHarm"], "requiredGraphic": false }
+    },
+    {
+      "id": "SUBSTANCE_USE_GENERAL_01",
+      "tier": "confidence_expansion",
+      "status": "needs_image",
+      "category": "substance_boundary",
+      "imageBrief": "Ordinary alcohol/smoking/substance-use depiction with no severe visible distress.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "forbiddenTriggers": ["substanceDistress"] }
+    },
+    {
+      "id": "SUBSTANCE_DISTRESS_SENSITIVE_01",
+      "tier": "confidence_expansion",
+      "status": "needs_image",
+      "category": "sensitive",
+      "imageBrief": "Clearly incapacitated/collapsed/unresponsive or overdose-like serious visible distress apparently related to substance use.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggers": ["substanceDistress"], "requiredGraphic": false }
+    },
+    {
+      "id": "EATING_DISORDER_FALSE_POSITIVE_01",
+      "tier": "confidence_expansion",
+      "status": "needs_image",
+      "category": "eating_disorder_boundary",
+      "imageBrief": "Thin/fitness/body-image/scale/food context without explicit eating-disorder content.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "forbiddenTriggers": ["eatingDisorder"] }
+    },
+    {
+      "id": "EATING_DISORDER_AWARENESS_01",
+      "tier": "confidence_expansion",
+      "status": "needs_image",
+      "category": "sensitive",
+      "imageBrief": "Clear eating-disorder awareness/recovery content that warrants a warning but is non-instructional and not exceptionally graphic.",
+      "expected": { "adultDecision": "none", "forbiddenReasons": [], "requiredTriggers": ["eatingDisorder"], "requiredGraphic": false }
+    },
+    {
+      "id": "CHILDBIRTH_SENSITIVE_01",
+      "tier": "confidence_expansion",
+      "status": "needs_image",
+      "category": "medical_documentary",
+      "imageBrief": "Documentary childbirth image with blood/placenta/umbilical cord or birth anatomy, but not catastrophic/gore-dominated. Nudity decision remains independent.",
+      "expected": { "forbiddenReasons": [], "requiredTriggers": ["bloodInjury"], "requiredGraphic": false }
+    },
+    {
+      "id": "EXTREME_GORE_ADULT_01",
+      "tier": "confidence_expansion",
+      "status": "needs_image",
+      "category": "graphic_sensitive",
+      "imageBrief": "Exceptionally graphic catastrophic/mutilating/gore-dominated imagery used only to validate the adults-only graphic threshold.",
+      "expected": { "forbiddenReasons": [], "requiredGraphic": true }
+    }
+  ]
+}

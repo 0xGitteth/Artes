@@ -19,7 +19,7 @@ const cases = [
   { id: 'SWIMWEAR_GENERAL_02', type: 'general' },
 ];
 
-let failures = 0;
+let nonPass = 0;
 for (const item of cases) {
   const file = `/tmp/artes-user-goldens/${item.id}.jpg`;
   const result = await runGeminiClassifier({ buffer: await readFile(file), mimeType: 'image/jpeg' });
@@ -72,9 +72,9 @@ for (const item of cases) {
     }
   }
 
-  if (status === 'FAIL') failures += 1;
+  if (status !== 'PASS') nonPass += 1;
   console.log(`${status.padEnd(14)} ${item.id}${notes.length ? ` | ${notes.join('; ')}` : ''}`);
 }
 
-console.log(`\nResult: ${cases.length - failures}/${cases.length} without expectation failures.`);
-if (failures) process.exitCode = 1;
+console.log(`\nResult: ${cases.length - nonPass}/${cases.length} PASS; ${nonPass} require attention.`);
+if (nonPass) process.exitCode = 1;

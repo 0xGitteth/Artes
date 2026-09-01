@@ -35,6 +35,15 @@ test('resolved upload moderator decisions become learning candidates without cha
   assert.equal(result.sourceEvidence.mismatchType, 'wrong_taxonomy');
 });
 
+test('taxonomy-correction actions remain visible even when legacy mismatch analytics says none', () => {
+  const result = assessModerationExampleCandidate({
+    ...validExample(),
+    analytics: { mismatchType: 'none' },
+  });
+  assert.equal(result.candidate, true);
+  assert.equal(result.sourceEvidence.mismatchType, 'wrong_taxonomy');
+});
+
 test('report cases and unresolved correction flows are excluded from the candidate pool', () => {
   const report = assessModerationExampleCandidate({ ...validExample(), caseType: 'report' });
   const correction = assessModerationExampleCandidate({

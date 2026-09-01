@@ -1,0 +1,36 @@
+name: Temporary extract golden thumbnails
+
+on:
+  push:
+    branches:
+      - temp/golden-staging-d58
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  thumbnails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+      - name: Create thumbnails
+        run: |
+          node --input-type=module <<'NODE'
+          import sharp from './functions/node_modules/sharp/lib/index.js';
+          await sharp('testing/moderation_goldens_v1/images/safe/SAFE_01.jpg').resize({ width: 320 }).jpeg({ quality: 55 }).toFile('/tmp/SAFE_01_thumb.jpg');
+          await sharp('testing/moderation_goldens_v1/images/boudoir/BOUDOIR_01.jpg').resize({ width: 320 }).jpeg({ quality: 55 }).toFile('/tmp/BOUDOIR_01_thumb.jpg');
+          NODE
+      - name: Emit thumbnails as base64
+        run: |
+          echo 'SAFE_BEGIN'
+          base64 -w0 /tmp/SAFE_01_thumb.jpg
+          echo
+          echo 'SAFE_END'
+          echo 'BOUDOIR_BEGIN'
+          base64 -w0 /tmp/BOUDOIR_01_thumb.jpg
+          echo
+          echo 'BOUDOIR_END'

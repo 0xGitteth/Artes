@@ -1,0 +1,27 @@
+name: Temporary golden expansion static validation
+
+on:
+  push:
+    branches:
+      - temp/moderation-golden-expansion
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+      - name: Expanded expectation unit tests
+        run: node --test functions/test/moderationGoldenManifestExpectations.test.js
+      - name: Expanded golden dry run
+        run: npm run golden:moderation-v2:expanded -- --dry-run

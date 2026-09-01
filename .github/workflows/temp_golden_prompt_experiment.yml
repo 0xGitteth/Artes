@@ -15,80 +15,67 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout exact moderation head
-        uses: actions/checkout@v4
-
-      - name: Set up Node 20
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Install Functions dependencies
-        run: npm ci --prefix functions
-
-      - name: Patch prompt for strict adult boundary separation
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('functions/geminiModerationContract.js')
-          s = p.read_text()
-          covered_needle = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
-          covered_repl = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'adultDecision describes nudity/explicitness only; adult-only sexual context is represented by triggers.',\n  '- Covered lingerie/underwear remains adultDecision=\\\"none\\\" when breasts, nipples, genitals and buttocks are not exposed and the image does not create the visual appearance of nudity.',\n  '- BDSM equipment, rope, restraints, fetish styling, erotic posing or sexual suggestion NEVER by themselves count as implied nudity. They may require adultEroticSuggestive/kinkBdsm triggers while adultDecision stays \\\"none\\\".',\n  '- Do not infer nudity merely because a clothed BDSM/kink image is sexual or fetishistic.',\n  '- Use adultDecision=\\\"borderline\\\" only when the visible body/clothing/crop itself shows or clearly creates the appearance of nudity under the explicit nudity rules above.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
-          explicit_line = '''  '- "explicit": a clear sexual act is visible, such as penetration, oral sex, masturbation, genital stimulation, or another unambiguous sex act.', '''.rstrip()
-          explicit_add = '''
-  '- Visible genitals alone are NOT a sexual act. A close-up of exposed genitals, including visible natural moisture or a droplet/fluid, stays "borderline" unless the image also visibly shows touching/stimulation, penetration, oral contact, masturbation or another unambiguous sex act.',
-  '- Do not infer masturbation, stimulation or penetration from arousal, wetness, bodily fluid, pose, framing or a genital close-up alone. The act itself must be visibly evidenced.', '''.rstrip()
-          if covered_needle not in s:
-              raise SystemExit('covered prompt insertion point not found')
-          if explicit_line not in s:
-              raise SystemExit('explicit prompt insertion point not found')
-          s = s.replace(covered_needle, covered_repl, 1)
-          s = s.replace(explicit_line, explicit_line + explicit_add, 1)
-          p.write_text(s)
-          PY
-
+      - run: npm ci --prefix functions
       - name: Authenticate to artes-staging
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: projects/712508684856/locations/global/workloadIdentityPools/github-actions/providers/github
           service_account: artes-moderation-golden@artes-staging.iam.gserviceaccount.com
-
-      - name: Run repeated live boundary experiment
+      - name: Run custom boundary prompt against Gemini
         env:
-          ENABLE_GEMINI_CLASSIFIER: 'true'
           GOOGLE_CLOUD_PROJECT: artes-staging
           GOOGLE_CLOUD_LOCATION: europe-west4
           GEMINI_MODEL: gemini-2.5-flash
         run: |
+          cd functions
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import { readFile } from 'node:fs/promises';
-          import { runGeminiClassifier } from './functions/geminiModerationClassifier.js';
-          const safeBuffer = await readFile('testing/moderation_goldens_v1/images/safe/SAFE_01.jpg');
-          const borderlineBuffer = await readFile('testing/moderation_goldens_v1/images/borderline/BORDERLINE_01.jpg');
-          const explicitBuffer = await readFile('testing/moderation_goldens_v1/images/explicit/EXPLICIT_01.jpg');
-          const results = [];
-          for (const [id, buffer] of [
-            ['SAFE_01', safeBuffer],
-            ['BORDERLINE_01_A', borderlineBuffer],
-            ['BORDERLINE_01_B', borderlineBuffer],
-            ['BORDERLINE_01_C', borderlineBuffer],
-            ['EXPLICIT_01', explicitBuffer],
-          ]) {
-            const result = await runGeminiClassifier({ buffer, mimeType: 'image/jpeg' });
-            results.push([id, result]);
-            console.log(JSON.stringify({ id, parsed: result.parsed, diagnostics: result.diagnostics }, null, 2));
-          }
-          const safe = results[0][1].parsed;
+          import { VertexAI } from '@google-cloud/vertexai';
+          import { buildGeminiModerationPrompt, parseGeminiModerationJson, normalizeGeminiModerationResult } from './geminiModerationContract.js';
+
+          const clarifications = `
+          MANDATORY ADULT BOUNDARY CLARIFICATIONS:
+          - adultDecision describes nudity/explicitness only; adult-only sexual context is represented separately by triggers.
+          - Covered lingerie/underwear remains adultDecision="none" when breasts, nipples, genitals and buttocks are not exposed and the image does not create the visual appearance of nudity.
+          - BDSM equipment, rope, restraints, fetish styling, erotic posing or sexual suggestion NEVER by themselves count as implied nudity. They may require adultEroticSuggestive/kinkBdsm triggers while adultDecision stays "none".
+          - Do not infer nudity merely because a clothed BDSM/kink image is sexual or fetishistic.
+          - Visible genitals alone are NOT a sexual act. A close-up of exposed genitals, including visible natural moisture or a droplet/fluid, stays adultDecision="borderline" unless the image also visibly shows touching/stimulation, penetration, oral contact, masturbation or another unambiguous sex act.
+          - Do not infer masturbation, stimulation or penetration from arousal, wetness, bodily fluid, pose, framing or a genital close-up alone. The act itself must be visibly evidenced.
+          `;
+          const prompt = `${buildGeminiModerationPrompt()}\n${clarifications}`;
+          const vertex = new VertexAI({ project: process.env.GOOGLE_CLOUD_PROJECT, location: process.env.GOOGLE_CLOUD_LOCATION });
+          const model = vertex.getGenerativeModel({ model: process.env.GEMINI_MODEL });
+
+          const classify = async (id, path) => {
+            const buffer = await readFile(path);
+            const result = await model.generateContent({
+              contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { data: buffer.toString('base64'), mimeType: 'image/jpeg' } }] }],
+              generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+            });
+            const text = result?.response?.candidates?.[0]?.content?.parts?.map((p) => p?.text || '').join('') || '';
+            const parsed = normalizeGeminiModerationResult(parseGeminiModerationJson(text));
+            console.log(JSON.stringify({ id, parsed }, null, 2));
+            return parsed;
+          };
+
+          const safe = await classify('SAFE_01', '../testing/moderation_goldens_v1/images/safe/SAFE_01.jpg');
           assert.equal(safe?.adultDecision, 'none');
           assert.ok(safe?.triggers?.some((t) => t.trigger === 'adultEroticSuggestive'));
           assert.ok(safe?.triggers?.some((t) => t.trigger === 'kinkBdsm'));
-          for (const [id, result] of results.slice(1, 4)) {
-            assert.equal(result.parsed?.adultDecision, 'borderline', `${id} should remain non-explicit nudity`);
-            assert.ok(!result.parsed?.forbiddenReasons?.includes('sexualExplicit'));
+
+          for (const suffix of ['A', 'B', 'C']) {
+            const borderline = await classify(`BORDERLINE_01_${suffix}`, '../testing/moderation_goldens_v1/images/borderline/BORDERLINE_01.jpg');
+            assert.equal(borderline?.adultDecision, 'borderline');
+            assert.ok(!borderline?.forbiddenReasons?.includes('sexualExplicit'));
           }
-          const explicit = results[4][1].parsed;
+
+          const explicit = await classify('EXPLICIT_01', '../testing/moderation_goldens_v1/images/explicit/EXPLICIT_01.jpg');
           assert.equal(explicit?.adultDecision, 'explicit');
           assert.ok(explicit?.forbiddenReasons?.includes('sexualExplicit'));
-          console.log('REPEATED_BOUNDARY_ASSERTIONS_PASSED');
+          console.log('CUSTOM_BOUNDARY_PROMPT_ASSERTIONS_PASSED');
           NODE

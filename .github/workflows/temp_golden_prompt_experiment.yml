@@ -1,0 +1,65 @@
+name: Temporary golden prompt experiment
+
+on:
+  push:
+    branches:
+      - temp/golden-prompt-experiment
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact moderation head
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Patch prompt for covered adult context separation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('functions/geminiModerationContract.js')
+          s = p.read_text()
+          needle = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
+          repl = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'adultDecision describes nudity/explicitness, not adult-only context by itself.',\n  '- If all intimate areas remain covered by opaque underwear/lingerie/swimwear and nudity is not deliberately implied, adultDecision MUST be \\\"none\\\", even when erotic/suggestive or BDSM/kink triggers apply.',\n  '- Use adultDecision=\\\"borderline\\\" only when actual nudity or deliberately implied nudity is present without an explicit sex act.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
+          if needle not in s:
+              raise SystemExit('prompt insertion point not found')
+          p.write_text(s.replace(needle, repl, 1))
+          PY
+
+      - name: Authenticate to artes-staging
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/712508684856/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: artes-moderation-golden@artes-staging.iam.gserviceaccount.com
+
+      - name: Run selected live classifier cases
+        env:
+          ENABLE_GEMINI_CLASSIFIER: 'true'
+          GOOGLE_CLOUD_PROJECT: artes-staging
+          GOOGLE_CLOUD_LOCATION: europe-west4
+          GEMINI_MODEL: gemini-2.5-flash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          import { runGeminiClassifier } from './functions/geminiModerationClassifier.js';
+          for (const [id, file] of [
+            ['SAFE_01','testing/moderation_goldens_v1/images/safe/SAFE_01.jpg'],
+            ['BOUDOIR_01','testing/moderation_goldens_v1/images/boudoir/BOUDOIR_01.jpg'],
+          ]) {
+            const result = await runGeminiClassifier({ buffer: await readFile(file), mimeType: 'image/jpeg' });
+            console.log(JSON.stringify({ id, parsed: result.parsed, diagnostics: result.diagnostics }, null, 2));
+          }
+          NODE

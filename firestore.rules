@@ -1134,6 +1134,8 @@ service cloud.firestore {
     }
 
 
+
+
     function isValidPostAuthorProfileId(profileId) {
       return profileId == request.auth.uid
         || (
@@ -1165,10 +1167,8 @@ service cloud.firestore {
 
     match /posts/{postId} {
       allow read: if true;
-      allow create: if isVerifiedAdultOrDev()
-        && !isKnownCodexProductionDenied()
-        && hasValidPostAuthorIdentityOnCreate()
-        && isPostModerationPublishAllowed(request.resource.data);
+      // New production posts are created only by the server moderation publication transaction.
+      allow create: if false;
       allow update: if isVerifiedAdultOrDev()
         && !isKnownCodexProductionDenied()
         && keepsPostAuthorIdentityOnUpdate()
@@ -1184,8 +1184,7 @@ service cloud.firestore {
           || (
             !isLegacyPostWithoutModerationProof(resource.data)
             && !isPreConsentModeratedPost(resource.data)
-            && keepsPostModerationFieldsOnUpdate()
-            && isPostModerationPublishAllowed(request.resource.data)
+            && isLegacyPostMetadataOnlyUpdate()
           )
         );
       allow delete: if isVerifiedAdultOrDev() && !isKnownCodexProductionDenied() && resource.data.authorId == request.auth.uid;

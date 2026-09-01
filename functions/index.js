@@ -4,8 +4,9 @@ import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { VertexAI } from '@google-cloud/vertexai';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
-import { onDocumentCreated, onDocumentDeleted } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 import admin from 'firebase-admin';
 import { FieldPath, FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
@@ -17,9 +18,10 @@ import {
   normalizeDomain,
 } from './websiteClaimProof.js';
 import { createDiditSession, refreshDiditSession, diditWebhook } from './didit.js';
-import { normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
-import { validateUploaderCorrectionAction } from './uploaderCorrection.js';
-import { canPublishUpload, getUserPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
+import { MODERATOR_DECISION_ACTIONS, isModeratorDecisionActionCompatible, normalizeModeratorDecisionAction, validateCorrectedTaxonomyForAction } from './moderatorDecision.js';
+import { applyAutomaticModeratorCorrectionToPostDraft, buildAcceptedCorrectionModerationState, buildModeratedPublicationTaxonomy, deriveAcceptedCorrectionAppliedTriggers, validateAcceptedCorrectionPublicationTaxonomy, validateUploaderCorrectionAction } from './uploaderCorrection.js';
+import { finalizeCorrectionReviewCasePlan, resolveCorrectionReviewReopenPlan, validateCorrectionAcceptancePlanProvenance, validateRoutedCorrectionAcceptanceProvenance } from './correctionReviewOwnership.js';
+import { canManageApprovedUploadPrompt, canPublishUpload, canSaveDraftUpload, getServerPublicPostPublishDecision, requiresMessageIdForAction } from './userModerationActionPolicy.js';
 import { runUserModerationActionMutation } from './userModerationActionIsolation.js';
 import { deleteSupportResetMessagesPageAtomically } from './supportResetIsolation.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
@@ -31,6 +33,32 @@ import {
   resolveReviewCaseUploadIds,
 } from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
+import { runGeminiClassifier as runGeminiClassifierV2 } from './geminiModerationClassifier.js';
+import { GEMINI_MODERATION_PROMPT_VERSION } from './geminiModerationContract.js';
+import { routeGeminiForbiddenReasons } from './geminiModerationRouting.js';
+import {
+  buildReusableCacheGeminiDiagnostics,
+  canRouteNearDuplicateModerationExampleAction,
+  compareModerationExampleCandidates,
+  hasMatchingReusableModerationTaxonomy,
+  isFinalModerationExampleAction,
+  isModerationExampleGenerationRouteable,
+  isNearDuplicateReuseOwnedByUploader,
+  isReusableModerationCache,
+  isUploadModerationExampleData,
+} from './moderationReuseRouting.js';
+import {
+  collectModerationFingerprintEntries,
+  collectModerationScopeKeys,
+  isModerationGenerationCurrent,
+  normalizeModerationGeneration,
+  planModerationScopeGenerationIncrement,
+  resolveModerationScopeKey,
+} from './moderationGeneration.js';
+import {
+  getModerationFreshScopeRef,
+  readModerationScopeGeneration,
+} from './moderationGenerationStore.js';
 import {
   getCodexDevLoginDecision,
   getCodexDevLoginDiagnostics,
@@ -62,13 +90,37 @@ import { createClaimInviteAtomically } from './claimInviteTransaction.js';
 import { isAvailablePersonalPublicProfile } from './publicProfileAvailability.js';
 import { applyFollowingCreatedCounters, applyFollowingDeletedCounters } from './followCounters.js';
 import { resetPersonalOnboardingAtomically } from './publicProfileUnpublish.js';
-import { findBestReusableAcrossPages, findReusableAcrossPages, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
+import { findBestReusableAcrossPages, findFirstUploadReviewCaseAcrossPages, findReusableAcrossPages, isUploadReviewCaseData, resolveCachedReviewCaseIdForUploader, reviewCaseMatchesCurrentUploadEvidence, reviewCaseMatchesFingerprint, reviewCaseReferencesUpload, selectNearReusableUpload, shouldCreateProductionReviewCase } from './uploadReuseIsolation.js';
+import { getOpenReviewCountAfterCaseExit, getReviewAccessDecision } from './reviewLifecycle.js';
+import { MODERATION_STATES, PUBLICATION_STATES, resolveModerationStateForResult, resolveUploadPublicationState } from './moderationLifecycle.js';
+import { getDeletedPublishedPostCleanupDecision, getModerationPendingMediaCleanupDecision, getModerationPreviewRetentionDecision, getOperationalModerationPreviewReviewCaseId, isOperationalModerationPreviewReviewCase, resolveOwnedModerationPreviewStoragePath } from './moderationPreviewStorage.js';
+import { buildPersistedModerationDraftState, buildPersistedPublicationConsentProof, normalizePersistedPublicationStringList, resolveTrustedModeratedImageUrl, sanitizePersistedPublicationCorrection, sanitizePersistedPublicationImageMeta } from './persistedPublication.js';
 import { cleanupCodexDevPostTrees } from './codexTestDataCleanup.js';
+import { validateModerationPublicationAuthorProfile } from './moderationPublicationAuthor.js';
 
 const suggestThreshold = 0.45;
 const forbiddenThreshold = 0.7;
 const mediumLogThreshold = 0.55;
 const codexDevLoginSecret = defineSecret('CODEX_DEV_LOGIN_SECRET');
+const configuredModerationPreviewRetentionDays = Number.parseInt(process.env.MODERATION_PREVIEW_RETENTION_DAYS || '30', 10);
+const moderationPreviewRetentionDays = Number.isFinite(configuredModerationPreviewRetentionDays)
+  && configuredModerationPreviewRetentionDays > 0
+  ? configuredModerationPreviewRetentionDays
+  : 30;
+const moderationPreviewRetentionMs = moderationPreviewRetentionDays * 24 * 60 * 60 * 1000;
+const configuredModerationPreviewGcBatchSize = Number.parseInt(process.env.MODERATION_PREVIEW_GC_BATCH_SIZE || '200', 10);
+const moderationPreviewGcBatchSize = Number.isFinite(configuredModerationPreviewGcBatchSize)
+  && configuredModerationPreviewGcBatchSize > 0
+  ? Math.min(configuredModerationPreviewGcBatchSize, 500)
+  : 200;
+const buildModerationPreviewRetentionExpiry = (nowMs = Date.now()) => Timestamp.fromMillis(
+  Number(nowMs) + moderationPreviewRetentionMs
+);
+const moderationPreviewPendingCleanupDelayMs = 24 * 60 * 60 * 1000;
+const moderationPreviewCleanupRetryMs = 6 * 60 * 60 * 1000;
+const buildModerationPreviewPendingCleanupExpiry = (nowMs = Date.now()) => Timestamp.fromMillis(
+  Number(nowMs) + moderationPreviewPendingCleanupDelayMs
+);
 
 const ADULT_ART_NUDE_TRIGGER = 'adultArtNude';
 const ADULT_EROTIC_SUGGESTIVE_TRIGGER = 'adultEroticSuggestive';
@@ -95,39 +147,31 @@ const likelihoodScores = {
 };
 
 
-const MANAGED_EXTERNAL_PROFILE_TYPES = new Set(['company', 'agency', 'collective']);
+const resolveValidatedPublicationAuthorOrThrow = (validation) => {
+  if (validation?.ok && validation.author) return validation.author;
+  const error = new Error(validation?.error || 'Publication author is not available');
+  error.status = validation?.status || 400;
+  error.code = validation?.code || 'publication_author_invalid';
+  throw error;
+};
 
 const resolveAuthorProfileForUid = async (userId, requestedProfileId) => {
   const ownerUid = String(userId || '').trim();
   const profileId = String(requestedProfileId || '').trim() || ownerUid;
-  if (!ownerUid || profileId === ownerUid) {
-    return { profileId: ownerUid, ownerUid, isPersonal: true };
+  if (ownerUid && profileId === ownerUid) {
+    return resolveValidatedPublicationAuthorOrThrow(validateModerationPublicationAuthorProfile({
+      userId: ownerUid,
+      requestedProfileId: profileId,
+    }));
   }
 
-  const profileSnap = await db.collection('profiles').doc(profileId).get();
-  if (!profileSnap.exists) {
-    const error = new Error('Het gekozen actieve profiel bestaat niet of is niet beschikbaar.');
-    error.status = 400;
-    throw error;
-  }
-  const profile = profileSnap.data() || {};
-  if (profile.ownerUid !== ownerUid) {
-    const error = new Error('Je kunt alleen publiceren namens een profiel dat je beheert.');
-    error.status = 403;
-    throw error;
-  }
-  if (profile.status !== 'active' || !MANAGED_EXTERNAL_PROFILE_TYPES.has(profile.type)) {
-    const error = new Error('Dit actieve profiel is niet beschikbaar om mee te publiceren.');
-    error.status = 400;
-    throw error;
-  }
-  return {
-    profileId,
-    ownerUid,
-    isPersonal: false,
-    displayName: String(profile.displayName || '').trim(),
-    type: profile.type,
-  };
+  const profileSnap = profileId ? await db.collection('profiles').doc(profileId).get() : null;
+  return resolveValidatedPublicationAuthorOrThrow(validateModerationPublicationAuthorProfile({
+    userId: ownerUid,
+    requestedProfileId: profileId,
+    profileExists: Boolean(profileSnap?.exists),
+    profileData: profileSnap?.exists ? (profileSnap.data() || {}) : null,
+  }));
 };
 
 const dataUrlPattern = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/;
@@ -137,7 +181,6 @@ const spidersKeywords = ['spider', 'spiders', 'insect', 'insects', 'bug', 'bugs'
 const VISION_DIAGNOSTIC_ONLY_TRIGGERS = new Set(['spidersInsects', 'needlesInjections']);
 const dhashPrefixLength = 4;
 const dhashThreshold = Number.parseInt(process.env.DHASH_HAMMING_THRESHOLD || '8', 10);
-const freshEvaluationReservationMs = Number.parseInt(process.env.FRESH_EVAL_RESERVATION_MS || '120000', 10);
 const falseAppealThreshold = Number.parseInt(process.env.FALSE_APPEAL_THRESHOLD || '2', 10);
 const cooldownDays = Number.parseInt(process.env.REVIEW_COOLDOWN_DAYS || '7', 10);
 const claimInviteExpiryMs = Number.parseInt(process.env.CLAIM_INVITE_EXPIRY_MS || `${14 * 24 * 60 * 60 * 1000}`, 10);
@@ -219,12 +262,17 @@ const MODERATION_EXAMPLE_REASON_CODES = new Set([
   'review_borderline_adult',
   'forbidden_explicit_sexual',
   'forbidden_non_consensual_context',
+  'forbidden_self_harm_instruction',
+  'forbidden_suicide_instruction',
+  'forbidden_eating_disorder_instruction',
+  'forbidden_harmful_drug_instruction',
+  'forbidden_other_safety',
   'wrong_theme_or_label',
   'unclear_ai_result',
 ]);
 const MODERATION_EXAMPLE_REASON_CODES_BY_ACTION = {
   approve: new Set(['allowed_art_nude', 'allowed_boudoir', 'allowed_non_sensitive', 'wrong_theme_or_label']),
-  reject: new Set(['forbidden_explicit_sexual', 'forbidden_non_consensual_context', 'wrong_theme_or_label']),
+  reject: new Set(['forbidden_explicit_sexual', 'forbidden_non_consensual_context', 'forbidden_self_harm_instruction', 'forbidden_suicide_instruction', 'forbidden_eating_disorder_instruction', 'forbidden_harmful_drug_instruction', 'forbidden_other_safety', 'wrong_theme_or_label']),
   queueFreshEvaluation: new Set(['review_borderline_adult', 'unclear_ai_result', 'wrong_theme_or_label']),
 };
 
@@ -946,26 +994,25 @@ const parseImageDataUrl = (image) => {
   return { buffer, mimeType };
 };
 
-const extractStoragePathFromFirebaseUrl = (url) => {
-  if (!url || typeof url !== 'string') return null;
-  try {
-    const parsed = new URL(url);
-    const objectPath = parsed.pathname.match(/\/o\/(.+)$/)?.[1];
-    if (!objectPath) return null;
-    return decodeURIComponent(objectPath);
-  } catch (_error) {
-    return null;
+const buildModerationPreviewStoragePath = ({ mimeType, userId, uploadId }) => {
+  const normalizedUserId = String(userId || '').trim();
+  const normalizedUploadId = String(uploadId || '').trim();
+  if (!normalizedUserId || normalizedUserId.includes('/') || !normalizedUploadId || normalizedUploadId.includes('/')) {
+    throw new Error('Moderation preview requires a valid owner and upload id');
   }
+  const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+  return `moderation-previews/${normalizedUserId}/${normalizedUploadId}.${extension}`;
 };
 
-const persistModerationPreview = async ({ buffer, mimeType, userId }) => {
+const persistModerationPreview = async ({ buffer, mimeType, userId, uploadId, storagePath: expectedStoragePath = null }) => {
   if (!buffer || !mimeType) return null;
-  const bucket = admin.storage().bucket();
-  const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
-  const objectId = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
-  const storagePath = `moderation-previews/${userId || 'anonymous'}/${objectId}.${extension}`;
-  const token = crypto.randomUUID();
+  const storagePath = buildModerationPreviewStoragePath({ mimeType, userId, uploadId });
+  if (expectedStoragePath && String(expectedStoragePath).trim() !== storagePath) {
+    throw new Error('Moderation preview storage binding changed');
+  }
 
+  const bucket = admin.storage().bucket();
+  const token = crypto.randomUUID();
   await bucket.file(storagePath).save(buffer, {
     contentType: mimeType,
     resumable: false,
@@ -982,6 +1029,36 @@ const persistModerationPreview = async ({ buffer, mimeType, userId }) => {
     imageUrl,
     imageRef: storagePath,
   };
+};
+
+const markModerationPreviewCleanupPending = async ({ uploadRef, reason, nowMs = Date.now() } = {}) => {
+  if (!uploadRef) return false;
+  try {
+    let marked = false;
+    await db.runTransaction(async (transaction) => {
+      const uploadSnap = await transaction.get(uploadRef);
+      if (!uploadSnap.exists) return;
+      const uploadData = uploadSnap.data() || {};
+      const mediaState = String(uploadData?.mediaState || '').trim();
+      if (mediaState !== 'pending' && mediaState !== 'cleanup_pending') return;
+      if (!resolveOwnedModerationPreviewStoragePath(uploadData)) return;
+      transaction.set(uploadRef, {
+        mediaState: 'cleanup_pending',
+        mediaCleanupAfter: Timestamp.fromMillis(Number(nowMs)),
+        mediaCleanupReason: String(reason || 'upload_not_finalized'),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      marked = true;
+    });
+    return marked;
+  } catch (error) {
+    logger.warn('Moderation preview cleanup retry could not be scheduled immediately.', {
+      uploadId: uploadRef.id,
+      reason: String(reason || ''),
+      error: error?.message || String(error),
+    });
+    return false;
+  }
 };
 
 const ensureJsonBody = (req) => {
@@ -1085,20 +1162,70 @@ const getUserModeration = async (userId) => {
 
 const findOpenReviewCase = async (userId) => {
   if (!userId) return null;
-  const snapshot = await db
-    .collection('reviewCases')
-    .where('userId', '==', userId)
-    .where('status', '==', 'inReview')
-    .limit(1)
-    .get();
-  if (snapshot.empty) return null;
-  const doc = snapshot.docs[0];
-  return { id: doc.id, data: doc.data() };
+  const doc = await findFirstUploadReviewCaseAcrossPages({
+    fetchPage: async (cursor) => {
+      let query = db
+        .collection('reviewCases')
+        .where('userId', '==', userId)
+        .where('status', '==', 'inReview')
+        .limit(20);
+      if (cursor) query = query.startAfter(cursor);
+      return (await query.get()).docs;
+    },
+  });
+  return doc ? { id: doc.id, data: doc.data() } : null;
 };
 
-const findExactUpload = async (sha256, { isCodexActor = false } = {}) => {
+
+const findOpenReviewCaseInTransaction = async ({
+  transaction,
+  userId,
+  fingerprints,
+  matchedUploadId = null,
+} = {}) => {
+  if (!transaction || !userId) return null;
+  const doc = await findFirstUploadReviewCaseAcrossPages({
+    fetchPage: async (cursor) => {
+      let query = db
+        .collection('reviewCases')
+        .where('userId', '==', userId)
+        .where('status', '==', 'inReview')
+        .limit(20);
+      if (cursor) query = query.startAfter(cursor);
+      return (await transaction.get(query)).docs;
+    },
+  });
+  if (!doc) return null;
+  const data = doc.data() || {};
+  const matchesCurrentUpload = await reviewCaseMatchesCurrentUploadEvidence({
+    reviewCaseData: data,
+    fingerprints,
+    matchedUploadId,
+    expectedOwnerUid: userId,
+    distanceBetween: hammingDistance,
+    threshold: dhashThreshold,
+    loadUpload: async (linkedUploadId) => {
+      const normalizedUploadId = String(linkedUploadId || '').trim();
+      if (!normalizedUploadId || normalizedUploadId.includes('/')) return null;
+      const linkedUploadSnap = await transaction.get(db.collection('uploads').doc(normalizedUploadId));
+      return linkedUploadSnap.exists ? (linkedUploadSnap.data() || {}) : null;
+    },
+  });
+  return {
+    id: doc.id,
+    ref: doc.ref,
+    data,
+    matchesCurrentUpload,
+  };
+};
+
+const findExactUpload = async (sha256, { isCodexActor = false, themes = [], makerTags = [], currentGeneration = 0 } = {}) => {
   const doc = await findReusableAcrossPages({
     isCodexActor,
+    isReusable: (uploadData) => (
+      isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION, currentGeneration)
+      && hasMatchingReusableModerationTaxonomy({ uploadData, themes, makerTags })
+    ),
     fetchPage: async (cursor) => {
       let query = db.collection('uploads').where('fingerprints.sha256', '==', sha256).limit(25);
       if (cursor) query = query.startAfter(cursor);
@@ -1110,39 +1237,40 @@ const findExactUpload = async (sha256, { isCodexActor = false } = {}) => {
   return { id: doc.id, data: doc.data() };
 };
 
-const FINAL_MODERATOR_ACTIONS = new Set(['approve', 'reject']);
-
-const getModerationExampleDecisionTimeMs = (exampleData = {}) => {
-  const decidedAt = resolveTimestamp(exampleData?.moderatorDecision?.decidedAt);
-  if (decidedAt) return decidedAt.getTime();
-  const createdAt = resolveTimestamp(exampleData?.provenance?.createdAt);
-  if (createdAt) return createdAt.getTime();
-  return 0;
-};
-
-const findExactModerationExample = async (sha256) => {
+const findExactModerationExample = async (sha256, currentGeneration = 0) => {
   if (!sha256) return null;
-  const snapshot = await db.collection('moderationExamples').where('fingerprints.sha256', '==', sha256).limit(25).get();
-  if (snapshot.empty) return null;
-  const ranked = snapshot.docs
-    .map((doc) => ({ id: doc.id, data: doc.data() }))
-    .sort((a, b) => {
-      const aAction = String(a?.data?.moderatorDecision?.action || '');
-      const bAction = String(b?.data?.moderatorDecision?.action || '');
-      const aFinal = FINAL_MODERATOR_ACTIONS.has(aAction) ? 1 : 0;
-      const bFinal = FINAL_MODERATOR_ACTIONS.has(bAction) ? 1 : 0;
-      if (aFinal !== bFinal) return bFinal - aFinal;
-      const timeDiff = getModerationExampleDecisionTimeMs(b.data) - getModerationExampleDecisionTimeMs(a.data);
-      if (timeDiff !== 0) return timeDiff;
-      return String(a.id).localeCompare(String(b.id));
+  let cursor = null;
+  let best = null;
+  let hasMore = true;
+  while (hasMore) {
+    let query = db.collection('moderationExamples').where('fingerprints.sha256', '==', sha256).limit(25);
+    if (cursor) query = query.startAfter(cursor);
+    const snapshot = await query.get();
+    if (snapshot.empty) break;
+    snapshot.docs.forEach((doc) => {
+      const candidate = { id: doc.id, data: doc.data() };
+      if (!isUploadModerationExampleData(candidate.data)) return;
+      if (!isModerationExampleGenerationRouteable(candidate.data, currentGeneration)) return;
+      if (!best || compareModerationExampleCandidates(candidate, best) < 0) best = candidate;
     });
-  return ranked[0] || null;
+    if (snapshot.docs.length < 25) {
+      hasMore = false;
+    } else {
+      cursor = snapshot.docs[snapshot.docs.length - 1];
+    }
+  }
+  return best;
 };
 
-const findNearDuplicateUpload = async ({ dhash, dhashPrefix }, { isCodexActor = false } = {}) => {
+const findNearDuplicateUpload = async ({ dhash, dhashPrefix }, { isCodexActor = false, themes = [], makerTags = [], userId = null, currentGeneration = 0 } = {}) => {
   if (!dhash) return null;
   return findBestReusableAcrossPages({
     isCodexActor,
+    isReusable: (uploadData) => (
+      isReusableModerationCache(uploadData, GEMINI_MODERATION_PROMPT_VERSION, currentGeneration)
+      && hasMatchingReusableModerationTaxonomy({ uploadData, themes, makerTags })
+      && isNearDuplicateReuseOwnedByUploader({ uploadData, userId })
+    ),
     fetchPage: async (cursor) => {
       let query = db.collection('uploads').where('fingerprints.dhashPrefix', '==', dhashPrefix).limit(25);
       if (cursor) query = query.startAfter(cursor);
@@ -1172,121 +1300,6 @@ const isFingerprintBlocked = (fingerprints, blockedFingerprints = []) => {
     }
   }
   return false;
-};
-
-const matchesFingerprintEntry = (fingerprints, candidate) => {
-  if (!fingerprints || !candidate) return false;
-  if (candidate?.sha256 && candidate.sha256 === fingerprints.sha256) {
-    return true;
-  }
-  if (!fingerprints.dhash || !fingerprints.dhashPrefix) return false;
-  if (candidate?.dhashPrefix !== fingerprints.dhashPrefix) return false;
-  if (!candidate?.dhash) return false;
-  const distance = hammingDistance(fingerprints.dhash, candidate.dhash);
-  return distance <= dhashThreshold;
-};
-
-const reserveFreshEvaluationOverride = async ({ userModerationRef, fingerprints }) => {
-  if (!userModerationRef || !fingerprints) return null;
-  const requestId = crypto.randomUUID();
-  let reservation = null;
-  await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(userModerationRef);
-    if (!snapshot.exists) return;
-    const data = snapshot.data() || {};
-    const overrides = Array.isArray(data.freshEvaluationOverrides)
-      ? data.freshEvaluationOverrides
-      : [];
-    const now = Date.now();
-    const matchIndex = overrides.findIndex((item) => {
-      if (!matchesFingerprintEntry(fingerprints, item)) return false;
-      const expiresAtMs = Number(item?.reservationExpiresAtMs || 0);
-      const isReserved = Boolean(item?.reservationRequestId) && expiresAtMs > now;
-      return !isReserved;
-    });
-    if (matchIndex === -1) return;
-    const nextOverrides = overrides.map((item, index) => {
-      if (index !== matchIndex) return item;
-      return {
-        ...item,
-        reservationRequestId: requestId,
-        reservationReservedAtMs: now,
-        reservationExpiresAtMs: now + freshEvaluationReservationMs,
-      };
-    });
-    transaction.set(
-      userModerationRef,
-      {
-        freshEvaluationOverrides: nextOverrides,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-    reservation = { requestId };
-  });
-  return reservation;
-};
-
-const consumeFreshEvaluationOverride = async ({ userModerationRef, fingerprints, reservationRequestId }) => {
-  if (!userModerationRef || !fingerprints || !reservationRequestId) return false;
-  let consumed = false;
-  await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(userModerationRef);
-    if (!snapshot.exists) return;
-    const data = snapshot.data() || {};
-    const overrides = Array.isArray(data.freshEvaluationOverrides)
-      ? data.freshEvaluationOverrides
-      : [];
-    const matchIndex = overrides.findIndex((item) => (
-      matchesFingerprintEntry(fingerprints, item)
-      && item?.reservationRequestId === reservationRequestId
-    ));
-    if (matchIndex === -1) return;
-    const nextOverrides = overrides.filter((_, index) => index !== matchIndex);
-    transaction.set(
-      userModerationRef,
-      {
-        freshEvaluationOverrides: nextOverrides,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-    consumed = true;
-  });
-  return consumed;
-};
-
-const releaseFreshEvaluationOverrideReservation = async ({ userModerationRef, fingerprints, reservationRequestId }) => {
-  if (!userModerationRef || !fingerprints || !reservationRequestId) return false;
-  let released = false;
-  await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(userModerationRef);
-    if (!snapshot.exists) return;
-    const data = snapshot.data() || {};
-    const overrides = Array.isArray(data.freshEvaluationOverrides)
-      ? data.freshEvaluationOverrides
-      : [];
-    const matchIndex = overrides.findIndex((item) => (
-      matchesFingerprintEntry(fingerprints, item)
-      && item?.reservationRequestId === reservationRequestId
-    ));
-    if (matchIndex === -1) return;
-    const nextOverrides = overrides.map((item, index) => {
-      if (index !== matchIndex) return item;
-      const { reservationRequestId: _a, reservationReservedAtMs: _b, reservationExpiresAtMs: _c, ...rest } = item;
-      return rest;
-    });
-    transaction.set(
-      userModerationRef,
-      {
-        freshEvaluationOverrides: nextOverrides,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-    released = true;
-  });
-  return released;
 };
 
 const extractLabelScore = (labels, keywords) => {
@@ -1504,6 +1517,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let matchedUpload = null;
   let matchedFingerprintType = null;
   let matchedModerationExample = null;
+  let matchedModerationExampleFingerprintType = null;
   let userModeration = null;
   let blockedByReport = false;
   try {
@@ -1541,49 +1555,87 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     return;
   }
 
-  let overrideReservation = null;
+  let requestModerationScope = null;
   try {
-    overrideReservation = await reserveFreshEvaluationOverride({
-      userModerationRef: userModeration?.ref,
-      fingerprints,
-    });
+    requestModerationScope = await readModerationScopeGeneration({ db, fingerprints });
   } catch (error) {
-    logger.error('Fresh evaluation override reserve mislukt.', error);
+    logger.error('Moderation generation ophalen mislukt.', error);
+    res.status(503).json({ error: 'Moderation generation is unavailable.' });
+    return;
   }
-  const skipUploadReuse = Boolean(overrideReservation);
+  if (!requestModerationScope?.scopeKey) {
+    res.status(500).json({ error: 'Moderation fingerprint scope is unavailable.' });
+    return;
+  }
+  const requestModerationGeneration = normalizeModerationGeneration(requestModerationScope.generation);
+  const normalizedMakerTags = normalizeMakerTags(makerTags);
+  const normalizedThemes = normalizeThemes(themes);
 
   try {
-    matchedModerationExample = isCodexActor ? null : await findExactModerationExample(fingerprints.sha256);
+    matchedModerationExample = isCodexActor ? null : await findExactModerationExample(fingerprints.sha256, requestModerationGeneration);
+    if (matchedModerationExample) matchedModerationExampleFingerprintType = 'sha256';
 
-    if (!skipUploadReuse) {
-      matchedUpload = await findExactUpload(fingerprints.sha256, { isCodexActor });
+    matchedUpload = await findExactUpload(fingerprints.sha256, {
+      isCodexActor,
+      themes: normalizedThemes,
+      makerTags: normalizedMakerTags,
+      currentGeneration: requestModerationGeneration,
+    });
+    if (matchedUpload) {
+      matchedFingerprintType = 'sha256';
+    }
+    if (!matchedUpload) {
+      matchedUpload = await findNearDuplicateUpload(fingerprints, {
+        isCodexActor,
+        themes: normalizedThemes,
+        makerTags: normalizedMakerTags,
+        userId,
+        currentGeneration: requestModerationGeneration,
+      });
       if (matchedUpload) {
-        matchedFingerprintType = 'sha256';
+        matchedFingerprintType = 'dhash';
       }
-      if (!matchedUpload) {
-        matchedUpload = await findNearDuplicateUpload(fingerprints, { isCodexActor });
-        if (matchedUpload) {
-          matchedFingerprintType = 'dhash';
-        }
+    }
+
+    if (!isCodexActor && !matchedModerationExample && matchedUpload && matchedFingerprintType === 'dhash') {
+      const matchedUploadSha = String(matchedUpload?.data?.fingerprints?.sha256 || '').trim();
+      if (matchedUploadSha && matchedUploadSha !== fingerprints.sha256) {
+        matchedModerationExample = await findExactModerationExample(matchedUploadSha, requestModerationGeneration);
+        if (matchedModerationExample) matchedModerationExampleFingerprintType = 'dhash';
       }
     }
 
   let cachedResult = null;
   const previousExampleAction = String(matchedModerationExample?.data?.moderatorDecision?.action || '');
-  const previousExampleIsFinalDecision = FINAL_MODERATOR_ACTIONS.has(previousExampleAction);
-  const shouldRouteByPreviousExample = Boolean(matchedModerationExample?.id) && previousExampleIsFinalDecision && !skipUploadReuse;
-  if (matchedUpload?.data) {
+  const previousExampleIsFinalDecision = isFinalModerationExampleAction(previousExampleAction);
+  const previousExampleIsNearDuplicate = matchedModerationExampleFingerprintType === 'dhash';
+  const previousExampleRouteAllowed = !previousExampleIsNearDuplicate
+    || canRouteNearDuplicateModerationExampleAction(previousExampleAction);
+  const shouldRouteByPreviousExample = Boolean(matchedModerationExample?.id)
+    && previousExampleIsFinalDecision
+    && previousExampleRouteAllowed;
+  const cachedGeminiDiagnostics = matchedUpload?.data && matchedFingerprintType === 'sha256'
+    ? buildReusableCacheGeminiDiagnostics({
+        uploadData: matchedUpload.data,
+        expectedPromptVersion: GEMINI_MODERATION_PROMPT_VERSION,
+        sourceUploadId: matchedUpload.id,
+        currentGeneration: requestModerationGeneration,
+      })
+    : null;
+  if (matchedUpload?.data && cachedGeminiDiagnostics) {
     cachedResult = {
       outcome: matchedUpload.data.outcome,
       appliedTriggers: matchedUpload.data.appliedTriggers || [],
       suggestedTriggers: matchedUpload.data.suggestedTriggers || [],
       forbiddenReasons: matchedUpload.data.forbiddenReasons || [],
-      reviewCaseId: isCodexActor ? null : (matchedUpload.data.reviewCaseId || null),
+      aiSafetySignals: matchedUpload.data.aiSafetySignals || [],
+      aiVisionLabels: matchedUpload.data.aiVisionLabels || [],
+      policyAppliedTriggers: matchedUpload.data.policyAppliedTriggers || [],
+      geminiDiagnostics: cachedGeminiDiagnostics,
+      reviewCaseId: resolveCachedReviewCaseIdForUploader({ uploadData: matchedUpload.data, userId, isCodexActor }),
     };
   }
 
-  const normalizedMakerTags = normalizeMakerTags(makerTags);
-  const normalizedThemes = normalizeThemes(themes);
   const appliedTriggers = normalizedMakerTags.map((tag) => buildTriggerRecord(tag, 1, 'makerTag'));
   const suggestedTriggers = [];
   const forbiddenReasons = [];
@@ -1676,7 +1728,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let geminiFailed = false;
   let geminiAdultDecision = null;
   let geminiSexualExplicitConfidence = 0;
-  let geminiDiagnostics = buildGeminiDiagnostics();
+  let geminiDiagnostics = buildGeminiDiagnostics(cachedGeminiDiagnostics || {});
   let explicitDecisionBranchHit = false;
   let explicitDecisionAddedForbiddenReason = false;
   let geminiDebug = {
@@ -1697,7 +1749,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   if (!cachedResult) {
     try {
       geminiAttempted = true;
-      const geminiClassifierResult = await runGeminiClassifier(parsed);
+      const geminiClassifierResult = await runGeminiClassifierV2(parsed);
       geminiResult = geminiClassifierResult?.parsed || null;
       geminiDiagnostics = buildGeminiDiagnostics({
         ...geminiDiagnostics,
@@ -1728,35 +1780,23 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
           }
         });
       }
-      if (geminiResult?.forbiddenReasons?.length) {
-        geminiResult.forbiddenReasons.forEach((reason) => {
-          if (typeof reason === 'string' && reason.trim()) {
-            const normalizedReason = reason.trim();
-            const lowerReason = normalizedReason.toLowerCase();
-            const trigger = (lowerReason.includes('sexual') || lowerReason.includes('porn') || lowerReason.includes('penetration') || lowerReason.includes('masturbation'))
-              ? INTERNAL_SEXUAL_EXPLICIT_TRIGGER
-              : 'gemini';
-            forbiddenReasons.push({ trigger, reason: normalizedReason, score: 1 });
-          }
-        });
-      }
-
       geminiAdultDecision = normalizeAdultDecision(geminiResult?.adultDecision);
       geminiSexualExplicitConfidence = Number(geminiResult?.sexualExplicitConfidence) || 0;
+      const routedGeminiForbiddenReasons = routeGeminiForbiddenReasons({
+        forbiddenReasons: geminiResult?.forbiddenReasons,
+        adultDecision: geminiAdultDecision,
+        sexualExplicitConfidence: geminiSexualExplicitConfidence,
+        forbiddenThreshold,
+        sexualExplicitTrigger: INTERNAL_SEXUAL_EXPLICIT_TRIGGER,
+      });
+      forbiddenReasons.push(...routedGeminiForbiddenReasons.records);
+      explicitDecisionAddedForbiddenReason = routedGeminiForbiddenReasons.explicitDecisionAddedForbiddenReason;
       geminiDebug = {
         ...geminiDebug,
         normalizedAdultDecision: geminiAdultDecision,
         normalizedSexualExplicitConfidence: geminiSexualExplicitConfidence,
       };
       explicitDecisionBranchHit = geminiAdultDecision === 'explicit';
-      if (explicitDecisionBranchHit && geminiSexualExplicitConfidence >= forbiddenThreshold) {
-        forbiddenReasons.push({
-          trigger: INTERNAL_SEXUAL_EXPLICIT_TRIGGER,
-          reason: 'Gemini explicit adult decision',
-          score: geminiSexualExplicitConfidence,
-        });
-        explicitDecisionAddedForbiddenReason = true;
-      }
     } catch (error) {
       geminiFailed = true;
       geminiDiagnostics = buildGeminiDiagnostics({
@@ -1836,92 +1876,66 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const finalPolicyAppliedTriggers = policyResult.policyAppliedTriggers;
   const aiVisionLabels = policyResult.aiVisionLabels;
   aiSafetySignals = policyResult.aiSafetySignals;
-  let reviewCaseId = policyResult.reviewCaseId;
+  let reviewCaseId = null;
   let uploadId = null;
   let canRequestReview = false;
   let openReviewCase = null;
   let inCooldown = false;
   let reviewCreated = false;
-
-  if (userId && shouldCreateProductionReviewCase({ isCodexActor, forbiddenReasons: finalForbiddenReasons })) {
-    try {
-      userModeration = await getUserModeration(userId);
-      const cooldownUntil = resolveTimestamp(userModeration?.data?.cooldownUntil);
-      if (cooldownUntil && cooldownUntil.getTime() > Date.now()) {
-        inCooldown = true;
-      }
-      openReviewCase = await findOpenReviewCase(userId);
-      if (openReviewCase) {
-        reviewCaseId = openReviewCase.id;
-      }
-      if (!reviewCaseId && !openReviewCase && !inCooldown) {
-        const rightsLevel = Number(userModeration?.data?.reviewRightsLevel ?? 1);
-        const openCount = Number(userModeration?.data?.openReviewCount ?? 0);
-        if (rightsLevel > 0 && openCount < 1) {
-          const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-          const reviewRef = db.collection('reviewCases').doc();
-          let persistedOrdinaryReview = false;
-          await db.runTransaction(async (transaction) => {
-            persistedOrdinaryReview = false;
-            if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
-            transaction.create(reviewRef, {
-            caseType: 'upload',
-            userId,
-            status: 'inReview',
-            decision: null,
-            fingerprints: [fingerprints],
-            linkedUploadIds: [],
-            reviewReason: 'forbiddenOutcomeAutoReview',
-            ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-            aiSummary: buildAiSummary({
-              classification: null,
-              shouldReview: null,
-              forbiddenReasons: finalForbiddenReasons,
-              appliedTriggers: finalAppliedTriggers,
-              suggestedTriggers: finalSuggestedTriggers,
-              userSelectedTaxonomy: {
-                themes: normalizedThemes,
-                triggers: normalizedMakerTags,
-              },
-              aiSuggestedTaxonomy: {
-                triggers: finalSuggestedTriggers,
-              },
-              aiSafetySignals,
-              aiVisionLabels,
-              policyAppliedTriggers: finalPolicyAppliedTriggers,
-              moderationSignals: policyResult.moderationSignals,
-            }),
-            createdAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-            });
-            transaction.set(userModeration.ref, { openReviewCount: 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-            persistedOrdinaryReview = true;
-          });
-          if (persistedOrdinaryReview) {
-            reviewCaseId = reviewRef.id;
-            reviewCreated = true;
-          }
-        }
-      }
-    } catch (error) {
-      logger.error('User moderation check mislukt.', error);
-    }
-  }
-
-  canRequestReview = !isCodexActor && finalForbiddenReasons.length > 0 && !inCooldown && !openReviewCase && !reviewCreated;
+  let hasReviewRights = true;
+  let reviewCapacityAvailable = true;
+  const policyRequiresReview = policyResult.shouldReview || policyResult.outcome === 'review';
+  const routedFinalModeratorRejection = policyResult.previousModeratorExample?.routingApplied === true
+    && ['rejectForbidden', 'reject'].includes(String(policyResult.previousModeratorExample?.action || ''));
+  const shouldFinalizeAutomaticReview = Boolean(
+    userId
+    && !routedFinalModeratorRejection
+    && shouldCreateProductionReviewCase({
+      isCodexActor,
+      forbiddenReasons: finalForbiddenReasons,
+      shouldReview: policyRequiresReview,
+    })
+  );
+  const automaticReviewRef = shouldFinalizeAutomaticReview
+    ? db.collection('reviewCases').doc()
+    : null;
+  const automaticReviewUserModerationRef = shouldFinalizeAutomaticReview
+    ? db.collection('userModeration').doc(userId)
+    : null;
+  const matchedUploadOwnerUid = String(
+    matchedUpload?.data?.uploaderUid
+    || matchedUpload?.data?.userId
+    || matchedUpload?.data?.ownerUid
+    || matchedUpload?.data?.userUid
+    || ''
+  ).trim();
+  const ownedMatchedUploadId = matchedUpload?.id
+    && matchedUploadOwnerUid === String(userId || '').trim()
+    ? matchedUpload.id
+    : null;
 
   const previousModeratorExample = policyResult.previousModeratorExample;
-  const effectiveShouldReview = policyResult.shouldReview;
+  const effectiveShouldReview = policyRequiresReview;
   const outcome = policyResult.outcome;
   const requiredThemes = policyResult.requiredThemes;
   const autoAppliedTriggers = policyResult.autoAppliedTriggers;
   const classification = policyResult.classification;
-  const userMessage = classification === 'disallowed_sexual_explicit'
-    ? 'Deze publicatie is geblokkeerd: Pornografisch / Seksueel expliciet.'
-    : requiredThemes.length > 0
+  const forbiddenOutcome = outcome === 'forbidden';
+  const publishBlocked = Boolean(policyResult.publishBlocked || forbiddenOutcome);
+  const userMessage = forbiddenOutcome
+    ? (classification === 'disallowed_sexual_explicit'
+      ? 'Deze publicatie is geblokkeerd: Pornografisch / Seksueel expliciet.'
+      : classification === 'disallowed_moderator_rejected'
+        ? 'Deze publicatie is geblokkeerd op basis van een eerdere moderatiebeslissing.'
+        : 'Deze publicatie is geblokkeerd door de safety check.')
+    : outcome === 'needsCorrection'
+      ? 'Pas de door de moderator gevraagde categoriecorrectie toe voordat je publiceert.'
+      : requiredThemes.length > 0
       ? 'Deze content is toegestaan, maar voeg eerst het thema Art Nude toe voordat je publiceert.'
       : effectiveShouldReview
-        ? 'Deze content lijkt toegestaan, maar is borderline expliciet. Vraag een review aan als je twijfelt.'
+        ? (finalForbiddenReasons.some((reason) => reason?.reason === 'sexual_explicit_uncertain')
+          ? 'Deze content kan seksueel expliciet zijn en moet eerst handmatig worden beoordeeld.'
+          : 'Deze content moet eerst handmatig worden beoordeeld voordat je kunt publiceren.')
         : autoAppliedTriggers.length > 0
           ? 'Deze content is toegestaan met 18+ labeling.'
           : 'AI-check: toegestaan. Je kunt publiceren.';
@@ -1935,6 +1949,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     canRequestReview,
     reviewCaseId,
     classification,
+    publishBlocked,
     requiredThemes,
     autoAppliedTriggers,
     shouldReview: effectiveShouldReview,
@@ -1942,129 +1957,167 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     moderationSignals: policyResult.moderationSignals,
     geminiDiagnostics,
     userSelectedTaxonomy: policyResult.userSelectedTaxonomy,
+    moderationGeneration: requestModerationGeneration,
+    moderationScopeKey: requestModerationScope.scopeKey,
+    moderatorCorrectionApplied: Boolean(policyResult.moderatorCorrectionApplied),
+    moderatorCorrectedTaxonomy: policyResult.moderatorCorrectedTaxonomy,
     aiSuggestedTaxonomy: policyResult.aiSuggestedTaxonomy,
     aiSafetySignals,
     aiVisionLabels,
     policyAppliedTriggers: finalPolicyAppliedTriggers,
   };
 
+  const uploadRef = db.collection('uploads').doc();
   let persistedPreview = null;
-  let previewCreatedByRequest = false;
   let previewField = null;
+  let uploadStubCreated = false;
+  let uploadSuppressedByHistoricalRegistry = false;
+  let plannedPreviewStoragePath = null;
   try {
-    const matchedPreviewUrl = String(
-      matchedUpload?.data?.previewUrl
-      || matchedUpload?.data?.imageUrl
-      || matchedUpload?.data?.postDraft?.imageUrl
-      || ''
-    ).trim();
+    plannedPreviewStoragePath = buildModerationPreviewStoragePath({
+      mimeType: parsed.mimeType,
+      userId,
+      uploadId: uploadRef.id,
+    });
+    const pendingCleanupAfter = buildModerationPreviewPendingCleanupExpiry();
 
-    if (matchedPreviewUrl) {
-      const matchedStoragePath = matchedUpload?.data?.storagePath
-        || matchedUpload?.data?.imageRef
-        || extractStoragePathFromFirebaseUrl(matchedPreviewUrl)
-        || null;
-      persistedPreview = {
-        imageUrl: matchedPreviewUrl,
-        previewUrl: matchedPreviewUrl,
-        storagePath: matchedStoragePath,
-        imageRef: matchedStoragePath,
-      };
-      previewField = matchedUpload?.data?.previewUrl
-        ? 'previewUrl'
-        : matchedUpload?.data?.imageUrl
-          ? 'imageUrl'
-          : 'postDraft.imageUrl';
-    } else {
-      persistedPreview = await persistModerationPreview({
-        buffer: parsed.buffer,
-        mimeType: parsed.mimeType,
-        userId,
+    // The upload is the durable media anchor. Storage is never touched until
+    // this server-owned stub has committed behind the current generation fence.
+    await db.runTransaction(async (transaction) => {
+      uploadStubCreated = false;
+      uploadSuppressedByHistoricalRegistry = false;
+      const newlyDenied = !isCodexActor
+        && await isKnownCodexDevActorUid({ db, uid: userId, transaction });
+      const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
+      if (newlyDenied) {
+        uploadSuppressedByHistoricalRegistry = true;
+        return;
+      }
+      if (freshModerationScope.generation !== requestModerationGeneration) {
+        const error = new Error('Fresh evaluation superseded this moderation request');
+        error.status = 409;
+        error.code = 'fresh_evaluation_superseded_during_request';
+        throw error;
+      }
+      transaction.create(uploadRef, {
+        userId: userId || null,
+        uploaderUid: userId || null,
+        moderationGeneration: requestModerationGeneration,
+        moderationScopeKey: requestModerationScope.scopeKey,
+        fingerprints,
+        mediaState: 'pending',
+        storagePath: plannedPreviewStoragePath,
+        imageRef: plannedPreviewStoragePath,
+        mediaCleanupAfter: pendingCleanupAfter,
+        mediaCleanupReason: 'upload_not_finalized',
+        ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
-      previewCreatedByRequest = Boolean(persistedPreview?.storagePath);
+      uploadStubCreated = true;
+    });
+
+    if (uploadStubCreated) {
+      try {
+        persistedPreview = await persistModerationPreview({
+          buffer: parsed.buffer,
+          mimeType: parsed.mimeType,
+          userId,
+          uploadId: uploadRef.id,
+          storagePath: plannedPreviewStoragePath,
+        });
+      } catch (error) {
+        await markModerationPreviewCleanupPending({
+          uploadRef,
+          reason: 'storage_write_failed',
+        });
+        throw error;
+      }
+
       if (persistedPreview?.imageUrl) {
         persistedPreview.previewUrl = persistedPreview.imageUrl;
         previewField = 'imageUrl';
       }
-    }
 
-    const uploadPayload = {
-      userId: userId || null,
-      uploaderUid: userId || null,
-      ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
-      outcome,
-      appliedTriggers: finalAppliedTriggers,
-      suggestedTriggers: finalSuggestedTriggers,
-      forbiddenReasons: finalForbiddenReasons,
-      userSelectedTaxonomy: response.userSelectedTaxonomy,
-      aiSuggestedTaxonomy: response.aiSuggestedTaxonomy,
-      aiSafetySignals: response.aiSafetySignals,
-      aiVisionLabels: response.aiVisionLabels,
-      policyAppliedTriggers: response.policyAppliedTriggers,
-      geminiDiagnostics: response.geminiDiagnostics || null,
-      reviewCaseId: reviewCaseId || null,
-      previousModeratorExample,
-      fingerprints,
-      matchedUploadId: matchedUpload?.id || null,
-      ...(persistedPreview?.imageUrl ? { imageUrl: persistedPreview.imageUrl } : {}),
-      ...(persistedPreview?.previewUrl ? { previewUrl: persistedPreview.previewUrl } : {}),
-      ...(persistedPreview?.imageRef ? { imageRef: persistedPreview.imageRef } : {}),
-      ...(persistedPreview?.storagePath ? { storagePath: persistedPreview.storagePath } : {}),
-      createdAt: FieldValue.serverTimestamp(),
-    };
-    const uploadRef = db.collection('uploads').doc();
-    let persistedUpload = false;
-    let uploadSuppressedByHistoricalRegistry = false;
-    await db.runTransaction(async (transaction) => {
-      persistedUpload = false;
-      uploadSuppressedByHistoricalRegistry = false;
-      if (!isCodexActor && await isKnownCodexDevActorUid({ db, uid: userId, transaction })) {
-        uploadSuppressedByHistoricalRegistry = true;
-        return;
-      }
-      transaction.create(uploadRef, uploadPayload);
-      persistedUpload = true;
-    });
-    uploadId = persistedUpload ? uploadRef.id : null;
+      const routedUserCorrection = outcome === 'needsCorrection'
+        && previousModeratorExample?.routingApplied === true
+        && previousModeratorExample?.action === 'requestUserCorrection'
+        && response.moderatorCorrectedTaxonomy
+        && typeof response.moderatorCorrectedTaxonomy === 'object';
+      const routedUserCorrectionTaxonomy = routedUserCorrection ? response.moderatorCorrectedTaxonomy : null;
+      const routedUserCorrectionReviewCaseId = routedUserCorrection
+        ? (matchedModerationExample?.data?.reviewCaseId || null)
+        : null;
+      const routedUserCorrectionReviewCaseOwnerUid = routedUserCorrection
+        ? (matchedModerationExample?.data?.uploaderUid || matchedModerationExample?.data?.userId || null)
+        : null;
 
-    if (uploadSuppressedByHistoricalRegistry && previewCreatedByRequest && persistedPreview?.storagePath) {
-      try {
-        await admin.storage().bucket().file(persistedPreview.storagePath).delete({ ignoreNotFound: true });
-      } catch (error) {
-        logger.error('Historically quarantined moderation preview cleanup failed.', {
-          uid: userId,
+      const uploadPayload = {
+        userId: userId || null,
+        uploaderUid: userId || null,
+        moderationGeneration: requestModerationGeneration,
+        moderationScopeKey: requestModerationScope.scopeKey,
+        publicationState: PUBLICATION_STATES.pending,
+        ...(isCodexActor ? { testActor: CODEX_DEV_ACTOR } : {}),
+        outcome,
+        classification,
+        shouldReview: effectiveShouldReview,
+        publishBlocked,
+        moderationSignals: response.moderationSignals || null,
+        appliedTriggers: finalAppliedTriggers,
+        suggestedTriggers: finalSuggestedTriggers,
+        forbiddenReasons: finalForbiddenReasons,
+        userSelectedTaxonomy: response.userSelectedTaxonomy,
+        aiSuggestedTaxonomy: response.aiSuggestedTaxonomy,
+        aiSafetySignals: response.aiSafetySignals,
+        aiVisionLabels: response.aiVisionLabels,
+        policyAppliedTriggers: response.policyAppliedTriggers,
+        geminiDiagnostics: response.geminiDiagnostics || null,
+        previousModeratorExample,
+        ...(routedUserCorrection ? {
+          correctedTaxonomy: routedUserCorrectionTaxonomy,
+          moderatorDecision: {
+            action: 'requestUserCorrection',
+            reasonCode: matchedModerationExample?.data?.moderatorDecision?.reasonCode || null,
+            correctedTaxonomy: routedUserCorrectionTaxonomy,
+            requiresUploaderAcceptance: true,
+            finalPolicyOutcome: 'allowed',
+          },
+          requiresUploaderAcceptance: true,
+          publicationStatus: 'needs_user_correction',
+          reviewStatus: 'needs_user_correction',
+          correctionReviewCaseId: routedUserCorrectionReviewCaseId,
+          correctionReviewCaseOwnerUid: routedUserCorrectionReviewCaseOwnerUid,
+        } : {}),
+        fingerprints,
+        matchedUploadId: matchedUpload?.id || null,
+        ...(persistedPreview?.imageUrl ? { imageUrl: persistedPreview.imageUrl } : {}),
+        ...(persistedPreview?.previewUrl ? { previewUrl: persistedPreview.previewUrl } : {}),
+        ...(persistedPreview?.imageRef ? { imageRef: persistedPreview.imageRef } : {}),
+        ...(persistedPreview?.storagePath ? {
           storagePath: persistedPreview.storagePath,
-          error: error?.message || String(error),
-        });
-        throw error;
+          previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
+        } : {}),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+
+      let automaticReviewUploaderSnapshot = null;
+      if (shouldFinalizeAutomaticReview) {
+        try {
+          automaticReviewUploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
+        } catch (error) {
+          logger.warn('Automatic review uploader snapshot could not be refreshed.', {
+            userId,
+            error: error?.message || String(error),
+          });
+        }
       }
-      persistedPreview = null;
-      previewField = null;
-    }
-
-    if (process.env.NODE_ENV === 'development') {
-      logger.debug('Moderation preview linked to upload', {
-        uploadId,
-        reviewCaseId: reviewCaseId || null,
-        previewField,
-      });
-    }
-  } catch (error) {
-    logger.error('Upload opslaan mislukt.', error);
-  }
-
-  if (reviewCaseId && uploadId) {
-    try {
-      const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(userId, { uid: userId });
-      await db.runTransaction(async (transaction) => {
-        if (await isKnownCodexDevActorUid({ db, uid: userId, transaction })) return;
-        transaction.set(db.collection('reviewCases').doc(reviewCaseId),
-        {
-          linkedUploadIds: FieldValue.arrayUnion(uploadId),
-          fingerprints: FieldValue.arrayUnion(fingerprints),
-          reviewReason: 'forbiddenOutcomeAutoReview',
-          ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
-          aiSummary: buildAiSummary({
+      const automaticReviewReason = finalForbiddenReasons.length > 0
+        ? 'forbiddenOutcomeAutoReview'
+        : 'policyReviewAuto';
+      const automaticReviewAiSummary = shouldFinalizeAutomaticReview
+        ? buildAiSummary({
             classification,
             shouldReview: effectiveShouldReview,
             forbiddenReasons: finalForbiddenReasons,
@@ -2077,17 +2130,230 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
             aiVisionLabels: response.aiVisionLabels,
             policyAppliedTriggers: response.policyAppliedTriggers,
             geminiDiagnostics: response.geminiDiagnostics || null,
+          })
+        : null;
+
+      const finalizationResult = await db.runTransaction(async (transaction) => {
+        const uploadSnap = await transaction.get(uploadRef);
+        if (!uploadSnap.exists) {
+          const error = new Error('Moderation media anchor disappeared before finalization');
+          error.status = 409;
+          error.code = 'moderation_media_anchor_missing';
+          throw error;
+        }
+        const freshModerationScope = await readModerationScopeGeneration({ db, fingerprints, transaction });
+        const newlyDenied = !isCodexActor
+          && await isKnownCodexDevActorUid({ db, uid: userId, transaction });
+        const stubData = uploadSnap.data() || {};
+        const stubOwnerUid = String(stubData?.userId || stubData?.uploaderUid || '').trim();
+        const stubStoragePath = resolveOwnedModerationPreviewStoragePath(stubData);
+        const stubMediaState = String(stubData?.mediaState || '').trim();
+        if (stubOwnerUid !== String(userId || '').trim()
+          || stubStoragePath !== plannedPreviewStoragePath
+          || stubMediaState !== 'pending') {
+          const error = new Error('Moderation media anchor changed before finalization');
+          error.status = 409;
+          error.code = 'moderation_media_anchor_changed';
+          throw error;
+        }
+
+        if (newlyDenied) {
+          transaction.set(uploadRef, {
+            mediaState: 'cleanup_pending',
+            mediaCleanupAfter: Timestamp.fromMillis(Date.now()),
+            mediaCleanupReason: 'historical_registry_suppressed',
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+          return { outcome: 'suppressed' };
+        }
+        if (freshModerationScope.generation !== requestModerationGeneration) {
+          transaction.set(uploadRef, {
+            mediaState: 'cleanup_pending',
+            mediaCleanupAfter: Timestamp.fromMillis(Date.now()),
+            mediaCleanupReason: 'moderation_generation_superseded',
+            moderationState: MODERATION_STATES.superseded,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+          return { outcome: 'superseded' };
+        }
+
+        let transactionReviewCaseId = null;
+        let transactionReviewCreated = false;
+        let transactionOpenReviewCase = null;
+        let transactionHasReviewRights = true;
+        let transactionReviewCapacityAvailable = true;
+        let transactionInCooldown = false;
+
+        if (shouldFinalizeAutomaticReview) {
+          const freshUserModerationSnap = await transaction.get(automaticReviewUserModerationRef);
+          const freshUserModerationData = freshUserModerationSnap.exists
+            ? (freshUserModerationSnap.data() || {})
+            : {};
+          transactionOpenReviewCase = await findOpenReviewCaseInTransaction({
+            transaction,
+            userId,
+            fingerprints,
+            matchedUploadId: ownedMatchedUploadId,
+          });
+          // The transactionally observed upload-review case is capacity authority.
+          // openReviewCount is a mirrored counter and may be stale after legacy failures.
+          const effectiveOpenReviewCount = transactionOpenReviewCase ? 1 : 0;
+          const freshReviewAccess = getReviewAccessDecision({
+            reviewRightsLevel: freshUserModerationData.reviewRightsLevel,
+            openReviewCount: effectiveOpenReviewCount,
+            cooldownUntil: resolveTimestamp(freshUserModerationData.cooldownUntil),
+          });
+          transactionHasReviewRights = freshReviewAccess.hasReviewRights;
+          transactionReviewCapacityAvailable = freshReviewAccess.reviewCapacityAvailable
+            && !transactionOpenReviewCase;
+          transactionInCooldown = freshReviewAccess.inCooldown;
+
+          if (transactionOpenReviewCase && Number(freshUserModerationData.openReviewCount || 0) < 1) {
+            transaction.set(automaticReviewUserModerationRef, {
+              ...(freshUserModerationSnap.exists ? {} : {
+                reviewRightsLevel: 1,
+                cooldownUntil: null,
+                falseAppealCount: 0,
+              }),
+              openReviewCount: 1,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+
+          if (transactionOpenReviewCase?.matchesCurrentUpload) {
+            transactionReviewCaseId = transactionOpenReviewCase.id;
+            transaction.set(transactionOpenReviewCase.ref, {
+              linkedUploadIds: FieldValue.arrayUnion(uploadRef.id),
+              fingerprints: FieldValue.arrayUnion(fingerprints),
+              reviewReason: automaticReviewReason,
+              ...(automaticReviewUploaderSnapshot ? { uploaderSnapshot: automaticReviewUploaderSnapshot } : {}),
+              aiSummary: automaticReviewAiSummary,
+              previousModeratorExample: previousModeratorExample || null,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          } else if (!transactionOpenReviewCase && freshReviewAccess.allowed) {
+            transactionReviewCaseId = automaticReviewRef.id;
+            transactionReviewCreated = true;
+            transactionReviewCapacityAvailable = false;
+            transaction.create(automaticReviewRef, {
+              caseType: 'upload',
+              userId,
+              status: 'inReview',
+              decision: null,
+              uploadId: uploadRef.id,
+              linkedUploadIds: [uploadRef.id],
+              fingerprints: [fingerprints],
+              reviewReason: automaticReviewReason,
+              ...(automaticReviewUploaderSnapshot ? { uploaderSnapshot: automaticReviewUploaderSnapshot } : {}),
+              aiSummary: automaticReviewAiSummary,
+              previousModeratorExample: previousModeratorExample || null,
+              createdAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+            transaction.set(automaticReviewUserModerationRef, {
+              ...(freshUserModerationSnap.exists ? {} : {
+                reviewRightsLevel: 1,
+                cooldownUntil: null,
+                falseAppealCount: 0,
+              }),
+              openReviewCount: 1,
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+        }
+
+        transaction.set(uploadRef, {
+          ...uploadPayload,
+          moderationState: resolveModerationStateForResult({
+            outcome,
+            shouldReview: effectiveShouldReview,
+            publishBlocked,
+            reviewCaseId: transactionReviewCaseId,
+            requiresUploaderAcceptance: routedUserCorrection,
           }),
-          previousModeratorExample,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-        );
+          reviewCaseId: transactionReviewCaseId || null,
+          ...(transactionReviewCaseId ? { reviewStatus: 'inReview' } : {}),
+          mediaState: 'ready',
+          mediaCleanupAfter: FieldValue.delete(),
+          mediaCleanupReason: FieldValue.delete(),
+          mediaCleanupClaimId: FieldValue.delete(),
+          mediaCleanupClaimedAt: FieldValue.delete(),
+        }, { merge: true });
+        return {
+          outcome: 'ready',
+          reviewCaseId: transactionReviewCaseId,
+          reviewCreated: transactionReviewCreated,
+          openReviewCaseId: transactionOpenReviewCase?.id || null,
+          hasReviewRights: transactionHasReviewRights,
+          reviewCapacityAvailable: transactionReviewCapacityAvailable,
+          inCooldown: transactionInCooldown,
+        };
       });
-    } catch (error) {
-      logger.error('Review case koppelen mislukt.', error);
+
+      const finalizationOutcome = finalizationResult?.outcome || 'pending';
+      if (finalizationOutcome === 'ready') {
+        uploadId = uploadRef.id;
+        reviewCaseId = finalizationResult.reviewCaseId || null;
+        reviewCreated = finalizationResult.reviewCreated === true;
+        openReviewCase = finalizationResult.openReviewCaseId
+          ? { id: finalizationResult.openReviewCaseId }
+          : null;
+        hasReviewRights = finalizationResult.hasReviewRights !== false;
+        reviewCapacityAvailable = finalizationResult.reviewCapacityAvailable !== false;
+        inCooldown = finalizationResult.inCooldown === true;
+      } else if (finalizationOutcome === 'suppressed') {
+        uploadSuppressedByHistoricalRegistry = true;
+        persistedPreview = null;
+        previewField = null;
+      } else if (finalizationOutcome === 'superseded') {
+        const error = new Error('Fresh evaluation superseded this moderation request');
+        error.status = 409;
+        error.code = 'fresh_evaluation_superseded_during_request';
+        throw error;
+      } else {
+        const error = new Error('Moderation upload did not reach a durable ready state');
+        error.status = 500;
+        error.code = 'moderation_upload_not_finalized';
+        throw error;
+      }
     }
+
+    if (process.env.NODE_ENV === 'development') {
+      logger.debug('Moderation preview linked to upload', {
+        uploadId,
+        reviewCaseId: reviewCaseId || null,
+        previewField,
+        mediaState: uploadId ? 'ready' : (uploadSuppressedByHistoricalRegistry ? 'cleanup_pending' : null),
+      });
+    }
+  } catch (error) {
+    if (uploadStubCreated && !uploadId) {
+      await markModerationPreviewCleanupPending({
+        uploadRef,
+        reason: error?.code || 'upload_finalization_failed',
+      });
+    }
+    if (error?.code === 'fresh_evaluation_superseded_during_request') throw error;
+    logger.error('Upload opslaan mislukt.', error);
+    const durablePersistenceError = new Error('Moderation result could not be durably persisted');
+    durablePersistenceError.status = Number(error?.status) >= 400 && Number(error?.status) < 600
+      ? Number(error.status)
+      : 500;
+    durablePersistenceError.code = error?.code || 'moderation_upload_persistence_failed';
+    throw durablePersistenceError;
   }
+
+  canRequestReview = Boolean(uploadId)
+    && !isCodexActor
+    && !routedFinalModeratorRejection
+    && (finalForbiddenReasons.length > 0 || policyRequiresReview)
+    && hasReviewRights
+    && reviewCapacityAvailable
+    && !inCooldown
+    && !openReviewCase
+    && !reviewCreated;
+  response.canRequestReview = canRequestReview;
+  response.reviewCaseId = reviewCaseId;
 
   response.uploadId = uploadId;
   response.previewField = previewField;
@@ -2096,16 +2362,17 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     response.debug = {
       path: blockedByReport
         ? 'blockedFingerprint'
-        : skipUploadReuse
-          ? 'freshEvaluationOverrideUsed'
-          : matchedFingerprintType === 'sha256'
-            ? 'exactReuse'
-            : matchedFingerprintType === 'dhash'
-              ? 'nearReuse'
-              : 'none',
+        : cachedResult && matchedFingerprintType === 'sha256'
+          ? 'exactReuse'
+          : cachedResult && matchedFingerprintType === 'dhash'
+            ? 'nearReuse'
+            : matchedUpload
+              ? 'matchedUploadFreshEvaluation'
+              : 'freshEvaluation',
       matchedUploadId: matchedUpload?.id || null,
       matchedModerationExampleId: matchedModerationExample?.id || null,
       matchedFingerprintType,
+      matchedModerationExampleFingerprintType,
       forbiddenTriggerKeys: finalForbiddenReasons.map((reason) => reason?.trigger).filter(Boolean),
       suggestedTriggerKeys: finalSuggestedTriggers.map((item) => item?.trigger).filter(Boolean),
       geminiDebug: {
@@ -2114,36 +2381,19 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         geminiFailed,
       },
       geminiDiagnostics,
+      moderationGeneration: requestModerationGeneration,
+      moderationScopeKey: requestModerationScope.scopeKey,
     };
-  }
-
-  if (skipUploadReuse) {
-    try {
-      await consumeFreshEvaluationOverride({
-        userModerationRef: userModeration?.ref,
-        fingerprints,
-        reservationRequestId: overrideReservation?.requestId,
-      });
-    } catch (error) {
-      logger.error('Fresh evaluation override consume mislukt.', error);
-    }
   }
 
   res.status(200).json(response);
   } catch (error) {
-    if (skipUploadReuse) {
-      try {
-        await releaseFreshEvaluationOverrideReservation({
-          userModerationRef: userModeration?.ref,
-          fingerprints,
-          reservationRequestId: overrideReservation?.requestId,
-        });
-      } catch (releaseError) {
-        logger.error('Fresh evaluation override release mislukt.', releaseError);
-      }
-    }
     logger.error('moderateImage fout.', error);
-    res.status(500).json({ error: 'Moderatie mislukt.' });
+    const status = Number(error?.status) || 500;
+    res.status(status).json({
+      error: error?.message || 'Moderatie mislukt.',
+      ...(error?.code ? { code: error.code } : {}),
+    });
   }
 });
 
@@ -3006,6 +3256,8 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       return;
     }
 
+    const manualUserModeration = await getUserModeration(decoded.uid);
+
     const uploadRef = db.collection('uploads').doc(uploadId);
     const uploadSnapshot = await uploadRef.get();
     if (!uploadSnapshot.exists) {
@@ -3026,11 +3278,14 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
     const postDraftAuthorProfile = postDraftInput
       ? await resolveAuthorProfileForUid(decoded.uid, postDraftInput.authorProfileId)
       : null;
-    const postDraft = postDraftInput
-      ? {
+    let postDraft = null;
+    if (postDraftInput) {
+      const draftState = buildPersistedModerationDraftState({
+        upload: uploadData,
+        draft: {
+          ...postDraftInput,
           title: String(postDraftInput.title || '').trim(),
           description: String(postDraftInput.description || postDraftInput.caption || '').trim(),
-          imageUrl: String(postDraftInput.imageUrl || '').trim(),
           authorProfileId: postDraftAuthorProfile.profileId,
           authorOwnerUid: decoded.uid,
           authorName: String(postDraftInput.authorName || postDraftAuthorProfile?.displayName || '').trim(),
@@ -3048,8 +3303,14 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
               ? postDraftInput.contributors.filter(Boolean)
               : [],
           isChallenge: Boolean(postDraftInput.isChallenge),
-        }
-      : null;
+        },
+      });
+      if (!draftState.ok) {
+        res.status(draftState.status || 409).json({ error: draftState.error, code: draftState.code });
+        return;
+      }
+      postDraft = draftState.draft;
+    }
 
     let existingCase = null;
     if (uploadData.reviewCaseId) {
@@ -3063,19 +3324,24 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
     }
 
     if (!existingCase) {
-      const openCasesSnapshot = await db
-        .collection('reviewCases')
-        .where('userId', '==', decoded.uid)
-        .where('status', '==', 'inReview')
-        .limit(20)
-        .get();
-      existingCase = openCasesSnapshot.docs
-        .map((docSnap) => ({ id: docSnap.id, data: docSnap.data() || {} }))
-        .find(({ data }) => {
-          if (data.caseType && data.caseType !== 'upload') return false;
+      const matchingOpenCaseDoc = await findFirstUploadReviewCaseAcrossPages({
+        fetchPage: async (cursor) => {
+          let query = db
+            .collection('reviewCases')
+            .where('userId', '==', decoded.uid)
+            .where('status', '==', 'inReview')
+            .limit(20);
+          if (cursor) query = query.startAfter(cursor);
+          return (await query.get()).docs;
+        },
+        matches: (data) => {
           if (data.uploadId === uploadId) return true;
           return Array.isArray(data.linkedUploadIds) && data.linkedUploadIds.includes(uploadId);
-        }) || null;
+        },
+      });
+      existingCase = matchingOpenCaseDoc
+        ? { id: matchingOpenCaseDoc.id, data: matchingOpenCaseDoc.data() || {} }
+        : null;
     }
 
     const uploaderSnapshot = await getUploaderSnapshotFromPublicProfile(decoded.uid, {
@@ -3127,19 +3393,43 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       }
 
       let reusableReviewRef = null;
-      if (candidateReviewRef) {
-        const candidateSnap = await transaction.get(candidateReviewRef);
-        if (candidateSnap.exists) {
-          const candidateData = candidateSnap.data() || {};
-          const candidateLinksUpload = freshUploadData.reviewCaseId === candidateReviewRef.id
-            || candidateData.uploadId === uploadId
-            || (Array.isArray(candidateData.linkedUploadIds) && candidateData.linkedUploadIds.includes(uploadId));
-          if (candidateData.status === 'inReview'
-            && candidateData.userId === decoded.uid
-            && (!candidateData.caseType || candidateData.caseType === 'upload')
-            && candidateLinksUpload) {
-            reusableReviewRef = candidateReviewRef;
-          }
+      const freshLinkedReviewCaseId = String(freshUploadData.reviewCaseId || '').trim();
+      const candidateReviewCaseIds = [...new Set([
+        freshLinkedReviewCaseId,
+        candidateReviewRef?.id || null,
+      ].filter(Boolean))];
+      for (const candidateReviewCaseId of candidateReviewCaseIds) {
+        const candidateRef = db.collection('reviewCases').doc(candidateReviewCaseId);
+        const candidateSnap = await transaction.get(candidateRef);
+        if (!candidateSnap.exists) continue;
+        const candidateData = candidateSnap.data() || {};
+        const candidateLinksUpload = freshLinkedReviewCaseId === candidateReviewCaseId
+          || candidateData.uploadId === uploadId
+          || (Array.isArray(candidateData.linkedUploadIds) && candidateData.linkedUploadIds.includes(uploadId));
+        if (candidateData.status === 'inReview'
+          && candidateData.userId === decoded.uid
+          && (!candidateData.caseType || candidateData.caseType === 'upload')
+          && candidateLinksUpload) {
+          reusableReviewRef = candidateRef;
+          break;
+        }
+      }
+
+      if (!reusableReviewRef) {
+        const freshUserModerationSnap = await transaction.get(manualUserModeration.ref);
+        const freshUserModerationData = freshUserModerationSnap.exists
+          ? (freshUserModerationSnap.data() || {})
+          : {};
+        const freshReviewAccess = getReviewAccessDecision({
+          reviewRightsLevel: freshUserModerationData.reviewRightsLevel,
+          openReviewCount: freshUserModerationData.openReviewCount,
+          cooldownUntil: resolveTimestamp(freshUserModerationData.cooldownUntil),
+        });
+        if (!freshReviewAccess.allowed) {
+          const error = new Error(freshReviewAccess.message);
+          error.status = freshReviewAccess.status;
+          error.code = freshReviewAccess.code;
+          throw error;
         }
       }
 
@@ -3149,6 +3439,11 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       const reviewUpdates = {
         uploadId,
         linkedUploadIds: created ? [uploadId] : FieldValue.arrayUnion(uploadId),
+        ...(freshUploadData?.fingerprints ? {
+          fingerprints: created
+            ? [freshUploadData.fingerprints]
+            : FieldValue.arrayUnion(freshUploadData.fingerprints),
+        } : {}),
         ...(uploaderSnapshot ? { uploaderSnapshot } : {}),
         reviewReason: 'manualUserReviewRequest',
         aiSummary,
@@ -3168,11 +3463,20 @@ export const requestUploadReviewCase = onRequest({ cors: true, region: 'europe-w
       }
       transaction.set(uploadRef, {
         reviewCaseId,
+        moderationState: MODERATION_STATES.reviewPending,
+        publicationState: PUBLICATION_STATES.pending,
         reviewStatus: 'inReview',
         reviewRequestedAt: FieldValue.serverTimestamp(),
+        previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
         updatedAt: FieldValue.serverTimestamp(),
         ...(postDraft ? { postDraft } : {}),
       }, { merge: true });
+      if (created) {
+        transaction.set(manualUserModeration.ref, {
+          openReviewCount: 1,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
     });
 
     res.status(200).json({ ok: true, reviewCaseId, created });
@@ -3389,6 +3693,10 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
       res.status(400).json({ error: 'Invalid action' });
       return;
     }
+    if (!isModeratorDecisionActionCompatible(normalizedModeratorAction, normalizedDecision)) {
+      res.status(400).json({ error: 'Moderator action contradicts decision' });
+      return;
+    }
     const taxonomyValidation = validateCorrectedTaxonomyForAction(normalizedModeratorAction, body?.correctedTaxonomy || {});
     if (!taxonomyValidation.isValid) {
       res.status(400).json({ error: 'correctedTaxonomy is required for correction actions' });
@@ -3476,6 +3784,14 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         uploadSnapshotData = uploadSnapshot.exists ? (uploadSnapshot.data() || null) : null;
       }
 
+      let decidingUserModerationData = {};
+      if (caseType === 'upload' && userId) {
+        const decidingUserModerationSnap = await transaction.get(db.collection('userModeration').doc(userId));
+        decidingUserModerationData = decidingUserModerationSnap.exists
+          ? (decidingUserModerationSnap.data() || {})
+          : {};
+      }
+
       const expires = Timestamp.fromDate(new Date(now + lockDurationMs));
       transaction.update(reviewRef, {
         lock: {
@@ -3490,8 +3806,34 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         const isApproved = normalizedDecision === 'approved';
         const requiresUploaderAcceptance = normalizedModeratorAction === 'requestUserCorrection';
         const uploadReviewStatus = requiresUploaderAcceptance ? 'needs_user_correction' : normalizedDecision;
+        const moderatorLifecycleState = !isApproved
+          ? {
+              outcome: 'forbidden',
+              forbiddenReasons: [{ trigger: 'moderatorRejected', reason: normalizedReasonCode, source: 'moderatorDecision' }],
+              shouldReview: false,
+              publishBlocked: true,
+              canRequestReview: false,
+            }
+          : requiresUploaderAcceptance
+            ? {
+                outcome: 'needsCorrection',
+                forbiddenReasons: [],
+                shouldReview: false,
+                publishBlocked: true,
+                canRequestReview: false,
+              }
+            : buildAcceptedCorrectionModerationState();
         transaction.update(uploadRef, {
+          moderationState: !isApproved
+            ? MODERATION_STATES.rejected
+            : requiresUploaderAcceptance
+              ? MODERATION_STATES.correctionPending
+              : MODERATION_STATES.allowed,
+          publicationState: PUBLICATION_STATES.pending,
           reviewStatus: uploadReviewStatus,
+          ...moderatorLifecycleState,
+          uploaderCorrectionResponse: FieldValue.delete(),
+          correction: FieldValue.delete(),
           reviewDecisionMessagePublic: finalDecisionMessage,
           reviewDecisionReasons: decisionReasons,
           reviewDecisionAt: FieldValue.serverTimestamp(),
@@ -3499,7 +3841,17 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
           approvedAt: isApproved ? FieldValue.serverTimestamp() : FieldValue.delete(),
           reviewCaseId,
           correctedTaxonomy: (correctedThemes.length || correctedTriggers.length) ? { themes: correctedThemes, triggers: correctedTriggers } : FieldValue.delete(),
+          moderatorDecision: {
+            action: normalizedModeratorAction,
+            reasonCode: normalizedReasonCode,
+            correctedTaxonomy: { themes: correctedThemes, triggers: correctedTriggers },
+            requiresUploaderAcceptance: normalizedModeratorAction === 'requestUserCorrection',
+            finalPolicyOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
+            decidedAt: FieldValue.serverTimestamp(),
+            decidedBy: decoded.uid,
+          },
           requiresUploaderAcceptance: normalizedModeratorAction === 'requestUserCorrection',
+          previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(now),
         });
       }
 
@@ -3520,6 +3872,9 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
           decidedAt: FieldValue.serverTimestamp(),
           decidedBy: decoded.uid,
         },
+        userCorrectionStatus: FieldValue.delete(),
+        userCorrectionRejectedAt: FieldValue.delete(),
+        userCorrectionRejectedByUid: FieldValue.delete(),
         lock: FieldValue.delete(),
       };
       if (uploadId) {
@@ -3529,6 +3884,15 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         reviewUpdate.reportedPostId = reportPostId;
       }
       transaction.update(reviewRef, reviewUpdate);
+      if (caseType === 'upload' && userId) {
+        transaction.set(db.collection('userModeration').doc(userId), {
+          openReviewCount: getOpenReviewCountAfterCaseExit({
+            openReviewCount: decidingUserModerationData.openReviewCount,
+            wasOpenUploadCase: true,
+          }),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
 
       const uploadFingerprints = uploadSnapshotData?.fingerprints || reviewSnapshotData?.reportedFingerprints || {};
       const uploadInputThemes = Array.isArray(uploadSnapshotData?.themes) ? uploadSnapshotData.themes : [];
@@ -3671,209 +4035,282 @@ export const moderatorQueueFreshEvaluation = onRequest({ cors: true, region: 'eu
       res.status(400).json({ error: 'reasonCode is required' });
       return;
     }
-    if (!MODERATION_EXAMPLE_REASON_CODES.has(reasonCode)) {
-      res.status(400).json({ error: 'Invalid reasonCode' });
-      return;
-    }
-    if (!MODERATION_EXAMPLE_REASON_CODES_BY_ACTION.queueFreshEvaluation.has(reasonCode)) {
+    if (!MODERATION_EXAMPLE_REASON_CODES.has(reasonCode)
+      || !MODERATION_EXAMPLE_REASON_CODES_BY_ACTION.queueFreshEvaluation.has(reasonCode)) {
       res.status(400).json({ error: 'Invalid reasonCode for action queueFreshEvaluation' });
       return;
     }
 
-    const pickFingerprint = (value) => {
-      if (!value || typeof value !== 'object') return null;
-      const sha256 = typeof value.sha256 === 'string' ? value.sha256.trim() : '';
-      const dhash = typeof value.dhash === 'string' ? value.dhash.trim() : '';
-      const dhashPrefix = typeof value.dhashPrefix === 'string' ? value.dhashPrefix.trim() : '';
-      if (!sha256 || !dhash || !dhashPrefix) return null;
-      return { sha256, dhash, dhashPrefix };
-    };
-
-    const pickString = (...values) => {
-      for (const value of values) {
-        if (typeof value === 'string' && value.trim()) return value.trim();
-      }
-      return '';
-    };
-
-    const pickFingerprintFromCandidates = (...candidates) => {
-      for (const candidate of candidates) {
-        const entry = pickFingerprint(candidate);
-        if (entry) return entry;
-      }
-      return null;
-    };
+    const pickString = (...values) => values
+      .map((value) => String(value || '').trim())
+      .find(Boolean) || '';
+    const ownerForUpload = (data = {}) => pickString(data?.userId, data?.uploaderUid, data?.ownerUid, data?.userUid);
 
     const reviewCaseRef = db.collection('reviewCases').doc(reviewCaseId);
-    const reviewCaseSnapshot = await reviewCaseRef.get();
-    if (!reviewCaseSnapshot.exists) {
+    const initialReviewCaseSnap = await reviewCaseRef.get();
+    if (!initialReviewCaseSnap.exists) {
       res.status(404).json({ error: 'Review case not found' });
       return;
     }
-
-    const reviewCaseData = reviewCaseSnapshot.data() || {};
-    const effectiveUploadId = String(
-      uploadIdFromBody
-      || reviewCaseData.uploadId
-      || (Array.isArray(reviewCaseData.linkedUploadIds) ? reviewCaseData.linkedUploadIds[0] : '')
-      || ''
-    ).trim() || null;
-
-    const alreadyFinal = reviewCaseData.status === 'freshEvalQueued' || reviewCaseData.status === 'closedNoFingerprint';
-
-    let uploadSnapshot = null;
-    let uploadData = {};
-    let uploadFound = false;
-    if (effectiveUploadId) {
-      uploadSnapshot = await db.collection('uploads').doc(effectiveUploadId).get();
-      uploadFound = uploadSnapshot.exists;
-      uploadData = uploadFound ? (uploadSnapshot.data() || {}) : {};
+    const initialReviewCaseData = initialReviewCaseSnap.data() || {};
+    if (!isUploadReviewCaseData(initialReviewCaseData)) {
+      res.status(409).json({ error: 'Fresh evaluation requires an upload review case' });
+      return;
     }
-
-    const userId = pickString(
-      reviewCaseData?.userId,
-      reviewCaseData?.uploaderUid,
-      reviewCaseData?.ownerUid,
-      reviewCaseData?.uploaderSnapshot?.uid,
-      reviewCaseData?.uploadSnapshot?.userId,
-      reviewCaseData?.uploadSnapshot?.ownerUid,
-      uploadData?.userId,
-      uploadData?.ownerUid
+    const initialCaseOwnerId = pickString(
+      initialReviewCaseData?.userId,
+      initialReviewCaseData?.uploaderUid,
+      initialReviewCaseData?.ownerUid,
+      initialReviewCaseData?.uploaderSnapshot?.uid,
     );
-    const fingerprints = pickFingerprintFromCandidates(
-      reviewCaseData?.fingerprints,
-      reviewCaseData?.fingerprint,
-      {
-        sha256: reviewCaseData?.sha256,
-        dhash: reviewCaseData?.dhash,
-        dhashPrefix: reviewCaseData?.dhashPrefix,
-      },
-      reviewCaseData?.uploadSnapshot?.fingerprints,
-      reviewCaseData?.uploadSnapshot?.metadata?.fingerprints,
-      uploadData?.fingerprints,
-      uploadData?.metadata?.fingerprints
-    );
+    const initialReviewCaseUploadIds = resolveReviewCaseUploadIds(initialReviewCaseData);
+    if (uploadIdFromBody && initialReviewCaseUploadIds.length > 0 && !initialReviewCaseUploadIds.includes(uploadIdFromBody)) {
+      const error = new Error('uploadId does not belong to this review case');
+      error.status = 409;
+      error.code = 'review_case_upload_mismatch';
+      throw error;
+    }
+    const effectiveUploadId = uploadIdFromBody || initialReviewCaseUploadIds[0] || null;
 
-    const moderation = userId ? await getUserModeration(userId) : null;
-    const existingOverrides = Array.isArray(moderation?.data?.freshEvaluationOverrides)
-      ? moderation.data.freshEvaluationOverrides
-      : [];
-    const alreadyQueued = fingerprints
-      ? existingOverrides.some((item) => matchesFingerprintEntry(fingerprints, item))
-      : false;
-    const shouldQueueFingerprintOverride = Boolean(fingerprints) && !alreadyQueued && Boolean(moderation?.ref);
+    let responseUserId = null;
+    let responseScopeKeys = [];
+    let responseGenerations = {};
+    let responseUploadFound = false;
+    let responseStatus = 'closedNoFingerprint';
 
-    if (shouldQueueFingerprintOverride) {
-      await moderation.ref.set(
-        {
-          freshEvaluationOverrides: FieldValue.arrayUnion({
-            sha256: fingerprints.sha256,
-            dhash: fingerprints.dhash,
-            dhashPrefix: fingerprints.dhashPrefix,
-            uploadId: effectiveUploadId,
-            reviewCaseId,
-            createdByUid: decoded.uid,
-            createdAtMs: Date.now(),
+    await db.runTransaction(async (transaction) => {
+      const freshReviewCaseSnap = await transaction.get(reviewCaseRef);
+      if (!freshReviewCaseSnap.exists) {
+        const error = new Error('Review case not found');
+        error.status = 404;
+        throw error;
+      }
+      const freshReviewCaseData = freshReviewCaseSnap.data() || {};
+      if (!isUploadReviewCaseData(freshReviewCaseData)) {
+        const error = new Error('Fresh evaluation requires an upload review case');
+        error.status = 409;
+        throw error;
+      }
+
+      const freshCaseOwnerId = pickString(
+        freshReviewCaseData?.userId,
+        freshReviewCaseData?.uploaderUid,
+        freshReviewCaseData?.ownerUid,
+        freshReviewCaseData?.uploaderSnapshot?.uid,
+      );
+      const freshReviewCaseUploadIds = resolveReviewCaseUploadIds(freshReviewCaseData);
+      const initialUploadSetKey = [...new Set(initialReviewCaseUploadIds)].sort().join('\n');
+      const freshUploadSetKey = [...new Set(freshReviewCaseUploadIds)].sort().join('\n');
+      if (initialUploadSetKey !== freshUploadSetKey) {
+        const error = new Error('Review case uploads changed while queuing fresh evaluation');
+        error.status = 409;
+        error.code = 'review_case_upload_changed';
+        throw error;
+      }
+      if (initialCaseOwnerId !== freshCaseOwnerId) {
+        const error = new Error('Review case owner changed while queuing fresh evaluation');
+        error.status = 409;
+        error.code = 'review_case_owner_changed';
+        throw error;
+      }
+      if (uploadIdFromBody && freshReviewCaseUploadIds.length > 0 && !freshReviewCaseUploadIds.includes(uploadIdFromBody)) {
+        const error = new Error('Review case upload changed while queuing fresh evaluation');
+        error.status = 409;
+        error.code = 'review_case_upload_changed';
+        throw error;
+      }
+      const linkedUploadIds = Array.from(new Set([
+        ...freshReviewCaseUploadIds,
+        ...(uploadIdFromBody ? [uploadIdFromBody] : []),
+      ].filter(Boolean)));
+      if (linkedUploadIds.length > 25) {
+        const error = new Error('Review case has too many linked uploads for atomic fresh evaluation');
+        error.status = 409;
+        error.code = 'review_case_link_limit';
+        throw error;
+      }
+
+      const linkedUploadRefs = linkedUploadIds.map((uploadId) => db.collection('uploads').doc(uploadId));
+      const linkedUploadSnaps = await Promise.all(linkedUploadRefs.map((ref) => transaction.get(ref)));
+      const linkedUploads = linkedUploadSnaps
+        .map((snapshot, index) => ({
+          id: linkedUploadIds[index],
+          ref: linkedUploadRefs[index],
+          exists: snapshot.exists,
+          data: snapshot.exists ? (snapshot.data() || {}) : {},
+        }));
+
+      const freshCaseUserId = pickString(
+        freshCaseOwnerId,
+        ...linkedUploads.map((item) => ownerForUpload(item.data)),
+      );
+      for (const linkedUpload of linkedUploads) {
+        const linkedOwner = ownerForUpload(linkedUpload.data);
+        if (freshCaseUserId && linkedOwner && freshCaseUserId !== linkedOwner) {
+          const error = new Error('Review case and upload ownership do not match');
+          error.status = 409;
+          error.code = 'review_case_upload_owner_mismatch';
+          throw error;
+        }
+      }
+
+      const fingerprintEntries = collectModerationFingerprintEntries(
+        freshReviewCaseData,
+        freshReviewCaseData?.uploadSnapshot,
+        ...linkedUploads.filter((item) => item.exists).map((item) => item.data),
+      );
+      const scopeKeys = collectModerationScopeKeys(fingerprintEntries);
+      if (scopeKeys.length > 25) {
+        const error = new Error('Review case spans too many moderation fingerprint scopes');
+        error.status = 409;
+        error.code = 'moderation_scope_limit';
+        throw error;
+      }
+
+      const scopeRefs = scopeKeys.map((scopeKey) => getModerationFreshScopeRef({ db, scopeKey }));
+      const scopeSnaps = await Promise.all(scopeRefs.map((ref) => transaction.get(ref)));
+      const currentGenerations = Object.fromEntries(scopeKeys.map((scopeKey, index) => [
+        scopeKey,
+        normalizeModerationGeneration(scopeSnaps[index]?.exists ? scopeSnaps[index].data()?.generation : 0),
+      ]));
+      const nextGenerations = planModerationScopeGenerationIncrement({
+        scopeKeys,
+        currentGenerations,
+      });
+
+      const moderationRef = freshCaseUserId ? db.collection('userModeration').doc(freshCaseUserId) : null;
+      const freshModerationSnap = moderationRef ? await transaction.get(moderationRef) : null;
+      const freshModerationData = freshModerationSnap?.exists ? (freshModerationSnap.data() || {}) : {};
+
+      // All transaction reads are complete above this line.
+      Object.entries(nextGenerations).forEach(([scopeKey, generation]) => {
+        const scopeRef = getModerationFreshScopeRef({ db, scopeKey });
+        transaction.set(scopeRef, {
+          generation,
+          scopeKey,
+          reviewCaseId,
+          reasonCode,
+          queuedByUid: decoded.uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+
+      const hasScopes = scopeKeys.length > 0;
+      const nextStatus = hasScopes ? 'freshEvalQueued' : 'closedNoFingerprint';
+      const wasOpenUploadCase = freshReviewCaseData.status === 'inReview';
+      if (moderationRef && wasOpenUploadCase) {
+        transaction.set(moderationRef, {
+          openReviewCount: getOpenReviewCountAfterCaseExit({
+            openReviewCount: freshModerationData.openReviewCount,
+            wasOpenUploadCase: true,
           }),
           updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    const fingerprintQueued = shouldQueueFingerprintOverride || alreadyQueued;
-    const queueMode = fingerprintQueued ? 'fingerprintOverride' : 'closeOnlyNoFingerprint';
-    const nextStatus = fingerprintQueued ? 'freshEvalQueued' : 'closedNoFingerprint';
-
-    if (!alreadyFinal || reviewCaseData.status !== nextStatus) {
-      await reviewCaseRef.set(
-        {
-          status: nextStatus,
-          queueExitReason: 'reEvaluateOnNextUpload',
-          queuedFreshEvaluationAt: FieldValue.serverTimestamp(),
-          queuedFreshEvaluationBy: decoded.uid,
-          queuedFreshEvaluationByUid: decoded.uid,
-          queueReasonCode: reasonCode,
-          fingerprintQueued,
-          queueFreshEvaluationMode: queueMode,
-          lock: FieldValue.delete(),
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    if (effectiveUploadId && uploadFound) {
-      await db.collection('uploads').doc(effectiveUploadId).set(
-        {
-          reviewStatus: nextStatus,
-          queueExitReason: 'reEvaluateOnNextUpload',
-          queuedFreshEvaluationAt: FieldValue.serverTimestamp(),
-          queuedFreshEvaluationBy: decoded.uid,
-          queuedFreshEvaluationByUid: decoded.uid,
-          queueReasonCode: reasonCode,
-          queueFreshEvaluationMode: queueMode,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    if (reviewCaseId || effectiveUploadId) {
-      const moderationExampleId = `${reviewCaseId || effectiveUploadId}_queueFreshEvaluation`;
-      const aiResult = uploadData?.aiResult || reviewCaseData?.uploadSnapshot?.aiResult || {};
-      const moderationSignals = uploadData?.moderationSignals || reviewCaseData?.uploadSnapshot?.moderationSignals || {};
-      const correctionSnapshot = uploadData?.correction || uploadData?.postDraft?.correction || reviewCaseData?.uploadSnapshot?.correction || null;
-      try {
-        const queueExamplePayload = buildCommonModerationExample({
-          uploadId: effectiveUploadId,
-          reviewCaseId,
-          uploaderUid: userId || null,
-          fingerprints: fingerprints ? { ...fingerprints } : null,
-          uploadData,
-          reviewData: reviewCaseData,
-          aiResult,
-          moderationSignals,
-          correctionSnapshot,
-          decision: null,
-          policyDecisionOutcome: 'review',
-          moderatorDecision: {
-            action: 'queueFreshEvaluation',
-            finalOutcome: 'review',
-            reasonCode,
-            notes: null,
-            decidedBy: decoded.uid,
-            decidedAt: FieldValue.serverTimestamp(),
-          },
-          source: 'moderatorQueueFreshEvaluation',
-          nowFactory: () => FieldValue.serverTimestamp(),
-        });
-        await db.collection('moderationExamples').doc(moderationExampleId).set(queueExamplePayload, { merge: true });
-      } catch (exampleError) {
-        logger.warn('moderatorQueueFreshEvaluation: moderationExample write skipped', {
-          reviewCaseId,
-          uploadId: effectiveUploadId,
-          error: exampleError?.message || String(exampleError),
-        });
+        }, { merge: true });
       }
-    }
+
+      transaction.set(reviewCaseRef, {
+        status: nextStatus,
+        queueExitReason: 'reEvaluateOnNextUpload',
+        queuedFreshEvaluationAt: FieldValue.serverTimestamp(),
+        queuedFreshEvaluationBy: decoded.uid,
+        queuedFreshEvaluationByUid: decoded.uid,
+        queueReasonCode: reasonCode,
+        fingerprintQueued: hasScopes,
+        queueFreshEvaluationMode: hasScopes ? 'moderationGeneration' : 'closeOnlyNoFingerprint',
+        moderationScopeGenerations: nextGenerations,
+        lock: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      linkedUploads.filter((item) => item.exists).forEach((linkedUpload) => {
+        transaction.set(linkedUpload.ref, {
+          moderationState: MODERATION_STATES.superseded,
+          publicationState: PUBLICATION_STATES.pending,
+          reviewStatus: nextStatus,
+          publicationStatus: nextStatus,
+          requiresUploaderAcceptance: false,
+          queueExitReason: 'reEvaluateOnNextUpload',
+          queuedFreshEvaluationAt: FieldValue.serverTimestamp(),
+          queuedFreshEvaluationBy: decoded.uid,
+          queuedFreshEvaluationByUid: decoded.uid,
+          queueReasonCode: reasonCode,
+          previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
+          queueFreshEvaluationMode: hasScopes ? 'moderationGeneration' : 'closeOnlyNoFingerprint',
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+
+      const primaryUpload = linkedUploads.find((item) => item.id === effectiveUploadId && item.exists)
+        || linkedUploads.find((item) => item.exists)
+        || null;
+      const primaryFingerprints = collectModerationFingerprintEntries(
+        primaryUpload?.data,
+        freshReviewCaseData,
+      )[0] || null;
+      const primaryScopeKey = resolveModerationScopeKey(primaryFingerprints || {});
+      const primaryGeneration = primaryScopeKey
+        ? normalizeModerationGeneration(nextGenerations[primaryScopeKey])
+        : 0;
+      const queueModerationExampleRef = db.collection('moderationExamples')
+        .doc(`${reviewCaseId}_queueFreshEvaluation`);
+      const queueExamplePayload = buildCommonModerationExample({
+        uploadId: primaryUpload?.id || effectiveUploadId,
+        reviewCaseId,
+        uploaderUid: freshCaseUserId || null,
+        fingerprints: primaryFingerprints,
+        uploadData: primaryUpload?.data || {},
+        reviewData: freshReviewCaseData,
+        aiResult: primaryUpload?.data?.aiResult || freshReviewCaseData?.uploadSnapshot?.aiResult || {},
+        moderationSignals: primaryUpload?.data?.moderationSignals || freshReviewCaseData?.uploadSnapshot?.moderationSignals || {},
+        correctionSnapshot: primaryUpload?.data?.correction || primaryUpload?.data?.postDraft?.correction || freshReviewCaseData?.uploadSnapshot?.correction || null,
+        decision: null,
+        policyDecisionOutcome: 'review',
+        moderatorDecision: {
+          action: 'queueFreshEvaluation',
+          finalOutcome: 'review',
+          reasonCode,
+          notes: null,
+          decidedBy: decoded.uid,
+          decidedAt: FieldValue.serverTimestamp(),
+        },
+        moderationGeneration: primaryGeneration,
+        source: 'moderatorQueueFreshEvaluation',
+        nowFactory: () => FieldValue.serverTimestamp(),
+      });
+      transaction.set(queueModerationExampleRef, {
+        ...queueExamplePayload,
+        moderationScopeGenerations: nextGenerations,
+      }, { merge: true });
+
+      responseUserId = freshCaseUserId || null;
+      responseScopeKeys = scopeKeys;
+      responseGenerations = nextGenerations;
+      responseUploadFound = Boolean(primaryUpload?.exists);
+      responseStatus = nextStatus;
+    });
 
     res.status(200).json({
       ok: true,
       reviewCaseId,
       uploadId: effectiveUploadId,
-      uploadFound,
-      uploadUpdateSkipped: Boolean(effectiveUploadId) && !uploadFound,
-      fingerprintQueued,
-      queueFreshEvaluationMode: queueMode,
-      status: nextStatus,
-      message: queueMode === 'fingerprintOverride'
-        ? 'Fresh evaluation queued for next matching upload.'
-        : 'Case removed from active review; no fingerprint override created.',
+      userId: responseUserId,
+      uploadFound: responseUploadFound,
+      uploadUpdateSkipped: Boolean(effectiveUploadId) && !responseUploadFound,
+      fingerprintQueued: responseScopeKeys.length > 0,
+      queueFreshEvaluationMode: responseScopeKeys.length > 0 ? 'moderationGeneration' : 'closeOnlyNoFingerprint',
+      moderationScopeKeys: responseScopeKeys,
+      moderationGenerations: responseGenerations,
+      status: responseStatus,
+      message: responseScopeKeys.length > 0
+        ? 'Fresh evaluation generation incremented for matching fingerprint scope.'
+        : 'Case removed from active review; no valid fingerprint scope was available.',
     });
   } catch (error) {
     const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Failed to queue fresh evaluation override' });
+    res.status(status).json({
+      error: error.message || 'Failed to queue fresh evaluation',
+      ...(error?.code ? { code: error.code } : {}),
+    });
   }
 });
 
@@ -3913,6 +4350,9 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
     const draftRef = action === 'saveDraft'
       ? userRef.collection('drafts').doc()
       : null;
+    const rejectedCorrectionReviewRef = action === 'rejectCorrection'
+      ? db.collection('reviewCases').doc()
+      : null;
 
     const [messageSnap, uploadSnap] = await Promise.all([
       messageRef ? messageRef.get() : Promise.resolve(null),
@@ -3943,17 +4383,13 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       res.status(409).json({ error: 'Upload is not approved' });
       return;
     }
-    if (action === 'saveDraft' && upload?.reviewStatus !== 'approved') {
-      res.status(409).json({ error: 'Upload is not approved' });
+    if (action === 'saveDraft' && !canSaveDraftUpload(upload)) {
+      res.status(409).json({ error: 'Upload is not approved for draft persistence' });
       return;
     }
-    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && upload?.reviewStatus !== 'approved') {
-      res.status(409).json({ error: 'Upload is not approved' });
-      return;
-    }
-    const initialPublicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
-    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && initialPublicationStatus === 'published') {
-      res.status(409).json({ error: 'Upload is already published' });
+    if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload')
+      && !canManageApprovedUploadPrompt(upload)) {
+      res.status(409).json({ error: 'Upload publication prompt is no longer actionable' });
       return;
     }
     if (action === 'acceptCorrection' || action === 'rejectCorrection') {
@@ -3973,17 +4409,24 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       const requestedAuthorProfileId = initialPostDraft?.authorProfileId || upload?.authorProfileId || userId;
       resolvedAuthorProfile = await resolveAuthorProfileForUid(userId, requestedAuthorProfileId);
     }
+    const publicationAuthorProfileRef = postRef && resolvedAuthorProfile && !resolvedAuthorProfile.isPersonal
+      ? db.collection('profiles').doc(resolvedAuthorProfile.profileId)
+      : null;
 
     await runUserModerationActionMutation({
       db,
       uid: userId,
       isKnownCodexDevActorUid,
       mutate: async (transaction) => {
-        const [latestUploadSnap, latestMessageSnap, latestUserSnap, latestPostSnap] = await Promise.all([
+        const [latestUploadSnap, latestMessageSnap, latestUserSnap, latestPostSnap, latestUserModerationSnap, latestAuthorProfileSnap] = await Promise.all([
           transaction.get(uploadRef),
           messageRef ? transaction.get(messageRef) : Promise.resolve(null),
           postRef ? transaction.get(userRef) : Promise.resolve(null),
           postRef ? transaction.get(postRef) : Promise.resolve(null),
+          action === 'rejectCorrection'
+            ? transaction.get(db.collection('userModeration').doc(userId))
+            : Promise.resolve(null),
+          publicationAuthorProfileRef ? transaction.get(publicationAuthorProfileRef) : Promise.resolve(null),
         ]);
 
         if (!latestUploadSnap.exists) {
@@ -4010,25 +4453,54 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
           error.status = 403;
           throw error;
         }
+        if (postRef) {
+          const latestModerationScope = await readModerationScopeGeneration({
+            db,
+            fingerprints: latestUpload?.fingerprints || null,
+            transaction,
+          });
+          if (!isModerationGenerationCurrent({
+            evidenceGeneration: latestUpload?.moderationGeneration,
+            currentGeneration: latestModerationScope.generation,
+          })) {
+            const error = new Error('Upload moderation is stale and must be evaluated again');
+            error.status = 409;
+            error.code = 'moderation_generation_stale';
+            throw error;
+          }
+        }
+        if (publicationAuthorProfileRef) {
+          resolvedAuthorProfile = resolveValidatedPublicationAuthorOrThrow(validateModerationPublicationAuthorProfile({
+            userId,
+            requestedProfileId: resolvedAuthorProfile?.profileId,
+            profileExists: Boolean(latestAuthorProfileSnap?.exists),
+            profileData: latestAuthorProfileSnap?.exists ? (latestAuthorProfileSnap.data() || {}) : null,
+          }));
+        }
 
-        const latestPublicationStatus = String(latestUpload?.publicationStatus || latestUpload?.publishStatus || '').trim();
+        const latestPublicationLifecycle = resolveUploadPublicationState(latestUpload);
+        if (postRef
+          && latestPublicationLifecycle.valid
+          && latestPublicationLifecycle.state === PUBLICATION_STATES.published
+          && !latestPostSnap?.exists) {
+          const error = new Error('Published post was deleted and cannot be recreated from stale upload state');
+          error.status = 409;
+          error.code = 'published_post_deleted';
+          throw error;
+        }
         if ((action === 'publishNow' || action === 'repairPublished') && !canPublishUpload(latestUpload)) {
           const error = new Error('Upload is not approved');
           error.status = 409;
           throw error;
         }
-        if (action === 'saveDraft' && latestUpload?.reviewStatus !== 'approved') {
-          const error = new Error('Upload is not approved');
+        if (action === 'saveDraft' && !canSaveDraftUpload(latestUpload)) {
+          const error = new Error('Upload is not approved for draft persistence');
           error.status = 409;
           throw error;
         }
-        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && latestUpload?.reviewStatus !== 'approved') {
-          const error = new Error('Upload is not approved');
-          error.status = 409;
-          throw error;
-        }
-        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload') && latestPublicationStatus === 'published') {
-          const error = new Error('Upload is already published');
+        if ((action === 'markPublicationPromptOpened' || action === 'discardApprovedUpload')
+          && !canManageApprovedUploadPrompt(latestUpload)) {
+          const error = new Error('Upload publication prompt is no longer actionable');
           error.status = 409;
           throw error;
         }
@@ -4042,13 +4514,93 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             throw error;
           }
           const { correctedTaxonomy } = validation;
-          const reviewCaseId = latestUpload?.reviewCaseId || null;
+          let reviewReopenPlan = resolveCorrectionReviewReopenPlan({
+            upload: latestUpload,
+            userId,
+            newReviewCaseId: action === 'rejectCorrection' ? (rejectedCorrectionReviewRef?.id || null) : null,
+          });
+          const acceptancePlanValidation = validateCorrectionAcceptancePlanProvenance({
+            plan: reviewReopenPlan,
+            action,
+          });
+          if (acceptancePlanValidation.acceptanceBlocked) {
+            const error = new Error('Correction acceptance requires verifiable moderator provenance');
+            error.status = 409;
+            error.code = 'correction_provenance_missing';
+            throw error;
+          }
+          let reviewCaseId = reviewReopenPlan.targetReviewCaseId;
+          if (action === 'acceptCorrection'
+            && reviewReopenPlan.createNewReviewCase === true
+            && reviewReopenPlan.sourceReviewCaseId) {
+            const sourceCorrectionCaseSnap = await transaction.get(
+              db.collection('reviewCases').doc(reviewReopenPlan.sourceReviewCaseId)
+            );
+            const provenanceValidation = validateRoutedCorrectionAcceptanceProvenance({
+              plan: reviewReopenPlan,
+              action,
+              persistedSourceCase: sourceCorrectionCaseSnap.exists ? (sourceCorrectionCaseSnap.data() || {}) : null,
+              persistedSourceCaseExists: sourceCorrectionCaseSnap.exists,
+              upload: latestUpload,
+            });
+            if (provenanceValidation.acceptanceBlocked) {
+              const error = new Error('Correction request is no longer active');
+              error.status = 409;
+              error.code = provenanceValidation.correctionSuperseded
+                ? 'correction_superseded'
+                : 'correction_source_inactive';
+              throw error;
+            }
+          }
+          if (reviewCaseId && reviewReopenPlan.createNewReviewCase !== true) {
+            const persistedCorrectionCaseSnap = await transaction.get(db.collection('reviewCases').doc(reviewCaseId));
+            reviewReopenPlan = finalizeCorrectionReviewCasePlan({
+              plan: reviewReopenPlan,
+              action,
+              userId,
+              persistedCase: persistedCorrectionCaseSnap.exists ? (persistedCorrectionCaseSnap.data() || {}) : null,
+              persistedCaseExists: persistedCorrectionCaseSnap.exists,
+              newReviewCaseId: action === 'rejectCorrection' ? (rejectedCorrectionReviewRef?.id || null) : null,
+              upload: latestUpload,
+              uploadId,
+            });
+            reviewCaseId = reviewReopenPlan.targetReviewCaseId;
+            if (reviewReopenPlan.correctionSuperseded || reviewReopenPlan.rejectionBlocked) {
+              const error = new Error('Correction request was superseded by a newer moderator decision');
+              error.status = 409;
+              error.code = 'correction_superseded';
+              throw error;
+            }
+            if (reviewReopenPlan.acceptanceBlocked) {
+              const error = new Error('Correction request is no longer active');
+              error.status = 409;
+              error.code = 'correction_request_inactive';
+              throw error;
+            }
+          }
+          if (action === 'rejectCorrection') {
+            const latestUserModerationData = latestUserModerationSnap?.exists
+              ? (latestUserModerationSnap.data() || {})
+              : {};
+            const correctionReviewAccess = getReviewAccessDecision({
+              reviewRightsLevel: latestUserModerationData.reviewRightsLevel,
+              openReviewCount: latestUserModerationData.openReviewCount,
+              cooldownUntil: resolveTimestamp(latestUserModerationData.cooldownUntil),
+            });
+            if (!correctionReviewAccess.allowed) {
+              const error = new Error(correctionReviewAccess.message);
+              error.status = correctionReviewAccess.status;
+              error.code = correctionReviewAccess.code;
+              throw error;
+            }
+          }
           const nextCorrection = {
             ...(latestUpload?.correction && typeof latestUpload.correction === 'object' ? latestUpload.correction : {}),
             suggestedThemes: correctedTaxonomy.themes,
             suggestedTriggers: correctedTaxonomy.triggers,
           };
           if (action === 'acceptCorrection') {
+            nextCorrection.type = 'safeCorrection';
             nextCorrection.userAcceptedAt = FieldValue.serverTimestamp();
             nextCorrection.userRejectedAt = null;
             nextCorrection.requiresModeratorReview = false;
@@ -4056,6 +4608,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             nextCorrection.finalAcceptedThemes = correctedTaxonomy.themes;
             nextCorrection.finalAcceptedTriggers = correctedTaxonomy.triggers;
           } else {
+            nextCorrection.type = 'reviewRequiredCorrection';
             nextCorrection.userRejectedAt = FieldValue.serverTimestamp();
             nextCorrection.requiresModeratorReview = true;
             nextCorrection.publishBlocked = true;
@@ -4066,6 +4619,8 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
           correctionPlan = {
             correctedTaxonomy,
             nextCorrection,
+            reviewCaseId,
+            reviewReopenPlan,
             moderationExampleRef: db.collection('moderationExamples').doc(moderationExampleId),
             moderationExamplePayload: buildCommonModerationExample({
               source: 'userModerationAction',
@@ -4108,39 +4663,63 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
 
         let publicationPlan = null;
         if (postRef) {
-          const publishDecision = getUserPublicPostPublishDecision(latestUserSnap?.exists ? latestUserSnap.data() : null);
+          const publishDecision = getServerPublicPostPublishDecision({
+            user: latestUserSnap?.exists ? latestUserSnap.data() : null,
+            tokenClaims: decoded,
+          });
           if (!publishDecision.allowed) {
             const error = new Error(publishDecision.code);
             error.status = 403;
             error.code = publishDecision.code;
             throw error;
           }
-          const postDraft = {
+          const submittedPostDraft = {
             ...(latestUpload?.postDraft || {}),
             ...(postDraftFromBody && typeof postDraftFromBody === 'object' ? postDraftFromBody : {}),
           };
-          const normalizedImageUrl = String(postDraft?.imageUrl || latestUpload?.imageUrl || latestUpload?.imageRef || '').trim();
+          const boundDraftState = buildPersistedModerationDraftState({ upload: latestUpload, draft: submittedPostDraft });
+          if (!boundDraftState.ok) {
+            const error = new Error(boundDraftState.error);
+            error.status = boundDraftState.status || 409;
+            error.code = boundDraftState.code || 'moderated_image_missing';
+            throw error;
+          }
+          const postDraft = applyAutomaticModeratorCorrectionToPostDraft({ upload: latestUpload, postDraft: boundDraftState.draft });
+          const publicationTaxonomy = buildModeratedPublicationTaxonomy({ upload: latestUpload, postDraft });
+          if (!publicationTaxonomy.ok) {
+            const error = new Error(publicationTaxonomy.error);
+            error.status = publicationTaxonomy.status || 409;
+            error.code = publicationTaxonomy.code || 'moderated_taxonomy_mismatch';
+            throw error;
+          }
+          const persistedConsentProof = buildPersistedPublicationConsentProof({ postDraft, userId });
+          if (!persistedConsentProof.ok) {
+            const error = new Error(persistedConsentProof.error);
+            error.status = persistedConsentProof.status || 400;
+            error.code = persistedConsentProof.code || 'upload_consent_invalid';
+            throw error;
+          }
+          const normalizedImageUrl = resolveTrustedModeratedImageUrl(latestUpload);
           if (!normalizedImageUrl) {
-            const error = new Error('Cannot publish upload without imageUrl');
-            error.status = 400;
+            const error = new Error('Cannot publish upload without a trusted moderated image');
+            error.status = 409;
+            error.code = 'moderated_image_missing';
             throw error;
           }
           publicationPlan = {
             title: String(postDraft?.title || latestUpload?.title || latestUpload?.caption || '').trim(),
             description: String(postDraft?.description || postDraft?.caption || latestUpload?.description || latestUpload?.caption || '').trim(),
             imageUrl: normalizedImageUrl,
-            styles: Array.isArray(postDraft?.styles)
-              ? postDraft.styles.filter(Boolean)
-              : Array.isArray(postDraft?.themes) ? postDraft.themes.filter(Boolean) : [],
-            makerTags: Array.isArray(postDraft?.makerTags)
-              ? postDraft.makerTags.filter(Boolean)
-              : Array.isArray(latestUpload?.makerTags) ? latestUpload.makerTags.filter(Boolean) : [],
-            appliedTriggers: Array.isArray(postDraft?.appliedTriggers)
-              ? postDraft.appliedTriggers.filter(Boolean)
-              : Array.isArray(latestUpload?.appliedTriggers) ? latestUpload.appliedTriggers.filter(Boolean) : [],
-            credits: Array.isArray(postDraft?.credits)
-              ? postDraft.credits.filter(Boolean)
-              : Array.isArray(postDraft?.contributors) ? postDraft.contributors.filter(Boolean) : [],
+            styles: publicationTaxonomy.themes,
+            makerTags: publicationTaxonomy.triggers,
+            appliedTriggers: publicationTaxonomy.appliedTriggers,
+            credits: persistedConsentProof.credits,
+            contributorIds: persistedConsentProof.contributorIds,
+            uploadConsent: persistedConsentProof.uploadConsent,
+            consentAudit: persistedConsentProof.consentAudit,
+            consentException: persistedConsentProof.consentException,
+            imageMeta: sanitizePersistedPublicationImageMeta(postDraft?.imageMeta),
+            correction: sanitizePersistedPublicationCorrection(latestUpload?.correction),
             authorName: String(postDraft?.authorName || resolvedAuthorProfile?.displayName || latestUpload?.authorName || '').trim(),
             authorRole: String(postDraft?.authorRole || latestUpload?.authorRole || '').trim(),
             isChallenge: Boolean(postDraft?.isChallenge || latestUpload?.isChallenge),
@@ -4154,18 +4733,21 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             publicationPromptOpenedByUid: userId,
             publicationPromptDismissedAt: FieldValue.serverTimestamp(),
             publicationPromptDismissedByUid: userId,
+            previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
           }, { merge: true });
           if (messageRef) transaction.set(messageRef, { unread: false }, { merge: true });
         }
 
         if (action === 'discardApprovedUpload') {
           transaction.set(uploadRef, {
+            publicationState: PUBLICATION_STATES.discarded,
             publicationStatus: 'discarded',
             publishStatus: 'discarded',
             discardedAt: FieldValue.serverTimestamp(),
             discardedByUid: userId,
             publicationPromptDismissedAt: FieldValue.serverTimestamp(),
             publicationPromptDismissedByUid: userId,
+            previewRetentionExpiresAt: Timestamp.fromMillis(Date.now()),
           }, { merge: true });
           const reviewCaseId = latestUpload?.reviewCaseId || null;
           if (reviewCaseId) {
@@ -4185,25 +4767,87 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
         }
 
         if (correctionPlan) {
+          let acceptedCorrectionPostDraft = null;
+          if (action === 'acceptCorrection') {
+            const acceptedDraftState = buildPersistedModerationDraftState({
+              upload: latestUpload,
+              draft: {
+                ...(latestUpload?.postDraft || {}),
+                ...(postDraftFromBody && typeof postDraftFromBody === 'object' ? postDraftFromBody : {}),
+                styles: correctionPlan.correctedTaxonomy.themes,
+                makerTags: correctionPlan.correctedTaxonomy.triggers,
+                appliedTriggers: deriveAcceptedCorrectionAppliedTriggers({
+                  upload: latestUpload,
+                  themes: correctionPlan.correctedTaxonomy.themes,
+                  triggers: correctionPlan.correctedTaxonomy.triggers,
+                }),
+              },
+            });
+            if (!acceptedDraftState.ok) {
+              const error = new Error(acceptedDraftState.error);
+              error.status = acceptedDraftState.status || 409;
+              error.code = acceptedDraftState.code || 'moderated_image_missing';
+              throw error;
+            }
+            acceptedCorrectionPostDraft = acceptedDraftState.draft;
+          }
           transaction.set(uploadRef, {
             correctedTaxonomy: correctionPlan.correctedTaxonomy,
             uploaderCorrectionResponse: action === 'acceptCorrection'
               ? { status: 'accepted', acceptedAt: FieldValue.serverTimestamp(), acceptedBy: userId }
               : { status: 'rejected', rejectedAt: FieldValue.serverTimestamp(), rejectedBy: userId },
             correction: correctionPlan.nextCorrection,
+            moderationState: action === 'acceptCorrection'
+              ? MODERATION_STATES.allowed
+              : MODERATION_STATES.reviewPending,
+            publicationState: PUBLICATION_STATES.pending,
             publicationStatus: action === 'acceptCorrection' ? 'correction_accepted' : 'user_disagreed',
-            reviewStatus: action === 'acceptCorrection' ? 'approved' : 'needs_user_correction',
+            reviewStatus: action === 'acceptCorrection' ? 'approved' : 'inReview',
             requiresUploaderAcceptance: action !== 'acceptCorrection',
+            previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
+            ...(action === 'rejectCorrection' && correctionPlan.reviewCaseId ? { reviewCaseId: correctionPlan.reviewCaseId } : {}),
             ...(action === 'acceptCorrection' ? {
-              postDraft: {
-                ...(latestUpload?.postDraft || {}),
-                styles: correctionPlan.correctedTaxonomy.themes,
-                makerTags: correctionPlan.correctedTaxonomy.triggers,
-                appliedTriggers: correctionPlan.correctedTaxonomy.triggers,
-              },
+              ...buildAcceptedCorrectionModerationState(),
+              postDraft: acceptedCorrectionPostDraft,
             } : {}),
           }, { merge: true });
           transaction.set(correctionPlan.moderationExampleRef, correctionPlan.moderationExamplePayload, { merge: true });
+          if (action === 'rejectCorrection') {
+            const correctionReviewCaseId = String(correctionPlan.reviewCaseId || '').trim();
+            if (correctionReviewCaseId) {
+              const reviewRef = db.collection('reviewCases').doc(correctionReviewCaseId);
+              const reviewMutation = {
+                caseType: 'upload',
+                userId,
+                status: 'inReview',
+                decision: null,
+                uploadId,
+                linkedUploadIds: correctionPlan.reviewReopenPlan?.createNewReviewCase
+                  ? [uploadId]
+                  : FieldValue.arrayUnion(uploadId),
+                reviewReason: 'uploaderRejectedCorrection',
+                userCorrectionStatus: 'rejected',
+                userCorrectionRejectedAt: FieldValue.serverTimestamp(),
+                userCorrectionRejectedByUid: userId,
+                correctedTaxonomy: correctionPlan.correctedTaxonomy,
+                updatedAt: FieldValue.serverTimestamp(),
+                lock: FieldValue.delete(),
+              };
+              if (correctionPlan.reviewReopenPlan?.createNewReviewCase) {
+                transaction.create(reviewRef, {
+                  ...reviewMutation,
+                  fingerprints: latestUpload?.fingerprints ? [latestUpload.fingerprints] : [],
+                  createdAt: FieldValue.serverTimestamp(),
+                });
+              } else {
+                transaction.set(reviewRef, reviewMutation, { merge: true });
+              }
+              transaction.set(db.collection('userModeration').doc(userId), {
+                openReviewCount: 1,
+                updatedAt: FieldValue.serverTimestamp(),
+              }, { merge: true });
+            }
+          }
         }
 
         if (publicationPlan) {
@@ -4212,6 +4856,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
               title: publicationPlan.title || 'Untitled',
               description: publicationPlan.description || '',
               imageUrl: publicationPlan.imageUrl,
+              moderationUploadId: uploadId,
               authorId: userId,
               authorUid: userId,
               authorProfileId: resolvedAuthorProfile.profileId,
@@ -4222,10 +4867,18 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
               makerTags: publicationPlan.makerTags,
               appliedTriggers: publicationPlan.appliedTriggers,
               triggers: publicationPlan.appliedTriggers,
-              outcome: latestUpload?.outcome || 'allowed',
-              forbiddenReasons: Array.isArray(latestUpload?.forbiddenReasons) ? latestUpload.forbiddenReasons : [],
+              sensitive: publicationPlan.appliedTriggers.length > 0,
+              outcome: 'allowed',
+              shouldReview: false,
+              forbiddenReasons: [],
               reviewCaseId: latestUpload?.reviewCaseId || null,
               credits: publicationPlan.credits,
+              contributorIds: publicationPlan.contributorIds,
+              uploadConsent: publicationPlan.uploadConsent,
+              consentAudit: publicationPlan.consentAudit,
+              consentException: publicationPlan.consentException,
+              ...(publicationPlan.imageMeta ? { imageMeta: publicationPlan.imageMeta } : {}),
+              ...(publicationPlan.correction ? { correction: publicationPlan.correction } : {}),
               likes: 0,
               isChallenge: publicationPlan.isChallenge,
               createdAt: FieldValue.serverTimestamp(),
@@ -4233,9 +4886,16 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             });
           }
           transaction.set(uploadRef, {
+            publicationState: PUBLICATION_STATES.published,
             publicationStatus: 'published',
+            publishStatus: 'published',
             publishedAt: FieldValue.serverTimestamp(),
             postId: uploadId,
+            previewRetentionExpiresAt: FieldValue.delete(),
+            previewRetentionDeferredAt: FieldValue.delete(),
+            previewRetentionDeferredReason: FieldValue.delete(),
+            previewExpiryClaimId: FieldValue.delete(),
+            draftId: FieldValue.delete(),
           }, { merge: true });
           if (messageRef) {
             transaction.set(messageRef, {
@@ -4257,7 +4917,13 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
             updatedAt: FieldValue.serverTimestamp(),
             status: 'draft',
           });
-          transaction.set(uploadRef, { publicationStatus: 'draft' }, { merge: true });
+          transaction.set(uploadRef, {
+            publicationState: PUBLICATION_STATES.draft,
+            publicationStatus: 'draft',
+            publishStatus: 'draft',
+            draftId: draftRef.id,
+            previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(),
+          }, { merge: true });
           transaction.set(messageRef, {
             unread: false,
             resolved: true,
@@ -4273,7 +4939,7 @@ export const userModerationAction = onRequest({ cors: true, region: 'europe-west
       },
     });
 
-    res.status(200).json({ ok: true });
+    res.status(200).json({ ok: true, ...((action === 'publishNow' || action === 'repairPublished') ? { postId: uploadId } : {}) });
   } catch (error) {
     const status = error.status || 500;
     res.status(status).json({ error: error.message || 'Failed to perform action', ...(error.code ? { code: error.code } : {}) });
@@ -5883,6 +6549,602 @@ export const onFollowingCreated = onDocumentCreated({
   }
 });
 
+const claimExpiredModerationPreview = async ({ uploadRef, nowMs = Date.now() } = {}) => {
+  let result = { action: 'skip', reason: 'not_due' };
+  await db.runTransaction(async (transaction) => {
+    const uploadSnap = await transaction.get(uploadRef);
+    if (!uploadSnap.exists) {
+      result = { action: 'skip', reason: 'upload_missing' };
+      return;
+    }
+
+    const uploadData = uploadSnap.data() || {};
+    const retentionExpiry = resolveTimestamp(uploadData?.previewRetentionExpiresAt);
+    if (!retentionExpiry || retentionExpiry.getTime() > nowMs) {
+      result = { action: 'skip', reason: 'not_due' };
+      return;
+    }
+
+    const productionPostSnap = await transaction.get(db.collection('posts').doc(uploadRef.id));
+    const codexDevPostSnap = await transaction.get(db.collection('codexDevPosts').doc(uploadRef.id));
+
+    const ownerUid = String(uploadData?.userId || uploadData?.uploaderUid || uploadData?.ownerUid || uploadData?.userUid || '').trim();
+    const reviewCaseStatuses = [];
+    const operationalReviewCaseId = getOperationalModerationPreviewReviewCaseId(uploadData);
+    if (operationalReviewCaseId) {
+      const reviewCaseSnap = await transaction.get(db.collection('reviewCases').doc(operationalReviewCaseId));
+      if (reviewCaseSnap.exists && isOperationalModerationPreviewReviewCase({
+        uploadId: uploadRef.id,
+        uploadData,
+        reviewCaseData: reviewCaseSnap.data() || {},
+      })) {
+        reviewCaseStatuses.push(String(reviewCaseSnap.data()?.status || '').trim());
+      }
+    }
+
+    const publicationLifecycle = resolveUploadPublicationState(uploadData);
+    const publicationStatus = publicationLifecycle.valid ? publicationLifecycle.state : null;
+    const draftId = String(uploadData?.draftId || '').trim();
+    let draftExists = false;
+    let draftMatchesUpload = false;
+    if (publicationStatus === PUBLICATION_STATES.draft
+      && ownerUid
+      && !ownerUid.includes('/')
+      && draftId
+      && !draftId.includes('/')) {
+      const draftSnap = await transaction.get(db.collection('users').doc(ownerUid).collection('drafts').doc(draftId));
+      draftExists = draftSnap.exists;
+      draftMatchesUpload = draftSnap.exists
+        && String(draftSnap.data()?.uploadId || '').trim() === uploadRef.id;
+    }
+
+    const decision = getModerationPreviewRetentionDecision({
+      uploadData,
+      productionPostExists: productionPostSnap.exists,
+      codexDevPostExists: codexDevPostSnap.exists,
+      reviewCaseStatuses,
+      draftExists,
+      draftMatchesUpload,
+    });
+
+    if (decision.action === 'clear_retention' || decision.action === 'preserve') {
+      transaction.set(uploadRef, {
+        previewRetentionExpiresAt: FieldValue.delete(),
+        previewRetentionDeferredAt: FieldValue.delete(),
+        previewRetentionDeferredReason: FieldValue.delete(),
+      }, { merge: true });
+      result = decision;
+      return;
+    }
+
+    if (decision.action === 'defer') {
+      transaction.set(uploadRef, {
+        previewRetentionExpiresAt: buildModerationPreviewRetentionExpiry(nowMs),
+        previewRetentionDeferredAt: FieldValue.serverTimestamp(),
+        previewRetentionDeferredReason: decision.reason,
+      }, { merge: true });
+      result = decision;
+      return;
+    }
+
+    if (decision.action !== 'expire') {
+      result = { action: 'skip', reason: 'unsupported_retention_decision' };
+      return;
+    }
+
+    const claimId = crypto.randomUUID();
+    const reviewStatus = String(uploadData?.reviewStatus || '').trim();
+    transaction.set(uploadRef, {
+      publicationState: PUBLICATION_STATES.expired,
+      publicationStatus: 'expired',
+      publishStatus: 'expired',
+      previewExpiryClaimId: claimId,
+      previewExpiryClaimedAt: FieldValue.serverTimestamp(),
+      previewExpiryReason: decision.reason,
+      previewExpiredFromPublicationStatus: String(uploadData?.publicationStatus || uploadData?.publishStatus || publicationStatus || '').trim() || null,
+      previewExpiredFromReviewStatus: reviewStatus || null,
+      previewRetentionDeferredAt: FieldValue.delete(),
+      previewRetentionDeferredReason: FieldValue.delete(),
+      previewRetentionExpiresAt: FieldValue.delete(),
+      mediaState: 'cleanup_pending',
+      mediaCleanupAfter: Timestamp.fromMillis(Number(nowMs) + moderationPreviewCleanupRetryMs),
+      mediaCleanupReason: 'retention_elapsed',
+    }, { merge: true });
+    result = {
+      ...decision,
+      claimId,
+      uploadData,
+    };
+  });
+  return result;
+};
+
+const finalizeExpiredModerationPreviewClaim = async ({ uploadRef, claimId, cleaned = false } = {}) => {
+  await db.runTransaction(async (transaction) => {
+    const uploadSnap = await transaction.get(uploadRef);
+    if (!uploadSnap.exists) return;
+    const uploadData = uploadSnap.data() || {};
+    if (String(uploadData?.previewExpiryClaimId || '').trim() !== String(claimId || '').trim()) return;
+
+    transaction.set(uploadRef, {
+      ...(cleaned ? {
+        imageUrl: FieldValue.delete(),
+        previewUrl: FieldValue.delete(),
+        imageRef: FieldValue.delete(),
+        storagePath: FieldValue.delete(),
+        mediaState: 'deleted',
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+        previewCleanedAt: FieldValue.serverTimestamp(),
+        previewExpiredAt: FieldValue.serverTimestamp(),
+      } : {}),
+      previewRetentionExpiresAt: FieldValue.delete(),
+      previewExpiryClaimId: FieldValue.delete(),
+    }, { merge: true });
+  });
+};
+
+const restorePublishedModerationPreviewClaim = async ({ uploadRef, claimId } = {}) => {
+  await db.runTransaction(async (transaction) => {
+    const uploadSnap = await transaction.get(uploadRef);
+    if (!uploadSnap.exists) return;
+    const uploadData = uploadSnap.data() || {};
+    if (String(uploadData?.previewExpiryClaimId || '').trim() !== String(claimId || '').trim()) return;
+
+    transaction.set(uploadRef, {
+      publicationState: PUBLICATION_STATES.published,
+      publicationStatus: 'published',
+      publishStatus: 'published',
+      postId: uploadRef.id,
+      mediaState: 'ready',
+      mediaCleanupAfter: FieldValue.delete(),
+      mediaCleanupReason: FieldValue.delete(),
+      mediaCleanupClaimId: FieldValue.delete(),
+      mediaCleanupClaimedAt: FieldValue.delete(),
+      previewRetentionExpiresAt: FieldValue.delete(),
+      previewExpiryClaimId: FieldValue.delete(),
+      previewExpiryRaceRecoveredAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+};
+
+const processExpiredModerationPreview = async ({ uploadRef, nowMs = Date.now() } = {}) => {
+  const claim = await claimExpiredModerationPreview({ uploadRef, nowMs });
+  if (claim.action !== 'expire') return claim;
+
+  const cleanup = await cleanupModerationPreviewForUpload({
+    uploadId: uploadRef.id,
+    uploadData: claim.uploadData,
+  });
+  if (cleanup.deleted || cleanup.reason === 'no_owned_preview') {
+    await finalizeExpiredModerationPreviewClaim({ uploadRef, claimId: claim.claimId, cleaned: true });
+    return { action: 'expired', reason: claim.reason, storagePath: cleanup.storagePath };
+  }
+
+  if (cleanup.reason === 'published_media_still_referenced') {
+    await restorePublishedModerationPreviewClaim({ uploadRef, claimId: claim.claimId });
+    return { action: 'preserve', reason: cleanup.reason, storagePath: cleanup.storagePath };
+  }
+
+  await finalizeExpiredModerationPreviewClaim({ uploadRef, claimId: claim.claimId, cleaned: false });
+  return { action: 'clear_retention', reason: cleanup.reason || 'preview_missing' };
+};
+
+const claimPendingModerationPreviewMedia = async ({ uploadRef, nowMs = Date.now() } = {}) => {
+  let result = { action: 'skip', reason: 'not_due' };
+  await db.runTransaction(async (transaction) => {
+    const uploadSnap = await transaction.get(uploadRef);
+    if (!uploadSnap.exists) {
+      result = { action: 'skip', reason: 'upload_missing' };
+      return;
+    }
+    const uploadData = uploadSnap.data() || {};
+    const decision = getModerationPendingMediaCleanupDecision({
+      uploadId: uploadRef.id,
+      uploadData,
+      nowMs,
+    });
+
+    if (decision.action === 'clear_schedule') {
+      transaction.set(uploadRef, {
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+      }, { merge: true });
+      result = decision;
+      return;
+    }
+    if (decision.action !== 'cleanup') {
+      result = decision;
+      return;
+    }
+
+    const [productionPostSnap, codexDevPostSnap] = await Promise.all([
+      transaction.get(db.collection('posts').doc(uploadRef.id)),
+      transaction.get(db.collection('codexDevPosts').doc(uploadRef.id)),
+    ]);
+    if (productionPostSnap.exists || codexDevPostSnap.exists) {
+      transaction.set(uploadRef, {
+        mediaState: 'ready',
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+        mediaCleanupRecoveredAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      result = { action: 'preserve', reason: 'published_media_still_referenced', storagePath: decision.storagePath };
+      return;
+    }
+
+    const claimId = crypto.randomUUID();
+    transaction.set(uploadRef, {
+      mediaState: 'cleanup_pending',
+      mediaCleanupClaimId: claimId,
+      mediaCleanupClaimedAt: FieldValue.serverTimestamp(),
+      mediaCleanupAfter: Timestamp.fromMillis(Number(nowMs) + moderationPreviewCleanupRetryMs),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    result = {
+      action: 'cleanup',
+      reason: decision.reason,
+      storagePath: decision.storagePath,
+      claimId,
+      uploadData,
+    };
+  });
+  return result;
+};
+
+const finalizePendingModerationPreviewMediaClaim = async ({
+  uploadRef,
+  claimId,
+  cleaned = false,
+  preserved = false,
+  nowMs = Date.now(),
+} = {}) => {
+  await db.runTransaction(async (transaction) => {
+    const uploadSnap = await transaction.get(uploadRef);
+    if (!uploadSnap.exists) return;
+    const uploadData = uploadSnap.data() || {};
+    if (String(uploadData?.mediaCleanupClaimId || '').trim() !== String(claimId || '').trim()) return;
+
+    if (preserved) {
+      transaction.set(uploadRef, {
+        mediaState: 'ready',
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+        mediaCleanupRecoveredAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return;
+    }
+
+    if (cleaned) {
+      const publicationStatus = String(uploadData?.publicationStatus || uploadData?.publishStatus || '').trim();
+      transaction.set(uploadRef, {
+        ...(publicationStatus === 'deleted_pending_cleanup' ? {
+          publicationState: PUBLICATION_STATES.discarded,
+          publicationStatus: 'deleted',
+          publishStatus: 'deleted',
+        } : {}),
+        mediaState: 'deleted',
+        imageUrl: FieldValue.delete(),
+        previewUrl: FieldValue.delete(),
+        imageRef: FieldValue.delete(),
+        storagePath: FieldValue.delete(),
+        mediaCleanupAfter: FieldValue.delete(),
+        mediaCleanupReason: FieldValue.delete(),
+        mediaCleanupClaimId: FieldValue.delete(),
+        mediaCleanupClaimedAt: FieldValue.delete(),
+        previewRetentionExpiresAt: FieldValue.delete(),
+        previewExpiryClaimId: FieldValue.delete(),
+        previewCleanedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return;
+    }
+
+    transaction.set(uploadRef, {
+      mediaState: 'cleanup_pending',
+      mediaCleanupAfter: Timestamp.fromMillis(Number(nowMs) + moderationPreviewCleanupRetryMs),
+      mediaCleanupClaimId: FieldValue.delete(),
+      mediaCleanupClaimedAt: FieldValue.delete(),
+      mediaCleanupRetryScheduledAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+};
+
+const processPendingModerationPreviewMedia = async ({ uploadRef, nowMs = Date.now() } = {}) => {
+  const claim = await claimPendingModerationPreviewMedia({ uploadRef, nowMs });
+  if (claim.action !== 'cleanup') return claim;
+
+  try {
+    const cleanup = await cleanupModerationPreviewForUpload({
+      uploadId: uploadRef.id,
+      uploadData: claim.uploadData,
+    });
+    if (cleanup.deleted || cleanup.reason === 'no_owned_preview') {
+      await finalizePendingModerationPreviewMediaClaim({
+        uploadRef,
+        claimId: claim.claimId,
+        cleaned: true,
+        nowMs,
+      });
+      return { action: 'cleaned', reason: claim.reason, storagePath: cleanup.storagePath || claim.storagePath };
+    }
+    if (cleanup.reason === 'published_media_still_referenced') {
+      await finalizePendingModerationPreviewMediaClaim({
+        uploadRef,
+        claimId: claim.claimId,
+        preserved: true,
+        nowMs,
+      });
+      return { action: 'preserve', reason: cleanup.reason, storagePath: cleanup.storagePath };
+    }
+    await finalizePendingModerationPreviewMediaClaim({
+      uploadRef,
+      claimId: claim.claimId,
+      cleaned: false,
+      nowMs,
+    });
+    return { action: 'defer', reason: cleanup.reason || 'cleanup_not_completed' };
+  } catch (error) {
+    await finalizePendingModerationPreviewMediaClaim({
+      uploadRef,
+      claimId: claim.claimId,
+      cleaned: false,
+      nowMs,
+    });
+    throw error;
+  }
+};
+
+export const cleanupExpiredModerationPreviews = onSchedule({
+  schedule: 'every 6 hours',
+  region: 'europe-west4',
+  timeoutSeconds: 300,
+}, async () => {
+  const now = Timestamp.now();
+  const snapshot = await db.collection('uploads')
+    .where('previewRetentionExpiresAt', '<=', now)
+    .orderBy('previewRetentionExpiresAt', 'asc')
+    .limit(moderationPreviewGcBatchSize)
+    .get();
+
+  const summary = {
+    scanned: snapshot.size,
+    expired: 0,
+    deferred: 0,
+    preserved: 0,
+    cleared: 0,
+    skipped: 0,
+    failed: 0,
+  };
+
+  for (const docSnap of snapshot.docs) {
+    try {
+      const result = await processExpiredModerationPreview({
+        uploadRef: docSnap.ref,
+        nowMs: now.toMillis(),
+      });
+      if (result.action === 'expired') summary.expired += 1;
+      else if (result.action === 'defer') summary.deferred += 1;
+      else if (result.action === 'preserve') summary.preserved += 1;
+      else if (result.action === 'clear_retention') summary.cleared += 1;
+      else summary.skipped += 1;
+    } catch (error) {
+      summary.failed += 1;
+      logger.error('Expired moderation preview cleanup failed.', {
+        uploadId: docSnap.id,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  const pendingMediaSnapshot = await db.collection('uploads')
+    .where('mediaCleanupAfter', '<=', now)
+    .orderBy('mediaCleanupAfter', 'asc')
+    .limit(moderationPreviewGcBatchSize)
+    .get();
+  summary.pendingMediaScanned = pendingMediaSnapshot.size;
+  summary.pendingMediaCleaned = 0;
+  summary.pendingMediaPreserved = 0;
+  summary.pendingMediaDeferred = 0;
+  summary.pendingMediaSkipped = 0;
+  summary.pendingMediaFailed = 0;
+
+  for (const docSnap of pendingMediaSnapshot.docs) {
+    try {
+      const result = await processPendingModerationPreviewMedia({
+        uploadRef: docSnap.ref,
+        nowMs: now.toMillis(),
+      });
+      if (result.action === 'cleaned') summary.pendingMediaCleaned += 1;
+      else if (result.action === 'preserve') summary.pendingMediaPreserved += 1;
+      else if (result.action === 'defer') summary.pendingMediaDeferred += 1;
+      else summary.pendingMediaSkipped += 1;
+    } catch (error) {
+      summary.pendingMediaFailed += 1;
+      logger.error('Pending moderation preview cleanup failed.', {
+        uploadId: docSnap.id,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  logger.info('Moderation preview retention cleanup completed.', summary);
+});
+
+const cleanupModerationPreviewForUpload = async ({ uploadId, uploadData = {} } = {}) => {
+  const normalizedUploadId = String(uploadId || '').trim();
+  const storagePath = resolveOwnedModerationPreviewStoragePath(uploadData);
+  if (!normalizedUploadId || !storagePath) return { deleted: false, reason: 'no_owned_preview' };
+
+  const [productionPostSnap, codexDevPostSnap] = await Promise.all([
+    db.collection('posts').doc(normalizedUploadId).get(),
+    db.collection('codexDevPosts').doc(normalizedUploadId).get(),
+  ]);
+  if (productionPostSnap.exists || codexDevPostSnap.exists) {
+    return { deleted: false, reason: 'published_media_still_referenced', storagePath };
+  }
+
+  await admin.storage().bucket().file(storagePath).delete({ ignoreNotFound: true });
+  return { deleted: true, storagePath };
+};
+
+const finalizeDeletedPublishedPostMedia = async ({ postId, postData = {} } = {}) => {
+  const normalizedPostId = String(postId || '').trim();
+  if (!normalizedPostId) return { cleaned: false, reason: 'missing_post_id' };
+
+  const uploadRef = db.collection('uploads').doc(normalizedPostId);
+  const uploadSnap = await uploadRef.get();
+  if (!uploadSnap.exists) return { cleaned: false, reason: 'upload_missing' };
+  const uploadData = uploadSnap.data() || {};
+  const decision = getDeletedPublishedPostCleanupDecision({
+    postId: normalizedPostId,
+    postData,
+    uploadExists: uploadSnap.exists,
+    uploadData,
+  });
+  if (!decision.ok) return { cleaned: false, reason: decision.reason };
+
+  let cleanup = null;
+  try {
+    cleanup = await cleanupModerationPreviewForUpload({ uploadId: normalizedPostId, uploadData });
+  } catch (error) {
+    try {
+      await uploadRef.set({
+        publicationState: PUBLICATION_STATES.discarded,
+        publicationStatus: 'deleted_pending_cleanup',
+        publishStatus: 'deleted_pending_cleanup',
+        deletedPostAt: FieldValue.serverTimestamp(),
+        previewCleanupRetryScheduledAt: FieldValue.serverTimestamp(),
+        mediaState: 'cleanup_pending',
+        mediaCleanupAfter: Timestamp.fromMillis(Date.now()),
+        mediaCleanupReason: 'deleted_post_cleanup_failed',
+        previewRetentionExpiresAt: FieldValue.delete(),
+      }, { merge: true });
+    } catch (scheduleError) {
+      logger.error('Deleted published preview retry scheduling failed.', {
+        postId: normalizedPostId,
+        error: scheduleError?.message || String(scheduleError),
+      });
+    }
+    throw error;
+  }
+
+  if (!cleanup.deleted && cleanup.reason !== 'no_owned_preview') {
+    return { cleaned: false, reason: cleanup.reason };
+  }
+
+  await uploadRef.set({
+    publicationState: PUBLICATION_STATES.discarded,
+    publicationStatus: 'deleted',
+    publishStatus: 'deleted',
+    deletedPostAt: FieldValue.serverTimestamp(),
+    imageUrl: FieldValue.delete(),
+    previewUrl: FieldValue.delete(),
+    imageRef: FieldValue.delete(),
+    storagePath: FieldValue.delete(),
+    mediaState: 'deleted',
+    mediaCleanupAfter: FieldValue.delete(),
+    mediaCleanupReason: FieldValue.delete(),
+    mediaCleanupClaimId: FieldValue.delete(),
+    mediaCleanupClaimedAt: FieldValue.delete(),
+    previewCleanedAt: FieldValue.serverTimestamp(),
+    previewRetentionExpiresAt: FieldValue.delete(),
+    previewExpiryClaimId: FieldValue.delete(),
+  }, { merge: true });
+  return {
+    cleaned: true,
+    ...(cleanup.storagePath ? { storagePath: cleanup.storagePath } : {}),
+    ...(cleanup.reason ? { reason: cleanup.reason } : {}),
+  };
+};
+
+export const onModerationUploadDeleted = onDocumentDeleted({
+  document: 'uploads/{uploadId}',
+  region: 'europe-west4',
+  retry: true,
+}, async (event) => {
+  const uploadData = event.data?.data?.() || {};
+  try {
+    await cleanupModerationPreviewForUpload({ uploadId: event.params.uploadId, uploadData });
+  } catch (error) {
+    logger.error('Deleted moderation upload preview cleanup failed.', {
+      uploadId: event.params.uploadId,
+      error: error?.message || String(error),
+    });
+    throw error;
+  }
+});
+
+export const onModerationUploadDiscarded = onDocumentUpdated({
+  document: 'uploads/{uploadId}',
+  region: 'europe-west4',
+  retry: true,
+}, async (event) => {
+  const before = event.data?.before?.data?.() || {};
+  const after = event.data?.after?.data?.() || {};
+  const beforePublication = resolveUploadPublicationState(before);
+  const afterPublication = resolveUploadPublicationState(after);
+  const afterMediaState = String(after?.mediaState || '').trim();
+  if (!afterPublication.valid || afterPublication.state !== PUBLICATION_STATES.discarded) return;
+  if (beforePublication.valid && beforePublication.state === PUBLICATION_STATES.discarded) return;
+  // User-discard cleanup should only claim media that is still ready (or a
+  // legacy upload without mediaState). Post-deletion cleanup failures already
+  // use cleanup_pending and must stay on the upload-owned retry path.
+  if (afterMediaState && afterMediaState !== 'ready') return;
+
+  const cleanup = await cleanupModerationPreviewForUpload({
+    uploadId: event.params.uploadId,
+    uploadData: after,
+  });
+  if (!cleanup.deleted) return;
+
+  await event.data.after.ref.set({
+    imageUrl: FieldValue.delete(),
+    previewUrl: FieldValue.delete(),
+    imageRef: FieldValue.delete(),
+    storagePath: FieldValue.delete(),
+    mediaState: 'deleted',
+    mediaCleanupAfter: FieldValue.delete(),
+    mediaCleanupReason: FieldValue.delete(),
+    mediaCleanupClaimId: FieldValue.delete(),
+    mediaCleanupClaimedAt: FieldValue.delete(),
+    previewCleanedAt: FieldValue.serverTimestamp(),
+    previewRetentionExpiresAt: FieldValue.delete(),
+    previewExpiryClaimId: FieldValue.delete(),
+  }, { merge: true });
+});
+
+export const onProductionPostDeleted = onDocumentDeleted({
+  document: 'posts/{postId}',
+  region: 'europe-west4',
+  retry: true,
+}, async (event) => {
+  await finalizeDeletedPublishedPostMedia({
+    postId: event.params.postId,
+    postData: event.data?.data?.() || {},
+  });
+});
+
+export const onCodexDevPostDeleted = onDocumentDeleted({
+  document: 'codexDevPosts/{postId}',
+  region: 'europe-west4',
+  retry: true,
+}, async (event) => {
+  await finalizeDeletedPublishedPostMedia({
+    postId: event.params.postId,
+    postData: event.data?.data?.() || {},
+  });
+});
+
 export const onFollowingDeleted = onDocumentDeleted({
   document: 'users/{uid}/following/{targetUid}',
   region: 'europe-west4',
@@ -5921,4 +7183,3 @@ export const markSupportThreadReadForModerator = createMarkSupportThreadReadForM
 export { ensureSupportThread, ensureModerationThread } from "./supportChat.js";
 export { createDiditSession, refreshDiditSession, diditWebhook };
 export { deleteOnboardingAccount } from "./accountLifecycle.js";
-    

@@ -101,12 +101,16 @@ export default function UploadModal({ onClose, onPublish, initialStyles = [] }) 
   const triggerOptions = [
     { id: 'adultArtNude', label: '18+ Artistiek naakt' },
     { id: 'adultEroticSuggestive', label: '18+ Erotisch / suggestief' },
+  { id: 'adultGraphicSensitive', label: '18+ Grafische gevoelige content' },
     { id: 'kinkBdsm', label: 'Kink / BDSM' },
     { id: 'breathRestriction', label: 'Ademrestrictie' },
     { id: 'bloodInjury', label: 'Bloed / verwonding' },
+  { id: 'selfHarm', label: 'Zelfbeschadiging' },
+  { id: 'suicide', label: 'Suïcide / bewustwording' },
+  { id: 'eatingDisorder', label: 'Eetstoornis / anorexia' },
+  { id: 'substanceDistress', label: 'Ernstige intoxicatie / overdosis' },
+  { id: 'violence', label: 'Geweld' },
     { id: 'horrorScare', label: 'Horror / schrik' },
-    { id: 'needlesInjections', label: 'Naalden / injecties' },
-    { id: 'spidersInsects', label: 'Spinnen / insecten' },
   ];
 
   return (

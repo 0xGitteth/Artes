@@ -125,6 +125,11 @@ import SensitiveOverlay from './components/SensitiveOverlay';
 import AppLogo from './components/branding/AppLogo';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { selectPendingApprovedUploadReminder } from './utils/pendingApprovedUpload';
+import { resolvePersistedModerationPublicationUploadId } from './utils/moderationPublicationRouting';
+import { resolveModerationApiBase } from './utils/moderationApiBase';
+import { isClientUploadCorrectionPending, isClientUploadDiscarded } from './utils/moderationUploadLifecycle';
+import { resolvePolicyAppliedTriggersForPublication } from './utils/moderationAppliedTriggerRouting';
+import { resolveModerationDraftAuthor } from './utils/moderationDraftAuthor';
 
 import { ROLE_OPTIONS, normalizeRoleValue } from './utils/roles';
 import {
@@ -208,6 +213,7 @@ import {
   CONTRIBUTOR_CONSENT_STATUSES,
   MAKER_FUNCTION_IDS,
   MAKER_ROLE_IDS,
+  buildConsentDraftState,
   buildUploadConsent,
   getMissingMakerPromptState,
   getSelfMakerRoles,
@@ -216,6 +222,7 @@ import {
   hasVisibleSubjectCredit,
   isMakerRole,
   normalizeCreditAfterRoleChange,
+  normalizeConsentDraftState,
   normalizeConsentException,
   normalizeConsentCredit,
   validateUploadConsent,
@@ -543,12 +550,16 @@ const CANONICAL_TRIGGER_ALIASES = {
 const TRIGGERS = [
   { id: 'adultArtNude', label: '18+ Artistiek naakt' },
   { id: 'adultEroticSuggestive', label: '18+ Erotisch / suggestief' },
+  { id: 'adultGraphicSensitive', label: '18+ Grafische gevoelige content' },
   { id: 'kinkBdsm', label: 'Kink / BDSM' },
   { id: 'breathRestriction', label: 'Ademrestrictie' },
   { id: 'bloodInjury', label: 'Bloed / verwonding' },
+  { id: 'selfHarm', label: 'Zelfbeschadiging' },
+  { id: 'suicide', label: 'Suïcide / bewustwording' },
+  { id: 'eatingDisorder', label: 'Eetstoornis / anorexia' },
+  { id: 'substanceDistress', label: 'Ernstige intoxicatie / overdosis' },
+  { id: 'violence', label: 'Geweld' },
   { id: 'horrorScare', label: 'Horror / schrik' },
-  { id: 'needlesInjections', label: 'Naalden / injecties' },
-  { id: 'spidersInsects', label: 'Spinnen / insecten' },
 ];
 
 const TAXONOMY_CORRECTION_TYPES = {
@@ -595,12 +606,17 @@ const MODERATOR_REASON_CODES = [
   { id: 'review_borderline_adult', label: 'Review: borderline adult' },
   { id: 'forbidden_explicit_sexual', label: 'Forbidden: explicit sexual' },
   { id: 'forbidden_non_consensual_context', label: 'Forbidden: non-consensual context' },
+  { id: 'forbidden_self_harm_instruction', label: 'Forbidden: harmful self-harm instruction' },
+  { id: 'forbidden_suicide_instruction', label: 'Forbidden: harmful suicide instruction' },
+  { id: 'forbidden_eating_disorder_instruction', label: 'Forbidden: harmful eating-disorder instruction' },
+  { id: 'forbidden_harmful_drug_instruction', label: 'Forbidden: harmful drug instruction' },
+  { id: 'forbidden_other_safety', label: 'Forbidden: other safety concern' },
   { id: 'wrong_theme_or_label', label: 'Wrong theme or label' },
   { id: 'unclear_ai_result', label: 'Unclear AI result' },
 ];
 const MODERATOR_REASON_CODES_BY_ACTION = {
   approved: ['allowed_art_nude', 'allowed_boudoir', 'allowed_non_sensitive', 'wrong_theme_or_label'],
-  rejected: ['forbidden_explicit_sexual', 'forbidden_non_consensual_context', 'wrong_theme_or_label'],
+  rejected: ['forbidden_explicit_sexual', 'forbidden_non_consensual_context', 'forbidden_self_harm_instruction', 'forbidden_suicide_instruction', 'forbidden_eating_disorder_instruction', 'forbidden_harmful_drug_instruction', 'forbidden_other_safety', 'wrong_theme_or_label'],
   queueFreshEvaluation: ['review_borderline_adult', 'unclear_ai_result', 'wrong_theme_or_label'],
 };
 const MODERATOR_DECISION_ACTIONS = {
@@ -1083,15 +1099,7 @@ export default function ArtesApp() {
     setRequestedActiveProfileId(nextProfileId);
   }, []);
 
-  const moderationApiBase = useMemo(() => {
-    const explicitBase = import.meta.env.VITE_MODERATION_API_BASE;
-    if (explicitBase) return explicitBase;
-    const moderationUrl = import.meta.env.VITE_MODERATION_FUNCTION_URL;
-    if (moderationUrl && moderationUrl.includes('/moderateImage')) {
-      return moderationUrl.replace('/moderateImage', '');
-    }
-    return moderationUrl || '';
-  }, []);
+  const moderationApiBase = useMemo(() => resolveModerationApiBase(import.meta.env), []);
   const functionsBase = useMemo(() => {
     const explicitBase = import.meta.env.VITE_FUNCTIONS_BASE_URL || import.meta.env.VITE_FUNCTIONS_BASE;
     if (explicitBase) return explicitBase;
@@ -2217,19 +2225,31 @@ export default function ArtesApp() {
 
     const loadPendingApprovedUpload = async () => {
       try {
-        const snapshot = await getDocs(query(
-          collection(db, 'uploads'),
-          where('userId', '==', authUser.uid),
-          where('reviewStatus', '==', 'approved'),
-          limit(10),
-        ));
-        if (!active || snapshot.empty) {
+        const [canonicalSnapshot, legacySnapshot] = await Promise.all([
+          getDocs(query(
+            collection(db, 'uploads'),
+            where('userId', '==', authUser.uid),
+            where('moderationState', '==', 'allowed'),
+            where('publicationState', '==', 'pending'),
+            limit(10),
+          )),
+          getDocs(query(
+            collection(db, 'uploads'),
+            where('userId', '==', authUser.uid),
+            where('reviewStatus', '==', 'approved'),
+            limit(10),
+          )),
+        ]);
+        const pendingDocs = Array.from(new Map(
+          [...canonicalSnapshot.docs, ...legacySnapshot.docs].map((docSnap) => [docSnap.id, docSnap])
+        ).values());
+        if (!active || pendingDocs.length === 0) {
           setPendingApprovedReminder(null);
           return;
         }
 
         const uploads = [];
-        for (const docSnap of snapshot.docs) {
+        for (const docSnap of pendingDocs) {
           const upload = { id: docSnap.id, ...docSnap.data() };
           const postSnap = await getDoc(doc(db, 'posts', docSnap.id));
           uploads.push({
@@ -6238,10 +6258,12 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
         return;
       }
       if (event.key.toLowerCase() === 'a') {
+        setDecisionAction(MODERATOR_DECISION_ACTIONS.approveAsIs);
         setDecision('approved');
         setMessageTouched(false);
       }
       if (event.key.toLowerCase() === 'r') {
+        setDecisionAction(MODERATOR_DECISION_ACTIONS.rejectForbidden);
         setDecision('rejected');
         setMessageTouched(false);
       }
@@ -6508,6 +6530,11 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     review_borderline_adult: 'Grensgeval 18 plus, review nodig',
     forbidden_explicit_sexual: 'Expliciet seksueel, geblokkeerd',
     forbidden_non_consensual_context: 'Niet consensuele context, geblokkeerd',
+    forbidden_self_harm_instruction: 'Schadelijke zelfbeschadigingsinstructie, geblokkeerd',
+    forbidden_suicide_instruction: 'Schadelijke suïcide-instructie, geblokkeerd',
+    forbidden_eating_disorder_instruction: 'Schadelijke eetstoornisinstructie, geblokkeerd',
+    forbidden_harmful_drug_instruction: 'Schadelijke drugsinstructie, geblokkeerd',
+    forbidden_other_safety: 'Andere ernstige safetyreden, geblokkeerd',
     wrong_theme_or_label: 'Thema of label klopt niet',
     unclear_ai_result: 'Onduidelijke AI uitkomst',
   };
@@ -7740,6 +7767,7 @@ function UploadModal({
   const [inviteShareCopied, setInviteShareCopied] = useState('');
   const [makerTags, setMakerTags] = useState([]);
   const [appliedTriggers, setAppliedTriggers] = useState([]);
+  const [policyAppliedTriggers, setPolicyAppliedTriggers] = useState([]);
   const [suggestedTriggers, setSuggestedTriggers] = useState([]);
   const [outcome, setOutcome] = useState(null);
   const [forbiddenReasons, setForbiddenReasons] = useState([]);
@@ -7752,6 +7780,10 @@ function UploadModal({
   const [classification, setClassification] = useState(null);
   const [reviewRequested, setReviewRequested] = useState(false);
   const [taxonomyCorrection, setTaxonomyCorrection] = useState(null);
+  const moderatorCorrectionBaselineRef = useRef(null);
+  const moderationInputRevisionRef = useRef(0);
+  const moderationRequestSequenceRef = useRef(0);
+  const moderationInFlightRequestRef = useRef(null);
   const [correctionAcceptedAt, setCorrectionAcceptedAt] = useState(null);
   const [correctionRejectedAt, setCorrectionRejectedAt] = useState(null);
   const [correctionReviewRequestedAt, setCorrectionReviewRequestedAt] = useState(null);
@@ -7787,6 +7819,12 @@ function UploadModal({
   }, []);
 
   const isResumeFlow = Boolean(resumeUploadId);
+  const getModerationDraftAuthor = () => resolveModerationDraftAuthor({
+    persistedDraft: resumeUpload ? { ...resumeUpload, ...(resumeUpload.postDraft || {}) } : null,
+    fallbackProfileId: getManagedProfileId(activeProfile) || user?.uid || '',
+    fallbackOwnerUid: user?.uid || '',
+    fallbackName: getManagedProfileDisplayName(activeProfile) || profile.displayName || '',
+  });
   const missingMakerPromptState = useMemo(() => getMissingMakerPromptState({
     credits,
     uploaderRole,
@@ -7939,7 +7977,7 @@ function UploadModal({
           return;
         }
         const uploadData = uploadSnap.data() || {};
-        if (String(uploadData.publicationStatus || uploadData.publishStatus || '').trim() === 'discarded') {
+        if (isClientUploadDiscarded(uploadData)) {
           setResumeUpload(null);
           setResumeError('Deze goedgekeurde upload is verworpen en kan niet meer hervat worden.');
           return;
@@ -7963,11 +8001,27 @@ function UploadModal({
         setImageMeta(draftImageMeta);
         setTitle(String(draft.title || uploadData.title || uploadData.caption || '').trim());
         setDesc(String(draft.description || draft.caption || uploadData.description || uploadData.caption || '').trim());
-        setSelectedStyles(Array.isArray(draft.styles)
+        const resumedConsentDraft = normalizeConsentDraftState({ ...uploadData, ...draft });
+        setConsentException(resumedConsentDraft.consentException);
+        setAiPeoplePresent(resumedConsentDraft.aiPeoplePresent);
+        setSubjectWarningAcknowledged(resumedConsentDraft.subjectWarningAcknowledged);
+        setMissingMakerPromptShown(resumedConsentDraft.missingMakerPromptShown);
+        setSelectedSelfMakerRole(resumedConsentDraft.selectedSelfMakerRole);
+        setPendingSelfMakerRole(resumedConsentDraft.pendingSelfMakerRole);
+        setSelfMakerRoleConfirmation(resumedConsentDraft.selfMakerRoleConfirmation);
+        const moderatorTaxonomy = uploadData.correctedTaxonomy || uploadData?.moderatorDecision?.correctedTaxonomy || null;
+        const automaticModeratorCorrection = uploadData?.moderatorDecision?.action === 'approveWithTaxonomyCorrection' && moderatorTaxonomy;
+        const draftThemes = Array.isArray(draft.styles)
           ? draft.styles.filter(Boolean)
           : Array.isArray(draft.themes)
             ? draft.themes.filter(Boolean)
-            : []);
+            : [];
+        const effectiveResumeThemes = automaticModeratorCorrection
+          && Array.isArray(moderatorTaxonomy.themes)
+          && moderatorTaxonomy.themes.filter(Boolean).length > 0
+          ? moderatorTaxonomy.themes.filter(Boolean)
+          : draftThemes;
+        setSelectedStyles(effectiveResumeThemes);
         const nextCredits = Array.isArray(draft.credits)
           ? draft.credits.filter(Boolean)
           : Array.isArray(draft.contributors)
@@ -7976,18 +8030,39 @@ function UploadModal({
         if (nextCredits.length > 0) {
           setCredits(nextCredits);
         }
+        setPendingInviteContributors(Array.isArray(draft.pendingInviteContributors)
+          ? draft.pendingInviteContributors.filter(isClaimableTemporaryContributor)
+          : []);
         const nextMakerTags = Array.isArray(draft.makerTags)
           ? draft.makerTags.filter(Boolean)
           : Array.isArray(uploadData.makerTags)
             ? uploadData.makerTags.filter(Boolean)
             : [];
+        const effectiveResumeMakerTags = automaticModeratorCorrection && Array.isArray(moderatorTaxonomy.triggers)
+          ? moderatorTaxonomy.triggers.filter(Boolean)
+          : nextMakerTags;
         const nextAppliedTriggers = Array.isArray(draft.appliedTriggers)
           ? draft.appliedTriggers.filter(Boolean)
           : Array.isArray(uploadData.appliedTriggers)
             ? uploadData.appliedTriggers.filter(Boolean)
             : [];
-        setMakerTags(nextMakerTags);
-        setAppliedTriggers(nextAppliedTriggers);
+        setMakerTags(effectiveResumeMakerTags);
+        setAppliedTriggers(automaticModeratorCorrection ? effectiveResumeMakerTags : nextAppliedTriggers);
+        const acceptedUploaderCorrection = uploadData?.uploaderCorrectionResponse?.status === 'accepted';
+        const acceptedCorrectionTriggers = Array.isArray(uploadData?.correction?.finalAcceptedTriggers)
+          ? uploadData.correction.finalAcceptedTriggers.filter(Boolean)
+          : nextAppliedTriggers;
+        const resumePolicyAppliedTriggers = automaticModeratorCorrection
+          ? effectiveResumeMakerTags.map((trigger) => ({ trigger: resolveTriggerKey(trigger), source: 'moderatorCorrection' })).filter((item) => item.trigger)
+          : acceptedUploaderCorrection
+            ? acceptedCorrectionTriggers.map((trigger) => ({ trigger: resolveTriggerKey(trigger), source: 'acceptedCorrection' })).filter((item) => item.trigger)
+            : Array.isArray(uploadData.policyAppliedTriggers)
+              ? uploadData.policyAppliedTriggers
+              : [];
+        setPolicyAppliedTriggers(resumePolicyAppliedTriggers);
+        moderatorCorrectionBaselineRef.current = automaticModeratorCorrection
+          ? { themes: effectiveResumeThemes, triggers: effectiveResumeMakerTags }
+          : null;
         setOutcome(uploadData.outcome || 'allowed');
         setForbiddenReasons(Array.isArray(uploadData.forbiddenReasons) ? uploadData.forbiddenReasons : []);
         setReviewCaseId(uploadData.reviewCaseId || null);
@@ -7995,8 +8070,7 @@ function UploadModal({
         setRequiredThemes([]);
         setShouldReview(false);
         setShowSuggestionUI(false);
-        const moderatorTaxonomy = uploadData.correctedTaxonomy || uploadData?.moderatorDecision?.correctedTaxonomy || null;
-        const needsAcceptance = uploadData.requiresUploaderAcceptance === true && uploadData.publicationStatus === 'needs_user_correction';
+        const needsAcceptance = isClientUploadCorrectionPending(uploadData);
         if (needsAcceptance && moderatorTaxonomy) {
           setTaxonomyCorrection({
             type: TAXONOMY_CORRECTION_TYPES.SAFE,
@@ -8038,6 +8112,9 @@ function UploadModal({
     const nextShouldReview = payload?.shouldReview ?? shouldReview;
     const nextForbiddenReasons = Array.isArray(payload?.forbiddenReasons) ? payload.forbiddenReasons : forbiddenReasons;
     const nextMessage = payload?.userMessage ?? userMessage;
+    const moderatorCorrection = payload?.moderatorCorrectedTaxonomy && typeof payload.moderatorCorrectedTaxonomy === 'object'
+      ? payload.moderatorCorrectedTaxonomy
+      : null;
 
     if (nextOutcome === 'forbidden') {
       return {
@@ -8048,6 +8125,20 @@ function UploadModal({
         requiresUserAcceptance: false,
         requiresModeratorReview: true,
         publishBlocked: true,
+      };
+    }
+    if (nextOutcome === 'needsCorrection' && moderatorCorrection) {
+      return {
+        type: TAXONOMY_CORRECTION_TYPES.SAFE,
+        suggestedThemes: Array.isArray(moderatorCorrection.themes) ? moderatorCorrection.themes.filter(Boolean) : [],
+        suggestedTriggers: Array.isArray(moderatorCorrection.triggers) ? moderatorCorrection.triggers.map(normalizeSensitiveTriggerKey).filter(Boolean) : [],
+        originalThemes: [...selectedStyles],
+        originalTriggers: [...makerTags],
+        reason: nextMessage || 'Moderator vroeg om categorie-correctie.',
+        requiresUserAcceptance: true,
+        requiresModeratorReview: false,
+        publishBlocked: true,
+        fromModeratorReview: true,
       };
     }
     if (nextShouldReview) {
@@ -8090,17 +8181,57 @@ function UploadModal({
     setSelectedStyles(nextThemes);
     setMakerTags(nextTriggers);
 
-    if (taxonomyCorrection?.fromModeratorReview && moderationApiBase && user?.uid && resumeUpload?.id) {
+    const correctionUploadId = String(resumeUpload?.id || reviewUploadId || '').trim();
+    const draftAuthor = getModerationDraftAuthor();
+    const consentDraftState = buildConsentDraftState({
+      consentException,
+      aiPeoplePresent,
+      subjectWarningAcknowledged,
+      missingMakerPromptShown,
+      selectedSelfMakerRole,
+      pendingSelfMakerRole,
+      selfMakerRoleConfirmation,
+    });
+    if (taxonomyCorrection?.fromModeratorReview && moderationApiBase && user?.uid && correctionUploadId) {
       try {
         const token = await user.getIdToken();
         const response = await fetch(`${moderationApiBase}/userModerationAction`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ uploadId: resumeUpload.id, action: 'acceptCorrection' }),
+          body: JSON.stringify({
+            uploadId: correctionUploadId,
+            action: 'acceptCorrection',
+            postDraft: {
+              title,
+              description: desc,
+              ...(imageMeta ? {
+                imageMeta: {
+                  width: imageMeta.width,
+                  height: imageMeta.height,
+                  aspectRatio: imageMeta.aspectRatio,
+                  orientation: imageMeta.orientation,
+                  sizeBytes: imageMeta.sizeBytes,
+                },
+              } : {}),
+              authorProfileId: draftAuthor.authorProfileId,
+              authorOwnerUid: draftAuthor.authorOwnerUid,
+              authorName: draftAuthor.authorName,
+              authorRole: uploaderRole,
+              styles: nextThemes,
+              makerTags: nextTriggers,
+              credits,
+              pendingInviteContributors,
+              ...consentDraftState,
+              isChallenge,
+            },
+          }),
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data?.error || 'Opslaan van correctie mislukt.');
         setCorrectionAcceptedAt(Timestamp.now());
+        setResumeUpload((previous) => (previous?.id === correctionUploadId
+          ? { ...previous, moderationState: 'allowed', publicationState: 'pending', requiresUploaderAcceptance: false }
+          : previous));
       } catch (error) {
         setErrors((prev) => ({ ...prev, moderation: error?.message || 'Correctie opslaan mislukt.' }));
         return;
@@ -8123,13 +8254,14 @@ function UploadModal({
   };
 
   const handleRejectTaxonomyCorrection = async () => {
-    if (taxonomyCorrection?.fromModeratorReview && moderationApiBase && user?.uid && resumeUpload?.id) {
+    const correctionUploadId = String(resumeUpload?.id || reviewUploadId || '').trim();
+    if (taxonomyCorrection?.fromModeratorReview && moderationApiBase && user?.uid && correctionUploadId) {
       try {
         const token = await user.getIdToken();
         const response = await fetch(`${moderationApiBase}/userModerationAction`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ uploadId: resumeUpload.id, action: 'rejectCorrection' }),
+          body: JSON.stringify({ uploadId: correctionUploadId, action: 'rejectCorrection' }),
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data?.error || 'Reviewverzoek versturen mislukt.');
@@ -8138,8 +8270,19 @@ function UploadModal({
         return;
       }
     }
+    setCorrectionAcceptedAt(null);
     setCorrectionRejectedAt(Timestamp.now());
     setCorrectionReviewRequestedAt(Timestamp.now());
+    setOutcome('review');
+    setShouldReview(true);
+    setTaxonomyCorrection((prev) => (prev ? {
+      ...prev,
+      type: TAXONOMY_CORRECTION_TYPES.REVIEW_REQUIRED,
+      requiresUserAcceptance: false,
+      requiresModeratorReview: true,
+      publishBlocked: true,
+    } : prev));
+    setUserMessage('Je correctie is afgewezen en opnieuw naar moderatie gestuurd.');
   };
 
 
@@ -8279,6 +8422,7 @@ function UploadModal({
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    moderationInputRevisionRef.current += 1;
 
     const initialTrace = {
       traceId: `trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -8304,6 +8448,7 @@ function UploadModal({
       setAiError('');
       setMakerTags([]);
       setAppliedTriggers([]);
+      setPolicyAppliedTriggers([]);
       setSuggestedTriggers([]);
       setOutcome(null);
       setForbiddenReasons([]);
@@ -8352,6 +8497,13 @@ function UploadModal({
       return null;
     }
 
+    const requestInputRevision = moderationInputRevisionRef.current;
+    const requestSequence = moderationRequestSequenceRef.current + 1;
+    moderationRequestSequenceRef.current = requestSequence;
+    moderationInFlightRequestRef.current = requestSequence;
+    const requestImage = image;
+    const requestMakerTags = [...makerTags];
+    const requestThemes = [...selectedStyles];
     setAiLoading(true);
     if (!silent) {
       setAiError('');
@@ -8359,8 +8511,8 @@ function UploadModal({
     setErrors((prev) => ({ ...prev, moderation: undefined }));
     logModerationDebug('before-moderate-image', {
       moderateImageCalled: true,
-      selectedThemes: selectedStyles,
-      selectedSafetyTags: makerTags,
+      selectedThemes: requestThemes,
+      selectedSafetyTags: requestMakerTags,
     });
 
     try {
@@ -8377,7 +8529,7 @@ function UploadModal({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ image, makerTags, themes: selectedStyles }),
+        body: JSON.stringify({ image: requestImage, makerTags: requestMakerTags, themes: requestThemes }),
       });
 
       if (!response.ok) {
@@ -8390,6 +8542,15 @@ function UploadModal({
       }
 
       const data = await response.json();
+      if (moderationInputRevisionRef.current !== requestInputRevision
+        || moderationRequestSequenceRef.current !== requestSequence) {
+        logModerationDebug('moderate-image-response-stale', {
+          finalResult: 'ignored',
+          finalReason: 'moderation-input-changed-during-request',
+          uploadId: data?.uploadId ?? null,
+        });
+        return null;
+      }
       const getTriggerKeys = (items) => (Array.isArray(items) ? items : [])
         .map((item) => {
           if (typeof item === 'string') return item;
@@ -8432,7 +8593,22 @@ function UploadModal({
         || (typeof peopleSignal === 'number' && peopleSignal > 0)
         || (Array.isArray(peopleSignal) && peopleSignal.length > 0);
       const normalizedAppliedTriggers = Array.from(new Set([...nextAppliedTriggers.map(resolveTriggerKey), ...nextAutoAppliedTriggers]));
-      const shouldShowSuggestions = nextOutcome === 'allowed' && nextSuggestedTriggers.length > 0;
+      const returnedUserTaxonomy = data?.moderatorCorrectionApplied === true
+        && data?.userSelectedTaxonomy
+        && typeof data.userSelectedTaxonomy === 'object'
+        ? data.userSelectedTaxonomy
+        : null;
+      const nextEffectiveThemes = Array.isArray(returnedUserTaxonomy?.themes)
+        ? Array.from(new Set(returnedUserTaxonomy.themes.filter(Boolean)))
+        : null;
+      const nextEffectiveMakerTags = Array.isArray(returnedUserTaxonomy?.triggers)
+        ? Array.from(new Set(returnedUserTaxonomy.triggers.map(resolveTriggerKey).filter(Boolean)))
+        : null;
+      moderatorCorrectionBaselineRef.current = returnedUserTaxonomy ? {
+        themes: nextEffectiveThemes || [],
+        triggers: nextEffectiveMakerTags || [],
+      } : null;
+      const shouldShowSuggestions = nextOutcome === 'needsCorrection' || (nextOutcome === 'allowed' && nextSuggestedTriggers.length > 0);
 
       logModerationDebug('after-moderate-image-response', {
         moderateImageHttpStatus: response.status,
@@ -8494,7 +8670,10 @@ function UploadModal({
         finalReason: parsedPolicyReason,
       });
 
+      if (nextEffectiveThemes) setSelectedStyles(nextEffectiveThemes);
+      if (nextEffectiveMakerTags) setMakerTags(nextEffectiveMakerTags);
       setAppliedTriggers(normalizedAppliedTriggers);
+      setPolicyAppliedTriggers(Array.isArray(data.policyAppliedTriggers) ? data.policyAppliedTriggers : []);
       setSuggestedTriggers(nextSuggestedTriggers.map(resolveTriggerKey));
       setOutcome(nextOutcome);
       setForbiddenReasons(nextForbiddenReasons);
@@ -8515,6 +8694,7 @@ function UploadModal({
         shouldReview: Boolean(data?.shouldReview),
         forbiddenReasons: nextForbiddenReasons,
         userMessage: data?.userMessage || '',
+        moderatorCorrectedTaxonomy: data?.moderatorCorrectedTaxonomy || null,
       }));
       setCorrectionAcceptedAt(null);
       setCorrectionRejectedAt(null);
@@ -8531,6 +8711,14 @@ function UploadModal({
         peoplePresent: nextAiPeoplePresent,
       };
     } catch (error) {
+      if (moderationInputRevisionRef.current !== requestInputRevision
+        || moderationRequestSequenceRef.current !== requestSequence) {
+        logModerationDebug('moderate-image-error-stale', {
+          finalResult: 'ignored',
+          finalReason: 'moderation-input-changed-during-request',
+        });
+        return null;
+      }
       console.error('AI check failed', error);
       logModerationDebug('after-parse-mapping', {
         finalResult: 'error',
@@ -8540,6 +8728,7 @@ function UploadModal({
         setAiError(error?.message === 'ai-moderation-endpoint-failed' ? 'AI moderatie endpoint is niet bereikbaar. Probeer het opnieuw.' : 'Afbeelding modereren mislukt. Probeer het opnieuw.');
       }
       setAppliedTriggers([]);
+      setPolicyAppliedTriggers([]);
       setSuggestedTriggers([]);
       setOutcome(null);
       setForbiddenReasons([]);
@@ -8562,7 +8751,10 @@ function UploadModal({
       setSelfMakerRoleConfirmation({ confirmed: false, role: '', confirmedAt: null });
       return null;
     } finally {
-      setAiLoading(false);
+      if (moderationRequestSequenceRef.current === requestSequence) {
+        moderationInFlightRequestRef.current = null;
+        setAiLoading(false);
+      }
     }
   };
 
@@ -8586,6 +8778,16 @@ function UploadModal({
       if (!uploadId) {
         throw new Error('Geen upload-ID beschikbaar. Voer eerst de AI-check uit en probeer opnieuw.');
       }
+      const draftAuthor = getModerationDraftAuthor();
+      const consentDraftState = buildConsentDraftState({
+        consentException,
+        aiPeoplePresent,
+        subjectWarningAcknowledged,
+        missingMakerPromptShown,
+        selectedSelfMakerRole,
+        pendingSelfMakerRole,
+        selfMakerRoleConfirmation,
+      });
 
       const caseResponse = await fetch(`${functionsBase}/requestUploadReviewCase`, {
         method: 'POST',
@@ -8598,7 +8800,6 @@ function UploadModal({
           postDraft: {
             title,
             description: desc,
-            imageUrl: image,
             ...(imageMeta ? {
               imageMeta: {
                 width: imageMeta.width,
@@ -8608,12 +8809,16 @@ function UploadModal({
                 sizeBytes: imageMeta.sizeBytes,
               },
             } : {}),
-            authorName: profile.displayName,
+            authorProfileId: draftAuthor.authorProfileId,
+            authorOwnerUid: draftAuthor.authorOwnerUid,
+            authorName: draftAuthor.authorName,
             authorRole: uploaderRole,
             styles: selectedStyles,
             makerTags,
             appliedTriggers,
             credits,
+            pendingInviteContributors,
+            ...consentDraftState,
             isChallenge,
           },
         }),
@@ -8862,7 +9067,25 @@ function UploadModal({
     });
   }, [uploaderRole, profile.displayName, profile.uid]);
 
+  const invalidateModerationAfterTaxonomyEdit = () => {
+    moderationInputRevisionRef.current += 1;
+    moderatorCorrectionBaselineRef.current = null;
+    setOutcome('unchecked');
+    setAppliedTriggers([]);
+    setPolicyAppliedTriggers([]);
+    setSuggestedTriggers([]);
+    setForbiddenReasons([]);
+    setRequiredThemes([]);
+    setUserMessage('');
+    setShouldReview(false);
+    setClassification(null);
+    setShowSuggestionUI(false);
+    setCorrectionAcceptedAt(null);
+    setTaxonomyCorrection((previous) => (previous?.fromModeratorReview ? previous : null));
+  };
+
   const toggleStyle = (theme) => {
+    invalidateModerationAfterTaxonomyEdit();
     setSelectedStyles((prev) => {
       const next = prev.includes(theme) ? prev.filter((x) => x !== theme) : [...prev, theme];
       const hasArtNude = next.includes('Art Nude');
@@ -8877,8 +9100,49 @@ function UploadModal({
     setErrors(prev => ({ ...prev, styles: undefined, moderation: undefined }));
   };
 
+  const handlePendingClaimInvitesAfterPublish = async (postId) => {
+    const claimableInviteContributors = pendingInviteContributors.filter(isClaimableTemporaryContributor);
+    if (claimableInviteContributors.length === 0) {
+      setPendingInviteContributors([]);
+      return false;
+    }
+
+    setInviteShareError('');
+    setInviteShareCopied('');
+    const baseUrl = window.location.origin;
+    try {
+      const inviteResults = await Promise.all(
+        claimableInviteContributors.map(async (candidate) => {
+          const result = await createClaimInvite({
+            contributorId: candidate.contributorId,
+            postId,
+          });
+          const path = result?.path || '';
+          return {
+            contributorId: candidate.contributorId,
+            displayName: candidate.displayName,
+            url: path ? new URL(path, baseUrl).toString() : '',
+          };
+        })
+      );
+      setInviteShareLinks(inviteResults.filter((entry) => entry.url));
+      setInviteShareOpen(true);
+      setPendingInviteContributors([]);
+    } catch (error) {
+      console.error('[UploadModal] Failed to create claim invite', error);
+      setInviteShareError(error?.message || 'Invite link maken mislukt.');
+      setInviteShareOpen(true);
+    }
+    return true;
+  };
+
   const handlePublish = async ({ applySuggestions = false } = {}) => {
-    const publishProfileCheck = assertCanPublishWithManagedProfile(activeProfile);
+    if (moderationInFlightRequestRef.current !== null || aiLoading) {
+      setErrors((prev) => ({ ...prev, moderation: 'Wacht tot de huidige AI-check klaar is voordat je publiceert.' }));
+      return;
+    }
+    const draftAuthor = getModerationDraftAuthor();
+    const publishProfileCheck = isResumeFlow ? { ok: true } : assertCanPublishWithManagedProfile(activeProfile);
     if (!publishProfileCheck.ok) {
       const copy = publishProfileCheck.copy || getSetupProfilePublishBlockCopy(activeProfile);
       setSetupProfilePublishBlock(copy);
@@ -8897,8 +9161,8 @@ function UploadModal({
 
     const validationErrors = {};
     const normalizeTheme = (theme) => String(theme || '').trim().toLowerCase();
-    const getMissingRequiredThemes = (themes = []) => {
-      const selectedThemeSet = new Set(selectedStyles.map(normalizeTheme));
+    const getMissingRequiredThemes = (themes = [], currentThemes = selectedStyles) => {
+      const selectedThemeSet = new Set(currentThemes.map(normalizeTheme));
       return themes.filter((theme) => !selectedThemeSet.has(normalizeTheme(theme)));
     };
 
@@ -8910,7 +9174,13 @@ function UploadModal({
     if (taxonomyCorrection?.type === TAXONOMY_CORRECTION_TYPES.REVIEW_REQUIRED || taxonomyCorrection?.requiresModeratorReview) {
       validationErrors.moderation = 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.';
     }
-    if (taxonomyCorrection?.requiresUserAcceptance && !correctionAcceptedAt) {
+    const normalizeCorrectionThemes = (items) => Array.from(new Set((Array.isArray(items) ? items : []).filter(Boolean))).sort();
+    const normalizeCorrectionTriggers = (items) => Array.from(new Set((Array.isArray(items) ? items : []).map(resolveTriggerKey).filter(Boolean))).sort();
+    const acceptedCorrectionChanged = Boolean(correctionAcceptedAt && taxonomyCorrection?.requiresUserAcceptance && (
+      JSON.stringify(normalizeCorrectionThemes(selectedStyles)) !== JSON.stringify(normalizeCorrectionThemes(taxonomyCorrection?.finalAcceptedThemes))
+      || JSON.stringify(normalizeCorrectionTriggers(makerTags)) !== JSON.stringify(normalizeCorrectionTriggers(taxonomyCorrection?.finalAcceptedTriggers))
+    ));
+    if (taxonomyCorrection?.requiresUserAcceptance && (!correctionAcceptedAt || acceptedCorrectionChanged)) {
       validationErrors.moderation = 'Accepteer eerst de taxonomie-correctie of vraag review aan.';
     }
     const missingRequiredThemes = getMissingRequiredThemes(requiredThemes);
@@ -8946,7 +9216,23 @@ function UploadModal({
     let moderationData = null;
     if (!nextOutcome || nextOutcome === 'unchecked') {
       moderationData = await runAICheck({ silent: true });
-      nextOutcome = moderationData?.outcome ?? outcome;
+      if (!moderationData) {
+        setErrors((prev) => ({ ...prev, moderation: 'De AI-check kon niet veilig worden afgerond. Probeer opnieuw.' }));
+        return;
+      }
+      nextOutcome = moderationData.outcome;
+    }
+
+    if (nextOutcome === 'needsCorrection') {
+      logModerationDebug('after-policy-gating', {
+        policyResult: 'correction_required',
+        policyReason: 'moderator-correction-required',
+        finalResult: 'review',
+        finalReason: 'moderator-correction-required',
+        publishAllowed: false,
+      });
+      setErrors((prev) => ({ ...prev, moderation: 'Accepteer eerst de taxonomie-correctie of vraag review aan.' }));
+      return;
     }
 
     if (nextOutcome === 'forbidden') {
@@ -8961,16 +9247,28 @@ function UploadModal({
       return;
     }
 
-    const effectiveAppliedTriggers = moderationData
-      ? (Array.isArray(moderationData.policyAppliedTriggers) ? moderationData.policyAppliedTriggers : (Array.isArray(moderationData.appliedTriggers) ? moderationData.appliedTriggers : []))
-      : appliedTriggers;
+    const effectiveUserTaxonomy = moderationData?.moderatorCorrectionApplied === true
+      && moderationData?.userSelectedTaxonomy
+      && typeof moderationData.userSelectedTaxonomy === 'object'
+      ? moderationData.userSelectedTaxonomy
+      : null;
+    const effectiveSelectedStyles = Array.isArray(effectiveUserTaxonomy?.themes)
+      ? Array.from(new Set(effectiveUserTaxonomy.themes.filter(Boolean)))
+      : selectedStyles;
+    const effectiveMakerTags = Array.isArray(effectiveUserTaxonomy?.triggers)
+      ? Array.from(new Set(effectiveUserTaxonomy.triggers.map(resolveTriggerKey).filter(Boolean)))
+      : makerTags;
+    const effectiveAppliedTriggers = resolvePolicyAppliedTriggersForPublication({
+      moderationData,
+      policyAppliedTriggers,
+    });
     const effectiveForbiddenReasons = moderationData
       ? (Array.isArray(moderationData.forbiddenReasons) ? moderationData.forbiddenReasons : [])
       : forbiddenReasons;
     const effectiveReviewCaseId = moderationData?.reviewCaseId ?? reviewCaseId;
     const effectiveRequiredThemes = moderationData?.requiredThemes ?? requiredThemes;
     const effectiveShouldReview = moderationData?.shouldReview ?? shouldReview;
-    const effectiveMissingRequiredThemes = getMissingRequiredThemes(effectiveRequiredThemes);
+    const effectiveMissingRequiredThemes = getMissingRequiredThemes(effectiveRequiredThemes, effectiveSelectedStyles);
 
     if (effectiveMissingRequiredThemes.length > 0) {
       logModerationDebug('after-policy-gating', {
@@ -8994,7 +9292,7 @@ function UploadModal({
       setErrors((prev) => ({ ...prev, moderation: 'Deze upload vereist eerst een handmatige review voordat je kunt publiceren.' }));
       return;
     }
-    const baseTriggers = sanitizeDiagnosticTriggerKeys(effectiveAppliedTriggers.length ? effectiveAppliedTriggers : makerTags);
+    const baseTriggers = sanitizeDiagnosticTriggerKeys(effectiveAppliedTriggers.length ? effectiveAppliedTriggers : effectiveMakerTags);
     const finalAppliedTriggers = applySuggestions
       ? Array.from(new Set([...baseTriggers, ...suggestedTriggers]))
       : baseTriggers;
@@ -9043,8 +9341,8 @@ function UploadModal({
         suggestedTriggers: taxonomyCorrection.suggestedTriggers || [],
         originalSelectedThemes: taxonomyCorrection.originalThemes || selectedStyles,
         originalSelectedTriggers: taxonomyCorrection.originalTriggers || makerTags,
-        finalAcceptedThemes: [...selectedStyles],
-        finalAcceptedTriggers: [...makerTags],
+        finalAcceptedThemes: [...effectiveSelectedStyles],
+        finalAcceptedTriggers: [...effectiveMakerTags],
         reason: taxonomyCorrection.reason || '',
         requiresUserAcceptance: Boolean(taxonomyCorrection.requiresUserAcceptance),
         requiresModeratorReview: taxonomyCorrection.type === TAXONOMY_CORRECTION_TYPES.SAFE ? false : Boolean(taxonomyCorrection.requiresModeratorReview),
@@ -9054,6 +9352,25 @@ function UploadModal({
         reviewRequestedAt: correctionReviewRequestedAt || null,
       },
     } : {};
+
+    const acceptedModeratorCorrection = Boolean(
+      correctionAcceptedAt
+      && taxonomyCorrection?.fromModeratorReview
+    );
+    const currentModerationUploadId = String(moderationData?.uploadId || reviewUploadId || resumeUpload?.id || '').trim();
+    const currentClaims = await readTokenClaims(user);
+    const codexDevPublication = isCodexDevIdentity({ claims: currentClaims, uid: user?.uid });
+    const persistedModerationPublicationUploadId = codexDevPublication ? null : resolvePersistedModerationPublicationUploadId({
+      isResumeFlow,
+      resumeUpload,
+      reviewUploadId: currentModerationUploadId,
+      acceptedModeratorCorrection,
+      currentModerationAllowed: nextOutcome === 'allowed',
+    });
+    if (!codexDevPublication && !persistedModerationPublicationUploadId) {
+      setErrors((prev) => ({ ...prev, moderation: 'Publiceren vereist een actuele server-moderatie. Voer de AI-check opnieuw uit.' }));
+      return;
+    }
 
     let firestorePostWriteAttempted = false;
     const imageUploadSucceeded = Boolean(image);
@@ -9069,7 +9386,7 @@ function UploadModal({
     });
 
     try {
-      if (isResumeFlow && resumeUpload?.reviewStatus === 'approved' && resumeUpload?.publicationStatus === 'pending') {
+      if (persistedModerationPublicationUploadId) {
         if (!moderationApiBase) {
           throw new Error('Publiceren is tijdelijk niet beschikbaar. Probeer opnieuw via de chat.');
         }
@@ -9083,12 +9400,11 @@ function UploadModal({
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
-            uploadId: resumeUpload.id,
+            uploadId: persistedModerationPublicationUploadId,
             action: 'repairPublished',
             postDraft: {
               title,
               description: desc,
-              imageUrl: image,
               ...(imageMeta ? {
                 imageMeta: {
                   width: imageMeta.width,
@@ -9098,17 +9414,18 @@ function UploadModal({
                   sizeBytes: imageMeta.sizeBytes,
                 },
               } : {}),
-              authorProfileId: getManagedProfileId(activeProfile) || user.uid,
-              authorOwnerUid: user.uid,
-              authorName: getManagedProfileDisplayName(activeProfile) || profile.displayName,
+              authorProfileId: draftAuthor.authorProfileId,
+              authorOwnerUid: draftAuthor.authorOwnerUid,
+              authorName: draftAuthor.authorName,
               authorRole: uploaderRole,
-              styles: selectedStyles,
-              makerTags,
-              appliedTriggers,
+              styles: effectiveSelectedStyles,
+              makerTags: effectiveMakerTags,
+              appliedTriggers: finalAppliedTriggers,
               credits: consentCredits,
               uploadConsent,
               consentAudit,
               consentException: normalizedException,
+              pendingInviteContributors,
               isChallenge,
               ...correctionMetadata,
             },
@@ -9126,6 +9443,8 @@ function UploadModal({
         }
         logModerationDebug('after-firestore-write-result', { firestoreWriteAttempted: true, firestoreWriteSucceeded: true });
         setPublishing(false);
+        const persistedPostId = data?.postId || persistedModerationPublicationUploadId;
+        if (await handlePendingClaimInvitesAfterPublish(persistedPostId)) return;
         onClose();
         return;
       }
@@ -9137,14 +9456,14 @@ function UploadModal({
         description: desc,
         imageUrl: image,
         authorId: user.uid,
-        authorProfileId: getManagedProfileId(activeProfile) || user.uid,
-        authorOwnerUid: user.uid,
-        authorName: getManagedProfileDisplayName(activeProfile) || profile.displayName,
+        authorProfileId: draftAuthor.authorProfileId,
+        authorOwnerUid: draftAuthor.authorOwnerUid,
+        authorName: draftAuthor.authorName,
         authorRole: uploaderRole,
-        styles: selectedStyles,
+        styles: effectiveSelectedStyles,
         sensitive: triggerFlag,
         triggers: finalAppliedTriggers.map(getTriggerLabel),
-        makerTags,
+        makerTags: effectiveMakerTags,
         appliedTriggers: finalAppliedTriggers,
         outcome: nextOutcome || 'unchecked',
         shouldReview: false,
@@ -9199,6 +9518,7 @@ function UploadModal({
       setConsentException({ enabled: false, type: CONSENT_EXCEPTION_REASONS.STREET, reason: '' });
       setMakerTags([]);
       setAppliedTriggers([]);
+      setPolicyAppliedTriggers([]);
       setSuggestedTriggers([]);
       setOutcome(null);
       setForbiddenReasons([]);
@@ -9219,39 +9539,7 @@ function UploadModal({
       setStep(1);
       setPublishing(false);
 
-      const claimableInviteContributors = pendingInviteContributors.filter(isClaimableTemporaryContributor);
-
-      if (claimableInviteContributors.length > 0) {
-        setInviteShareError('');
-        setInviteShareCopied('');
-        const baseUrl = window.location.origin;
-        try {
-          const inviteResults = await Promise.all(
-            claimableInviteContributors.map(async (candidate) => {
-              const result = await createClaimInvite({
-                contributorId: candidate.contributorId,
-                postId,
-              });
-              const path = result?.path || '';
-              return {
-                contributorId: candidate.contributorId,
-                displayName: candidate.displayName,
-                url: path ? new URL(path, baseUrl).toString() : '',
-              };
-            })
-          );
-          setInviteShareLinks(inviteResults.filter((entry) => entry.url));
-          setInviteShareOpen(true);
-          setPendingInviteContributors([]);
-        } catch (error) {
-          console.error('[UploadModal] Failed to create claim invite', error);
-          setInviteShareError(error?.message || 'Invite link maken mislukt.');
-          setInviteShareOpen(true);
-        }
-        return;
-      }
-
-      setPendingInviteContributors([]);
+      if (await handlePendingClaimInvitesAfterPublish(postId)) return;
       onClose();
     } catch (error) {
       console.error('Publish error', error);
@@ -9441,7 +9729,9 @@ function UploadModal({
                              <button
                                key={trigger.id}
                                type="button"
+                               disabled={aiLoading}
                                onClick={() => {
+                                 invalidateModerationAfterTaxonomyEdit();
                                  setMakerTags((prev) => {
                                    const normalized = Array.from(new Set(prev.map(resolveTriggerKey)));
                                    const triggerId = resolveTriggerKey(trigger.id);
@@ -9944,8 +10234,10 @@ function UploadModal({
                            return (
                              <button
                                key={t}
+                               type="button"
                                onClick={() => toggleStyle(t)}
-                               className={`px-2 py-1 rounded text-xs border transition-all ${isSelected
+                               disabled={aiLoading}
+                               className={`px-2 py-1 rounded text-xs border transition-all disabled:cursor-not-allowed disabled:opacity-50 ${isSelected
                                  ? 'bg-blue-600 text-white border-blue-500 dark:bg-blue-500 dark:text-white dark:border-blue-400 ring-2 ring-blue-300/80 dark:ring-blue-300/50'
                                  : getThemeStyle(t)}`}
                              >
@@ -9970,7 +10262,7 @@ function UploadModal({
                       )}
                       {publishError && <p className="text-sm text-red-500 text-center">{publishError}</p>}
                       {showSuggestionUI && <p className="text-xs text-amber-700 dark:text-amber-300 text-center">Kies hoe je met de AI-suggesties wilt omgaan om te publiceren.</p>}
-                      <Button onClick={handlePublish} className="w-full py-2 text-sm md:py-3 md:text-base" disabled={publishing || showSuggestionUI || outcome === 'forbidden'}>
+                      <Button onClick={handlePublish} className="w-full py-2 text-sm md:py-3 md:text-base" disabled={publishing || aiLoading || moderationInFlightRequestRef.current !== null || showSuggestionUI || outcome === 'forbidden'}>
                         {publishing ? <><Loader2 className="w-4 h-4 animate-spin" /> Publiceren...</> : 'Publiceren'}
                       </Button>
                    </div>

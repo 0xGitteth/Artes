@@ -23,6 +23,8 @@ test('prompt encodes the agreed Artes nudity boundaries', () => {
   assert.match(prompt, /visible genitalia/i);
   assert.match(prompt, /bare male chest/i);
   assert.match(prompt, /underwear, lingerie, swimwear, a thong, or a string/i);
+  assert.match(prompt, /BDSM equipment, rope, restraints.*do NOT by themselves count as implied nudity/i);
+  assert.match(prompt, /adult-only sexual context is represented separately by triggers/i);
 });
 
 test('prompt keeps erotic and BDSM content separate from explicit sex acts', () => {
@@ -31,6 +33,8 @@ test('prompt keeps erotic and BDSM content separate from explicit sex acts', () 
   assert.match(prompt, /kinkBdsm/);
   assert.match(prompt, /Do not use adultDecision="explicit" merely because an image is nude, erotic, fetish, or BDSM/i);
   assert.match(prompt, /penetration, oral sex, masturbation/i);
+  assert.match(prompt, /Visible genitals alone are NOT a sexual act/i);
+  assert.match(prompt, /Do not infer masturbation, stimulation or penetration from arousal, wetness, bodily fluid/i);
 });
 
 test('prompt does not ask AI to perform age verification', () => {

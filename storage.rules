@@ -99,6 +99,10 @@ service firebase.storage {
         && isValidProfileImageUpload(fileName);
     }
 
+    match /moderation-previews/{allPaths=**} {
+      allow read, write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

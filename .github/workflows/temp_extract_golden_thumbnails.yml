@@ -17,14 +17,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Functions dependencies
         run: npm ci --prefix functions
-      - name: Create tiny thumbnails
+      - name: Create inspection thumbnails
         run: |
+          mkdir -p /tmp/golden-thumbs
           node --input-type=module <<'NODE'
           import sharp from './functions/node_modules/sharp/lib/index.js';
-          await sharp('testing/moderation_goldens_v1/images/safe/SAFE_01.jpg').resize({ width: 128 }).jpeg({ quality: 35 }).toFile('/tmp/SAFE_01_thumb.jpg');
-          await sharp('testing/moderation_goldens_v1/images/boudoir/BOUDOIR_01.jpg').resize({ width: 128 }).jpeg({ quality: 35 }).toFile('/tmp/BOUDOIR_01_thumb.jpg');
+          await sharp('testing/moderation_goldens_v1/images/safe/SAFE_01.jpg').resize({ width: 640 }).jpeg({ quality: 75 }).toFile('/tmp/golden-thumbs/SAFE_01.jpg');
+          await sharp('testing/moderation_goldens_v1/images/boudoir/BOUDOIR_01.jpg').resize({ width: 640 }).jpeg({ quality: 75 }).toFile('/tmp/golden-thumbs/BOUDOIR_01.jpg');
           NODE
-      - name: Emit thumbnails as base64
-        run: |
-          echo "SAFE=$(base64 -w0 /tmp/SAFE_01_thumb.jpg)"
-          echo "BOUDOIR=$(base64 -w0 /tmp/BOUDOIR_01_thumb.jpg)"
+      - name: Upload inspection thumbnails
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-inspection-thumbnails
+          path: /tmp/golden-thumbs
+          retention-days: 1

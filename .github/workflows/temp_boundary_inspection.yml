@@ -1,0 +1,30 @@
+name: Temporary boundary inspection
+
+on:
+  push:
+    branches:
+      - temp/golden-prompt-experiment
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci --prefix functions
+      - name: Create boundary thumbnails
+        run: |
+          mkdir -p /tmp/boundary-thumbs
+          node --input-type=module <<'NODE'
+          import sharp from './functions/node_modules/sharp/lib/index.js';
+          await sharp('testing/moderation_goldens_v1/images/borderline/BORDERLINE_01.jpg').resize({ width: 700 }).jpeg({ quality: 78 }).toFile('/tmp/boundary-thumbs/BORDERLINE_01.jpg');
+          await sharp('testing/moderation_goldens_v1/images/explicit/EXPLICIT_01.jpg').resize({ width: 700 }).jpeg({ quality: 78 }).toFile('/tmp/boundary-thumbs/EXPLICIT_01.jpg');
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boundary-inspection-thumbnails
+          path: /tmp/boundary-thumbs
+          retention-days: 1

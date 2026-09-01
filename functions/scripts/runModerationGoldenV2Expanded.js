@@ -30,18 +30,79 @@ const loadManifest = async () => {
   return parsed;
 };
 
-const inspectCaseFile = async (item) => {
-  if (!item.file) return null;
-  const absolutePath = path.resolve(repoRoot, item.file);
-  await access(absolutePath);
-  const info = await stat(absolutePath);
-  const buffer = await readFile(absolutePath);
-  return {
-    absolutePath,
-    bytes: info.size,
-    sha256: sha256(buffer),
-    buffer,
-  };
+const parseGcsUri = (uri) => {
+  const match = /^gs:\/\/([^/]+)\/(.+)$/.exec(String(uri || ''));
+  if (!match) throw new Error(`Invalid GCS fixture URI: ${uri}`);
+  return { bucketName: match[1], objectName: match[2] };
+};
+
+let firebaseAppPromise = null;
+const getFirebaseAdminApp = async () => {
+  if (!firebaseAppPromise) {
+    firebaseAppPromise = (async () => {
+      const { getApps, initializeApp } = await import('firebase-admin/app');
+      const existing = getApps()[0];
+      return existing || initializeApp({ projectId: process.env.GOOGLE_CLOUD_PROJECT });
+    })();
+  }
+  return firebaseAppPromise;
+};
+
+const readGcsFixture = async (gcsUri) => {
+  const { bucketName, objectName } = parseGcsUri(gcsUri);
+  const { getStorage } = await import('firebase-admin/storage');
+  const app = await getFirebaseAdminApp();
+  const [buffer] = await getStorage(app).bucket(bucketName).file(objectName).download();
+  return buffer;
+};
+
+const inferMimeType = (item) => {
+  if (item?.mimeType) return item.mimeType;
+  const source = item?.file || item?.gcsUri || '';
+  if (/\.png$/i.test(source)) return 'image/png';
+  if (/\.webp$/i.test(source)) return 'image/webp';
+  return 'image/jpeg';
+};
+
+const inspectCaseFixture = async (item, { fetchRemote = false } = {}) => {
+  if (item.file) {
+    const absolutePath = path.resolve(repoRoot, item.file);
+    await access(absolutePath);
+    const info = await stat(absolutePath);
+    const buffer = await readFile(absolutePath);
+    return {
+      source: 'repo',
+      locator: item.file,
+      bytes: info.size,
+      sha256: sha256(buffer),
+      mimeType: inferMimeType(item),
+      buffer,
+    };
+  }
+
+  if (item.gcsUri) {
+    if (!fetchRemote) {
+      return {
+        source: 'gcs',
+        locator: item.gcsUri,
+        bytes: null,
+        sha256: null,
+        mimeType: inferMimeType(item),
+        buffer: null,
+      };
+    }
+    const buffer = await readGcsFixture(item.gcsUri);
+    return {
+      source: 'gcs',
+      locator: item.gcsUri,
+      bytes: buffer.length,
+      sha256: sha256(buffer),
+      mimeType: inferMimeType(item),
+      buffer,
+    };
+  }
+
+  throw new Error(`${item.id}: no fixture source configured`);
 };
 
 const assertSafeProject = (manifest) => {
@@ -75,14 +136,16 @@ const main = async () => {
 
   const metadata = [];
   for (const item of ready) {
-    const file = await inspectCaseFile(item);
+    const fixture = await inspectCaseFixture(item, { fetchRemote: false });
     metadata.push({
       id: item.id,
       tier: item.tier,
       category: item.category,
-      file: item.file,
-      bytes: file.bytes,
-      sha256: file.sha256,
+      source: fixture.source,
+      locator: fixture.locator,
+      bytes: fixture.bytes,
+      sha256: fixture.sha256,
+      mimeType: fixture.mimeType,
       expected: item.expected,
     });
   }
@@ -92,7 +155,7 @@ const main = async () => {
   if (dryRun) {
     console.log(JSON.stringify({
       mode: 'expanded-golden-dry-run',
-      note: 'Manifest and available real-image fixtures verified. No external AI call was made.',
+      note: 'Manifest and local fixtures verified. Private GCS fixture objects are not downloaded during dry-run. No external AI call was made.',
       summary,
       readyCases: metadata,
       missingCases: missing.map(({ id, tier, category, imageBrief }) => ({ id, tier, category, imageBrief })),
@@ -114,12 +177,12 @@ const main = async () => {
   let hadFailure = false;
 
   for (const item of ready) {
-    const { buffer, bytes, sha256: digest } = await inspectCaseFile(item);
+    const fixture = await inspectCaseFixture(item, { fetchRemote: true });
     const attempts = [];
 
     for (let attempt = 1; attempt <= repeatCount; attempt += 1) {
       try {
-        const result = await runGeminiClassifier({ buffer, mimeType: 'image/jpeg' });
+        const result = await runGeminiClassifier({ buffer: fixture.buffer, mimeType: fixture.mimeType });
         const expectationFailure = getManifestGoldenExpectationFailure({ item, result });
         if (expectationFailure) hadFailure = true;
         attempts.push({
@@ -147,9 +210,11 @@ const main = async () => {
       id: item.id,
       tier: item.tier,
       category: item.category,
-      file: item.file,
-      bytes,
-      sha256: digest,
+      source: fixture.source,
+      locator: fixture.locator,
+      bytes: fixture.bytes,
+      sha256: fixture.sha256,
+      mimeType: fixture.mimeType,
       expected: item.expected,
       passed: attempts.every((attempt) => attempt.passed),
       attempts,

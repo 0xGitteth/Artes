@@ -83,6 +83,15 @@ export const normalizeArtesDetectorLabel = (label) => {
   };
 };
 
+const resolveLearningMismatchType = ({ action = null, storedMismatchType = null } = {}) => {
+  const normalizedAction = cleanString(action);
+  const normalizedMismatch = cleanString(storedMismatchType);
+  if (normalizedAction === 'approveWithTaxonomyCorrection' && (!normalizedMismatch || normalizedMismatch === 'none')) {
+    return 'wrong_taxonomy';
+  }
+  return normalizedMismatch || null;
+};
+
 export const assessModerationExampleCandidate = (example = {}) => {
   const reasons = [];
   const caseType = cleanString(example.caseType).toLowerCase();
@@ -91,6 +100,10 @@ export const assessModerationExampleCandidate = (example = {}) => {
   const learningStatus = cleanString(example.learningStatus);
   const sha256 = cleanString(example?.fingerprints?.sha256);
   const policyVersion = cleanString(example.policyVersion || example?.provenance?.policyVersion);
+  const mismatchType = resolveLearningMismatchType({
+    action,
+    storedMismatchType: example?.analytics?.mismatchType,
+  });
 
   if (caseType && caseType !== 'upload') reasons.push('not_upload_case');
   if (learningStatus !== 'resolved') reasons.push('not_resolved');
@@ -107,7 +120,7 @@ export const assessModerationExampleCandidate = (example = {}) => {
       finalOutcome: finalOutcome || null,
       policyVersion: policyVersion || null,
       sha256: sha256 || null,
-      mismatchType: cleanString(example?.analytics?.mismatchType) || null,
+      mismatchType,
     },
   };
 };

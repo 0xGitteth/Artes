@@ -115,13 +115,28 @@ test('allows configured provider safety blocks but rejects unconfigured ones', (
   assert.match(getManifestGoldenExpectationFailure({ item: rejected, result: blockedResult }), /provider safety block was not an allowed outcome/);
 });
 
-test('manifest validator catches duplicate ids and missing files for ready fixtures', () => {
+test('manifest validator catches duplicate ids and missing fixture sources for ready fixtures', () => {
   const failures = validateGoldenExpansionManifest({
     cases: [
       { id: 'A', tier: 'release_gate', status: 'ready', expected: {} },
       { id: 'A', tier: 'release_gate', status: 'needs_image', expected: {} },
     ],
   });
-  assert.ok(failures.some((entry) => entry.includes('.file is required')));
+  assert.ok(failures.some((entry) => entry.includes('requires file or gs:// gcsUri')));
   assert.ok(failures.some((entry) => entry.includes('duplicates A')));
+});
+
+test('manifest validator accepts a private GCS fixture source', () => {
+  const failures = validateGoldenExpansionManifest({
+    cases: [
+      {
+        id: 'PRIVATE_FIXTURE',
+        tier: 'release_gate',
+        status: 'ready',
+        gcsUri: 'gs://artes-staging-moderation-goldens/general/example.jpg',
+        expected: { adultDecision: 'none' },
+      },
+    ],
+  });
+  assert.deepEqual(failures, []);
 });

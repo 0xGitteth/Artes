@@ -33,7 +33,7 @@ jobs:
               raise SystemExit('nudity insertion point not found')
           s = s.replace(needle1, add1, 1)
 
-          needle2 = "  '- If the pose/context is clearly erotic or sexually suggestive without an explicit sex act, add trigger \\\"adultEroticSuggestive\\\" with severity \\\"suggest\\\".',\n"
+          needle2 = "  'Sexual context can still make a clothed image adult-only:',\n"
           add2 = needle2 + "  '- Do NOT add adultEroticSuggestive merely because an adult wears lingerie, shows cleavage/thighs, poses sensually, arches their back, looks at the camera, is photographed in a bedroom/boudoir setting, or uses glamorous/provocative styling. Ordinary solo boudoir is general content.',\n  '- For a solo adult, require overt sexual behavior, direct sexual touching, use of a sex toy, or an unmistakable simulated sex act before adultEroticSuggestive is warranted. Sensual presentation alone is not enough.',\n  '- For interacting adults, clearly sexualized interaction can warrant adultEroticSuggestive even when everyone remains covered, for example straddling while making out, sexualized buttock/crotch grabbing, kneeling at another adult's crotch, a face positioned between another adult's legs, or comparable simulated sexual interaction. This still does NOT make adultDecision explicit unless the sexual act itself is visibly evidenced.',\n"
           if needle2 not in s:
               raise SystemExit('erotic insertion point not found')

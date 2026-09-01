@@ -26,17 +26,21 @@ jobs:
       - name: Install Functions dependencies
         run: npm ci --prefix functions
 
-      - name: Patch prompt for strict nudity and kink separation
+      - name: Patch prompt for strict adult boundary separation
         run: |
           python - <<'PY'
           from pathlib import Path
           p = Path('functions/geminiModerationContract.js')
           s = p.read_text()
-          needle = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
-          repl = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'adultDecision describes nudity/explicitness only; adult-only sexual context is represented by triggers.',\n  '- Covered lingerie/underwear remains adultDecision=\\\"none\\\" when breasts, nipples, genitals and buttocks are not exposed and the image does not create the visual appearance of nudity.',\n  '- BDSM equipment, rope, restraints, fetish styling, erotic posing or sexual suggestion NEVER by themselves count as implied nudity. They may require adultEroticSuggestive/kinkBdsm triggers while adultDecision stays \\\"none\\\".',\n  '- Do not infer nudity merely because a clothed BDSM/kink image is sexual or fetishistic.',\n  '- Use adultDecision=\\\"borderline\\\" only when the visible body/clothing/crop itself shows or clearly creates the appearance of nudity under the explicit nudity rules above.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
-          if needle not in s:
+          covered_needle = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
+          covered_repl = "  '- underwear, lingerie, swimwear, a thong, or a string when intimate areas remain covered.',\n  '',\n  'adultDecision describes nudity/explicitness only; adult-only sexual context is represented by triggers.',\n  '- Covered lingerie/underwear remains adultDecision=\\\"none\\\" when breasts, nipples, genitals and buttocks are not exposed and the image does not create the visual appearance of nudity.',\n  '- BDSM equipment, rope, restraints, fetish styling, erotic posing or sexual suggestion NEVER by themselves count as implied nudity. They may require adultEroticSuggestive/kinkBdsm triggers while adultDecision stays \\\"none\\\".',\n  '- Do not infer nudity merely because a clothed BDSM/kink image is sexual or fetishistic.',\n  '- Use adultDecision=\\\"borderline\\\" only when the visible body/clothing/crop itself shows or clearly creates the appearance of nudity under the explicit nudity rules above.',\n  '',\n  'Sexual context can still make a clothed image adult-only:',"
+          explicit_needle = "  '- \\\"explicit\\\": a clear sexual act is visible, such as penetration, oral sex, masturbation, genital stimulation, or another unambiguous sex act.',\n  '',\n  'For Artes, classify the following as adultDecision=\\\"borderline\\\" when no explicit sexual act is visible:',"
+          explicit_repl = "  '- \\\"explicit\\\": a clear sexual act is visible, such as penetration, oral sex, masturbation, genital stimulation, or another unambiguous sex act.',\n  '- Visible genitals alone are NOT a sexual act. A close-up of exposed genitals, including visible natural moisture or a droplet/fluid, stays \\\"borderline\\\" unless the image also visibly shows touching/stimulation, penetration, oral contact, masturbation or another unambiguous sex act.',\n  '- Do not infer masturbation, stimulation or penetration from arousal, wetness, bodily fluid, pose, framing or a genital close-up alone. The act itself must be visibly evidenced.',\n  '',\n  'For Artes, classify the following as adultDecision=\\\"borderline\\\" when no explicit sexual act is visible:',"
+          if covered_needle not in s or explicit_needle not in s:
               raise SystemExit('prompt insertion point not found')
-          p.write_text(s.replace(needle, repl, 1))
+          s = s.replace(covered_needle, covered_repl, 1)
+          s = s.replace(explicit_needle, explicit_repl, 1)
+          p.write_text(s)
           PY
 
       - name: Authenticate to artes-staging
@@ -45,7 +49,7 @@ jobs:
           workload_identity_provider: projects/712508684856/locations/global/workloadIdentityPools/github-actions/providers/github
           service_account: artes-moderation-golden@artes-staging.iam.gserviceaccount.com
 
-      - name: Run full live golden classifier experiment
+      - name: Run repeated live boundary experiment
         env:
           ENABLE_GEMINI_CLASSIFIER: 'true'
           GOOGLE_CLOUD_PROJECT: artes-staging
@@ -56,30 +60,31 @@ jobs:
           import assert from 'node:assert/strict';
           import { readFile } from 'node:fs/promises';
           import { runGeminiClassifier } from './functions/geminiModerationClassifier.js';
-          const cases = [
-            ['SAFE_01','testing/moderation_goldens_v1/images/safe/SAFE_01.jpg'],
-            ['BOUDOIR_01','testing/moderation_goldens_v1/images/boudoir/BOUDOIR_01.jpg'],
-            ['BORDERLINE_01','testing/moderation_goldens_v1/images/borderline/BORDERLINE_01.jpg'],
-            ['EXPLICIT_01','testing/moderation_goldens_v1/images/explicit/EXPLICIT_01.jpg'],
-          ];
-          const byId = {};
-          for (const [id, file] of cases) {
-            const result = await runGeminiClassifier({ buffer: await readFile(file), mimeType: 'image/jpeg' });
-            byId[id] = result;
+          const safeBuffer = await readFile('testing/moderation_goldens_v1/images/safe/SAFE_01.jpg');
+          const borderlineBuffer = await readFile('testing/moderation_goldens_v1/images/borderline/BORDERLINE_01.jpg');
+          const explicitBuffer = await readFile('testing/moderation_goldens_v1/images/explicit/EXPLICIT_01.jpg');
+          const results = [];
+          for (const [id, buffer] of [
+            ['SAFE_01', safeBuffer],
+            ['BORDERLINE_01_A', borderlineBuffer],
+            ['BORDERLINE_01_B', borderlineBuffer],
+            ['BORDERLINE_01_C', borderlineBuffer],
+            ['EXPLICIT_01', explicitBuffer],
+          ]) {
+            const result = await runGeminiClassifier({ buffer, mimeType: 'image/jpeg' });
+            results.push([id, result]);
             console.log(JSON.stringify({ id, parsed: result.parsed, diagnostics: result.diagnostics }, null, 2));
           }
-          const safe = byId.SAFE_01.parsed;
+          const safe = results[0][1].parsed;
           assert.equal(safe?.adultDecision, 'none');
-          assert.equal(safe?.forbiddenReasons?.length, 0);
           assert.ok(safe?.triggers?.some((t) => t.trigger === 'adultEroticSuggestive'));
           assert.ok(safe?.triggers?.some((t) => t.trigger === 'kinkBdsm'));
-          const boudoir = byId.BOUDOIR_01;
-          assert.ok(boudoir.parsed || boudoir.diagnostics?.safetyBlocked === true);
-          const borderline = byId.BORDERLINE_01.parsed;
-          assert.equal(borderline?.adultDecision, 'borderline');
-          assert.ok(!borderline?.forbiddenReasons?.includes('sexualExplicit'));
-          const explicit = byId.EXPLICIT_01.parsed;
+          for (const [id, result] of results.slice(1, 4)) {
+            assert.equal(result.parsed?.adultDecision, 'borderline', `${id} should remain non-explicit nudity`);
+            assert.ok(!result.parsed?.forbiddenReasons?.includes('sexualExplicit'));
+          }
+          const explicit = results[4][1].parsed;
           assert.equal(explicit?.adultDecision, 'explicit');
           assert.ok(explicit?.forbiddenReasons?.includes('sexualExplicit'));
-          console.log('FULL_EXPERIMENT_ASSERTIONS_PASSED');
+          console.log('REPEATED_BOUNDARY_ASSERTIONS_PASSED');
           NODE

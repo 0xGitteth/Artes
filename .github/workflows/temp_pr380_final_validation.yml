@@ -1,0 +1,40 @@
+name: Temporary PR380 final validation
+
+on:
+  push:
+    branches:
+      - temp/pr380-final-validation-35819
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+      - name: Moderation policy suite
+        run: npm run test:moderation-policy
+      - name: Public publication suite
+        run: npm run test:public-user-publication
+      - name: Codex isolation suite
+        run: npm run test:codex-dev-isolation
+      - name: Firestore and Storage rules
+        run: npm run test:rules
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+      - name: Golden dry-run and diff check
+        run: |
+          npm run golden:moderation-v2:classifier -- --dry-run
+          git diff --check

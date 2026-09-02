@@ -32,7 +32,19 @@ test('resolved upload moderator decisions become learning candidates without cha
   const result = assessModerationExampleCandidate(validExample());
   assert.equal(result.candidate, true);
   assert.deepEqual(result.reasons, []);
+  assert.deepEqual(result.qualityWarnings, []);
   assert.equal(result.sourceEvidence.mismatchType, 'wrong_taxonomy');
+});
+
+test('legacy examples without a policy version remain candidates with an explicit provenance warning', () => {
+  const legacy = validExample();
+  delete legacy.policyVersion;
+  const result = assessModerationExampleCandidate(legacy);
+  assert.equal(result.candidate, true);
+  assert.deepEqual(result.reasons, []);
+  assert.deepEqual(result.qualityWarnings, ['missing_policy_version']);
+  assert.equal(result.sourceEvidence.policyVersion, null);
+  assert.equal(result.sourceEvidence.policyVersionKnown, false);
 });
 
 test('taxonomy-correction actions remain visible even when legacy mismatch analytics says none', () => {
@@ -84,6 +96,21 @@ test('training readiness requires explicit curation, durable approved media, and
   assert.equal(ready.trainingReady, true);
   assert.equal(ready.labelVersion, ARTES_DETECTOR_LABEL_VERSION);
   assert.ok(['train', 'validation', 'test'].includes(ready.datasetSplit));
+});
+
+test('a missing legacy policy version does not block training readiness once all detector-specific requirements are met', () => {
+  const legacy = validExample();
+  delete legacy.policyVersion;
+  const item = buildModerationLearningItem({
+    exampleId: 'legacy-1',
+    example: legacy,
+    curation: { status: 'approved', detectorLabel: validLabel() },
+    embedding: { model: 'dinov2-vitb14', dimension: 768, semanticClusterId: 'cluster-legacy' },
+    trainingAsset: { uri: 'gs://bucket/legacy-1.webp', approvedForTraining: true },
+  });
+  assert.equal(item.trainingReady, true);
+  assert.equal(item.policyVersionKnown, false);
+  assert.deepEqual(item.sourceQualityWarnings, ['missing_policy_version']);
 });
 
 test('semantic cluster splitting is deterministic and keeps related examples in one split', () => {

@@ -94,7 +94,7 @@ export default function ModeratorLearningEvidenceFields({
     const nextEvidence = { ...visualEvidence };
     if (nextValue === '' || nextValue === undefined) delete nextEvidence[field];
     else nextEvidence[field] = nextValue;
-    onChange?.({ visualEvidence: nextEvidence });
+    onChange?.(Object.keys(nextEvidence).length > 0 ? { visualEvidence: nextEvidence } : null);
   };
 
   const toggleSensitiveSignal = (signal) => {

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summarizeHistoricalModerationCoverage } from '../moderationHistoricalCoverageAudit.js';
+import {
+  findDecidedUploadReviewCasesWithoutExamples,
+  summarizeHistoricalModerationCoverage,
+} from '../moderationHistoricalCoverageAudit.js';
 
 test('historical coverage audit compares decided upload review cases with stored moderation examples', () => {
   const summary = summarizeHistoricalModerationCoverage({
@@ -27,6 +30,23 @@ test('historical coverage audit compares decided upload review cases with stored
   assert.equal(summary.decidedUploadExampleCoverageRate, 0.6667);
   assert.equal(summary.decidedUploadStatuses.approved, 2);
   assert.equal(summary.decidedUploadStatuses.rejected, 1);
+});
+
+test('missing decided upload cases can be selected internally without changing aggregate output', () => {
+  const missing = findDecidedUploadReviewCasesWithoutExamples({
+    reviewCases: [
+      { id: 'r1', data: { caseType: 'upload', uploadId: 'u1', status: 'approved' } },
+      { id: 'r2', data: { caseType: 'upload', uploadId: 'u2', status: 'rejected' } },
+      { id: 'r3', data: { caseType: 'upload', uploadId: 'u3', status: 'open' } },
+    ],
+    moderationExamples: [
+      { id: 'r1_approve', data: { reviewCaseId: 'r1' } },
+    ],
+  });
+
+  assert.equal(missing.length, 1);
+  assert.equal(missing[0].id, 'r2');
+  assert.equal(missing[0].data.uploadId, 'u2');
 });
 
 test('historical coverage audit returns aggregate data only', () => {

@@ -18,6 +18,7 @@ import {
 } from './services/firebaseClient';
 import useRecoveredImageMeta from './utils/useRecoveredImageMeta';
 import PrivacyPolicyView from './components/settings/PrivacyPolicyView';
+import ModeratorLearningEvidenceFields from './components/ModeratorLearningEvidenceFields';
 import {
   DIDIT_APPROVED_STATUSES,
   DIDIT_REFRESHABLE_STATUSES,
@@ -5864,6 +5865,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
   const [decision, setDecision] = useState('approved');
   const [selectedReasons, setSelectedReasons] = useState([]);
   const [decisionReasonCode, setDecisionReasonCode] = useState('');
+  const [moderatorLearningSubmission, setModeratorLearningSubmission] = useState(null);
   const [queueFreshEvaluationReasonCode, setQueueFreshEvaluationReasonCode] = useState('');
   const [decisionMessage, setDecisionMessage] = useState('');
   const [messageTouched, setMessageTouched] = useState(false);
@@ -6226,6 +6228,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     setDecisionAction(MODERATOR_DECISION_ACTIONS.approveAsIs);
     setDecision('approved');
     setDecisionReasonCode('');
+    setModeratorLearningSubmission(null);
     setQueueFreshEvaluationReasonCode('');
     setSelectedReasons([]);
     setDecisionMessage(buildDecisionTemplate('approved', []));
@@ -6241,6 +6244,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     if (!decisionReasonCode) return;
     if (validDecisionReasonCodes.has(decisionReasonCode)) return;
     setDecisionReasonCode('');
+    setModeratorLearningSubmission(null);
   }, [decisionReasonCode, validDecisionReasonCodes]);
 
   useEffect(() => {
@@ -6344,6 +6348,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
           decision,
           action: decisionAction,
           reasonCode: decisionReasonCode,
+          ...(moderatorLearningSubmission ? { moderatorLearningSubmission } : {}),
           decisionMessagePublic: decisionMessage.trim(),
           decisionReasons: selectedReasons,
           correctedTaxonomy: {
@@ -6568,6 +6573,12 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
     }).join(' · ');
   };
   const geminiDiagnostics = resolveGeminiDiagnostics(selectedCase, selectedUpload);
+  const selectedAiDetectorLabel = selectedUpload?.detectorLabel
+    || selectedUpload?.aiDetectorLabel
+    || selectedUpload?.aiResult?.detectorLabel
+    || selectedCase?.detectorLabel
+    || selectedCase?.aiSummary?.detectorLabel
+    || null;
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
@@ -6907,7 +6918,7 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                       <select
                         className="mt-2 w-full p-3 rounded-xl border dark:bg-slate-800 dark:text-white"
                         value={decisionReasonCode}
-                        onChange={(event) => setDecisionReasonCode(event.target.value)}
+                        onChange={(event) => { setDecisionReasonCode(event.target.value); setModeratorLearningSubmission(null); }}
                       >
                         <option value="">Selecteer reason code</option>
                         {visibleReasonCodes.map((code) => (
@@ -6915,6 +6926,14 @@ function ModerationPanel({ moderationApiBase, authUser, isModerator, caseTypeFil
                         ))}
                       </select>
                     </div>
+                    {!isReportCase && (
+                      <ModeratorLearningEvidenceFields
+                        reasonCode={decisionReasonCode}
+                        aiDetectorLabel={selectedAiDetectorLabel}
+                        value={moderatorLearningSubmission}
+                        onChange={setModeratorLearningSubmission}
+                      />
+                    )}
                     <div>
                       <label className="text-xs font-semibold text-slate-500 dark:text-slate-300">Redenen (max 3)</label>
                       <div className="flex flex-wrap gap-2 mt-2">

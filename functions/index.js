@@ -25,6 +25,7 @@ import { canManageApprovedUploadPrompt, canPublishUpload, canSaveDraftUpload, ge
 import { runUserModerationActionMutation } from './userModerationActionIsolation.js';
 import { deleteSupportResetMessagesPageAtomically } from './supportResetIsolation.js';
 import { buildCommonModerationExample } from './moderationExampleBuilder.js';
+import { buildModeratorDecisionLearningFields } from './moderationModeratorLearningSubmission.js';
 import {
   fetchModerationExamplesForFingerprints,
   resolveEffectiveUploadId,
@@ -3651,6 +3652,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
     const decoded = await verifyToken(req);
     const { email } = await ensureModerator(decoded);
     const body = parseJsonBody(req);
+    const moderatorLearningSubmission = body?.moderatorLearningSubmission ?? null;
     const {
       reviewCaseId,
       decision,
@@ -3728,6 +3730,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
     let reviewSnapshotData = null;
     let uploadSnapshotData = null;
     let moderationExamplePayload = null;
+    let moderatorLearningFields = {};
 
     await db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(reviewRef);
@@ -3782,6 +3785,16 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         uploadRef = db.collection('uploads').doc(uploadId);
         const uploadSnapshot = await transaction.get(uploadRef);
         uploadSnapshotData = uploadSnapshot.exists ? (uploadSnapshot.data() || null) : null;
+        moderatorLearningFields = buildModeratorDecisionLearningFields({
+          reasonCode: normalizedReasonCode,
+          aiDetectorLabel: uploadSnapshotData?.detectorLabel
+            || uploadSnapshotData?.aiDetectorLabel
+            || uploadSnapshotData?.aiResult?.detectorLabel
+            || reviewSnapshotData?.detectorLabel
+            || reviewSnapshotData?.aiSummary?.detectorLabel
+            || null,
+          submission: moderatorLearningSubmission,
+        });
       }
 
       let decidingUserModerationData = {};
@@ -3844,6 +3857,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
           moderatorDecision: {
             action: normalizedModeratorAction,
             reasonCode: normalizedReasonCode,
+            ...moderatorLearningFields,
             correctedTaxonomy: { themes: correctedThemes, triggers: correctedTriggers },
             requiresUploaderAcceptance: normalizedModeratorAction === 'requestUserCorrection',
             finalPolicyOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
@@ -3866,6 +3880,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
         moderatorDecision: {
           action: normalizedModeratorAction,
           reasonCode: normalizedReasonCode,
+          ...moderatorLearningFields,
           correctedTaxonomy: { themes: correctedThemes, triggers: correctedTriggers },
           requiresUploaderAcceptance: normalizedModeratorAction === 'requestUserCorrection',
           finalPolicyOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
@@ -3920,6 +3935,7 @@ export const moderatorDecide = onRequest({ cors: true, region: 'europe-west4' },
           action: normalizedModeratorAction,
           finalOutcome: normalizedDecision === 'approved' ? 'allowed' : 'forbidden',
           reasonCode: normalizedReasonCode,
+          ...moderatorLearningFields,
           correctedTaxonomy: { themes: correctedThemes, triggers: correctedTriggers },
           notes: moderatorNoteInternal || null,
           decidedBy: decoded.uid,

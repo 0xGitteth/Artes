@@ -11,8 +11,15 @@ export const summarizeModerationLearningCandidates = (examples = []) => {
     candidateExamples: 0,
     excludedExamples: 0,
     candidateRate: 0,
+    recordsWithSha256: 0,
+    recordsWithPolicyVersion: 0,
+    recordsWithReasonCode: 0,
+    recordsWithCorrectedTaxonomy: 0,
+    recordsWithModeratorNote: 0,
     exclusionReasons: {},
+    qualityWarnings: {},
     moderatorActions: {},
+    reasonCodes: {},
     finalOutcomes: {},
     mismatchTypes: {},
     policyVersions: {},
@@ -25,12 +32,26 @@ export const summarizeModerationLearningCandidates = (examples = []) => {
     if (!example || typeof example !== 'object') continue;
 
     const assessment = assessModerationExampleCandidate(example);
+    const reasonCode = String(example?.moderatorDecision?.reasonCode || '').trim();
+    const correctedTaxonomy = example?.moderatorDecision?.correctedTaxonomy;
+    const correctedThemes = Array.isArray(correctedTaxonomy?.themes) ? correctedTaxonomy.themes.filter(Boolean) : [];
+    const correctedTriggers = Array.isArray(correctedTaxonomy?.triggers) ? correctedTaxonomy.triggers.filter(Boolean) : [];
+    const moderatorNote = String(example?.moderatorDecision?.notes || '').trim();
+
     summary.totalExamples += 1;
     if (assessment.candidate) summary.candidateExamples += 1;
     else summary.excludedExamples += 1;
 
+    if (assessment.sourceEvidence.sha256) summary.recordsWithSha256 += 1;
+    if (assessment.sourceEvidence.policyVersionKnown) summary.recordsWithPolicyVersion += 1;
+    if (reasonCode) summary.recordsWithReasonCode += 1;
+    if (correctedThemes.length > 0 || correctedTriggers.length > 0) summary.recordsWithCorrectedTaxonomy += 1;
+    if (moderatorNote) summary.recordsWithModeratorNote += 1;
+
     assessment.reasons.forEach((reason) => increment(summary.exclusionReasons, reason));
+    assessment.qualityWarnings.forEach((warning) => increment(summary.qualityWarnings, warning));
     increment(summary.moderatorActions, assessment.sourceEvidence.action);
+    increment(summary.reasonCodes, reasonCode);
     increment(summary.finalOutcomes, assessment.sourceEvidence.finalOutcome);
     increment(summary.mismatchTypes, assessment.sourceEvidence.mismatchType);
     increment(summary.policyVersions, assessment.sourceEvidence.policyVersion);

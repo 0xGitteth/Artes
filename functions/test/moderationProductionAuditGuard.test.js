@@ -4,6 +4,7 @@ import {
   MODERATION_PRODUCTION_PROJECT_ID,
   assertModerationProductionAuditProject,
   assertProductionAuditReadOnlyOptions,
+  assertProductionCoverageAuditReadOnlyOptions,
 } from '../moderationProductionAuditGuard.js';
 
 test('production audit guard only allows the Artes production project', () => {
@@ -33,5 +34,20 @@ test('production audit options are limited to moderationExamples and bounded rea
   assert.throws(
     () => assertProductionAuditReadOnlyOptions({ limit: 5001 }),
     /production_audit_invalid_limit/,
+  );
+});
+
+test('historical coverage audit is bounded and restricted to reviewCases plus moderationExamples', () => {
+  assert.deepEqual(
+    assertProductionCoverageAuditReadOnlyOptions({ limit: 500 }),
+    { limit: 500, collections: ['reviewCases', 'moderationExamples'] },
+  );
+  assert.throws(
+    () => assertProductionCoverageAuditReadOnlyOptions({ limit: 0 }),
+    /production_coverage_audit_invalid_limit/,
+  );
+  assert.throws(
+    () => assertProductionCoverageAuditReadOnlyOptions({ limit: 5001 }),
+    /production_coverage_audit_invalid_limit/,
   );
 });

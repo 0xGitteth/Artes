@@ -12,7 +12,7 @@ const unwrap = (record) => {
   return { id: '', data: record && typeof record === 'object' ? record : {} };
 };
 
-const isUploadLikeReviewCase = (data = {}) => {
+export const isUploadLikeReviewCase = (data = {}) => {
   const caseType = cleanString(data.caseType).toLowerCase();
   if (caseType === 'upload') return true;
   if (caseType && caseType !== 'upload') return false;
@@ -20,7 +20,7 @@ const isUploadLikeReviewCase = (data = {}) => {
   return Array.isArray(data.linkedUploadIds) && data.linkedUploadIds.some((value) => cleanString(value));
 };
 
-const isDecidedReviewCase = (data = {}) => {
+export const isDecidedReviewCase = (data = {}) => {
   const status = cleanString(data.status).toLowerCase();
   if (status === 'approved' || status === 'rejected') return true;
   if (data.decidedAt) return true;
@@ -28,7 +28,7 @@ const isDecidedReviewCase = (data = {}) => {
   return finalPolicyOutcome === 'allowed' || finalPolicyOutcome === 'forbidden';
 };
 
-export const summarizeHistoricalModerationCoverage = ({ reviewCases = [], moderationExamples = [] } = {}) => {
+const buildExampleLinkage = (moderationExamples = []) => {
   const exampleReviewCaseIds = new Set();
   const exampleDocIds = [];
 
@@ -38,6 +38,33 @@ export const summarizeHistoricalModerationCoverage = ({ reviewCases = [], modera
     if (linkedReviewCaseId) exampleReviewCaseIds.add(linkedReviewCaseId);
     if (id) exampleDocIds.push(id);
   }
+
+  return { exampleReviewCaseIds, exampleDocIds };
+};
+
+const hasModerationExampleForReviewCase = (reviewCaseId, linkage) => {
+  const id = cleanString(reviewCaseId);
+  if (!id) return false;
+  if (linkage.exampleReviewCaseIds.has(id)) return true;
+  return linkage.exampleDocIds.some((exampleId) => exampleId.startsWith(`${id}_`));
+};
+
+export const findDecidedUploadReviewCasesWithoutExamples = ({ reviewCases = [], moderationExamples = [] } = {}) => {
+  const linkage = buildExampleLinkage(moderationExamples);
+  const missing = [];
+
+  for (const rawReviewCase of Array.isArray(reviewCases) ? reviewCases : []) {
+    const { id, data } = unwrap(rawReviewCase);
+    if (!isUploadLikeReviewCase(data) || !isDecidedReviewCase(data)) continue;
+    if (hasModerationExampleForReviewCase(id, linkage)) continue;
+    missing.push({ id, data });
+  }
+
+  return missing;
+};
+
+export const summarizeHistoricalModerationCoverage = ({ reviewCases = [], moderationExamples = [] } = {}) => {
+  const linkage = buildExampleLinkage(moderationExamples);
 
   const summary = {
     totalReviewCases: 0,
@@ -74,9 +101,7 @@ export const summarizeHistoricalModerationCoverage = ({ reviewCases = [], modera
     summary.decidedUploadReviewCases += 1;
     increment(summary.decidedUploadStatuses, data.status);
 
-    const linkedByField = id && exampleReviewCaseIds.has(id);
-    const linkedByLegacyDocId = id && exampleDocIds.some((exampleId) => exampleId.startsWith(`${id}_`));
-    if (linkedByField || linkedByLegacyDocId) summary.decidedUploadWithModerationExample += 1;
+    if (hasModerationExampleForReviewCase(id, linkage)) summary.decidedUploadWithModerationExample += 1;
     else summary.decidedUploadWithoutModerationExample += 1;
   }
 

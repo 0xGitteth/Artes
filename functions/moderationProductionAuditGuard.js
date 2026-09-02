@@ -28,3 +28,19 @@ export const assertProductionCoverageAuditReadOnlyOptions = ({ limit } = {}) => 
     collections: ['reviewCases', 'moderationExamples'],
   };
 };
+
+export const assertProductionReconstructionAuditReadOnlyOptions = ({ limit, maxUploadPointReads = 100 } = {}) => {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
+    throw new Error('production_reconstruction_audit_invalid_limit');
+  }
+  if (!Number.isInteger(maxUploadPointReads) || maxUploadPointReads < 1 || maxUploadPointReads > 100) {
+    throw new Error('production_reconstruction_audit_invalid_upload_read_cap');
+  }
+  return {
+    limit,
+    collections: ['reviewCases', 'moderationExamples'],
+    uploadCollection: 'uploads',
+    uploadReadMode: 'linked_document_point_reads_only',
+    maxUploadPointReads,
+  };
+};

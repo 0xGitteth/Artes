@@ -18,3 +18,13 @@ export const assertProductionAuditReadOnlyOptions = ({ limit, collection = 'mode
   }
   return { limit, collection };
 };
+
+export const assertProductionCoverageAuditReadOnlyOptions = ({ limit } = {}) => {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
+    throw new Error('production_coverage_audit_invalid_limit');
+  }
+  return {
+    limit,
+    collections: ['reviewCases', 'moderationExamples'],
+  };
+};

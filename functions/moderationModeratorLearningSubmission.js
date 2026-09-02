@@ -4,6 +4,13 @@ const isPlainObject = (value) => Boolean(value)
   && typeof value === 'object'
   && !Array.isArray(value);
 
+const invalidSubmission = (message) => {
+  const error = new Error(message);
+  error.status = 400;
+  error.code = 'invalid_moderator_learning_submission';
+  return error;
+};
+
 export const sanitizeModeratorLearningSubmission = ({
   reasonCode = null,
   aiDetectorLabel = null,
@@ -16,13 +23,13 @@ export const sanitizeModeratorLearningSubmission = ({
     };
   }
   if (!isPlainObject(submission)) {
-    throw new Error('invalid_moderator_learning_submission_shape');
+    throw invalidSubmission('invalid_moderator_learning_submission_shape');
   }
 
   const allowedKeys = new Set(['confirmAiLabel', 'visualEvidence']);
   const unsupportedKeys = Object.keys(submission).filter((key) => !allowedKeys.has(key));
   if (unsupportedKeys.length > 0) {
-    throw new Error(`unsupported_moderator_learning_submission_fields:${unsupportedKeys.sort().join(',')}`);
+    throw invalidSubmission(`unsupported_moderator_learning_submission_fields:${unsupportedKeys.sort().join(',')}`);
   }
 
   const confirmAiLabel = submission.confirmAiLabel === true;
@@ -31,23 +38,28 @@ export const sanitizeModeratorLearningSubmission = ({
     : null;
 
   if (!confirmAiLabel && !visualEvidence) {
-    throw new Error('empty_moderator_learning_submission');
+    throw invalidSubmission('empty_moderator_learning_submission');
   }
   if (confirmAiLabel && visualEvidence && Object.keys(visualEvidence).length > 0) {
-    throw new Error('moderator_learning_submission_conflicting_modes');
+    throw invalidSubmission('moderator_learning_submission_conflicting_modes');
   }
 
-  const evidence = buildModeratorLearningEvidence({
-    reasonCode,
-    aiDetectorLabel,
-    confirmAiLabel,
-    visualEvidence,
-  });
+  try {
+    const evidence = buildModeratorLearningEvidence({
+      reasonCode,
+      aiDetectorLabel,
+      confirmAiLabel,
+      visualEvidence,
+    });
 
-  return {
-    supplied: true,
-    evidence,
-  };
+    return {
+      supplied: true,
+      evidence,
+    };
+  } catch (error) {
+    if (error?.status === 400) throw error;
+    throw invalidSubmission(error?.message || 'invalid_moderator_learning_submission');
+  }
 };
 
 export const buildModeratorDecisionLearningFields = ({

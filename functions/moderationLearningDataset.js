@@ -94,6 +94,7 @@ const resolveLearningMismatchType = ({ action = null, storedMismatchType = null 
 
 export const assessModerationExampleCandidate = (example = {}) => {
   const reasons = [];
+  const qualityWarnings = [];
   const caseType = cleanString(example.caseType).toLowerCase();
   const action = cleanString(example?.moderatorDecision?.action);
   const finalOutcome = cleanString(example.finalOutcome);
@@ -110,15 +111,21 @@ export const assessModerationExampleCandidate = (example = {}) => {
   if (!RESOLVED_TRAINING_ACTIONS.has(action)) reasons.push('unsupported_moderator_action');
   if (!TRAINING_FINAL_OUTCOMES.has(finalOutcome)) reasons.push('unsupported_final_outcome');
   if (!sha256) reasons.push('missing_sha256');
-  if (!policyVersion) reasons.push('missing_policy_version');
+
+  // A policy version is valuable provenance but is not required to learn a visual
+  // detector label. Legacy moderator decisions predate versioned policy metadata.
+  // Keep them eligible while surfacing the missing provenance explicitly.
+  if (!policyVersion) qualityWarnings.push('missing_policy_version');
 
   return {
     candidate: reasons.length === 0,
     reasons,
+    qualityWarnings,
     sourceEvidence: {
       action: action || null,
       finalOutcome: finalOutcome || null,
       policyVersion: policyVersion || null,
+      policyVersionKnown: Boolean(policyVersion),
       sha256: sha256 || null,
       mismatchType,
     },
@@ -177,9 +184,11 @@ export const buildModerationLearningItem = ({
     sourceExampleId: sourceExampleId || null,
     sourceFingerprintSha256: candidateAssessment.sourceEvidence.sha256,
     policyVersion: candidateAssessment.sourceEvidence.policyVersion,
+    policyVersionKnown: candidateAssessment.sourceEvidence.policyVersionKnown,
     sourceModeratorAction: candidateAssessment.sourceEvidence.action,
     sourceFinalOutcome: candidateAssessment.sourceEvidence.finalOutcome,
     sourceMismatchType: candidateAssessment.sourceEvidence.mismatchType,
+    sourceQualityWarnings: candidateAssessment.qualityWarnings,
     candidate: candidateAssessment.candidate,
     candidateExclusionReasons: candidateAssessment.reasons,
     curationStatus: curationStatus || 'pending',

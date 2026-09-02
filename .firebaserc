@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "artes-media-app"
+    "default": "artes-media-app",
+    "staging": "artes-staging"
   }
 }

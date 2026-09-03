@@ -17,6 +17,11 @@ test('staging app config audit performs GET requests only', () => {
   assert.match(source, /writes: false/);
 });
 
+test('staging app config audit sends the staging quota project for ADC-backed admin APIs', () => {
+  assert.match(source, /'X-Goog-User-Project': STAGING_PROJECT_ID/);
+  assert.match(source, /quotaProjectId: STAGING_PROJECT_ID/);
+});
+
 test('staging app config audit never prints raw Firebase api keys or provider secrets', () => {
   assert.match(source, /hasApiKey:/);
   assert.doesNotMatch(source, /clientSecret/);

@@ -8,6 +8,7 @@ LOG_FILE="$REPO_ROOT/.tmp/vision-poc.log"
 MODEL_CACHE="$SCRIPT_DIR/.model-cache/huggingface"
 ENDPOINT="http://127.0.0.1:8787"
 IMAGE_PATH="${1:-$REPO_ROOT/public/brand/logo.png}"
+POC_TIMEOUT_MS="${ARTES_CUSTOM_VISION_TIMEOUT_MS:-300000}"
 
 if [[ ! -x "$VENV_PYTHON" ]]; then
   echo "Vision POC venv ontbreekt. Run eerst: bash vision-service/setup_cpu_poc.sh" >&2
@@ -60,6 +61,7 @@ fi
 
 cd "$REPO_ROOT"
 if ! ARTES_CUSTOM_VISION_URL="$ENDPOINT" \
+  ARTES_CUSTOM_VISION_TIMEOUT_MS="$POC_TIMEOUT_MS" \
   node scripts/testLocalModerationVisionPoc.js "$IMAGE_PATH"
 then
   echo "---- vision service log ----" >&2

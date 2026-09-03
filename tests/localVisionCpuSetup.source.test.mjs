@@ -13,10 +13,11 @@ test('vision setup installs only inside a local venv', () => {
 
 test('vision setup forces CPU-only PyTorch before normal requirements', () => {
   const cpuIndex = source.indexOf('https://download.pytorch.org/whl/cpu');
-  const requirements = source.indexOf('-m pip install -r requirements.txt');
+  const requirements = source.indexOf('-r requirements.txt');
   assert.notEqual(cpuIndex, -1);
   assert.notEqual(requirements, -1);
   assert.ok(cpuIndex < requirements);
+  assert.match(source, /--no-cache-dir/);
   assert.match(source, /torchCudaAvailable/);
   assert.match(source, /expectedDevice.*cpu/);
 });

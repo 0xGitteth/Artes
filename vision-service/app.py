@@ -1,5 +1,6 @@
 import base64
 import io
+import logging
 import os
 from functools import lru_cache
 
@@ -16,6 +17,7 @@ MODEL_NAME = 'dinov2_vitb14'
 EMBEDDING_DIMENSION = 768
 MAX_IMAGE_BYTES = int(os.getenv('ARTES_VISION_MAX_IMAGE_BYTES', str(15 * 1024 * 1024)))
 ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+logger = logging.getLogger('artes.vision')
 
 app = FastAPI(title='Artes moderation vision POC', version='1')
 
@@ -105,7 +107,14 @@ def infer(request: InferenceRequest):
         raise HTTPException(status_code=400, detail='embedding_output_required')
 
     image = decode_image(request.image)
-    vector = embed_image(image)
+    try:
+        vector = embed_image(image)
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception('Vision model inference failed.')
+        raise HTTPException(status_code=503, detail='vision_model_unavailable') from error
+
     return InferenceResponse(
         embedding=EmbeddingPayload(
             provider=PROVIDER,

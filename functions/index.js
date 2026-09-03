@@ -34,6 +34,7 @@ import {
   resolveReviewCaseUploadIds,
 } from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
+import { MODERATION_RUNTIME_MODES, assertRuntimeProviderInvocationAllowed, buildManualReviewFallback, resolveModerationRuntimeMode } from './moderationRuntimeProvider.js';
 import { runGeminiClassifier as runGeminiClassifierV2 } from './geminiModerationClassifier.js';
 import { GEMINI_MODERATION_PROMPT_VERSION } from './geminiModerationContract.js';
 import { routeGeminiForbiddenReasons } from './geminiModerationRouting.js';
@@ -1506,6 +1507,21 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     return;
   }
 
+  const moderationRuntimeProjectId = process.env.GOOGLE_CLOUD_PROJECT
+    || process.env.GCLOUD_PROJECT
+    || process.env.GCP_PROJECT
+    || '';
+  const moderationRuntime = resolveModerationRuntimeMode({
+    projectId: moderationRuntimeProjectId,
+    requestedMode: process.env.MODERATION_RUNTIME_MODE || null,
+    // Fail closed until the custom detector is actually invoked by this handler.
+    // Merely setting an environment variable must never activate an unwired provider.
+    customProviderConfigured: false,
+  });
+  const moderationManualFallback = moderationRuntime.mode === MODERATION_RUNTIME_MODES.manualOnly
+    ? buildManualReviewFallback({ reason: moderationRuntime.reason })
+    : null;
+
   let fingerprints;
   try {
     fingerprints = await buildFingerprint(parsed.buffer);
@@ -1747,7 +1763,22 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     normalizedSexualExplicitConfidence: 0,
   };
 
-  if (!cachedResult) {
+  if (!cachedResult && moderationRuntime.mode !== MODERATION_RUNTIME_MODES.legacyGemini) {
+    geminiDiagnostics = buildGeminiDiagnostics({
+      ...geminiDiagnostics,
+      attempted: false,
+      success: false,
+      fallbackUsed: true,
+      fallbackReason: `runtime_${moderationRuntime.reason}`,
+    });
+  }
+
+  if (!cachedResult && moderationRuntime.mode === MODERATION_RUNTIME_MODES.legacyGemini) {
+    assertRuntimeProviderInvocationAllowed({
+      projectId: moderationRuntimeProjectId,
+      providerGenerative: true,
+      mode: moderationRuntime.mode,
+    });
     try {
       geminiAttempted = true;
       const geminiClassifierResult = await runGeminiClassifierV2(parsed);
@@ -1885,7 +1916,9 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let reviewCreated = false;
   let hasReviewRights = true;
   let reviewCapacityAvailable = true;
-  const policyRequiresReview = policyResult.shouldReview || policyResult.outcome === 'review';
+  const policyRequiresReview = Boolean(moderationManualFallback?.forceReview)
+    || policyResult.shouldReview
+    || policyResult.outcome === 'review';
   const routedFinalModeratorRejection = policyResult.previousModeratorExample?.routingApplied === true
     && ['rejectForbidden', 'reject'].includes(String(policyResult.previousModeratorExample?.action || ''));
   const shouldFinalizeAutomaticReview = Boolean(
@@ -1956,6 +1989,12 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     shouldReview: effectiveShouldReview,
     userMessage,
     moderationSignals: policyResult.moderationSignals,
+    moderationRuntime: {
+      mode: moderationRuntime.mode,
+      reason: moderationRuntime.reason,
+      generativeAllowed: moderationRuntime.generativeAllowed,
+      manualReviewFallback: Boolean(moderationManualFallback),
+    },
     geminiDiagnostics,
     userSelectedTaxonomy: policyResult.userSelectedTaxonomy,
     moderationGeneration: requestModerationGeneration,
@@ -2065,6 +2104,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         shouldReview: effectiveShouldReview,
         publishBlocked,
         moderationSignals: response.moderationSignals || null,
+        moderationRuntime: response.moderationRuntime || null,
         appliedTriggers: finalAppliedTriggers,
         suggestedTriggers: finalSuggestedTriggers,
         forbiddenReasons: finalForbiddenReasons,

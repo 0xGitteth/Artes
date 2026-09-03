@@ -11,6 +11,7 @@ REQUIRED_MODULES = {
     "uvicorn": "uvicorn",
     "PIL": "pillow",
     "torch": "torch",
+    "torchvision": "torchvision",
     "transformers": "transformers",
 }
 

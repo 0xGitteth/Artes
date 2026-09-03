@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "researchDate": "2026-09-03",
+  "principle": "Prefer contemporary creator-owned photography with commercial/modification rights and verified adult/model-rights evidence. Old open-licensed work may fill detector coverage gaps but must not define Artes visual style.",
+  "newFindings": [
+    {
+      "id": "round3-elements-profile",
+      "source": "Flickr",
+      "creator": "Elements Of This World",
+      "sourceUrl": "https://www.flickr.com/people/elementsofthisworld",
+      "finding": "Creator/model couple states they are well over 21 and explicitly permits AI training and commercial use for the subset of images released under Creative Commons.",
+      "use": "high-confidence rights pool; verify each individual work license before intake"
+    },
+    {
+      "id": "round3-elements-white-thighs",
+      "source": "Flickr",
+      "creator": "Elements Of This World",
+      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/29817019072/",
+      "year": 2016,
+      "rights": "some rights reserved; creator page explicitly includes commercial and AI use for CC works",
+      "visualFacet": "adult_nude_detail",
+      "visualStyleRole": "coverage_only",
+      "trainingEligible": false,
+      "nextAction": "verify exact per-image CC license before eligibility assessment"
+    },
+    {
+      "id": "round3-nathan-rupert-2026",
+      "source": "Flickr",
+      "creator": "Nathan Rupert",
+      "sourceUrl": "https://www.flickr.com/photos/nathaninsandiego/55029647368/",
+      "year": 2026,
+      "visualFacet": "contemporary_boudoir",
+      "visualFit": "high",
+      "rights": "CC BY-NC-ND 4.0",
+      "trainingEligible": false,
+      "blockReason": "project policy excludes noncommercial and no-derivatives material from the commercial/model-training path without separate rightsholder permission",
+      "use": "style reference only"
+    },
+    {
+      "id": "round3-randy-craig-2024",
+      "source": "Flickr",
+      "creator": "Randy Craig Photography",
+      "sourceUrl": "https://www.flickr.com/people/78712515@N00/",
+      "year": 2024,
+      "visualFacet": "contemporary_outdoor_art_nude",
+      "visualFit": "high_for_nature_art_nude",
+      "rights": "creator profile states all photos are copyright protected and may not be used without express written permission",
+      "trainingEligible": false,
+      "use": "style reference only"
+    },
+    {
+      "id": "round3-pyretta-blaze",
+      "source": "Flickr",
+      "creator": "Pyretta Blaze",
+      "sourceUrl": "https://flickr.com/people/pyrettablazemodel/",
+      "visualFacet": "adult_model_art_nude_fetish",
+      "finding": "Public model profile establishes professional adult modelling context including art nude and fetish levels, but does not itself grant copyright/training rights to individual photographs.",
+      "trainingEligible": false,
+      "use": "adult/model-context research only until an original rights-cleared work is found"
+    }
+  ],
+  "searchPolicy": {
+    "primaryDiscovery": [
+      "Flickr original creator pages",
+      "Openverse discovery filtered to Flickr plus commercial/modification-compatible licences"
+    ],
+    "verification": [
+      "individual original work page",
+      "exact CC licence",
+      "adult status when recognizable human is present",
+      "model/personality-rights evidence",
+      "explicit separate permission when ordinary licence is insufficient"
+    ],
+    "neverUseAsDatasetSource": [
+      "Wikipedia/Wikimedia mirrors",
+      "Pexels ordinary licence route",
+      "Unsplash ordinary licence route",
+      "all-rights-reserved style references",
+      "NC or ND material without separate explicit permission"
+    ]
+  },
+  "coverageStatus": {
+    "clothed_portrait": "strong_candidate_available",
+    "female_art_nude_bare_buttocks": "rights_cleared_pool_available_but_visual_style_older",
+    "female_bare_breasts": "rights_cleared_pool_likely_available_but_needs_per-image_selection",
+    "genitalia": "rights_cleared_pool_likely_available_but_needs_per-image_selection",
+    "modern_boudoir": "excellent_style_references_but_rights_cleared_training_candidate_still_missing",
+    "implied_nude": "still_missing_modern_rights_cleared_candidate",
+    "male_topless": "still_missing_modern_rights_cleared_candidate",
+    "non_explicit_bdsm_kink": "still_missing_modern_rights_cleared_candidate",
+    "diversity": "insufficient"
+  },
+  "recommendation": "Do not lower rights or representativeness thresholds just to fill every category externally. Use contributor-authorized Artes photography for modern boudoir, implied nude, male topless, kink and diversity gaps if public sourcing remains weak."
+}

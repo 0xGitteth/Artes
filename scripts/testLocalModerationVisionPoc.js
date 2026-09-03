@@ -11,6 +11,10 @@ const IMAGE_MIME_BY_EXTENSION = new Map([
 
 const imagePath = process.argv[2] ? path.resolve(process.argv[2]) : null;
 const endpoint = String(process.env.ARTES_CUSTOM_VISION_URL || 'http://127.0.0.1:8787').trim();
+const configuredTimeoutMs = Number.parseInt(process.env.ARTES_CUSTOM_VISION_TIMEOUT_MS || '15000', 10);
+const timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+  ? configuredTimeoutMs
+  : 15000;
 
 if (!imagePath) {
   console.error('Gebruik: node scripts/testLocalModerationVisionPoc.js <pad-naar-geautoriseerde-testafbeelding>');
@@ -25,7 +29,7 @@ if (!mimeType) {
 
 try {
   const buffer = await readFile(imagePath);
-  const client = createModerationCustomVisionClient({ endpoint });
+  const client = createModerationCustomVisionClient({ endpoint, timeoutMs });
   const result = await client.infer({ buffer, mimeType });
   process.stdout.write(`${JSON.stringify({
     ok: true,

@@ -17,6 +17,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+vision-service/.model-cache/
 
 # Editor directories and files
 .vscode/*

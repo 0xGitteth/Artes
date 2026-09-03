@@ -58,6 +58,11 @@ const parseResponseJson = async (response) => {
   }
 };
 
+const resolveHttpErrorCode = (payload, status) => {
+  const detail = typeof payload?.detail === 'string' ? payload.detail : null;
+  return clean(payload?.code || payload?.error || detail) || `http_${status}`;
+};
+
 export const createModerationCustomVisionClient = ({
   endpoint,
   descriptor = DINO_V2_VIT_B14_POC,
@@ -96,7 +101,7 @@ export const createModerationCustomVisionClient = ({
 
     const payload = await parseResponseJson(response);
     if (!response.ok) {
-      const safeCode = clean(payload?.code || payload?.error) || `http_${response.status}`;
+      const safeCode = resolveHttpErrorCode(payload, response.status);
       throw new Error(`custom_vision_http_error:${safeCode.slice(0, 120)}`);
     }
 

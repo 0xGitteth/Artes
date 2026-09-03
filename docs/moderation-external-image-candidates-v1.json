@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "notes": "No image in this registry is automatically approved for training. Rights, adult status, model/personality rights, and visual fit are separate gates.",
+  "candidates": [
+    {
+      "id": "ext-001",
+      "title": "Scott James Reeves Headshot Portrait",
+      "creator": "Scott James Reeves",
+      "source": "Flickr / creator-linked public-domain copy",
+      "sourceUrl": "https://www.flickr.com/photos/198088095@N07/55106176189/",
+      "year": 2026,
+      "visualFacet": "clothed_fashion_headshot",
+      "dataUseClass": "external_authorized_poc",
+      "rights": {
+        "status": "strong",
+        "license": "public_domain_mark",
+        "evidence": "Creator states the photo was taken by him and released as CC0; a linked public-domain copy was independently reviewed from the Flickr source.",
+        "trainingApproved": false
+      },
+      "humanSubject": {
+        "creatorIsSubject": true,
+        "adultStatus": "verified_adult",
+        "modelRightsEvidence": "self-photographed/self-published subject",
+        "trainingApproved": false
+      },
+      "visualFit": "modern professional male portrait; useful clothed control",
+      "nextAction": "manual_visual_review_then_local_embedding"
+    },
+    {
+      "id": "ext-002",
+      "title": "Scott James Reeves Outdoor Portrait in Green Shirt",
+      "creator": "Scott James Reeves",
+      "source": "Flickr",
+      "sourceUrl": "https://www.flickr.com/photos/198088095@N07/55104296904/",
+      "year": 2026,
+      "visualFacet": "clothed_outdoor_portrait",
+      "dataUseClass": "external_authorized_poc",
+      "rights": {
+        "status": "strong",
+        "license": "cc0_or_public_domain_dedication_claimed_by_creator",
+        "evidence": "Creator explicitly states he took the photograph and uploaded it under CC0.",
+        "trainingApproved": false
+      },
+      "humanSubject": {
+        "creatorIsSubject": true,
+        "adultStatus": "verified_adult",
+        "modelRightsEvidence": "self-photographed/self-published subject",
+        "trainingApproved": false
+      },
+      "visualFit": "modern outdoor male portrait; useful lighting/context variation",
+      "nextAction": "manual_visual_review_then_local_embedding"
+    },
+    {
+      "id": "ext-003",
+      "title": "Country Lady Fashion Outfit Portrait",
+      "creator": "Rydale Clothing",
+      "source": "Flickr",
+      "sourceUrl": "https://www.flickr.com/photos/rydaleclothing/53888580828/",
+      "year": 2024,
+      "visualFacet": "clothed_fashion_location",
+      "dataUseClass": "external_candidate",
+      "rights": {
+        "status": "pending_exact_license",
+        "license": null,
+        "evidence": "Source says the image is released under Creative Commons and requests attribution, but the exact CC license still needs verification.",
+        "trainingApproved": false
+      },
+      "humanSubject": {
+        "creatorIsSubject": false,
+        "adultStatus": "unverified",
+        "modelRightsEvidence": "not yet verified",
+        "trainingApproved": false
+      },
+      "visualFit": "recent commercial-fashion portrait; useful if rights/model gates clear",
+      "nextAction": "verify_exact_license_and_model_adult_rights"
+    },
+    {
+      "id": "ext-004",
+      "title": "Women in lingerie lounging",
+      "creator": "Dainis Graveris",
+      "source": "Flickr",
+      "sourceUrl": "https://www.flickr.com/photos/dainisgraveris/51101416343",
+      "year": 2021,
+      "visualFacet": "lingerie_boudoir",
+      "dataUseClass": "external_candidate",
+      "rights": {
+        "status": "pending_exact_license",
+        "license": null,
+        "evidence": "Source explicitly says the image is released under Creative Commons and requests creator attribution, but exact CC terms still need verification.",
+        "trainingApproved": false
+      },
+      "humanSubject": {
+        "creatorIsSubject": false,
+        "adultStatus": "unverified",
+        "modelRightsEvidence": "not yet verified",
+        "trainingApproved": false
+      },
+      "visualFit": "modern-enough real lingerie/boudoir photography and relevant to Artes adult-content boundary",
+      "nextAction": "verify_exact_license_and_adult_model_rights"
+    },
+    {
+      "id": "ext-005",
+      "title": "Women in lingerie sitting up",
+      "creator": "Dainis Graveris",
+      "source": "Flickr",
+      "sourceUrl": "https://flickr.com/photos/dainisgraveris/51100951396/",
+      "year": 2021,
+      "visualFacet": "lingerie_boudoir",
+      "dataUseClass": "external_candidate",
+      "rights": {
+        "status": "pending_exact_license",
+        "license": null,
+        "evidence": "Source explicitly says the image is released under Creative Commons and requests creator attribution, but exact CC terms still need verification.",
+        "trainingApproved": false
+      },
+      "humanSubject": {
+        "creatorIsSubject": false,
+        "adultStatus": "unverified",
+        "modelRightsEvidence": "not yet verified",
+        "trainingApproved": false
+      },
+      "visualFit": "real lingerie image with indoor context and multiple subjects",
+      "nextAction": "verify_exact_license_and_adult_model_rights"
+    },
+    {
+      "id": "ext-006",
+      "title": "Women in lingerie holding flog and handcuffs",
+      "creator": "Dainis Graveris",
+      "source": "Flickr / openly indexed copy",
+      "sourceUrl": "https://www.flickr.com/photos/tags/sexeducationpictures",
+      "year": 2021,
+      "visualFacet": "non_explicit_bdsm_kink",
+      "dataUseClass": "external_candidate",
+      "rights": {
+        "status": "pending_exact_license",
+        "license": null,
+        "evidence": "Indexed source states Creative Commons reuse with attribution; exact work page/license still needs verification.",
+        "trainingApproved": false
+      },
+      "humanSubject": {
+        "creatorIsSubject": false,
+        "adultStatus": "unverified",
+        "modelRightsEvidence": "not yet verified",
+        "trainingApproved": false
+      },
+      "visualFit": "useful non-explicit kink/BDSM signal candidate if rights and adult gates clear",
+      "nextAction": "resolve_exact_work_url_license_and_adult_model_rights"
+    }
+  ]
+}

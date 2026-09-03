@@ -28,3 +28,8 @@ test('vision service accepts only bounded supported image input and does not per
   assert.doesNotMatch(source, /open\([^\n]*['\"]w/);
   assert.doesNotMatch(source, /write_bytes|write_text|NamedTemporaryFile|mkstemp/);
 });
+
+test('vision service fails with structured JSON-safe model errors', () => {
+  assert.match(source, /logger\.exception\('Vision model inference failed\.'\)/);
+  assert.match(source, /HTTPException\(status_code=503, detail='vision_model_unavailable'\)/);
+});

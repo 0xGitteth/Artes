@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 const INTAKE_PATH = path.join(REPO_ROOT, '.tmp', 'moderation-test-set', 'external-poc', 'intake.json');
+const EXPECTED_MODEL = 'dinov2_vitb14';
+const EXPECTED_DIMENSION = 768;
 
 const cosineSimilarity = (a, b) => {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || a.length === 0) {
@@ -29,18 +31,33 @@ const cosineDistance = (a, b) => 1 - cosineSimilarity(a, b);
 
 const shortName = (fileName) => String(fileName || '').replace(/\.(?:jpe?g|png|webp)$/i, '');
 
+const extractEmbeddingVector = (item) => {
+  const embedding = item?.embedding;
+  const vector = embedding?.vector;
+  if (
+    !embedding
+    || embedding.model !== EXPECTED_MODEL
+    || embedding.dimension !== EXPECTED_DIMENSION
+    || !Array.isArray(vector)
+    || vector.length !== EXPECTED_DIMENSION
+    || !vector.every(Number.isFinite)
+  ) {
+    throw new Error(`invalid_embedding:${item?.fileName || 'unknown'}`);
+  }
+  return vector;
+};
+
 const intake = JSON.parse(await readFile(INTAKE_PATH, 'utf8'));
-const items = Array.isArray(intake?.items) ? intake.items : [];
-if (items.length < 2) {
+const rawItems = Array.isArray(intake?.items) ? intake.items : [];
+if (rawItems.length < 2) {
   console.error('Need at least two embedded items in external POC intake.');
   process.exit(2);
 }
 
-for (const item of items) {
-  if (!Array.isArray(item.embedding) || item.embedding.length !== 768) {
-    throw new Error(`invalid_embedding:${item.fileName || 'unknown'}`);
-  }
-}
+const items = rawItems.map((item) => ({
+  fileName: item.fileName,
+  vector: extractEmbeddingVector(item),
+}));
 
 const pairs = [];
 for (let i = 0; i < items.length; i += 1) {
@@ -48,7 +65,7 @@ for (let i = 0; i < items.length; i += 1) {
     pairs.push({
       a: shortName(items[i].fileName),
       b: shortName(items[j].fileName),
-      cosineDistance: cosineDistance(items[i].embedding, items[j].embedding),
+      cosineDistance: cosineDistance(items[i].vector, items[j].vector),
     });
   }
 }
@@ -61,7 +78,7 @@ const nearest = items.map((item) => {
     .filter((other) => other !== item)
     .map((other) => ({
       item: shortName(other.fileName),
-      cosineDistance: cosineDistance(item.embedding, other.embedding),
+      cosineDistance: cosineDistance(item.vector, other.vector),
     }))
     .sort((a, b) => a.cosineDistance - b.cosineDistance || a.item.localeCompare(b.item));
   return { item: name, nearest: candidates[0] };
@@ -80,7 +97,8 @@ process.stdout.write(`${JSON.stringify({
   ok: true,
   source: '.tmp/moderation-test-set/external-poc/intake.json',
   itemCount: items.length,
-  embeddingDimension: 768,
+  embeddingModel: EXPECTED_MODEL,
+  embeddingDimension: EXPECTED_DIMENSION,
   metric: 'cosine_distance',
   smallerMeansMoreSimilar: true,
   pairCount: roundedPairs.length,

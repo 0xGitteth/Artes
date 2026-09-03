@@ -53,6 +53,20 @@ test('client validates embedding and returns provider-neutral inference envelope
   assert.equal(result.detectorResult, null);
 });
 
+test('client surfaces structured FastAPI detail on HTTP errors', async () => {
+  const client = createModerationCustomVisionClient({
+    endpoint: 'http://127.0.0.1:8787',
+    fetchImpl: async () => response(
+      { detail: 'vision_model_unavailable' },
+      { ok: false, status: 503 },
+    ),
+  });
+  await assert.rejects(
+    () => client.infer({ buffer: Buffer.from('image'), mimeType: 'image/png' }),
+    /custom_vision_http_error:vision_model_unavailable/,
+  );
+});
+
 test('client rejects wrong-dimension embeddings', async () => {
   const client = createModerationCustomVisionClient({
     endpoint: 'http://127.0.0.1:8787',

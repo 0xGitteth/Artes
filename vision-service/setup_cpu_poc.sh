@@ -26,9 +26,9 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 
 "$VENV_PYTHON" - <<'PY'
 import json
+import PIL
 import torch
 import transformers
-from PIL import Image
 import fastapi
 import uvicorn
 
@@ -37,7 +37,7 @@ print(json.dumps({
     "torchVersion": torch.__version__,
     "torchCudaAvailable": torch.cuda.is_available(),
     "transformersVersion": transformers.__version__,
-    "pillowVersion": Image.__version__,
+    "pillowVersion": PIL.__version__,
     "fastapiVersion": fastapi.__version__,
     "uvicornVersion": uvicorn.__version__,
     "expectedDevice": "cpu",

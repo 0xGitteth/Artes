@@ -9,11 +9,24 @@ const BLOCKED_RIGHTS = new Set([
   'noncommercial_restriction',
 ]);
 
+const normalizeLicense = (value) => clean(value)
+  .toLowerCase()
+  .replace(/creative\s+commons/g, 'cc')
+  .replace(/[\s_]+/g, '-')
+  .replace(/[^a-z0-9+.-]+/g, '-');
+
+const licenseHasSegment = (normalizedLicense, segment) => (
+  normalizedLicense.split('-').includes(segment)
+);
+
 export const assessExternalImageTrainingEligibility = ({
   sourcePlatform,
+  copyrightLicense = null,
   copyrightLicenseVerified = false,
   rightsStatus,
   explicitAiTrainingPermission = false,
+  explicitCommercialUsePermission = false,
+  explicitModificationPermission = false,
   recognizableHuman = false,
   adultStatus,
   modelRightsStatus,
@@ -22,6 +35,7 @@ export const assessExternalImageTrainingEligibility = ({
   const reasons = [];
   const platform = clean(sourcePlatform).toLowerCase();
   const normalizedRights = clean(rightsStatus).toLowerCase();
+  const normalizedLicense = normalizeLicense(copyrightLicense || rightsStatus);
   const normalizedAdult = clean(adultStatus).toLowerCase();
   const normalizedModelRights = clean(modelRightsStatus).toLowerCase();
 
@@ -37,6 +51,19 @@ export const assessExternalImageTrainingEligibility = ({
 
   if (BLOCKED_RIGHTS.has(normalizedRights)) {
     reasons.push(`rights_status_blocked:${normalizedRights || 'unknown'}`);
+  }
+
+  // Artes deliberately excludes NC and ND material from this commercial/model-training
+  // research path unless the original rightsholder has granted an explicit separate
+  // permission for the otherwise restricted use. This is a project risk gate, not a
+  // claim about how every jurisdiction would interpret model training under CC terms.
+  if ((licenseHasSegment(normalizedLicense, 'nc') || normalizedLicense.includes('noncommercial'))
+    && !explicitCommercialUsePermission) {
+    reasons.push('project_policy_license_noncommercial');
+  }
+  if ((licenseHasSegment(normalizedLicense, 'nd') || normalizedLicense.includes('no-derivatives'))
+    && !explicitModificationPermission) {
+    reasons.push('project_policy_license_no_derivatives');
   }
 
   if (recognizableHuman) {

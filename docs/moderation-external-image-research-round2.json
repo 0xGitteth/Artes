@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "principle": "Visual representativeness and training eligibility are separate gates. A visually excellent reference can remain permanently excluded from model data.",
+  "verifiedUpdates": [
+    {
+      "candidateId": "ext-003",
+      "title": "Country Lady Fashion Outfit Portrait",
+      "sourceUrl": "https://www.flickr.com/photos/rydaleclothing/53888580828/",
+      "year": 2024,
+      "copyrightLicense": "CC BY 2.0",
+      "copyrightLicenseVerified": true,
+      "adultStatus": "unverified",
+      "modelRightsStatus": "pending",
+      "trainingEligible": false,
+      "reason": "Copyright licence is verified, but recognizable model age/personality-rights evidence is still insufficient."
+    },
+    {
+      "candidateId": "ext-004",
+      "title": "Women in lingerie lounging",
+      "sourceUrl": "https://www.flickr.com/photos/dainisgraveris/51101416343",
+      "year": 2021,
+      "copyrightLicense": "CC BY 2.0",
+      "copyrightLicenseVerified": true,
+      "adultStatus": "unverified",
+      "modelRightsStatus": "pending",
+      "trainingEligible": false,
+      "reason": "Useful real boudoir evidence and copyright licence verified, but adult/model-rights gate is not yet cleared."
+    }
+  ],
+  "sourcePools": [
+    {
+      "id": "pool-elements-of-this-world",
+      "name": "Elements Of This World",
+      "sourceUrl": "https://www.flickr.com/people/elementsofthisworld",
+      "sourceType": "creator_and_subject_owned_flickr_stream",
+      "adultStatus": "verified_over_21_by_source",
+      "subjectRelationship": "adult photographer/model couple; she models, he photographs and sometimes models",
+      "aiTrainingPermission": "explicit_for_creative_commons_images",
+      "commercialUsePermission": "explicit_for_creative_commons_images",
+      "perImageLicenseRequired": true,
+      "strength": "high",
+      "targetFacets": [
+        "art_nude",
+        "bare_buttocks",
+        "female_bare_breasts",
+        "genitalia",
+        "male_topless_if_available"
+      ],
+      "knownVerifiedOriginals": [
+        {
+          "flickrPhotoId": "50857522022",
+          "originalUrl": "https://www.flickr.com/photos/elementsofthisworld/50857522022/",
+          "year": 2021,
+          "license": "CC BY 2.0",
+          "licenseVerified": true,
+          "visualFacet": "adult_female_art_nude_rear_buttocks",
+          "trainingCandidate": true,
+          "note": "Original Flickr work; external licence verification confirms CC BY 2.0. Use Flickr as the dataset source, not mirrors."
+        },
+        {
+          "flickrPhotoId": "50904067993",
+          "originalUrl": "https://www.flickr.com/photos/elementsofthisworld/50904067993/",
+          "year": 2021,
+          "license": "CC BY 2.0",
+          "licenseVerified": true,
+          "visualFacet": "adult_female_figure_art_bare_buttocks",
+          "trainingCandidate": true,
+          "note": "Original Flickr work; external licence verification confirms CC BY 2.0. Use Flickr as the dataset source, not mirrors."
+        }
+      ]
+    }
+  ],
+  "visualCalibrationOnly": [
+    {
+      "id": "style-ryan-stanikk-boudoir-2026",
+      "creator": "Ryan Stanikk",
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/sets/72177720332391930",
+      "yearPublished": 2026,
+      "visualFit": "very_high",
+      "representativeFeatures": [
+        "contemporary_boudoir",
+        "lingerie",
+        "implied_nude",
+        "tattoos",
+        "harness_lingerie",
+        "natural_window_light",
+        "moody_colour_lighting",
+        "editorial_styling"
+      ],
+      "rightsStatus": "all_rights_reserved_on_checked_individual_images",
+      "trainingEligible": false,
+      "purpose": "visual style calibration only; never download into model dataset without direct permission"
+    },
+    {
+      "id": "style-vishal-rastogi-male-topless-2026",
+      "creator": "Vishal Rastogi",
+      "title": "Contemplation",
+      "sourceUrl": "https://www.flickr.com/photos/explore_my_world/55242622232",
+      "yearPublished": 2026,
+      "visualFit": "high_for_male_topless",
+      "rightsStatus": "not_cleared_for_training",
+      "trainingEligible": false,
+      "purpose": "modern visual reference while searching for a rights-cleared male-topless equivalent"
+    },
+    {
+      "id": "style-nathan-rupert-boudoir-2026",
+      "creator": "Nathan Rupert",
+      "sourceUrl": "https://www.flickr.com/photos/nathaninsandiego/55029647368/",
+      "yearPublished": 2026,
+      "visualFit": "high",
+      "copyrightLicense": "CC BY-NC-ND 4.0",
+      "rightsStatus": "noncommercial_restriction",
+      "trainingEligible": false,
+      "purpose": "visual reference only for a commercial Artes moderation system"
+    }
+  ],
+  "blockedSourceClasses": [
+    {
+      "source": "Pexels",
+      "reason": "ordinary service/image route has ML/AI dataset restrictions; explicit separate permission required",
+      "trainingEligibleByDefault": false
+    },
+    {
+      "source": "Unsplash",
+      "reason": "ordinary image licence/terms restrict ML/AI dataset use; separate dataset arrangements are distinct",
+      "trainingEligibleByDefault": false
+    },
+    {
+      "source": "Wikipedia/Wikimedia as image source",
+      "reason": "not used for selected Artes POC imagery; original creator/source is required and user wants contemporary representative source material",
+      "trainingEligibleByDefault": false
+    }
+  ],
+  "coverageGaps": [
+    "modern_rights_cleared_implied_nude",
+    "modern_rights_cleared_editorial_art_nude",
+    "modern_rights_cleared_male_topless",
+    "modern_rights_cleared_non_explicit_bdsm_kink",
+    "more_skin_tone_body_type_and_gender_presentation_diversity"
+  ]
+}

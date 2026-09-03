@@ -21,3 +21,8 @@ test('local logo POC runner keeps model cache local and defaults to repo-owned l
   assert.match(source, /public\/brand\/logo\.png/);
   assert.match(source, /testLocalModerationVisionPoc\.js/);
 });
+
+test('local logo POC runner permits a longer first-model warmup only via explicit timeout', () => {
+  assert.match(source, /POC_TIMEOUT_MS=.*300000/);
+  assert.match(source, /ARTES_CUSTOM_VISION_TIMEOUT_MS=\"\$POC_TIMEOUT_MS\"/);
+});

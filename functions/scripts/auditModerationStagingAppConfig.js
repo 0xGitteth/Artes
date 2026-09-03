@@ -16,7 +16,10 @@ const apiGet = async (token, url) => {
   try {
     const response = await fetch(url, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Goog-User-Project': STAGING_PROJECT_ID,
+      },
     });
     const payload = await response.json().catch(() => ({}));
     return {
@@ -168,6 +171,7 @@ const main = async () => {
   process.stdout.write(`${JSON.stringify({
     auditMode: 'staging_firebase_app_config_read_only',
     projectId: STAGING_PROJECT_ID,
+    quotaProjectId: STAGING_PROJECT_ID,
     readOnly: true,
     writes: false,
     secretsPrinted: false,

@@ -30,8 +30,20 @@ const assertWhitelistedFlickrPhotoUrl = (value) => {
   return url;
 };
 
-const resolveFlickrImageUrl = async (sourceUrl) => {
-  assertWhitelistedFlickrPhotoUrl(sourceUrl);
+const validateResolvedStaticImageUrl = (value) => {
+  const imageUrl = new URL(value);
+  if (imageUrl.protocol !== 'https:' || !ALLOWED_STATIC_HOST.test(imageUrl.hostname)) {
+    throw new Error('external_poc_resolved_host_not_allowed');
+  }
+  return imageUrl;
+};
+
+const decodeHtmlAttribute = (value) => String(value || '')
+  .replaceAll('&amp;', '&')
+  .replaceAll('&quot;', '"')
+  .replaceAll('&#39;', "'");
+
+const resolveViaOembed = async (sourceUrl) => {
   const endpoint = new URL('https://www.flickr.com/services/oembed/');
   endpoint.searchParams.set('format', 'json');
   endpoint.searchParams.set('maxwidth', '2048');
@@ -39,25 +51,52 @@ const resolveFlickrImageUrl = async (sourceUrl) => {
   endpoint.searchParams.set('url', sourceUrl);
 
   const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error(`external_poc_oembed_http_${response.status}`);
-  const payload = await response.json();
+  if (!response.ok) return null;
+  const payload = await response.json().catch(() => null);
   const candidate = String(payload?.url || payload?.thumbnail_url || '').trim();
-  if (!candidate) throw new Error('external_poc_oembed_missing_image_url');
-
-  const imageUrl = new URL(candidate);
-  if (imageUrl.protocol !== 'https:' || !ALLOWED_STATIC_HOST.test(imageUrl.hostname)) {
-    throw new Error('external_poc_resolved_host_not_allowed');
+  if (!candidate) return null;
+  try {
+    return validateResolvedStaticImageUrl(candidate);
+  } catch {
+    return null;
   }
-  return imageUrl;
+};
+
+const resolveViaPhotoPage = async (sourceUrl) => {
+  const response = await fetch(sourceUrl, { headers: { Accept: 'text/html' }, redirect: 'follow' });
+  if (!response.ok) throw new Error(`external_poc_flickr_page_http_${response.status}`);
+  const finalUrl = assertWhitelistedFlickrPhotoUrl(response.url);
+  if (finalUrl.pathname !== new URL(sourceUrl).pathname) {
+    throw new Error('external_poc_flickr_page_redirect_mismatch');
+  }
+  const html = await response.text();
+  const patterns = [
+    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["'][^>]*>/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["'][^>]*>/i,
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (!match?.[1]) continue;
+    try {
+      return validateResolvedStaticImageUrl(decodeHtmlAttribute(match[1]));
+    } catch {
+      // Keep looking; fail closed below if no Flickr static image is found.
+    }
+  }
+  throw new Error('external_poc_flickr_page_missing_allowed_og_image');
+};
+
+const resolveFlickrImageUrl = async (sourceUrl) => {
+  assertWhitelistedFlickrPhotoUrl(sourceUrl);
+  const oembed = await resolveViaOembed(sourceUrl);
+  if (oembed) return oembed;
+  return resolveViaPhotoPage(sourceUrl);
 };
 
 const downloadImage = async (imageUrl) => {
   const response = await fetch(imageUrl, { redirect: 'follow' });
   if (!response.ok) throw new Error(`external_poc_image_http_${response.status}`);
-  const finalUrl = new URL(response.url);
-  if (finalUrl.protocol !== 'https:' || !ALLOWED_STATIC_HOST.test(finalUrl.hostname)) {
-    throw new Error('external_poc_final_host_not_allowed');
-  }
+  const finalUrl = validateResolvedStaticImageUrl(response.url);
   const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   const extension = ALLOWED_MIME_TYPES.get(mimeType);
   if (!extension) throw new Error(`external_poc_unsupported_mime:${mimeType || 'missing'}`);

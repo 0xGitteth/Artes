@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "status": "approved_for_local_embedding_poc_only",
+  "policy": "Every entry must pass the fail-closed external-image eligibility guard before download. Images remain local in .tmp and are not committed or promoted to training-ready data by this manifest.",
+  "entries": [
+    {
+      "id": "external-poc-scott-headshot-2026",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/198088095@N07/55106176189/",
+      "creator": "Scott James Reeves",
+      "year": 2026,
+      "visualFacet": "clothed_fashion_headshot",
+      "copyrightLicense": "CC0 creator statement / Flickr public-domain marking",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc0",
+      "explicitAiTrainingPermission": false,
+      "recognizableHuman": true,
+      "adultStatus": "verified_adult",
+      "modelRightsStatus": "self_subject",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Original Flickr page states the photograph was taken by the subject/creator and uploaded under CC0.",
+        "The source describes a professional adult model/photographer context and 2026 publication."
+      ],
+      "intendedUse": "modern clothed control for local embedding POC"
+    },
+    {
+      "id": "external-poc-scott-outdoor-2026",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/198088095@N07/55104296904/",
+      "creator": "Scott James Reeves",
+      "year": 2026,
+      "visualFacet": "clothed_outdoor_portrait",
+      "copyrightLicense": "CC0 creator statement / Flickr public-domain marking",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc0",
+      "explicitAiTrainingPermission": false,
+      "recognizableHuman": true,
+      "adultStatus": "verified_adult",
+      "modelRightsStatus": "self_subject",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Original Flickr page states the photograph was taken by the subject/creator and uploaded under CC0.",
+        "The source describes a professional adult model/photographer context and 2026 publication."
+      ],
+      "intendedUse": "modern clothed/location control for local embedding POC"
+    },
+    {
+      "id": "external-poc-elements-bathroom-rear-2021",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/50857522022/",
+      "creator": "Elements Of This World",
+      "year": 2021,
+      "visualFacet": "adult_female_art_nude_rear_bare_buttocks",
+      "copyrightLicense": "CC BY 2.0",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc_by_2_0",
+      "explicitAiTrainingPermission": true,
+      "recognizableHuman": true,
+      "adultStatus": "verified_over_21_by_source",
+      "modelRightsStatus": "creator_subject_owned",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Creator/model couple profile states both are well over 21 and explicitly permits commercial use and AI training for Creative Commons images.",
+        "Independent Flickr licence review confirms this exact original as CC BY 2.0."
+      ],
+      "intendedUse": "coverage-only adult art-nude/bare-buttocks embedding POC; not visual-style calibration"
+    },
+    {
+      "id": "external-poc-elements-art-class-2021",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/50904067993/",
+      "creator": "Elements Of This World",
+      "year": 2021,
+      "visualFacet": "adult_female_figure_art_bare_buttocks",
+      "copyrightLicense": "CC BY 2.0",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc_by_2_0",
+      "explicitAiTrainingPermission": true,
+      "recognizableHuman": true,
+      "adultStatus": "verified_over_21_by_source",
+      "modelRightsStatus": "creator_subject_owned",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Creator/model couple profile states both are well over 21 and explicitly permits commercial use and AI training for Creative Commons images.",
+        "Independent Flickr licence review confirms this exact original as CC BY 2.0."
+      ],
+      "intendedUse": "coverage-only adult figure-art embedding POC; not visual-style calibration"
+    }
+  ]
+}

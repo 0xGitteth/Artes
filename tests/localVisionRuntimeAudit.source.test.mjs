@@ -14,7 +14,7 @@ test('local vision runtime audit is read-only and installs nothing', () => {
 });
 
 test('local vision runtime audit checks required POC modules and disk', () => {
-  for (const name of ['fastapi', 'uvicorn', 'PIL', 'torch', 'transformers']) {
+  for (const name of ['fastapi', 'uvicorn', 'PIL', 'torch', 'torchvision', 'transformers']) {
     assert.match(source, new RegExp(`"${name}"`));
   }
   assert.match(source, /shutil\.disk_usage/);

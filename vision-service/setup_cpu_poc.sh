@@ -12,17 +12,18 @@ fi
 
 VENV_PYTHON="$VENV_DIR/bin/python"
 
-"$VENV_PYTHON" -m pip install --upgrade pip
+"$VENV_PYTHON" -m pip install --upgrade --no-cache-dir pip
 
 # Install a CPU-only PyTorch wheel first. Using PyPI directly for torch on Linux
 # can pull large CUDA runtime packages that are unnecessary for the local POC.
 "$VENV_PYTHON" -m pip install \
+  --no-cache-dir \
   --index-url https://download.pytorch.org/whl/cpu \
   'torch>=2.2,<3'
 
 # Torch is already satisfied by the CPU-only install above; the remaining
 # dependencies can safely come from the normal package index.
-"$VENV_PYTHON" -m pip install -r requirements.txt
+"$VENV_PYTHON" -m pip install --no-cache-dir -r requirements.txt
 
 "$VENV_PYTHON" - <<'PY'
 import json

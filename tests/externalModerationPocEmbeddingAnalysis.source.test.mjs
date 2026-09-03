@@ -12,10 +12,20 @@ test('external POC analysis reads only local intake and uses cosine distance', (
   assert.doesNotMatch(source, /fetch\(/);
 });
 
-test('external POC analysis validates 768D embeddings and prints no full vectors or image bytes', () => {
-  assert.match(source, /item\.embedding\.length !== 768/);
+test('external POC analysis validates stored DINO embedding object and 768D vector', () => {
+  assert.match(source, /embedding\?\.vector/);
+  assert.match(source, /embedding\.model !== EXPECTED_MODEL/);
+  assert.match(source, /embedding\.dimension !== EXPECTED_DIMENSION/);
+  assert.match(source, /vector\.length !== EXPECTED_DIMENSION/);
+  assert.match(source, /vector\.every\(Number\.isFinite\)/);
+  assert.match(source, /EXPECTED_MODEL = 'dinov2_vitb14'/);
+  assert.match(source, /EXPECTED_DIMENSION = 768/);
+});
+
+test('external POC analysis prints no full vectors or image bytes', () => {
   assert.match(source, /fullEmbeddingsPrinted: false/);
   assert.match(source, /imageBytesPrinted: false/);
+  assert.doesNotMatch(source, /JSON\.stringify\(rawItems\)/);
   assert.doesNotMatch(source, /JSON\.stringify\(items\)/);
 });
 

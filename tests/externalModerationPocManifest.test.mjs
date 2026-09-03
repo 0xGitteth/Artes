@@ -1,0 +1,36 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { assessExternalImageTrainingEligibility } from '../functions/moderationExternalImageEligibility.js';
+
+const manifest = JSON.parse(readFileSync(new URL('../docs/moderation-external-poc-manifest-v1.json', import.meta.url), 'utf8'));
+const fetcherSource = readFileSync(new URL('../scripts/fetchExternalModerationPocImages.js', import.meta.url), 'utf8');
+
+test('every external POC manifest entry passes the fail-closed eligibility gate', () => {
+  assert.equal(manifest.status, 'approved_for_local_embedding_poc_only');
+  assert.ok(Array.isArray(manifest.entries));
+  assert.ok(manifest.entries.length >= 4);
+  for (const entry of manifest.entries) {
+    const assessment = assessExternalImageTrainingEligibility(entry);
+    assert.equal(assessment.eligible, true, `${entry.id}: ${assessment.reasons.join(',')}`);
+    assert.match(entry.sourceUrl, /^https:\/\/(?:www\.)?flickr\.com\/photos\/[^/]+\/\d+\/?$/);
+    assert.notEqual(entry.intendedUse, 'training_ready');
+  }
+});
+
+test('manifest uses original Flickr sources and not blocked discovery mirrors', () => {
+  const serialized = JSON.stringify(manifest).toLowerCase();
+  assert.doesNotMatch(serialized, /pexels\.com/);
+  assert.doesNotMatch(serialized, /unsplash\.com/);
+  assert.doesNotMatch(serialized, /wikipedia\.org/);
+  assert.doesNotMatch(serialized, /wikimedia\.org/);
+});
+
+test('fetcher is local-only, bounded and restricts resolved images to static Flickr hosts', () => {
+  assert.match(fetcherSource, /\.tmp.*moderation-test-images.*external-poc/s);
+  assert.match(fetcherSource, /MAX_IMAGE_BYTES = 15 \* 1024 \* 1024/);
+  assert.match(fetcherSource, /staticflickr/);
+  assert.match(fetcherSource, /assertExternalImageTrainingEligible/);
+  assert.match(fetcherSource, /trainingReady: false/);
+  assert.doesNotMatch(fetcherSource, /child_process|exec\(|spawn\(/);
+});

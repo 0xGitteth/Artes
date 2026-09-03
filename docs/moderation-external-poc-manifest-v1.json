@@ -49,6 +49,7 @@
       "id": "external-poc-elements-bathroom-rear-2021",
       "sourcePlatform": "flickr",
       "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/50857522022/",
+      "resolvedImageUrl": "https://live.staticflickr.com/65535/50857522022_30d062a597_o.png",
       "creator": "Elements Of This World",
       "year": 2021,
       "visualFacet": "adult_female_art_nude_rear_bare_buttocks",
@@ -62,17 +63,19 @@
       "sourceIsOriginalCreatorLocation": true,
       "evidence": [
         "Creator/model couple profile states both are well over 21 and explicitly permits commercial use and AI training for Creative Commons images.",
-        "Independent Flickr licence review confirms this exact original as CC BY 2.0."
+        "Independent licence review confirms this exact Flickr original as CC BY 2.0.",
+        "The pinned image URL is the original Flickr CDN URL for photo ID 50857522022."
       ],
       "intendedUse": "coverage-only adult art-nude/bare-buttocks embedding POC; not visual-style calibration"
     },
     {
-      "id": "external-poc-elements-art-class-2021",
+      "id": "external-poc-elements-window-breasts-2022",
       "sourcePlatform": "flickr",
-      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/50904067993/",
+      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/52277349582/",
+      "resolvedImageUrl": "https://live.staticflickr.com/65535/52277349582_1dfe8e6088_o.jpg",
       "creator": "Elements Of This World",
-      "year": 2021,
-      "visualFacet": "adult_female_figure_art_bare_buttocks",
+      "year": 2022,
+      "visualFacet": "adult_female_art_nude_bare_breasts",
       "copyrightLicense": "CC BY 2.0",
       "copyrightLicenseVerified": true,
       "rightsStatus": "cc_by_2_0",
@@ -83,9 +86,10 @@
       "sourceIsOriginalCreatorLocation": true,
       "evidence": [
         "Creator/model couple profile states both are well over 21 and explicitly permits commercial use and AI training for Creative Commons images.",
-        "Independent Flickr licence review confirms this exact original as CC BY 2.0."
+        "Independent licence review confirms this exact Flickr original as CC BY 2.0.",
+        "The pinned image URL is the original Flickr CDN URL for photo ID 52277349582."
       ],
-      "intendedUse": "coverage-only adult figure-art embedding POC; not visual-style calibration"
+      "intendedUse": "coverage-only adult bare-breasts embedding POC; not visual-style calibration"
     }
   ]
 }

@@ -7,7 +7,7 @@ import {
 } from './moderationVisionProvider.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
-const MAX_TIMEOUT_MS = 60000;
+const MAX_TIMEOUT_MS = 300000;
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const clean = (value) => String(value || '').trim();

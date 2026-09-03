@@ -26,11 +26,24 @@ test('manifest uses original Flickr sources and not blocked discovery mirrors', 
   assert.doesNotMatch(serialized, /wikimedia\.org/);
 });
 
+test('adult entries can pin exact Flickr CDN originals without weakening source checks', () => {
+  const pinned = manifest.entries.filter((entry) => entry.resolvedImageUrl);
+  assert.ok(pinned.length >= 2);
+  for (const entry of pinned) {
+    const sourceId = new URL(entry.sourceUrl).pathname.match(/\/(\d+)\/?$/)?.[1];
+    const resolved = new URL(entry.resolvedImageUrl);
+    assert.equal(resolved.protocol, 'https:');
+    assert.match(resolved.hostname, /^(?:live|farm\d+)\.staticflickr\.com$/i);
+    assert.ok(sourceId && resolved.pathname.includes(`/${sourceId}_`));
+  }
+});
+
 test('fetcher is local-only, bounded and restricts resolved images to static Flickr hosts', () => {
   assert.match(fetcherSource, /\.tmp.*moderation-test-images.*external-poc/s);
   assert.match(fetcherSource, /MAX_IMAGE_BYTES = 15 \* 1024 \* 1024/);
   assert.match(fetcherSource, /staticflickr/);
   assert.match(fetcherSource, /assertExternalImageTrainingEligible/);
+  assert.match(fetcherSource, /external_poc_pinned_image_photo_id_mismatch/);
   assert.match(fetcherSource, /trainingReady: false/);
   assert.doesNotMatch(fetcherSource, /child_process|exec\(|spawn\(/);
 });

@@ -1,0 +1,39 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+const source = readFileSync(new URL('../scripts/serveExternalModerationPocLabelReview.js', import.meta.url), 'utf8');
+
+test('label review server is loopback-only and reads only local POC files', () => {
+  assert.match(source, /const HOST = '127\.0\.0\.1'/);
+  assert.match(source, /\.tmp.*moderation-test-images.*external-poc/s);
+  assert.match(source, /\.tmp.*moderation-test-set.*external-poc.*intake\.json/s);
+  assert.doesNotMatch(source, /https:\/\//);
+});
+
+test('review UI covers the full detector label contract', () => {
+  for (const value of ['none', 'underwear_swimwear', 'implied_nude', 'bare_buttocks', 'female_bare_breasts', 'genitalia', 'male_topless']) {
+    assert.match(source, new RegExp(value));
+  }
+  for (const value of ['suggestive', 'bdsm_kink', 'explicit_act', 'mild', 'graphic']) {
+    assert.match(source, new RegExp(value));
+  }
+  assert.match(source, /possibleMinorConcern/);
+  assert.match(source, /confidence/);
+  assert.match(source, /uncertaintyFlags/);
+  assert.match(source, /sensitiveSignals/);
+});
+
+test('metadata suggestions remain proposals until explicit human confirmation', () => {
+  assert.match(source, /Voorselectie is alleen een voorstel/);
+  assert.match(source, /Bevestig label/);
+  assert.match(source, /labelStatus: 'human_confirmed'/);
+  assert.match(source, /labelSource: 'local_human_review'/);
+  assert.match(source, /validateArtesDetectorLabel/);
+});
+
+test('reviewed labels remain non-training-ready and empty confidence fails closed', () => {
+  assert.match(source, /trainingReady: false/);
+  assert.match(source, /confidenceRaw===''\?null:Number\(confidenceRaw\)/);
+  assert.doesNotMatch(source, /trainingReady: true/);
+});

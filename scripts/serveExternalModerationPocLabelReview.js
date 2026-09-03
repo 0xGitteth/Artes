@@ -117,6 +117,7 @@ body{font-family:system-ui,sans-serif;margin:0;background:#f4f4f4;color:#171717}
 async function saveCard(button){
   const card=button.closest('.card');
   const pick=(name)=>card.querySelector('[name="'+name+'"]');
+  const confidenceRaw=pick('confidence').value.trim();
   const body={
     fileName:card.dataset.file,
     detectorLabel:{
@@ -125,7 +126,7 @@ async function saveCard(button){
       graphicInjury:pick('graphicInjury').value,
       sensitiveSignals:[...card.querySelectorAll('[name="sensitiveSignals"]:checked')].map(x=>x.value),
       possibleMinorConcern:pick('possibleMinorConcern').value==='true'?true:pick('possibleMinorConcern').value==='false'?false:null,
-      confidence:Number(pick('confidence').value),
+      confidence:confidenceRaw===''?null:Number(confidenceRaw),
       uncertaintyFlags:pick('uncertaintyFlags').value.split(',').map(x=>x.trim()).filter(Boolean)
     }
   };

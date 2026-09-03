@@ -1,0 +1,5 @@
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1
+pillow>=10,<13
+torch>=2.2,<3
+transformers>=4.38,<6

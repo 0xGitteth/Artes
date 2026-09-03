@@ -7,6 +7,8 @@ const source = readFileSync(new URL('../scripts/testLocalModerationVisionPoc.js'
 test('local vision POC uses provider client and supported local image formats only', () => {
   assert.match(source, /createModerationCustomVisionClient/);
   assert.match(source, /ARTES_CUSTOM_VISION_URL/);
+  assert.match(source, /ARTES_CUSTOM_VISION_TIMEOUT_MS/);
+  assert.match(source, /createModerationCustomVisionClient\(\{ endpoint, timeoutMs \}\)/);
   assert.match(source, /image\/jpeg/);
   assert.match(source, /image\/png/);
   assert.match(source, /image\/webp/);

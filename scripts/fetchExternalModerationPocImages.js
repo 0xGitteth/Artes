@@ -38,6 +38,14 @@ const validateResolvedStaticImageUrl = (value) => {
   return imageUrl;
 };
 
+const assertPinnedUrlMatchesPhotoId = (sourceUrl, imageUrl) => {
+  const sourceMatch = new URL(sourceUrl).pathname.match(/\/(\d+)\/?$/);
+  const photoId = sourceMatch?.[1];
+  if (!photoId || !imageUrl.pathname.includes(`/${photoId}_`)) {
+    throw new Error('external_poc_pinned_image_photo_id_mismatch');
+  }
+};
+
 const decodeHtmlAttribute = (value) => String(value || '')
   .replaceAll('&amp;', '&')
   .replaceAll('&quot;', '"')
@@ -56,7 +64,9 @@ const resolveViaOembed = async (sourceUrl) => {
   const candidate = String(payload?.url || payload?.thumbnail_url || '').trim();
   if (!candidate) return null;
   try {
-    return validateResolvedStaticImageUrl(candidate);
+    const resolved = validateResolvedStaticImageUrl(candidate);
+    assertPinnedUrlMatchesPhotoId(sourceUrl, resolved);
+    return resolved;
   } catch {
     return null;
   }
@@ -78,16 +88,25 @@ const resolveViaPhotoPage = async (sourceUrl) => {
     const match = html.match(pattern);
     if (!match?.[1]) continue;
     try {
-      return validateResolvedStaticImageUrl(decodeHtmlAttribute(match[1]));
+      const resolved = validateResolvedStaticImageUrl(decodeHtmlAttribute(match[1]));
+      assertPinnedUrlMatchesPhotoId(sourceUrl, resolved);
+      return resolved;
     } catch {
-      // Keep looking; fail closed below if no Flickr static image is found.
+      // Keep looking; fail closed below if no matching Flickr static image is found.
     }
   }
   throw new Error('external_poc_flickr_page_missing_allowed_og_image');
 };
 
-const resolveFlickrImageUrl = async (sourceUrl) => {
+const resolveFlickrImageUrl = async ({ sourceUrl, resolvedImageUrl }) => {
   assertWhitelistedFlickrPhotoUrl(sourceUrl);
+
+  if (resolvedImageUrl) {
+    const pinned = validateResolvedStaticImageUrl(resolvedImageUrl);
+    assertPinnedUrlMatchesPhotoId(sourceUrl, pinned);
+    return pinned;
+  }
+
   const oembed = await resolveViaOembed(sourceUrl);
   if (oembed) return oembed;
   return resolveViaPhotoPage(sourceUrl);
@@ -117,7 +136,7 @@ const main = async () => {
   for (const entry of entries) {
     assertExternalImageTrainingEligible(entry);
     assertWhitelistedFlickrPhotoUrl(entry.sourceUrl);
-    const imageUrl = await resolveFlickrImageUrl(entry.sourceUrl);
+    const imageUrl = await resolveFlickrImageUrl(entry);
     const downloaded = await downloadImage(imageUrl);
     const fileName = `${entry.id}${downloaded.extension}`;
     const filePath = path.join(OUTPUT_DIR, fileName);

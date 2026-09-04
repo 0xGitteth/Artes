@@ -28,6 +28,19 @@ const validLabel = () => ({
   uncertaintyFlags: [],
 });
 
+const approvedEmbedding = (cluster = 'cluster-a') => ({
+  model: 'dinov2_vitb14',
+  dimension: 768,
+  semanticClusterId: cluster,
+  semanticClusterApproved: true,
+});
+
+const approvedAsset = (name = 'ex1') => ({
+  uri: `gs://artes-staging-moderation-training/${name}.webp`,
+  approvedForTraining: true,
+  retentionClass: 'curated',
+});
+
 test('resolved upload moderator decisions become learning candidates without changing runtime authority', () => {
   const result = assessModerationExampleCandidate(validExample());
   assert.equal(result.candidate, true);
@@ -79,23 +92,60 @@ test('detector labels follow the Artes policy detector schema', () => {
   assert.ok(invalid.errors.includes('invalid_confidence'));
 });
 
-test('training readiness requires explicit curation, durable approved media, and a semantic cluster', () => {
+test('training readiness requires explicit curation, durable approved media, source pool, and an approved semantic cluster', () => {
   const pending = buildModerationLearningItem({ exampleId: 'ex1', example: validExample() });
   assert.equal(pending.candidate, true);
   assert.equal(pending.trainingReady, false);
   assert.ok(pending.trainingReadinessReasons.includes('curation_not_approved'));
+  assert.ok(pending.trainingReadinessReasons.includes('missing_source_pool'));
   assert.ok(pending.trainingReadinessReasons.includes('missing_training_asset'));
 
   const ready = buildModerationLearningItem({
     exampleId: 'ex1',
     example: validExample(),
     curation: { status: 'approved', detectorLabel: validLabel() },
-    embedding: { model: 'multimodalembedding@001', dimension: 512, semanticClusterId: 'cluster-a' },
-    trainingAsset: { uri: 'gs://artes-staging-moderation-training/ex1.webp', approvedForTraining: true, retentionClass: 'curated' },
+    embedding: approvedEmbedding('cluster-a'),
+    trainingAsset: approvedAsset('ex1'),
+    sourcePoolId: 'creator-model-pool-a',
   });
   assert.equal(ready.trainingReady, true);
   assert.equal(ready.labelVersion, ARTES_DETECTOR_LABEL_VERSION);
+  assert.equal(ready.sourcePoolId, 'creator-model-pool-a');
+  assert.equal(ready.semanticEmbedding.semanticClusterApproved, true);
+  assert.equal(ready.datasetSplitFinal, false);
   assert.ok(['train', 'validation', 'test'].includes(ready.datasetSplit));
+});
+
+test('raw DINO neighbor groups cannot become training-ready semantic clusters without explicit approval', () => {
+  const item = buildModerationLearningItem({
+    exampleId: 'neighbor-only',
+    example: validExample(),
+    curation: { status: 'approved', detectorLabel: validLabel() },
+    embedding: {
+      model: 'dinov2_vitb14',
+      dimension: 768,
+      semanticClusterId: 'poc_mnn_unapproved_neighbor_group',
+      semanticClusterApproved: false,
+    },
+    trainingAsset: approvedAsset('neighbor-only'),
+    sourcePoolId: 'creator-model-pool-a',
+  });
+  assert.equal(item.trainingReady, false);
+  assert.equal(item.datasetSplit, null);
+  assert.ok(item.trainingReadinessReasons.includes('semantic_cluster_not_approved'));
+});
+
+test('missing source pool blocks training readiness even when every other detector requirement is satisfied', () => {
+  const item = buildModerationLearningItem({
+    exampleId: 'no-source-pool',
+    example: validExample(),
+    curation: { status: 'approved', detectorLabel: validLabel() },
+    embedding: approvedEmbedding('cluster-no-source-pool'),
+    trainingAsset: approvedAsset('no-source-pool'),
+  });
+  assert.equal(item.trainingReady, false);
+  assert.equal(item.sourcePoolId, null);
+  assert.ok(item.trainingReadinessReasons.includes('missing_source_pool'));
 });
 
 test('a missing legacy policy version does not block training readiness once all detector-specific requirements are met', () => {
@@ -105,8 +155,9 @@ test('a missing legacy policy version does not block training readiness once all
     exampleId: 'legacy-1',
     example: legacy,
     curation: { status: 'approved', detectorLabel: validLabel() },
-    embedding: { model: 'dinov2-vitb14', dimension: 768, semanticClusterId: 'cluster-legacy' },
+    embedding: approvedEmbedding('cluster-legacy'),
     trainingAsset: { uri: 'gs://bucket/legacy-1.webp', approvedForTraining: true },
+    sourcePoolId: 'legacy-source-pool',
   });
   assert.equal(item.trainingReady, true);
   assert.equal(item.policyVersionKnown, false);
@@ -125,8 +176,9 @@ test('benchmark examples are never training ready', () => {
     exampleId: 'golden-1',
     example: validExample(),
     curation: { status: 'approved', detectorLabel: validLabel(), benchmarkOnly: true },
-    embedding: { model: 'multimodalembedding@001', dimension: 512, semanticClusterId: 'cluster-golden' },
+    embedding: approvedEmbedding('cluster-golden'),
     trainingAsset: { uri: 'gs://artes-staging-moderation-benchmark/golden-1.webp', approvedForTraining: true, retentionClass: 'benchmark' },
+    sourcePoolId: 'golden-source-pool',
   });
   assert.equal(item.trainingReady, false);
   assert.ok(item.trainingReadinessReasons.includes('benchmark_only'));
@@ -137,8 +189,9 @@ test('learning items contain media references only and never inline image bytes'
     exampleId: 'ex1',
     example: validExample(),
     curation: { status: 'approved', detectorLabel: validLabel() },
-    embedding: { model: 'multimodalembedding@001', dimension: 512, semanticClusterId: 'cluster-a' },
+    embedding: approvedEmbedding('cluster-a'),
     trainingAsset: { uri: 'gs://bucket/ex1.webp', approvedForTraining: true },
+    sourcePoolId: 'creator-model-pool-a',
   });
   assert.equal(Object.hasOwn(item, 'buffer'), false);
   assert.equal(Object.hasOwn(item, 'imageData'), false);

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "status": "planning_only",
+  "seedVersion": "external_poc_seed_v1",
+  "principle": "Expand by missing detector value and source-risk class. Do not train a classifier until each promoted label has enough independently sourced, human-confirmed examples and the benchmark remains separate.",
+  "currentCoverage": {
+    "nudity": ["none", "bare_buttocks", "female_bare_breasts"],
+    "sexualContext": ["none"],
+    "graphicInjury": ["none"],
+    "sensitiveSignals": [],
+    "possibleMinorConcernTrue": false
+  },
+  "priorityTiers": [
+    {
+      "tier": 1,
+      "name": "low-risk external expansion",
+      "sourceStrategy": "rights-cleared adult creator-owned or explicitly licensed photography",
+      "targets": [
+        "nudity:underwear_swimwear",
+        "nudity:implied_nude",
+        "nudity:male_topless",
+        "sexualContext:suggestive",
+        "sexualContext:bdsm_kink"
+      ],
+      "preferredSourceClass": "external_authorized_poc_or_contributor_authorized",
+      "notes": "Prioritize contemporary Artes-like photography. Human adult/model-rights evidence remains mandatory for recognizable people."
+    },
+    {
+      "tier": 2,
+      "name": "adult explicit anatomy coverage",
+      "sourceStrategy": "explicitly authorized adult creator-owned sources only",
+      "targets": [
+        "nudity:genitalia"
+      ],
+      "preferredSourceClass": "explicit_adult_authorized_only",
+      "notes": "Coverage value is technical, not style calibration. Keep provenance and rights evidence unusually strict."
+    },
+    {
+      "tier": 3,
+      "name": "high-sensitivity moderation coverage",
+      "sourceStrategy": "curated specialist datasets or explicit contributor authorization; no casual web scraping",
+      "targets": [
+        "sexualContext:explicit_act",
+        "graphicInjury:mild",
+        "graphicInjury:graphic",
+        "sensitiveSignals:bloodInjury",
+        "sensitiveSignals:selfHarm",
+        "sensitiveSignals:suicide",
+        "sensitiveSignals:eatingDisorder",
+        "sensitiveSignals:substanceDistress",
+        "sensitiveSignals:violence",
+        "sensitiveSignals:horrorScare",
+        "possibleMinorConcern:true"
+      ],
+      "preferredSourceClass": "specialist_curated_only",
+      "notes": "Do not source these ad hoc from social platforms. Preserve separation between detector evidence and final policy."
+    }
+  ],
+  "minimumPocTargets": {
+    "perCommonVisualClass": 8,
+    "perBoundaryPairSide": 4,
+    "distinctCreatorsPreferred": 3,
+    "benchmarkHeldOutPerClass": 2
+  },
+  "boundaryPairs": [
+    ["none", "underwear_swimwear"],
+    ["underwear_swimwear", "implied_nude"],
+    ["implied_nude", "bare_buttocks"],
+    ["implied_nude", "female_bare_breasts"],
+    ["none", "male_topless"],
+    ["sexualContext:none", "sexualContext:suggestive"],
+    ["sexualContext:suggestive", "sexualContext:bdsm_kink"]
+  ],
+  "promotionRules": {
+    "humanConfirmedLabelsRequired": true,
+    "rightsClearedSourceRequired": true,
+    "semanticClusterLeakagePreventionRequired": true,
+    "goldenBenchmarkSeparate": true,
+    "trainingReadyDefault": false,
+    "classifierTrainingRecommendedBeforeCoverage": false
+  }
+}

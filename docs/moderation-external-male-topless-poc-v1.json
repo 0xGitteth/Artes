@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "status": "approved_for_local_embedding_poc_only",
+  "round": "external_male_topless_v1",
+  "policy": "Independent male-topless source-pool expansion. Copyright, adulthood and self-subject rights evidence are verified before local intake. Human detector review is still required and nothing becomes training-ready from this manifest.",
+  "limitations": [
+    "This first batch contains one source pool and one image; it improves source-pool coverage but is nowhere near sufficient for class training.",
+    "The 2019 portrait is coverage data, not the sole visual-style calibration target for contemporary Artes photography.",
+    "Human review remains authoritative for the detector label."
+  ],
+  "entries": [
+    {
+      "id": "external-male-topless-v1-isana-chiba-2019",
+      "sourcePoolId": "flickr_isana_chiba_self",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/202388154@N07/54384348264/",
+      "creator": "Isana Chiba",
+      "year": 2019,
+      "visualFacet": "adult_male_topless_self_portrait",
+      "copyrightLicense": "CC0 1.0",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc0",
+      "explicitAiTrainingPermission": false,
+      "recognizableHuman": true,
+      "adultStatus": "verified_adult",
+      "modelRightsStatus": "self_subject",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Wikimedia Commons records the exact Flickr photo ID 54384348264 and says FlickrReviewR 2 confirmed the original Flickr work as CC0.",
+        "The file description identifies the subject as Isana Chiba, born 25 April 1999, and the photograph as taken 25 April 2019, establishing age 20 on the image date.",
+        "The author and copyright holder are both recorded as Isana Chiba and the work is categorized as a self-portrait.",
+        "The source description explicitly identifies the portrait as shirtless/topless."
+      ],
+      "rightsEvidenceUrl": "https://commons.wikimedia.org/wiki/File:IsanaChiba.jpg",
+      "intendedUse": "independent_source_pool_candidate_for_nudity_male_topless_coverage",
+      "trainingReady": false
+    }
+  ]
+}

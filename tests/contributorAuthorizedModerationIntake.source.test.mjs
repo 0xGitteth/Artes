@@ -47,5 +47,6 @@ test('image intake is bounded and top-level only', () => {
   assert.match(source, /MAX_IMAGE_BYTES = 15 \* 1024 \* 1024/);
   assert.match(source, /SUPPORTED_EXTENSIONS/);
   assert.match(source, /readdir\(IMAGE_DIR, \{ withFileTypes: true \}\)/);
-  assert.doesNotMatch(source, /recursive:\s*true/);
+  assert.match(source, /\.filter\(\(entry\) => entry\.isFile\(\)/);
+  assert.doesNotMatch(source, /readdir\s*\(\s*IMAGE_DIR\s*,\s*\{[^}]*recursive\s*:\s*true/s);
 });

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "goal": "Find additional independent real-photography source pools for the first nudity head without weakening copyright, adulthood, model-rights or source-pool requirements.",
+  "findings": [
+    {
+      "id": "research-dainis-graveris-sexualalpha-2021",
+      "targets": ["nudity:underwear_swimwear", "nudity:implied_nude", "sexualContext:suggestive"],
+      "sourcePoolCandidate": "flickr_dainis_graveris_sexualalpha_2021",
+      "sourcePlatform": "flickr",
+      "creator": "Dainis Graveris / FounderTips / SexualAlpha",
+      "exampleUrls": [
+        "https://www.flickr.com/photos/dainisgraveris/51100951396/",
+        "https://www.flickr.com/photos/dainisgraveris/51101416343/",
+        "https://www.flickr.com/photos/dainisgraveris/51096412059/"
+      ],
+      "evidenceSummary": "Multiple 2021 lingerie works explicitly say they are released under Creative Commons and ask for credit to Dainis Graveris. Independent Flickr-to-Commons reviews confirm CC BY 2.0 for works from the same published pool. SexualAlpha identifies itself as adult-only content.",
+      "rightsFinding": "Copyright licensing is promising and much stronger than ordinary Flickr search snippets, but image-level model adulthood and model/personality-rights authorization for Artes moderation ML are not established by the pages reviewed.",
+      "visualFit": "high",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Seek an explicit model-release/adult-status statement or direct rights-holder confirmation before using recognizable-model images for training."
+    },
+    {
+      "id": "research-ronald-frazier-adult-self-subject",
+      "targets": ["nudity:male_topless", "nudity:genitalia"],
+      "sourcePoolCandidate": "flickr_ronald_douglas_frazier_self",
+      "sourcePlatform": "flickr",
+      "creatorModel": "Ronald Douglas Frazier",
+      "albumUrl": "https://www.flickr.com/photos/tomronworldwide/albums/72157638970074073/",
+      "evidenceSummary": "Adult-restricted album says the photographs depict the account owner, were taken either by himself or guest photographers, and are licensed CC BY-SA 3.0.",
+      "rightsFinding": "Adult/self-subject evidence is strong, but guest-photographer wording prevents assuming the account owner holds copyright for every individual image. Exact work-level authorship must be resolved before use.",
+      "visualFit": "medium",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Identify exact self-photographed works and verify work-level authorship before local intake."
+    },
+    {
+      "id": "research-vishal-rastogi-modern-male-topless",
+      "targets": ["nudity:male_topless", "nudity:implied_nude"],
+      "sourcePoolCandidate": "flickr_vishal_rastogi_male_portrait",
+      "sourcePlatform": "flickr",
+      "creator": "Vishal Rastogi / Creative Bloke Photography",
+      "exampleUrls": [
+        "https://www.flickr.com/photos/explore_my_world/55242622232"
+      ],
+      "evidenceSummary": "Modern 2026 studio work explicitly describes a shirtless male model and is visually close to contemporary Artes portrait photography.",
+      "rightsFinding": "No sufficiently clear training-compatible copyright license, adult-status evidence or model/personality-rights authorization was established for the reviewed work.",
+      "visualFit": "very_high",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Style reference only unless direct permission is obtained."
+    },
+    {
+      "id": "research-scott-beale-kink-event",
+      "targets": ["sexualContext:bdsm_kink"],
+      "sourcePoolCandidate": "flickr_scott_beale_laughing_squid_events",
+      "sourcePlatform": "flickr",
+      "creator": "Scott Beale / Laughing Squid",
+      "exampleUrls": [
+        "https://www.flickr.com/photos/laughingsquid/2503854007"
+      ],
+      "evidenceSummary": "Flickr pages explicitly state Creative Commons licensing for event photography, including kink-adjacent material.",
+      "rightsFinding": "Exact license details and especially individual model/personality rights are insufficient for recognizable people in a moderation-training corpus. Material is also visually dated for Artes calibration.",
+      "visualFit": "low_to_medium",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Do not promote; use only as evidence that public kink photography remains model-rights constrained."
+    }
+  ],
+  "conclusion": {
+    "newTrainingApprovedSourcePoolFound": false,
+    "independentPromisingPools": 2,
+    "mainConstraint": "recognizable-human adulthood/model-rights evidence rather than image copyright alone",
+    "recommendedNextRoute": "Continue direct-permission/contributor-authorized sourcing while keeping public CC candidates as research leads."
+  }
+}

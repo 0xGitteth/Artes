@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "planRef": "moderation-dataset-expansion-plan-v1",
+  "round": 2,
+  "result": "Four additional rights-cleared technical coverage candidates were promoted to a local-only expansion POC manifest; modern Artes-style Tier-1 gaps remain.",
+  "promotedTechnicalCoverage": [
+    {
+      "flickrPhotoId": "49462574496",
+      "target": "nudity:underwear_swimwear",
+      "year": 2020,
+      "license": "CC BY 2.0",
+      "sourcePool": "Elements Of This World",
+      "role": "coverage_only"
+    },
+    {
+      "flickrPhotoId": "32357111915",
+      "target": "nudity:underwear_swimwear",
+      "year": 2017,
+      "license": "CC BY 2.0",
+      "sourcePool": "Elements Of This World",
+      "role": "coverage_only"
+    },
+    {
+      "flickrPhotoId": "46633247011",
+      "targets": ["nudity:underwear_swimwear", "sexualContext:suggestive_boundary_candidate"],
+      "year": 2019,
+      "license": "CC BY 2.0",
+      "sourcePool": "Elements Of This World",
+      "role": "coverage_only"
+    },
+    {
+      "flickrPhotoId": "52567311403",
+      "target": "nudity:genitalia",
+      "year": 2022,
+      "license": "CC BY 2.0",
+      "sourcePool": "Elements Of This World",
+      "role": "coverage_only"
+    }
+  ],
+  "sourcePoolAssessment": {
+    "adultStatus": "verified_over_21_by_source",
+    "creatorSubjectRelationship": "creator/model couple using their own bodies",
+    "explicitAiTrainingPermissionForCcWorks": true,
+    "commercialUsePermissionForCcWorks": true,
+    "perWorkLicenseVerificationRequired": true,
+    "diversityLimitation": "single creator/model pool; cannot satisfy distinct-creator or Artes-style diversity targets by itself"
+  },
+  "blockedOrPendingLeads": [
+    {
+      "target": "nudity:underwear_swimwear",
+      "source": "Flickr 51434371803",
+      "year": 2021,
+      "status": "blocked_pending_model_release",
+      "reason": "CC BY 2.0 copyright is verified, but independent metadata carries a personality-rights warning and no model release was found."
+    },
+    {
+      "target": "nudity:male_topless",
+      "source": "Flickr 6216708412",
+      "year": 2011,
+      "status": "research_lead_only",
+      "reason": "CC BY 2.0 and published-consent evidence exist, but subject adulthood mapping, a suitable direct Flickr CDN asset within the bounded intake path, and modern representativeness are not sufficient for promotion yet."
+    }
+  ],
+  "remainingPriorityGaps": [
+    "modern_rights_cleared_implied_nude",
+    "modern_rights_cleared_male_topless",
+    "modern_rights_cleared_suggestive_boudoir",
+    "modern_rights_cleared_non_explicit_bdsm_kink",
+    "creator_body_type_skin_tone_gender_presentation_diversity"
+  ],
+  "recommendation": "Run the four-item technical expansion locally and obtain human labels. Continue external verification in parallel, but expect contributor-authorized Artes photography to be the preferred route for the remaining modern Tier-1 boundary cases. Do not start classifier training from this single-source expansion."
+}

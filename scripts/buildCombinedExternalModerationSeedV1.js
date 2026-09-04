@@ -12,6 +12,8 @@ const ORIGINAL_SEED_PATH = path.join(SEED_DIR, 'seed-v1.json');
 const EXPANSION_INTAKE_PATH = path.join(EXPANSION_DIR, 'intake.json');
 const EXPANSION_LABELS_PATH = path.join(EXPANSION_DIR, 'labels.reviewed.json');
 const EXPANSION_ANALYSIS_PATH = path.join(EXPANSION_DIR, 'reviewed-analysis.json');
+const ORIGINAL_MANIFEST_PATH = path.join(REPO_ROOT, 'docs', 'moderation-external-poc-manifest-v1.json');
+const EXPANSION_MANIFEST_PATH = path.join(REPO_ROOT, 'docs', 'moderation-external-expansion-poc-v1.json');
 const OUTPUT_PATH = path.join(OUTPUT_DIR, 'seed-v1.json');
 const COVERAGE_PATH = path.join(OUTPUT_DIR, 'coverage-v1.json');
 
@@ -22,12 +24,15 @@ const SEXUAL_CONTEXT_VALUES = ['none', 'suggestive', 'bdsm_kink', 'explicit_act'
 const GRAPHIC_INJURY_VALUES = ['none', 'mild', 'graphic'];
 const SENSITIVE_SIGNALS = ['bloodInjury', 'selfHarm', 'suicide', 'eatingDisorder', 'substanceDistress', 'violence', 'horrorScare'];
 const countBy = (values) => Object.fromEntries(values.map((value) => [value, 0]));
+const sourceIdFromFileName = (fileName) => String(fileName || '').replace(/\.(?:jpe?g|png|webp)$/i, '');
 
-const [seed, expansionIntake, expansionLabels, expansionAnalysis] = await Promise.all([
+const [seed, expansionIntake, expansionLabels, expansionAnalysis, originalManifest, expansionManifest] = await Promise.all([
   readFile(ORIGINAL_SEED_PATH, 'utf8').then(JSON.parse),
   readFile(EXPANSION_INTAKE_PATH, 'utf8').then(JSON.parse),
   readFile(EXPANSION_LABELS_PATH, 'utf8').then(JSON.parse),
   readFile(EXPANSION_ANALYSIS_PATH, 'utf8').then(JSON.parse),
+  readFile(ORIGINAL_MANIFEST_PATH, 'utf8').then(JSON.parse),
+  readFile(EXPANSION_MANIFEST_PATH, 'utf8').then(JSON.parse),
 ]);
 
 if (seed?.seedVersion !== 'external_poc_seed_v1' || seed?.trainingReady !== false || !Array.isArray(seed?.items) || seed.items.length !== 4) {
@@ -39,6 +44,16 @@ if (expansionLabels?.labelStatus !== 'complete' || expansionLabels?.trainingRead
 if (expansionAnalysis?.analysisType !== 'external_expansion_v1_human_label_validation' || expansionAnalysis?.trainingReady !== false || expansionAnalysis?.thresholdSelected !== false) {
   throw new Error('combined_seed_requires_validated_unpromoted_expansion');
 }
+
+const originalManifestById = new Map((originalManifest?.entries || []).map((entry) => [entry.id, entry]));
+const expansionManifestById = new Map((expansionManifest?.entries || []).map((entry) => [entry.id, entry]));
+const requireSourcePoolId = (manifestById, fileName) => {
+  const sourceId = sourceIdFromFileName(fileName);
+  const entry = manifestById.get(sourceId);
+  const sourcePoolId = String(entry?.sourcePoolId || '').trim();
+  if (!sourcePoolId) throw new Error(`combined_seed_missing_source_pool:${fileName}`);
+  return sourcePoolId;
+};
 
 const expansionIntakeItems = Array.isArray(expansionIntake?.items) ? expansionIntake.items : [];
 const expansionLabelItems = Array.isArray(expansionLabels?.items) ? expansionLabels.items : [];
@@ -62,6 +77,7 @@ const expansionItems = expansionIntakeItems.map((item) => {
     sourceDataset: 'external-expansion-v1',
     sourceFileName: item.fileName,
     sourceSha256: item.sha256,
+    sourcePoolId: requireSourcePoolId(expansionManifestById, item.fileName),
     labelVersion: item.labelVersion,
     detectorLabel: normalizeArtesDetectorLabel(labelItem.detectorLabel),
     labelSource: 'local_human_review',
@@ -89,6 +105,7 @@ const originalItems = seed.items.map((item) => {
   return {
     ...item,
     sourceDataset: 'external-poc',
+    sourcePoolId: requireSourcePoolId(originalManifestById, item.sourceFileName),
     metadataSuggestionOverridden: false,
     trainingReady: false,
     semanticClusterId: null,
@@ -107,6 +124,7 @@ const nudityCounts = countBy(NUDITY_VALUES);
 const sexualContextCounts = countBy(SEXUAL_CONTEXT_VALUES);
 const graphicInjuryCounts = countBy(GRAPHIC_INJURY_VALUES);
 const sensitiveSignalCounts = countBy(SENSITIVE_SIGNALS);
+const sourcePoolCounts = {};
 let possibleMinorConcernTrue = 0;
 let possibleMinorConcernFalse = 0;
 for (const item of items) {
@@ -116,6 +134,7 @@ for (const item of items) {
   for (const signal of item.detectorLabel.sensitiveSignals) sensitiveSignalCounts[signal] += 1;
   if (item.detectorLabel.possibleMinorConcern) possibleMinorConcernTrue += 1;
   else possibleMinorConcernFalse += 1;
+  sourcePoolCounts[item.sourcePoolId] = (sourcePoolCounts[item.sourcePoolId] || 0) + 1;
 }
 
 const missing = {
@@ -136,6 +155,7 @@ const combinedSeed = {
   embeddingDimension: EXPECTED_DIMENSION,
   thresholdSelected: false,
   semanticClustersPromoted: false,
+  sourcePoolLeakageGuardRequired: true,
   trainingReady: false,
   classifierTrainingRecommended: false,
   items,
@@ -147,6 +167,8 @@ const coverage = {
   itemCount: items.length,
   humanConfirmed: items.length,
   metadataSuggestionOverrides: items.filter((item) => item.metadataSuggestionOverridden).length,
+  sourcePoolCounts,
+  sourcePoolCount: Object.keys(sourcePoolCounts).length,
   counts: {
     nudity: nudityCounts,
     sexualContext: sexualContextCounts,
@@ -171,8 +193,11 @@ process.stdout.write(`${JSON.stringify({
   embeddingModel: combinedSeed.embeddingModel,
   embeddingDimension: combinedSeed.embeddingDimension,
   metadataSuggestionOverrides: coverage.metadataSuggestionOverrides,
+  sourcePoolCount: coverage.sourcePoolCount,
+  sourcePoolCounts: coverage.sourcePoolCounts,
   counts: coverage.counts,
   missing: coverage.missing,
+  sourcePoolLeakageGuardRequired: true,
   trainingReady: false,
   classifierTrainingRecommended: false,
   outputs: [

@@ -14,9 +14,25 @@ test('contributor embedding preparation preserves authorization, source pool and
   assert.match(embedSource, /contributor_image_sha_mismatch/);
 });
 
-test('contributor embedding preparation requires local DINOv2 768D output and infers no labels', () => {
+test('contributor embedding preparation requires the real client envelope and DINOv2 768D output', () => {
+  assert.match(embedSource, /EXPECTED_PROVIDER = 'artes_custom_vision'/);
   assert.match(embedSource, /EXPECTED_MODEL = 'dinov2_vitb14'/);
   assert.match(embedSource, /EXPECTED_DIMENSION = 768/);
+  assert.match(embedSource, /const vector = inference\?\.embedding/);
+  assert.match(embedSource, /inference\?\.provider !== EXPECTED_PROVIDER/);
+  assert.match(embedSource, /inference\?\.model !== EXPECTED_MODEL/);
+  assert.match(embedSource, /inference\?\.embeddingDimension !== EXPECTED_DIMENSION/);
+});
+
+test('contributor embedding endpoint is fail-closed to loopback only', () => {
+  assert.match(embedSource, /LOOPBACK_HOSTS/);
+  assert.match(embedSource, /127\.0\.0\.1/);
+  assert.match(embedSource, /localhost/);
+  assert.match(embedSource, /contributor_embedding_endpoint_must_be_loopback/);
+  assert.match(embedSource, /networkScope: 'loopback_custom_vision_only'/);
+});
+
+test('contributor embeddings infer no labels and cannot promote training readiness', () => {
   assert.match(embedSource, /detectorLabel: null/);
   assert.match(embedSource, /labelStatus: 'pending_human_review'/);
   assert.match(embedSource, /semanticClusterApproved: false/);

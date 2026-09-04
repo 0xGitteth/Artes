@@ -151,6 +151,7 @@ export const buildModerationLearningItem = ({
   curation = {},
   embedding = {},
   trainingAsset = {},
+  sourcePoolId = null,
 } = {}) => {
   const sourceExampleId = cleanString(exampleId);
   const candidateAssessment = assessModerationExampleCandidate(example);
@@ -158,7 +159,9 @@ export const buildModerationLearningItem = ({
   const detectorLabel = normalizeArtesDetectorLabel(curation.detectorLabel);
   const detectorLabelValidation = validateArtesDetectorLabel(curation.detectorLabel);
   const semanticClusterId = cleanString(embedding.semanticClusterId);
+  const semanticClusterApproved = embedding.semanticClusterApproved === true;
   const embeddingModel = cleanString(embedding.model);
+  const normalizedSourcePoolId = cleanString(sourcePoolId);
   const trainingAssetUri = cleanString(trainingAsset.uri);
   const assetApproved = trainingAsset.approvedForTraining === true;
   const benchmarkOnly = curation.benchmarkOnly === true;
@@ -168,11 +171,13 @@ export const buildModerationLearningItem = ({
   if (curationStatus !== 'approved') readinessReasons.push('curation_not_approved');
   if (!detectorLabel) readinessReasons.push(...detectorLabelValidation.errors.map((reason) => `detector_label:${reason}`));
   if (!semanticClusterId) readinessReasons.push('missing_semantic_cluster');
+  if (semanticClusterId && !semanticClusterApproved) readinessReasons.push('semantic_cluster_not_approved');
   if (!embeddingModel) readinessReasons.push('missing_embedding_model');
+  if (!normalizedSourcePoolId) readinessReasons.push('missing_source_pool');
   if (!trainingAssetUri) readinessReasons.push('missing_training_asset');
   if (!assetApproved) readinessReasons.push('training_asset_not_approved');
 
-  const split = semanticClusterId ? assignDatasetSplit(semanticClusterId) : null;
+  const split = semanticClusterId && semanticClusterApproved ? assignDatasetSplit(semanticClusterId) : null;
   const trainingReady = candidateAssessment.candidate
     && !benchmarkOnly
     && readinessReasons.length === 0
@@ -182,6 +187,7 @@ export const buildModerationLearningItem = ({
     schemaVersion: MODERATION_LEARNING_SCHEMA_VERSION,
     labelVersion: ARTES_DETECTOR_LABEL_VERSION,
     sourceExampleId: sourceExampleId || null,
+    sourcePoolId: normalizedSourcePoolId || null,
     sourceFingerprintSha256: candidateAssessment.sourceEvidence.sha256,
     policyVersion: candidateAssessment.sourceEvidence.policyVersion,
     policyVersionKnown: candidateAssessment.sourceEvidence.policyVersionKnown,
@@ -197,6 +203,7 @@ export const buildModerationLearningItem = ({
       model: embeddingModel || null,
       dimension: Number.isInteger(embedding.dimension) ? embedding.dimension : null,
       semanticClusterId: semanticClusterId || null,
+      semanticClusterApproved,
     },
     trainingAsset: trainingAssetUri
       ? {
@@ -208,6 +215,7 @@ export const buildModerationLearningItem = ({
     benchmarkOnly,
     datasetSplitVersion: DATASET_SPLIT_VERSION,
     datasetSplit: split,
+    datasetSplitFinal: false,
     trainingReady,
     trainingReadinessReasons: Array.from(new Set(readinessReasons)),
   };

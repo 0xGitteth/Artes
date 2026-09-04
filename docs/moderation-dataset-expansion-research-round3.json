@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "goal": "Find independent creator/model source pools for missing implied_nude, male_topless, suggestive and bdsm_kink coverage without relaxing rights or adult-status requirements.",
+  "findings": [
+    {
+      "id": "research-kelly-kooper-implied-boudoir",
+      "targets": ["nudity:implied_nude", "sexualContext:suggestive"],
+      "sourcePlatform": "flickr",
+      "creatorModel": "Kelly Kooper",
+      "profileUrl": "https://flickr.com/people/kellykooper/",
+      "evidenceSummary": "Profile describes 20+ years of professional modeling across swimwear, lingerie, art nude and conceptual work. Search results contain highly relevant implied-topless and lingerie work.",
+      "rightsFinding": "Checked representative work 'Confident in your own skin' is All Rights Reserved and many relevant images credit separate photographers, so model self-posting alone does not establish copyright permission for Artes ML use.",
+      "visualFit": "very_high",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Use only if a specific work has rights-holder permission plus adult/model-rights evidence; otherwise style calibration only."
+    },
+    {
+      "id": "research-ronald-frazier-adult-self-portrait-pool",
+      "targets": ["nudity:male_topless", "nudity:genitalia"],
+      "sourcePlatform": "flickr",
+      "creatorModel": "Ronald Douglas Frazier",
+      "albumUrl": "https://www.flickr.com/photos/tomronworldwide/albums/72157638970074073/",
+      "evidenceSummary": "Adult-restricted album states viewers must be over 18, says photographs are of the account owner and were taken by himself or guest photographers, and states a Creative Commons Attribution-ShareAlike 3.0 license for the album.",
+      "rightsFinding": "Promising independent adult self-subject pool, but guest-photographer wording means exact image-level authorship must be resolved before promotion. Exact individual male-topless candidate and work-level license still need verification.",
+      "visualFit": "medium",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Identify an exact self-photographed male-topless image and verify its individual Flickr license before local download."
+    },
+    {
+      "id": "research-subshop-harness-fashion",
+      "targets": ["sexualContext:bdsm_kink", "nudity:underwear_swimwear"],
+      "sourcePlatform": "flickr",
+      "creator": "Autumn LeFleur / Sub-Shop.com listings",
+      "evidenceSummary": "Current Flickr tag results contain modern body-harness and bondage-style fashion images that are visually close to the desired non-explicit kink boundary.",
+      "rightsFinding": "Search results provide commercial-product context but no verified Creative Commons or explicit ML-use permission, so these are not dataset candidates.",
+      "visualFit": "high",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Do not download unless exact rights-holder and ML-use permission can be verified."
+    }
+  ],
+  "conclusion": {
+    "newTrainingApprovedSourcePoolFound": false,
+    "promisingIndependentPoolCount": 1,
+    "publicSourcingStillRightsLimited": true,
+    "preferredNextRoute": "Continue exact-work verification for Ronald Frazier while preparing contributor-authorized Artes-like intake for missing modern boundary classes."
+  }
+}

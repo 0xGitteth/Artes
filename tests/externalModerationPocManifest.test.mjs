@@ -49,13 +49,13 @@ test('fetcher is local-only, bounded and restricts resolved images to static Fli
 });
 
 test('fetcher supports only bounded manifest and output names while preserving seed defaults', () => {
-  assert.match(fetcherSource, /DEFAULT_MANIFEST_NAME = 'moderation-external-poc-manifest-v1\.json'/);
-  assert.match(fetcherSource, /DEFAULT_OUTPUT_SUBDIR = 'external-poc'/);
-  assert.match(fetcherSource, /ARTES_EXTERNAL_POC_MANIFEST/);
-  assert.match(fetcherSource, /ARTES_EXTERNAL_POC_OUTPUT_SUBDIR/);
-  assert.match(fetcherSource, /MANIFEST_NAME_PATTERN = \/\^\[A-Za-z0-9\._-\]\+\\\.json\$\//);
-  assert.match(fetcherSource, /OUTPUT_SUBDIR_PATTERN = \/\^\[a-z0-9\]\[a-z0-9\._-\]\*\$\//);
-  assert.match(fetcherSource, /candidate\.includes\('\.\.'\)/);
-  assert.match(fetcherSource, /path\.join\(REPO_ROOT, 'docs', MANIFEST_NAME\)/);
-  assert.match(fetcherSource, /path\.join\(REPO_ROOT, '\.tmp', 'moderation-test-images', OUTPUT_SUBDIR\)/);
+  assert.ok(fetcherSource.includes("const DEFAULT_MANIFEST_NAME = 'moderation-external-poc-manifest-v1.json';"));
+  assert.ok(fetcherSource.includes("const DEFAULT_OUTPUT_SUBDIR = 'external-poc';"));
+  assert.ok(fetcherSource.includes('process.env.ARTES_EXTERNAL_POC_MANIFEST'));
+  assert.ok(fetcherSource.includes('process.env.ARTES_EXTERNAL_POC_OUTPUT_SUBDIR'));
+  assert.ok(fetcherSource.includes("const MANIFEST_NAME_PATTERN = /^[A-Za-z0-9._-]+\\.json$/;"));
+  assert.ok(fetcherSource.includes('const OUTPUT_SUBDIR_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;'));
+  assert.ok(fetcherSource.includes("candidate.includes('..')"));
+  assert.ok(fetcherSource.includes("path.join(REPO_ROOT, 'docs', MANIFEST_NAME)"));
+  assert.ok(fetcherSource.includes("path.join(REPO_ROOT, '.tmp', 'moderation-test-images', OUTPUT_SUBDIR)"));
 });

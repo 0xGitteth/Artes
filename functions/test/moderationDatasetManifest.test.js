@@ -10,7 +10,8 @@ import {
 const makeItem = ({
   id,
   cluster,
-  sourcePoolId = null,
+  sourcePoolId = `pool-${id}`,
+  semanticClusterApproved = true,
   nudity = 'none',
   sexualContext = 'none',
   sensitiveSignals = [],
@@ -22,7 +23,7 @@ const makeItem = ({
   labelVersion: ARTES_DETECTOR_LABEL_VERSION,
   trainingReady,
   benchmarkOnly,
-  semanticEmbedding: { semanticClusterId: cluster },
+  semanticEmbedding: { semanticClusterId: cluster, semanticClusterApproved },
   detectorLabel: {
     nudity,
     sexualContext,
@@ -110,6 +111,32 @@ test('benchmark-only and non-training-ready items are excluded from model datase
   assert.equal(manifest.eligibleItemCount, 1);
   assert.equal(manifest.excludedItemCount, 2);
   assert.deepEqual(manifest.assignments.map((item) => item.sourceExampleId), ['trainable']);
+});
+
+test('items without a source pool never enter a model dataset even if marked training-ready', () => {
+  const manifest = buildGroupStratifiedDatasetManifest({
+    datasetVersion: 'dataset-missing-source-pool',
+    items: [
+      makeItem({ id: 'valid', cluster: 'cluster-valid', sourcePoolId: 'pool-valid' }),
+      makeItem({ id: 'missing-pool', cluster: 'cluster-missing', sourcePoolId: null }),
+    ],
+  });
+  assert.equal(manifest.eligibleItemCount, 1);
+  assert.equal(manifest.excludedItemCount, 1);
+  assert.deepEqual(manifest.assignments.map((item) => item.sourceExampleId), ['valid']);
+});
+
+test('unapproved semantic clusters never enter a model dataset', () => {
+  const manifest = buildGroupStratifiedDatasetManifest({
+    datasetVersion: 'dataset-unapproved-cluster',
+    items: [
+      makeItem({ id: 'approved', cluster: 'cluster-approved', semanticClusterApproved: true }),
+      makeItem({ id: 'raw-neighbor', cluster: 'poc_mnn_raw', semanticClusterApproved: false }),
+    ],
+  });
+  assert.equal(manifest.eligibleItemCount, 1);
+  assert.equal(manifest.excludedItemCount, 1);
+  assert.deepEqual(manifest.assignments.map((item) => item.sourceExampleId), ['approved']);
 });
 
 test('invalid ratios fail closed rather than silently creating a bad split', () => {

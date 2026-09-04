@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "planVersion": "nudity_head_acquisition_backlog_v1",
+  "basis": "Measured from combined_external_seed_v1 against nudity_head_dataset_gates_v1.",
+  "current": {
+    "humanLabeledImages": 8,
+    "sourcePoolsTotal": 2,
+    "largestSourcePoolFraction": 0.75,
+    "imagesPerClass": {
+      "none": 2,
+      "underwear_swimwear": 3,
+      "implied_nude": 0,
+      "bare_buttocks": 1,
+      "female_bare_breasts": 1,
+      "genitalia": 1,
+      "male_topless": 0
+    },
+    "sourcePoolsPerClass": {
+      "none": 1,
+      "underwear_swimwear": 1,
+      "implied_nude": 0,
+      "bare_buttocks": 1,
+      "female_bare_breasts": 1,
+      "genitalia": 1,
+      "male_topless": 0
+    }
+  },
+  "experimentalProbeGate": {
+    "minimumTotalHumanLabeledImages": 140,
+    "minimumImagesPerClass": 15,
+    "minimumSourcePoolsTotal": 10,
+    "minimumSourcePoolsPerClass": 3,
+    "maxSingleSourcePoolFraction": 0.25,
+    "remainingTotalImages": 132,
+    "remainingIndependentSourcePoolsMinimum": 8,
+    "minimumAdditionalImagesPerClassToReachClassFloor": {
+      "none": 13,
+      "underwear_swimwear": 12,
+      "implied_nude": 15,
+      "bare_buttocks": 14,
+      "female_bare_breasts": 14,
+      "genitalia": 14,
+      "male_topless": 15
+    },
+    "minimumAdditionalSourcePoolsPerClass": {
+      "none": 2,
+      "underwear_swimwear": 2,
+      "implied_nude": 3,
+      "bare_buttocks": 2,
+      "female_bare_breasts": 2,
+      "genitalia": 2,
+      "male_topless": 3
+    },
+    "note": "Class-floor image deficits sum to 97. After reaching every 15-image class floor, another 35 images are still required to reach 140 total. Those 35 should be used to improve diversity and difficult boundary coverage, not concentrated in the easiest class."
+  },
+  "acquisitionOrder": [
+    {
+      "priority": 1,
+      "goal": "source_pool_diversity",
+      "target": "Add at least 8 independent source pools, deliberately covering multiple nudity classes where rights allow.",
+      "reason": "Quantity from existing pools would not satisfy the leakage-safe probe gate and would worsen style/source bias."
+    },
+    {
+      "priority": 2,
+      "goal": "zero_coverage_classes",
+      "classes": ["implied_nude", "male_topless"],
+      "target": "At least 3 independent source pools and 15 human-labeled images per class."
+    },
+    {
+      "priority": 3,
+      "goal": "thin_coverage_classes",
+      "classes": ["bare_buttocks", "female_bare_breasts", "genitalia", "none", "underwear_swimwear"],
+      "target": "At least 3 independent source pools and 15 human-labeled images per class."
+    },
+    {
+      "priority": 4,
+      "goal": "balance_to_total_gate",
+      "target": "Add the remaining images to reach at least 140 while maximizing body, skin-tone, gender-presentation, photographic-style, crop, setting and creator/model diversity."
+    }
+  ],
+  "sourceStrategy": {
+    "publicRightsCleared": "Continue exact-work verification first, but do not lower copyright, adult-status, model-rights or ML-use requirements.",
+    "contributorAuthorized": "Use the completed local contributor route for modern Artes-like work when public sourcing cannot provide enough independent pools.",
+    "sameCreatorLimit": "Do not solve a class deficit primarily by adding more images from an already represented creator/model pool.",
+    "synthetic": "Excluded from this pilot.",
+    "sensitiveFutureHeads": "Sexual-context and safety datasets remain separate from this first nudity-head acquisition program."
+  },
+  "promotion": {
+    "experimentalProbeRuntimeEligible": false,
+    "automaticSemanticClusterPromotion": false,
+    "dinoNeighborMayAssignLabel": false,
+    "trainingReadyByAcquisitionAlone": false
+  }
+}

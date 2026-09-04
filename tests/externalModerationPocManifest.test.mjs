@@ -39,11 +39,23 @@ test('adult entries can pin exact Flickr CDN originals without weakening source 
 });
 
 test('fetcher is local-only, bounded and restricts resolved images to static Flickr hosts', () => {
-  assert.match(fetcherSource, /\.tmp.*moderation-test-images.*external-poc/s);
+  assert.match(fetcherSource, /\.tmp.*moderation-test-images/s);
   assert.match(fetcherSource, /MAX_IMAGE_BYTES = 15 \* 1024 \* 1024/);
   assert.match(fetcherSource, /staticflickr/);
   assert.match(fetcherSource, /assertExternalImageTrainingEligible/);
   assert.match(fetcherSource, /external_poc_pinned_image_photo_id_mismatch/);
   assert.match(fetcherSource, /trainingReady: false/);
   assert.doesNotMatch(fetcherSource, /child_process|exec\(|spawn\(/);
+});
+
+test('fetcher supports only bounded manifest and output names while preserving seed defaults', () => {
+  assert.match(fetcherSource, /DEFAULT_MANIFEST_NAME = 'moderation-external-poc-manifest-v1\.json'/);
+  assert.match(fetcherSource, /DEFAULT_OUTPUT_SUBDIR = 'external-poc'/);
+  assert.match(fetcherSource, /ARTES_EXTERNAL_POC_MANIFEST/);
+  assert.match(fetcherSource, /ARTES_EXTERNAL_POC_OUTPUT_SUBDIR/);
+  assert.match(fetcherSource, /MANIFEST_NAME_PATTERN = \/\^\[A-Za-z0-9\._-\]\+\\\.json\$\//);
+  assert.match(fetcherSource, /OUTPUT_SUBDIR_PATTERN = \/\^\[a-z0-9\]\[a-z0-9\._-\]\*\$\//);
+  assert.match(fetcherSource, /candidate\.includes\('\.\.'\)/);
+  assert.match(fetcherSource, /path\.join\(REPO_ROOT, 'docs', MANIFEST_NAME\)/);
+  assert.match(fetcherSource, /path\.join\(REPO_ROOT, '\.tmp', 'moderation-test-images', OUTPUT_SUBDIR\)/);
 });

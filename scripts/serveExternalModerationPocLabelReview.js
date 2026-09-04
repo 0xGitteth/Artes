@@ -8,10 +8,23 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.ARTES_LABEL_REVIEW_PORT || 8791);
-const IMAGE_DIR = path.join(REPO_ROOT, '.tmp', 'moderation-test-images', 'external-poc');
-const INTAKE_PATH = path.join(REPO_ROOT, '.tmp', 'moderation-test-set', 'external-poc', 'intake.json');
+const DEFAULT_DATASET_SUBDIR = 'external-poc';
+const DATASET_SUBDIR_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
+const resolveDatasetSubdir = (value) => {
+  const candidate = String(value || DEFAULT_DATASET_SUBDIR).trim();
+  if (!DATASET_SUBDIR_PATTERN.test(candidate) || candidate.includes('..')) {
+    throw new Error('invalid_label_review_dataset_subdir');
+  }
+  return candidate;
+};
+
+const DATASET_SUBDIR = resolveDatasetSubdir(process.env.ARTES_LABEL_REVIEW_SUBDIR);
+const IMAGE_DIR = path.join(REPO_ROOT, '.tmp', 'moderation-test-images', DATASET_SUBDIR);
+const TEST_SET_DIR = path.join(REPO_ROOT, '.tmp', 'moderation-test-set', DATASET_SUBDIR);
+const INTAKE_PATH = path.join(TEST_SET_DIR, 'intake.json');
 const SOURCES_PATH = path.join(IMAGE_DIR, 'sources.json');
-const OUTPUT_PATH = path.join(REPO_ROOT, '.tmp', 'moderation-test-set', 'external-poc', 'labels.reviewed.json');
+const OUTPUT_PATH = path.join(TEST_SET_DIR, 'labels.reviewed.json');
 
 const ALLOWED_NUDITY = ['none', 'underwear_swimwear', 'implied_nude', 'bare_buttocks', 'female_bare_breasts', 'genitalia', 'male_topless'];
 const ALLOWED_SEXUAL_CONTEXT = ['none', 'suggestive', 'bdsm_kink', 'explicit_act'];
@@ -25,17 +38,41 @@ const MIME_BY_EXT = new Map([
   ['.webp', 'image/webp'],
 ]);
 
+const baseSuggestion = () => ({
+  nudity: null,
+  sexualContext: null,
+  graphicInjury: 'none',
+  sensitiveSignals: [],
+  possibleMinorConcern: false,
+});
+
 const suggestionsByFacet = (facet = '') => {
-  if (facet.includes('bare_buttocks')) {
-    return { nudity: 'bare_buttocks', sexualContext: 'none', graphicInjury: 'none', sensitiveSignals: [], possibleMinorConcern: false };
+  const normalized = String(facet || '').toLowerCase();
+  const suggestion = baseSuggestion();
+
+  if (normalized.includes('genitalia') || normalized.includes('vulva')) {
+    suggestion.nudity = 'genitalia';
+  } else if (normalized.includes('underwear') || normalized.includes('panties') || normalized.includes('lingerie') || normalized.includes('swimwear')) {
+    suggestion.nudity = 'underwear_swimwear';
+  } else if (normalized.includes('bare_buttocks')) {
+    suggestion.nudity = 'bare_buttocks';
+  } else if (normalized.includes('bare_breasts')) {
+    suggestion.nudity = 'female_bare_breasts';
+  } else if (normalized.includes('male_topless')) {
+    suggestion.nudity = 'male_topless';
+  } else if (normalized.includes('implied_nude')) {
+    suggestion.nudity = 'implied_nude';
+  } else if (normalized.includes('clothed_')) {
+    suggestion.nudity = 'none';
   }
-  if (facet.includes('bare_breasts')) {
-    return { nudity: 'female_bare_breasts', sexualContext: 'none', graphicInjury: 'none', sensitiveSignals: [], possibleMinorConcern: false };
+
+  if (normalized.includes('lingerie_bed') || normalized.includes('suggestive')) {
+    suggestion.sexualContext = 'suggestive';
+  } else if (suggestion.nudity) {
+    suggestion.sexualContext = 'none';
   }
-  if (facet.includes('clothed_')) {
-    return { nudity: 'none', sexualContext: 'none', graphicInjury: 'none', sensitiveSignals: [], possibleMinorConcern: false };
-  }
-  return { nudity: null, sexualContext: null, graphicInjury: null, sensitiveSignals: [], possibleMinorConcern: null };
+
+  return suggestion;
 };
 
 const escapeHtml = (value) => String(value ?? '')
@@ -112,7 +149,7 @@ const renderPage = async () => {
 <title>Artes POC label review</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#f4f4f4;color:#171717}.wrap{max-width:1100px;margin:auto;padding:24px}.card{display:grid;grid-template-columns:minmax(280px,46%) 1fr;background:white;margin:20px 0;border-radius:12px;overflow:hidden;box-shadow:0 1px 8px #0002}.card img{width:100%;height:100%;max-height:720px;object-fit:contain;background:#111}.body{padding:20px}.body label{display:block;margin:12px 0}.body select,.body input{width:100%;padding:8px;margin-top:4px}.body fieldset label{display:inline-block;margin:4px 12px 4px 0}.body fieldset input{width:auto}.hint{font-size:.92rem;opacity:.75}.status{margin-left:12px}button{padding:10px 16px;cursor:pointer}@media(max-width:760px){.card{grid-template-columns:1fr}.card img{max-height:560px}}
-</style></head><body><div class="wrap"><h1>Artes detectorlabels, lokale POC</h1><p>Bekijk elk beeld en bevestig alleen wat visueel waarneembaar is. Dit maakt nog geen trainingsdata.</p>${cards}</div>
+</style></head><body><div class="wrap"><h1>Artes detectorlabels, lokale POC</h1><p><strong>Set:</strong> ${escapeHtml(DATASET_SUBDIR)}</p><p>Bekijk elk beeld en bevestig alleen wat visueel waarneembaar is. Dit maakt nog geen trainingsdata.</p>${cards}</div>
 <script>
 async function saveCard(button){
   const card=button.closest('.card');
@@ -159,12 +196,12 @@ const saveHumanLabel = async (payload) => {
   const validation = validateArtesDetectorLabel(payload?.detectorLabel);
   if (!validation.valid) throw new Error(`invalid_detector_label:${validation.errors.join(',')}`);
   const normalized = normalizeArtesDetectorLabel(payload.detectorLabel);
-  let output = { schemaVersion: 1, labelVersion: 'artes_detector_v1', labelStatus: 'partial', trainingReady: false, items: [] };
+  let output = { schemaVersion: 1, labelVersion: 'artes_detector_v1', labelStatus: 'partial', datasetSubdir: DATASET_SUBDIR, trainingReady: false, items: [] };
   try { output = JSON.parse(await readFile(OUTPUT_PATH, 'utf8')); } catch { /* first save */ }
   const items = Array.isArray(output.items) ? output.items.filter((item) => item.fileName !== state.fileName) : [];
   items.push({ fileName: state.fileName, sha256: state.sha256, detectorLabel: normalized, labelStatus: 'human_confirmed', labelSource: 'local_human_review' });
   items.sort((a,b)=>a.fileName.localeCompare(b.fileName));
-  await writeFile(OUTPUT_PATH, `${JSON.stringify({ schemaVersion: 1, labelVersion: 'artes_detector_v1', labelStatus: items.length === states.length ? 'complete' : 'partial', trainingReady: false, itemCount: items.length, items }, null, 2)}\n`, 'utf8');
+  await writeFile(OUTPUT_PATH, `${JSON.stringify({ schemaVersion: 1, labelVersion: 'artes_detector_v1', datasetSubdir: DATASET_SUBDIR, labelStatus: items.length === states.length ? 'complete' : 'partial', trainingReady: false, itemCount: items.length, items }, null, 2)}\n`, 'utf8');
 };
 
 const server = http.createServer(async (request, response) => {
@@ -189,7 +226,7 @@ const server = http.createServer(async (request, response) => {
       const payload = await readJsonBody(request);
       await saveHumanLabel(payload);
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ ok: true, trainingReady: false }));
+      response.end(JSON.stringify({ ok: true, datasetSubdir: DATASET_SUBDIR, trainingReady: false }));
       return;
     }
     response.writeHead(404).end('Not found');
@@ -201,6 +238,7 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Artes local label review: http://${HOST}:${PORT}`);
+  console.log(`Dataset: ${DATASET_SUBDIR}`);
   console.log(`Output: ${path.relative(REPO_ROOT, OUTPUT_PATH)}`);
   console.log('Stop with Ctrl+C. No image or label data is sent to a cloud service.');
 });

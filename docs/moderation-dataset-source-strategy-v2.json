@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "strategyVersion": "moderation_dataset_sources_v2",
+  "goal": "Build a multi-source, rights-aware, source-pool-diverse real-photography corpus for the Artes nudity head without depending on Flickr as the default discovery path.",
+  "principles": [
+    "Prefer original creator uploads and direct permission over mirrors or aggregators.",
+    "Use Openverse only for discovery; verify license, adulthood and model/personality rights at the upstream source.",
+    "Treat copyright permission and model/personality rights as separate checks.",
+    "Prefer modern real photography for style calibration; archival material may be used only as supplemental coverage or benchmark material.",
+    "No platform or license alone makes a recognizable-person image training-eligible.",
+    "Synthetic images remain excluded from the first nudity-head pilot."
+  ],
+  "prioritySources": [
+    {
+      "source": "WordPress Photo Directory",
+      "priority": "high",
+      "strengths": ["CC0-only submissions", "original contributor work required", "modern community photography", "people/fashion categories"],
+      "limitations": ["recognizable-person model/personality rights are not guaranteed by CC0 alone"],
+      "use": "high-skin controls, swimwear, male-topless and clothed controls when person rights can be separately verified"
+    },
+    {
+      "source": "Wikimedia Commons original creator uploads",
+      "priority": "high",
+      "strengths": ["exact work-level licenses", "self-published/self-portrait works can establish creator/subject identity", "modern CC0/CC-BY photography exists"],
+      "limitations": ["do not use Commons merely as a mirror", "personality rights and adulthood still require verification", "many works are archival or visually unsuitable"],
+      "use": "self-portrait and creator-subject pools, especially male-topless/art-nude/implied-nude candidates"
+    },
+    {
+      "source": "DeviantArt creator-authorized photography",
+      "priority": "high_direct_permission",
+      "strengths": ["modern editorial/boudoir/art-nude/kink photography", "creators can control external AI-training permission"],
+      "limitations": ["individual work license and adult/model-rights evidence must be verified", "ordinary deviations are not assumed reusable"],
+      "use": "direct-permission route for implied-nude, suggestive and bdsm-kink"
+    },
+    {
+      "source": "Nappy",
+      "priority": "medium",
+      "strengths": ["CC0 photography", "modern Black and Brown representation", "commercial reuse allowed"],
+      "limitations": ["publicity/privacy rights are not waived by CC0", "model consent may still be required"],
+      "use": "diverse clothed/high-skin controls and direct-permission candidates"
+    },
+    {
+      "source": "Internet Archive and personal Creative Commons collections",
+      "priority": "medium",
+      "strengths": ["creator-published collections may carry explicit CC terms", "can provide independent source pools"],
+      "limitations": ["rights metadata is heterogeneous", "exact authorship and model rights need item-level verification"],
+      "use": "supplemental discovery and direct-permission leads"
+    },
+    {
+      "source": "Europeana and Smithsonian Open Access",
+      "priority": "supplemental",
+      "strengths": ["large open collections", "CC0/open-rights metadata", "strong provenance"],
+      "limitations": ["predominantly archival and often poor Artes-style calibration", "third-party/personality rights may remain"],
+      "use": "supplemental controls and future locked benchmark only"
+    }
+  ],
+  "discoveryLayer": {
+    "source": "Openverse",
+    "role": "discovery_only",
+    "reason": "Openverse indexes many upstream providers but does not verify individual work licensing or personality rights."
+  },
+  "blockedOrDeprioritized": [
+    {
+      "source": "Pixabay",
+      "reason": "terms prohibit unauthorized automated extraction/data mining for machine-learning purposes"
+    },
+    {
+      "source": "StockSnap",
+      "reason": "terms prohibit automated scraping/access without permission"
+    },
+    {
+      "source": "Pexels",
+      "reason": "project policy excludes ordinary route because ML/dataset use is not clearly permitted without separate authorization"
+    },
+    {
+      "source": "Unsplash",
+      "reason": "project policy excludes ordinary route because current license/platform guidance restricts ML-training use"
+    }
+  ],
+  "currentCandidateNotes": [
+    {
+      "source": "WordPress Photo Directory",
+      "candidate": "2025 swimsuit couple",
+      "status": "copyright_clear_model_rights_pending"
+    },
+    {
+      "source": "WordPress Photo Directory",
+      "candidate": "2025 bare-chest fashion portrait",
+      "status": "copyright_clear_model_rights_pending"
+    },
+    {
+      "source": "Wikimedia Commons",
+      "candidate": "2025 black-and-white male nude self-portrait by Gfnoah25/Rowan",
+      "status": "creator_subject_and_cc0_clear_adult_status_pending"
+    }
+  ],
+  "nextAction": "Run sourcing rounds across all high-priority sources, optimize first for new independent source pools for implied_nude and male_topless, and batch only rights-cleared candidates for local DINO/human review."
+}

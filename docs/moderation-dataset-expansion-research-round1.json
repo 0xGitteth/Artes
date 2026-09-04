@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "planRef": "moderation-dataset-expansion-plan-v1",
+  "principle": "A visually relevant lead is not dataset material until exact licence, adult status, model/personality rights and original-source requirements all pass.",
+  "leads": [
+    {
+      "id": "lead-implied-california-will-2025",
+      "target": "nudity:implied_nude",
+      "source": "Flickr",
+      "creator": "California Will",
+      "sourceUrl": "https://www.flickr.com/photos/31291809@N05/54753843823",
+      "year": 2025,
+      "visualFit": "high",
+      "description": "Contemporary implied nude portrait with model draped in a gold sheet.",
+      "rightsStatus": "needs_exact_license_and_model_rights_verification",
+      "trainingEligible": false,
+      "nextAction": "verify exact Flickr licence, adult status and model rights before any download"
+    },
+    {
+      "id": "lead-male-topless-chris-hunkeler-2024",
+      "target": "nudity:male_topless",
+      "source": "Flickr",
+      "creator": "Chris Hunkeler",
+      "sourceUrl": "https://www.flickr.com/photos/chrishunkeler/53824801859/",
+      "year": 2024,
+      "visualFit": "medium_high",
+      "description": "Contemporary shirtless adult male event/street portrait.",
+      "rightsStatus": "some_rights_reserved_exact_license_unknown",
+      "trainingEligible": false,
+      "nextAction": "verify exact licence and recognizable-subject rights/adult evidence"
+    },
+    {
+      "id": "style-implied-ryan-stanikk-2026",
+      "target": "nudity:implied_nude",
+      "source": "Flickr",
+      "creator": "Ryan Stanikk",
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/55134264748",
+      "year": 2026,
+      "visualFit": "very_high",
+      "description": "Contemporary editorial boudoir/implied nude with warm window light.",
+      "rightsStatus": "all_rights_reserved",
+      "trainingEligible": false,
+      "use": "style_calibration_only"
+    },
+    {
+      "id": "style-boudoir-ryan-stanikk-2026-set",
+      "targets": ["nudity:underwear_swimwear", "nudity:implied_nude", "sexualContext:suggestive", "sexualContext:bdsm_kink"],
+      "source": "Flickr",
+      "creator": "Ryan Stanikk",
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/sets/72177720332391930",
+      "year": 2026,
+      "visualFit": "very_high",
+      "description": "Modern Artes-like boudoir set including lingerie, implied nude, tattoos and harness styling.",
+      "rightsStatus": "checked_examples_all_rights_reserved",
+      "trainingEligible": false,
+      "use": "visual_style_calibration_only"
+    }
+  ],
+  "searchConclusion": {
+    "rightsClearedModernImpliedNudeFound": false,
+    "rightsClearedModernMaleToplessFound": false,
+    "rightsClearedModernBdsmKinkFound": false,
+    "rightsClearedModernUnderwearSwimwearFound": false,
+    "recommendation": "Continue external verification, but prepare contributor-authorized Artes imagery as the preferred route for tier-1 gaps if public rights-cleared material remains weak."
+  }
+}

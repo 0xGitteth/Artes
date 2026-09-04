@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "status": "approved_for_local_embedding_poc_only",
+  "round": "external_expansion_v1",
+  "policy": "Coverage-only expansion from an explicitly adult creator/model-owned Flickr pool. Every work is individually verified as CC BY 2.0, images remain local in .tmp, and nothing becomes training-ready from this manifest.",
+  "limitations": [
+    "All four examples come from one creator/model pool and therefore do not provide creator diversity.",
+    "These examples fill detector coverage gaps but are not modern Artes visual-style calibration.",
+    "Human review remains required before detector labels are accepted."
+  ],
+  "entries": [
+    {
+      "id": "external-expansion-v1-underwear-bulge-2020",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/49462574496/",
+      "resolvedImageUrl": "https://live.staticflickr.com/65535/49462574496_46f7e62901_o.png",
+      "creator": "Elements Of This World",
+      "year": 2020,
+      "visualFacet": "adult_female_underwear_panties_pubic_hair",
+      "copyrightLicense": "CC BY 2.0",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc_by_2_0",
+      "explicitAiTrainingPermission": true,
+      "recognizableHuman": true,
+      "adultStatus": "verified_over_21_by_source",
+      "modelRightsStatus": "creator_subject_owned",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Creator/model couple profile states both are well over 21 and explicitly permits commercial use and AI training for their Creative Commons works.",
+        "This exact Flickr photo was independently reviewed as CC BY 2.0.",
+        "Pinned image URL is the original Flickr CDN URL for photo ID 49462574496."
+      ],
+      "intendedUse": "coverage_only_candidate_for_nudity_underwear_swimwear_boundary",
+      "trainingReady": false
+    },
+    {
+      "id": "external-expansion-v1-underwear-grey-2017",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/32357111915/",
+      "resolvedImageUrl": "https://live.staticflickr.com/265/32357111915_f10c3651d4_o.png",
+      "creator": "Elements Of This World",
+      "year": 2017,
+      "visualFacet": "adult_female_grey_underwear_midriff",
+      "copyrightLicense": "CC BY 2.0",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc_by_2_0",
+      "explicitAiTrainingPermission": true,
+      "recognizableHuman": true,
+      "adultStatus": "verified_over_21_by_source",
+      "modelRightsStatus": "creator_subject_owned",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Creator/model couple profile states both are well over 21 and explicitly permits commercial use and AI training for their Creative Commons works.",
+        "This exact Flickr photo was independently reviewed as CC BY 2.0.",
+        "Pinned image URL is the original Flickr CDN URL for photo ID 32357111915."
+      ],
+      "intendedUse": "coverage_only_candidate_for_nudity_underwear_swimwear",
+      "trainingReady": false
+    },
+    {
+      "id": "external-expansion-v1-underwear-black-2019",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/46633247011/",
+      "resolvedImageUrl": "https://live.staticflickr.com/4840/46633247011_0af7851bbb_o.png",
+      "creator": "Elements Of This World",
+      "year": 2019,
+      "visualFacet": "adult_female_black_panties_lingerie_bed",
+      "copyrightLicense": "CC BY 2.0",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc_by_2_0",
+      "explicitAiTrainingPermission": true,
+      "recognizableHuman": true,
+      "adultStatus": "verified_over_21_by_source",
+      "modelRightsStatus": "creator_subject_owned",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Creator/model couple profile states both are well over 21 and explicitly permits commercial use and AI training for their Creative Commons works.",
+        "This exact Flickr photo was independently reviewed as CC BY 2.0.",
+        "Pinned image URL is the original Flickr CDN URL for photo ID 46633247011."
+      ],
+      "intendedUse": "coverage_only_candidate_for_underwear_lingerie_and_suggestive_boundary",
+      "trainingReady": false
+    },
+    {
+      "id": "external-expansion-v1-genitalia-2022",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/elementsofthisworld/52567311403/",
+      "resolvedImageUrl": "https://live.staticflickr.com/65535/52567311403_c2230f51a7_o.jpg",
+      "creator": "Elements Of This World",
+      "year": 2022,
+      "visualFacet": "adult_female_genitalia_vulva_mons_pubic_hair_closeup",
+      "copyrightLicense": "CC BY 2.0",
+      "copyrightLicenseVerified": true,
+      "rightsStatus": "cc_by_2_0",
+      "explicitAiTrainingPermission": true,
+      "recognizableHuman": true,
+      "adultStatus": "verified_over_21_by_source",
+      "modelRightsStatus": "creator_subject_owned",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidence": [
+        "Creator/model couple profile states both are well over 21 and explicitly permits commercial use and AI training for their Creative Commons works.",
+        "This exact Flickr photo was independently reviewed as CC BY 2.0.",
+        "Pinned image URL is the original Flickr CDN URL for photo ID 52567311403."
+      ],
+      "intendedUse": "coverage_only_candidate_for_nudity_genitalia_not_style_calibration",
+      "trainingReady": false
+    }
+  ]
+}

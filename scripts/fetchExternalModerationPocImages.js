@@ -6,8 +6,31 @@ import { assertExternalImageTrainingEligible } from '../functions/moderationExte
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
-const MANIFEST_PATH = path.join(REPO_ROOT, 'docs', 'moderation-external-poc-manifest-v1.json');
-const OUTPUT_DIR = path.join(REPO_ROOT, '.tmp', 'moderation-test-images', 'external-poc');
+const DEFAULT_MANIFEST_NAME = 'moderation-external-poc-manifest-v1.json';
+const DEFAULT_OUTPUT_SUBDIR = 'external-poc';
+const MANIFEST_NAME_PATTERN = /^[A-Za-z0-9._-]+\.json$/;
+const OUTPUT_SUBDIR_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
+const resolveBoundedName = (value, fallback, pattern, errorCode) => {
+  const candidate = String(value || fallback).trim();
+  if (!pattern.test(candidate) || candidate.includes('..')) throw new Error(errorCode);
+  return candidate;
+};
+
+const MANIFEST_NAME = resolveBoundedName(
+  process.env.ARTES_EXTERNAL_POC_MANIFEST,
+  DEFAULT_MANIFEST_NAME,
+  MANIFEST_NAME_PATTERN,
+  'external_poc_manifest_name_invalid',
+);
+const OUTPUT_SUBDIR = resolveBoundedName(
+  process.env.ARTES_EXTERNAL_POC_OUTPUT_SUBDIR,
+  DEFAULT_OUTPUT_SUBDIR,
+  OUTPUT_SUBDIR_PATTERN,
+  'external_poc_output_subdir_invalid',
+);
+const MANIFEST_PATH = path.join(REPO_ROOT, 'docs', MANIFEST_NAME);
+const OUTPUT_DIR = path.join(REPO_ROOT, '.tmp', 'moderation-test-images', OUTPUT_SUBDIR);
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Map([
   ['image/jpeg', '.jpg'],
@@ -162,6 +185,8 @@ const main = async () => {
   await writeFile(metadataPath, `${JSON.stringify({
     schemaVersion: 1,
     manifestStatus: manifest.status,
+    manifestName: MANIFEST_NAME,
+    outputSubdir: OUTPUT_SUBDIR,
     imageCount: records.length,
     outputScope: 'local_embedding_poc_only',
     trainingReady: false,
@@ -171,6 +196,7 @@ const main = async () => {
   process.stdout.write(`${JSON.stringify({
     ok: true,
     fetched: records.length,
+    manifestName: MANIFEST_NAME,
     outputDirectory: path.relative(REPO_ROOT, OUTPUT_DIR),
     metadataFile: path.relative(REPO_ROOT, metadataPath),
     trainingReady: false,

@@ -135,11 +135,14 @@ export const buildGroupStratifiedDatasetManifest = ({
   if (!version) throw new Error('missing_dataset_version');
   if (!validateRatios(ratios)) throw new Error('invalid_split_ratios');
 
-  const eligible = (Array.isArray(items) ? items : []).filter((item) => (
+  const allItems = Array.isArray(items) ? items : [];
+  const eligible = allItems.filter((item) => (
     item?.trainingReady === true
     && item?.benchmarkOnly !== true
     && cleanString(item?.labelVersion) === ARTES_DETECTOR_LABEL_VERSION
     && cleanString(item?.semanticEmbedding?.semanticClusterId)
+    && item?.semanticEmbedding?.semanticClusterApproved === true
+    && cleanString(item?.sourcePoolId)
     && cleanString(item?.sourceExampleId)
   ));
 
@@ -206,7 +209,7 @@ export const buildGroupStratifiedDatasetManifest = ({
       return {
         sourceExampleId: item.sourceExampleId,
         semanticClusterId: item.semanticEmbedding.semanticClusterId,
-        sourcePoolId: cleanString(item.sourcePoolId) || null,
+        sourcePoolId: cleanString(item.sourcePoolId),
         leakageGroupId,
         split: leakageGroupAssignments[leakageGroupId],
       };
@@ -225,9 +228,9 @@ export const buildGroupStratifiedDatasetManifest = ({
     labelVersion: ARTES_DETECTOR_LABEL_VERSION,
     ratios: { ...ratios },
     eligibleItemCount: eligible.length,
-    excludedItemCount: Math.max((Array.isArray(items) ? items.length : 0) - eligible.length, 0),
+    excludedItemCount: Math.max(allItems.length - eligible.length, 0),
     clusterCount: new Set(eligible.map((item) => cleanString(item?.semanticEmbedding?.semanticClusterId))).size,
-    sourcePoolCount: new Set(eligible.map((item) => cleanString(item?.sourcePoolId)).filter(Boolean)).size,
+    sourcePoolCount: new Set(eligible.map((item) => cleanString(item?.sourcePoolId))).size,
     leakageGroupCount: groups.size,
     splitCounts,
     stratumCounts,

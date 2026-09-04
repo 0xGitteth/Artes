@@ -22,6 +22,20 @@ test('expansion runner remains loopback-only and cleans up DINO service', () => 
   assert.doesNotMatch(source, /artes-media-app|artes-staging|firebase deploy|gcloud/);
 });
 
+test('expansion runner supports resumable local processing without re-fetching image bytes', () => {
+  assert.match(source, /ARTES_EXTERNAL_POC_SKIP_FETCH/);
+  assert.match(source, /SKIP_FETCH="\$\{ARTES_EXTERNAL_POC_SKIP_FETCH:-0\}"/);
+  assert.match(source, /sources\.json/);
+  assert.match(source, /Reusing already fetched external expansion images/);
+});
+
+test('expansion runner allows bounded slow startup and first-model warmup', () => {
+  assert.match(source, /ARTES_VISION_STARTUP_WAIT_SECONDS:-120/);
+  assert.match(source, /ARTES_CUSTOM_VISION_TIMEOUT_MS:-300000/);
+  assert.match(source, /STARTUP_WAIT_SECONDS.*600/);
+  assert.match(source, /seq 1 "\$STARTUP_WAIT_SECONDS"/);
+});
+
 test('expansion runner does not promote or overwrite original seed outputs', () => {
   assert.match(source, /Original external-poc seed directories were not modified/);
   assert.doesNotMatch(source, /trainingReady=true|trainingReady: true/);

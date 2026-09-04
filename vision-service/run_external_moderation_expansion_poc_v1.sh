@@ -11,9 +11,17 @@ MANIFEST_NAME="moderation-external-expansion-poc-v1.json"
 OUTPUT_SUBDIR="external-expansion-v1"
 IMAGE_DIR="$REPO_ROOT/.tmp/moderation-test-images/$OUTPUT_SUBDIR"
 OUTPUT_DIR="$REPO_ROOT/.tmp/moderation-test-set/$OUTPUT_SUBDIR"
+STARTUP_WAIT_SECONDS="${ARTES_VISION_STARTUP_WAIT_SECONDS:-120}"
+POC_TIMEOUT_MS="${ARTES_CUSTOM_VISION_TIMEOUT_MS:-300000}"
+SKIP_FETCH="${ARTES_EXTERNAL_POC_SKIP_FETCH:-0}"
 
 if [[ ! -x "$VENV_PYTHON" ]]; then
   echo "Vision POC venv ontbreekt. Run eerst: bash vision-service/setup_cpu_poc.sh" >&2
+  exit 2
+fi
+
+if ! [[ "$STARTUP_WAIT_SECONDS" =~ ^[0-9]+$ ]] || [[ "$STARTUP_WAIT_SECONDS" -lt 1 ]] || [[ "$STARTUP_WAIT_SECONDS" -gt 600 ]]; then
+  echo "ARTES_VISION_STARTUP_WAIT_SECONDS moet een geheel getal tussen 1 en 600 zijn." >&2
   exit 2
 fi
 
@@ -21,9 +29,17 @@ mkdir -p "$REPO_ROOT/.tmp" "$MODEL_CACHE"
 export HF_HOME="$MODEL_CACHE"
 
 cd "$REPO_ROOT"
-ARTES_EXTERNAL_POC_MANIFEST="$MANIFEST_NAME" \
-ARTES_EXTERNAL_POC_OUTPUT_SUBDIR="$OUTPUT_SUBDIR" \
-node scripts/fetchExternalModerationPocImages.js
+if [[ "$SKIP_FETCH" == "1" ]]; then
+  if [[ ! -d "$IMAGE_DIR" || ! -f "$IMAGE_DIR/sources.json" ]]; then
+    echo "Kan fetch niet overslaan: bestaande expansion-afbeeldingen of sources.json ontbreken." >&2
+    exit 2
+  fi
+  echo "Reusing already fetched external expansion images from .tmp/moderation-test-images/$OUTPUT_SUBDIR"
+else
+  ARTES_EXTERNAL_POC_MANIFEST="$MANIFEST_NAME" \
+  ARTES_EXTERNAL_POC_OUTPUT_SUBDIR="$OUTPUT_SUBDIR" \
+  node scripts/fetchExternalModerationPocImages.js
+fi
 
 cd "$SCRIPT_DIR"
 "$VENV_PYTHON" -m uvicorn app:app \
@@ -39,9 +55,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 ready=false
-for _attempt in $(seq 1 30); do
+for _attempt in $(seq 1 "$STARTUP_WAIT_SECONDS"); do
   if ! kill -0 "$VISION_PID" 2>/dev/null; then
     echo "Visionservice stopte tijdens startup." >&2
+    echo "---- vision service log ----" >&2
     tail -n 120 "$LOG_FILE" >&2 || true
     exit 1
   fi
@@ -53,7 +70,8 @@ for _attempt in $(seq 1 30); do
 done
 
 if [[ "$ready" != "true" ]]; then
-  echo "Visionservice werd niet op tijd healthy." >&2
+  echo "Visionservice werd niet binnen ${STARTUP_WAIT_SECONDS}s healthy." >&2
+  echo "---- vision service log ----" >&2
   tail -n 120 "$LOG_FILE" >&2 || true
   exit 1
 fi
@@ -62,7 +80,7 @@ cd "$REPO_ROOT"
 if ! ARTES_AUTHORIZED_TEST_IMAGE_DIR="$IMAGE_DIR" \
   ARTES_AUTHORIZED_TEST_OUTPUT_DIR="$OUTPUT_DIR" \
   ARTES_CUSTOM_VISION_URL="$ENDPOINT" \
-  ARTES_CUSTOM_VISION_TIMEOUT_MS="60000" \
+  ARTES_CUSTOM_VISION_TIMEOUT_MS="$POC_TIMEOUT_MS" \
   node scripts/prepareAuthorizedModerationTestSet.js --confirm-authorized
 then
   echo "---- vision service log ----" >&2

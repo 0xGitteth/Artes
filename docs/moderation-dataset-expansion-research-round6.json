@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "goal": "Resolve new independent source pools for the first nudity head, prioritizing implied_nude and male_topless while keeping copyright, adulthood, model-rights and source-pool gates fail-closed.",
+  "findings": [
+    {
+      "id": "research-bodymorph-daniel-b001-2021",
+      "targets": ["nudity:male_topless"],
+      "sourcePoolCandidate": "commons_bodymorph_danielmms_b001_2021",
+      "sourcePlatform": "wikimedia_commons_original",
+      "creator": "DanielMMS",
+      "exampleUrls": [
+        "https://commons.wikimedia.org/wiki/File:Bodymorphproj_DanielMMS_modB001_20211025_posA01.jpg",
+        "https://commons.wikimedia.org/wiki/File:Bodymorphproj_DanielMMS_modB001_20211025_posA04.jpg",
+        "https://commons.wikimedia.org/wiki/File:Bodymorphproj_DanielMMS_modB001_20211025_pos09.jpg"
+      ],
+      "evidenceSummary": "The Body Morphology Project metadata explicitly records a 19-year-old male model, a model release, torso-unclothed poses, own-work authorship and CC BY-SA 4.0 licensing.",
+      "rightsFinding": "Adult status and model-release evidence are unusually strong, but the exact works are ShareAlike. Current Artes pilot policy does not admit SA-licensed training images without a separate license-policy decision because downstream model/derivative obligations are not assumed to be settled.",
+      "visualFit": "low_to_medium_coverage_only",
+      "sourcePoolIndependent": true,
+      "rightsEvidenceStrength": "very_high_except_sharealike_policy",
+      "trainingEligible": false,
+      "nextAction": "Keep as a high-confidence coverage lead. Do not train on it unless Artes explicitly clears ShareAlike for model-training use."
+    },
+    {
+      "id": "research-rio-shirtless-cc0-consent-2023",
+      "targets": ["nudity:male_topless"],
+      "sourcePoolCandidate": "commons_wilfredor_rio_consent_2023",
+      "sourcePlatform": "wikimedia_commons_original",
+      "creator": "Wilfredor",
+      "exampleUrls": [
+        "https://commons.wikimedia.org/wiki/File:Shirtless_man_carrying_a_bag_in_Rio_de_Janeiro,_Brazil.jpg"
+      ],
+      "evidenceSummary": "2023 real photography, CC0, uploader-created, and the file explicitly states that all identifiable persons specifically consented to publication under a free license.",
+      "rightsFinding": "Copyright and publication-consent evidence are strong. The reviewed page does not provide an explicit age or adult-status statement for the depicted person, so it remains fail-closed under the Artes adult-evidence requirement.",
+      "visualFit": "medium",
+      "sourcePoolIndependent": true,
+      "rightsEvidenceStrength": "high_missing_explicit_adult_status",
+      "trainingEligible": false,
+      "nextAction": "Seek source-level adult-status confirmation; if obtained, this is a strong CC0 male_topless source-pool candidate."
+    },
+    {
+      "id": "research-peter-kennedy-self-portrait-2024",
+      "targets": ["nudity:male_topless"],
+      "sourcePoolCandidate": "flickr_peter_kennedy_self_2024",
+      "sourcePlatform": "flickr",
+      "creatorModel": "Peter Kennedy / fkdusjpe14",
+      "exampleUrls": [
+        "https://www.flickr.com/photos/200759319@N03/54221554493/",
+        "https://www.flickr.com/photos/200759319@N03/54221554498/"
+      ],
+      "evidenceSummary": "Two 2024 works explicitly describe themselves as shirtless self-portraits, one outdoors and one at a waterfall, and are visually close to contemporary casual Artes photography.",
+      "rightsFinding": "Self-subject evidence is strong, but the reviewed pages did not expose a sufficiently clear exact training-compatible license or explicit adulthood evidence.",
+      "visualFit": "high",
+      "sourcePoolIndependent": true,
+      "rightsEvidenceStrength": "partial",
+      "trainingEligible": false,
+      "nextAction": "Verify exact Flickr license and adulthood evidence or obtain direct permission."
+    },
+    {
+      "id": "research-chris-foxson-shirtless-2024",
+      "targets": ["nudity:male_topless"],
+      "sourcePoolCandidate": "commons_chris_foxson_2024",
+      "sourcePlatform": "wikimedia_commons_original",
+      "creator": "Christopher Tillotson",
+      "exampleUrls": [
+        "https://commons.wikimedia.org/wiki/File:Chris_Foxson_Profile_Picture_2.png"
+      ],
+      "evidenceSummary": "2024 own work showing a shirtless subject, licensed CC BY-SA 4.0 and uploaded by the stated copyright holder.",
+      "rightsFinding": "The page does not establish that the photographer and subject are the same person, does not provide explicit adult status, and is ShareAlike. It therefore fails multiple Artes training gates despite good visual recency.",
+      "visualFit": "medium_to_high",
+      "sourcePoolIndependent": true,
+      "rightsEvidenceStrength": "partial",
+      "trainingEligible": false,
+      "nextAction": "Do not promote without identity/adult/model-rights evidence and a ShareAlike policy decision."
+    },
+    {
+      "id": "research-angelique-handbra-2013",
+      "targets": ["nudity:implied_nude", "nudity:female_bare_breasts"],
+      "sourcePoolCandidate": "flickr_lies_thru_a_lens_angelique_2013",
+      "sourcePlatform": "flickr_via_verified_commons_license",
+      "creator": "Lies Thru a Lens",
+      "exampleUrls": [
+        "https://commons.wikimedia.org/wiki/File:Angelique_topless_model.jpg",
+        "https://commons.wikimedia.org/wiki/File:Angelique_(8754815022).jpg"
+      ],
+      "evidenceSummary": "The exact artistic-nude handbra work identifies Angelique as a 19-year-old model and has a bot-verified irrevocable CC BY 2.0 license. The same shoot is explicitly described as portraits, fashion, boudoir and artistic nude.",
+      "rightsFinding": "Copyright license and adult status are strong. The reviewed pages do not contain explicit model/personality-rights authorization for reuse in Artes moderation ML; posing for the shoot is not treated as equivalent to that authorization.",
+      "visualFit": "medium_but_relevant_boundary",
+      "sourcePoolIndependent": true,
+      "rightsEvidenceStrength": "high_missing_model_rights_scope",
+      "trainingEligible": false,
+      "nextAction": "High-priority direct-permission lead for implied_nude. Human review would still decide whether the handbra composition is implied_nude or female_bare_breasts."
+    },
+    {
+      "id": "research-courtney-morris-cc0-body-crops-2015",
+      "targets": ["nudity:none", "nudity:underwear_swimwear", "nudity:implied_nude"],
+      "sourcePoolCandidate": "commons_courtney_morris_body_crops_2015",
+      "sourcePlatform": "wikimedia_commons_original",
+      "creator": "Courtney Morris / Courtneymorris95",
+      "exampleUrls": [
+        "https://commons.wikimedia.org/wiki/File:20_year_old_female_wearing_non-branded_black_bikini_bottom.jpg",
+        "https://commons.wikimedia.org/wiki/File:Close_up_of_slightly_wet_female_stomach.jpg",
+        "https://commons.wikimedia.org/wiki/File:Nude_female_with_digital_sticker_covering_private_parts.jpg"
+      ],
+      "evidenceSummary": "Own-work CC0 body-detail photography includes an explicitly 20-year-old bikini-bottom subject and other early-20s body-detail images. Several examples appear designed as body crops rather than face-centric portraits.",
+      "rightsFinding": "Copyright and age evidence are promising, but the source pages do not explicitly establish photographer-subject identity or a model release. Non-recognizable crops may avoid the recognizable-person model-rights gate, but that must be confirmed from the actual image before eligibility can change. The digitally censored nude is not representative Artes imagery and should not be used as style calibration.",
+      "visualFit": "low_to_medium_coverage_and_hard_negative_only",
+      "sourcePoolIndependent": true,
+      "rightsEvidenceStrength": "promising_pending_recognizability_review",
+      "trainingEligible": false,
+      "nextAction": "Visually inspect only the CC0 non-face crops. If a candidate is genuinely non-recognizable and label-relevant, it can be reconsidered as coverage-only data under the existing external eligibility guard."
+    },
+    {
+      "id": "research-sasha-kargaltsev-published-consent",
+      "targets": ["nudity:male_topless"],
+      "sourcePoolCandidate": "flickr_sasha_kargaltsev_male_portraits",
+      "sourcePlatform": "flickr_via_verified_commons_license",
+      "creator": "Sasha Kargaltsev",
+      "exampleUrls": [
+        "https://commons.wikimedia.org/wiki/File:Paul_posing.jpg",
+        "https://commons.wikimedia.org/wiki/File:Leonid.jpg",
+        "https://commons.wikimedia.org/wiki/File:Andrey_standing_around_shirtless.jpg"
+      ],
+      "evidenceSummary": "Multiple topless male portraits carry verified CC BY 2.0 licensing and Wikimedia's Published consent marker.",
+      "rightsFinding": "Copyright and consent signals are substantially stronger than ordinary public Flickr material, but exact individual adulthood evidence was not established in this review. The imagery is also dated and should be coverage-only even if later cleared.",
+      "visualFit": "low_to_medium_coverage_only",
+      "sourcePoolIndependent": true,
+      "rightsEvidenceStrength": "high_missing_exact_adult_evidence",
+      "trainingEligible": false,
+      "nextAction": "Verify exact subject adulthood for one or more works before promotion; keep all works from this photographer/model ecosystem in one leakage pool where appropriate."
+    }
+  ],
+  "conclusion": {
+    "newTrainingApprovedSourcePoolFound": false,
+    "bestMaleToplessRightsLead": "commons_wilfredor_rio_consent_2023",
+    "bestMaleToplessAdultAndReleaseLead": "commons_bodymorph_danielmms_b001_2021",
+    "bestImpliedNudeDirectPermissionLead": "flickr_lies_thru_a_lens_angelique_2013",
+    "publicSourcingDiagnosis": "The missing field is now usually one specific requirement rather than broad uncertainty: explicit adult status, model-rights scope, or ShareAlike policy clearance.",
+    "recommendedNextRoute": "Continue public exact-work verification, but start treating direct contributor permission as the primary route for modern implied_nude and contemporary male_topless diversity. Do not relax the gates to force the 140-image probe."
+  }
+}

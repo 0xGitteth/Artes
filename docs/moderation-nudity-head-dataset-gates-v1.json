@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "planVersion": "nudity_head_dataset_gates_v1",
+  "purpose": "Define measurable data gates for the first supervised Artes nudity classifier head without pretending the full moderation detector is ready.",
+  "scope": {
+    "firstHead": "nudity",
+    "embeddingBackbone": "dinov2_vitb14",
+    "classes": [
+      "none",
+      "underwear_swimwear",
+      "implied_nude",
+      "bare_buttocks",
+      "female_bare_breasts",
+      "genitalia",
+      "male_topless"
+    ],
+    "outOfScopeForFirstHead": [
+      "sexualContext",
+      "graphicInjury",
+      "sensitiveSignals",
+      "possibleMinorConcern"
+    ]
+  },
+  "experimentalProbeGate": {
+    "purpose": "Allow an offline diagnostic linear probe only; never runtime or production promotion.",
+    "minimumTotalHumanLabeledImages": 140,
+    "minimumImagesPerClass": 15,
+    "minimumSourcePoolsTotal": 10,
+    "minimumSourcePoolsPerClass": 3,
+    "maxSingleSourcePoolFraction": 0.25,
+    "runtimeEligible": false
+  },
+  "preferredPilotTrainingGate": {
+    "minimumTotalHumanLabeledImages": 280,
+    "targetImagesPerClass": 40,
+    "minimumImagesPerClass": 30,
+    "minimumSourcePoolsTotal": 18,
+    "minimumSourcePoolsPerClass": 4,
+    "maxSingleSourcePoolFraction": 0.15,
+    "runtimeEligible": false,
+    "reason": "This is still a pilot-sized dataset. Passing this gate permits supervised offline training and evaluation, not automatic moderation authority."
+  },
+  "pilotGoldenBenchmark": {
+    "minimumImagesPerClass": 10,
+    "minimumTotalImages": 70,
+    "sourcePoolsMustBeDisjointFromTraining": true,
+    "benchmarkOnly": true,
+    "trainingReady": false,
+    "notes": "A 70-image benchmark is sufficient only for early directional evaluation. Production promotion requires a larger locked benchmark and explicit per-class acceptance criteria."
+  },
+  "dataQualityRequirements": {
+    "humanDetectorLabelRequired": true,
+    "rightsAndModerationMlUseRequired": true,
+    "adultAndModelRightsEvidenceRequiredForRecognizablePeople": true,
+    "sourcePoolIdRequired": true,
+    "sourcePoolAwareSplitRequired": true,
+    "semanticClusterMustBeExplicitlyApproved": true,
+    "dinoNeighborDistanceMayNotAssignLabel": true,
+    "dinoNeighborDistanceMayNotAutoApproveSemanticCluster": true,
+    "realPhotographyPreferred": true,
+    "syntheticImagesExcludedFromThisPilot": true
+  },
+  "futureHeads": [
+    {
+      "head": "sexualContext",
+      "values": ["none", "suggestive", "bdsm_kink", "explicit_act"],
+      "status": "data_collection_after_nudity_head_is_viable"
+    },
+    {
+      "head": "safety",
+      "values": ["graphicInjury", "sensitiveSignals", "possibleMinorConcern"],
+      "status": "separate_sensitive_dataset_program_required"
+    }
+  ]
+}

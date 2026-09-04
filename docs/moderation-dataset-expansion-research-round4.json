@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only",
+  "goal": "Continue independent source-pool verification for missing implied_nude, male_topless, suggestive and bdsm_kink coverage after contributor-authorized intake became test-green.",
+  "findings": [
+    {
+      "id": "research-brooke-shaden-modern-implied-self-portrait",
+      "targets": ["nudity:implied_nude"],
+      "sourcePlatform": "flickr",
+      "creatorModel": "Brooke Shaden",
+      "sourceUrl": "https://www.flickr.com/photos/brookeshaden/54644412780/",
+      "year": 2025,
+      "evidenceSummary": "The exact Flickr post describes Brooke Shaden's own self-portrait practice and explicitly discusses an implied-nude self-portrait/body representation context. The account profile identifies her as a fine-art self-portrait photographer.",
+      "rightsFinding": "The exact 2025 work is marked All Rights Reserved on Flickr. Self-subject authorship improves adult/model-rights confidence but does not authorize Artes moderation-ML use.",
+      "visualFit": "very_high",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "use": "modern_visual_style_reference_only",
+      "nextAction": "Do not download for ML use without explicit rights-holder permission covering Artes moderation model development."
+    },
+    {
+      "id": "research-ronald-frazier-self-portrait-pages",
+      "targets": ["nudity:male_topless", "nudity:genitalia"],
+      "sourcePlatform": "flickr",
+      "creatorModel": "Ronald Douglas Frazier",
+      "albumUrl": "https://www.flickr.com/photos/tomronworldwide/albums/72157638970074073/",
+      "candidateUrls": [
+        "https://www.flickr.com/photos/tomronworldwide/55133873401/",
+        "https://www.flickr.com/photos/tomronworldwide/51305074946/",
+        "https://www.flickr.com/photos/tomronworldwide/50948459937/"
+      ],
+      "evidenceSummary": "The adult-restricted album states viewers must be over 18, says the images are of Ronald and were taken by him or guest photographers, and applies CC BY-SA 3.0 at album level. Multiple exact recent/2021 pages are explicitly titled Self-portrait and are marked Some rights reserved.",
+      "rightsFinding": "This remains a promising independent source pool, but album wording permits guest photographers and the currently indexed exact pages do not expose enough machine-readable evidence to prove the individual work is self-shot and covered by the album-level CC BY-SA grant. Content class also still requires image-level visual confirmation.",
+      "visualFit": "medium",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Keep research-only until exact image authorship, exact Creative Commons license and desired detector class are all independently verified."
+    },
+    {
+      "id": "research-public-bdsm-kink-search-round4",
+      "targets": ["sexualContext:bdsm_kink"],
+      "sourcePlatform": "flickr",
+      "evidenceSummary": "Targeted searches surface bondage/harness-tagged photography, but current results are predominantly old event photography, irrelevant uses of the word bondage/harness, virtual-world imagery, or works with only generic Some rights reserved metadata.",
+      "rightsFinding": "No contemporary Artes-like non-explicit BDSM/kink photograph was found with sufficiently clear creator/model/adult/ML-use rights in this round.",
+      "visualFit": "low_to_mixed",
+      "sourcePoolIndependent": true,
+      "trainingEligible": false,
+      "nextAction": "Prefer contributor-authorized contemporary Artes-like imagery for this boundary rather than relaxing rights checks."
+    }
+  ],
+  "conclusion": {
+    "newTrainingApprovedSourcePoolFound": false,
+    "publicSourcingStillRightsLimited": true,
+    "modernImpliedNudeStyleReferenceFound": true,
+    "ronaldFrazierStillPromisingButUnresolved": true,
+    "contributorAuthorizedRouteTechnicallyReady": true,
+    "preferredNextRoute": "Use public sources only when exact image-level rights are fully verified; otherwise collect contributor-authorized real Artes-like examples from multiple independent source pools for implied_nude, male_topless, suggestive and bdsm_kink."
+  }
+}

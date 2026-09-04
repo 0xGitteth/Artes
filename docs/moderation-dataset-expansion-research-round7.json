@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "status": "research_with_one_rights_cleared_candidate",
+  "goal": "Promote only exact works that satisfy copyright, adult-status, model-rights and original-source requirements for the nudity-head acquisition backlog.",
+  "findings": [
+    {
+      "id": "isana-chiba-shirtless-self-portrait-2019",
+      "targets": ["nudity:male_topless"],
+      "sourcePoolId": "flickr_isana_chiba_self",
+      "sourcePlatform": "flickr",
+      "sourceUrl": "https://www.flickr.com/photos/202388154@N07/54384348264/",
+      "rightsEvidenceUrl": "https://commons.wikimedia.org/wiki/File:IsanaChiba.jpg",
+      "creatorModel": "Isana Chiba",
+      "imageDate": "2019-04-25",
+      "birthDate": "1999-04-25",
+      "ageAtImage": 20,
+      "copyrightLicense": "CC0 1.0",
+      "copyrightLicenseVerified": true,
+      "adultStatus": "verified_adult",
+      "modelRightsStatus": "self_subject",
+      "sourceIsOriginalCreatorLocation": true,
+      "evidenceSummary": "The exact Flickr work is identified as a shirtless self-portrait. Commons records Isana Chiba as subject, author and copyright holder, gives his birth date and image date, and records a FlickrReviewR confirmation that the Flickr original was CC0.",
+      "rightsGateEligible": true,
+      "humanDetectorReviewRequired": true,
+      "trainingReady": false,
+      "nextAction": "Fetch from the original Flickr route, create a local DINO embedding and obtain a human detector label before this image can enter curated dataset assessment."
+    },
+    {
+      "id": "courtney-morris-cc0-body-crops-followup",
+      "targets": ["nudity:underwear_swimwear", "nudity:none", "nudity:implied_nude"],
+      "sourcePoolId": "commons_courtney_morris_body_crops_2015",
+      "rightsEvidence": "Own-work CC0 files explicitly describe a 20-year-old or early-20s female subject.",
+      "remainingQuestion": "Whether selected crops contain a recognizable person and, if so, whether uploader/photographer and subject identity or model-rights evidence can be established.",
+      "rightsGateEligible": false,
+      "trainingReady": false,
+      "nextAction": "Use only if a selected crop is genuinely non-recognizable or additional model-rights evidence is established; avoid digitally censored nude imagery as Artes style calibration."
+    }
+  ],
+  "conclusion": {
+    "newRightsClearedSourcePools": 1,
+    "newRightsClearedImagesPendingHumanLabel": 1,
+    "classImprovedAfterHumanConfirmation": "male_topless",
+    "probeSourcePoolTarget": 10,
+    "currentHumanLabeledSourcePools": 2,
+    "potentialAfterThisBatch": 3,
+    "priorityAfterThisBatch": "Find at least two additional independent male_topless pools and three implied_nude pools while continuing diversity acquisition for every other nudity class."
+  }
+}

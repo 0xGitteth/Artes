@@ -11,6 +11,7 @@ const INTAKE_PATH = path.join(REPO_ROOT, '.tmp', 'moderation-contributor-intake'
 const OUTPUT_PATH = path.join(REPO_ROOT, '.tmp', 'moderation-contributor-intake', 'embedding-intake.json');
 const ENDPOINT = String(process.env.ARTES_CUSTOM_VISION_URL || 'http://127.0.0.1:8787').trim();
 const TIMEOUT_MS = Number(process.env.ARTES_CUSTOM_VISION_TIMEOUT_MS || 300000);
+const EXPECTED_PROVIDER = 'artes_custom_vision';
 const EXPECTED_MODEL = 'dinov2_vitb14';
 const EXPECTED_DIMENSION = 768;
 const MIME_BY_EXT = new Map([
@@ -19,6 +20,7 @@ const MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
   ['.webp', 'image/webp'],
 ]);
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 const fail = (code, fileName = null) => {
@@ -28,6 +30,14 @@ const fail = (code, fileName = null) => {
 if (!process.argv.includes('--confirm-authorized')) {
   fail('explicit_authorization_confirmation_required');
 }
+
+let endpointUrl;
+try {
+  endpointUrl = new URL(ENDPOINT);
+} catch {
+  fail('invalid_contributor_embedding_endpoint');
+}
+if (!LOOPBACK_HOSTS.has(endpointUrl.hostname)) fail('contributor_embedding_endpoint_must_be_loopback');
 
 const intake = JSON.parse(await readFile(INTAKE_PATH, 'utf8'));
 if (intake?.intakeType !== 'contributor_authorized_moderation_images') fail('invalid_contributor_intake_type');
@@ -50,8 +60,15 @@ for (const item of intake.items) {
   if (sha256(buffer) !== item.sha256) fail('contributor_image_sha_mismatch', fileName);
 
   const inference = await client.infer({ buffer, mimeType });
-  const embedding = inference?.embedding;
-  if (embedding?.model !== EXPECTED_MODEL || !Array.isArray(embedding?.vector) || embedding.vector.length !== EXPECTED_DIMENSION || !embedding.vector.every(Number.isFinite)) {
+  const vector = inference?.embedding;
+  if (
+    inference?.provider !== EXPECTED_PROVIDER
+    || inference?.model !== EXPECTED_MODEL
+    || inference?.embeddingDimension !== EXPECTED_DIMENSION
+    || !Array.isArray(vector)
+    || vector.length !== EXPECTED_DIMENSION
+    || !vector.every(Number.isFinite)
+  ) {
     fail('invalid_contributor_embedding', fileName);
   }
 
@@ -62,10 +79,10 @@ for (const item of intake.items) {
     sourcePoolId: item.sourcePoolId,
     authorization: item.authorization,
     embedding: {
-      provider: embedding.provider || 'artes_custom_vision',
+      provider: EXPECTED_PROVIDER,
       model: EXPECTED_MODEL,
       dimension: EXPECTED_DIMENSION,
-      vector: embedding.vector,
+      vector,
     },
     detectorLabel: null,
     labelStatus: 'pending_human_review',
@@ -82,6 +99,7 @@ const output = {
   sourceIntakeType: intake.intakeType,
   itemCount: outputItems.length,
   authorizationConfirmed: true,
+  embeddingProvider: EXPECTED_PROVIDER,
   embeddingModel: EXPECTED_MODEL,
   embeddingDimension: EXPECTED_DIMENSION,
   sourcePoolRequired: true,
@@ -97,6 +115,7 @@ process.stdout.write(`${JSON.stringify({
   ok: true,
   itemCount: output.itemCount,
   sourcePoolCount: new Set(outputItems.map((item) => item.sourcePoolId)).size,
+  embeddingProvider: output.embeddingProvider,
   embeddingModel: output.embeddingModel,
   embeddingDimension: output.embeddingDimension,
   labelsReady: 0,

@@ -6,8 +6,121 @@
   "authoritative": false,
   "humanConfirmationRequired": true,
   "discoveryMetadataUsedAsLabelAuthority": false,
-  "status": "partial_waiting_visual_review",
+  "status": "complete_visual_review",
+  "itemCount": 36,
+  "adultClearCount": 26,
+  "ageSafetySkipCount": 10,
   "items": [
+    {
+      "sourceUrl": "https://www.flickr.com/photos/jessica-jane/54023791370/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "underwear_swimwear",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/55134264628/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "underwear_swimwear",
+        "sexualContext": "bdsm_kink",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.97,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/55133188822/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "underwear_swimwear",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/55134264683/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "underwear_swimwear",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/55133188777/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "underwear_swimwear",
+        "sexualContext": "bdsm_kink",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.94,
+        "uncertaintyFlags": [
+          "bdsm_kink_boundary"
+        ]
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/55133188837/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "underwear_swimwear",
+        "sexualContext": "bdsm_kink",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.96,
+        "uncertaintyFlags": [
+          "bdsm_kink_boundary"
+        ]
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/spirosk/51771387977/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "underwear_swimwear",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.85,
+        "uncertaintyFlags": [
+          "lower_garment_obscured"
+        ]
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/alanant/3399595825/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:youthful_appearance_in_nudity_context"
+    },
     {
       "sourceUrl": "https://www.flickr.com/photos/brookeshaden/54644412780/",
       "ageSafetyDecision": "adult_clear",
@@ -20,7 +133,313 @@
         "confidence": 0.99,
         "uncertaintyFlags": []
       },
-      "basis": "visual_review_from_user_provided_review_screenshot"
+      "basis": "assistant_visual_review_from_user_provided_review_screenshot"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/brookeshaden/52306201495/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "implied_nude",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.97,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/133839447@N02/52166567147/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "implied_nude",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.98,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/deannadarling/391767444/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:age_not_assessable_from_cropped_body_detail"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/jonbauer/3083583397/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "implied_nude",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.97,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/momentspause/52671271393/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:youthful_appearance_in_nude_context"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/momentspause/51239244117/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:face_not_visible_in_nude_context"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/55134264748/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "implied_nude",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/ryanstanikkphotography/55134081551/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "implied_nude",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.98,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/demare/3741747823/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:youthful_appearance_in_nude_context"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/zimwiz/54356907385/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:face_not_visible_in_nudity_context"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/spirosk/52788289515/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "underwear_swimwear",
+        "sexualContext": "bdsm_kink",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/anemoneprojectors/3662790693/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.96,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/66414499@N05/6077958997/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:age_not_assessable_from_cropped_mirror_selfie"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/bluepoint951/441349241/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:youthful_group_age_uncertain"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/bhofmeister13/489427419/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/folkyboy/2501660801/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/7432548@N07/429658573/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/ec1_matt/55385680511/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/35024597@N00/186856769/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/200759319@N03/54221554493/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/200759319@N03/54221554498/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/andruco/4445005670/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:age_not_assessable_from_silhouette"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/teknosual/4238219819/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.95,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/52809910@N00/52565942/",
+      "ageSafetyDecision": "skip_minor_or_age_uncertain",
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_from_user_uploaded_original:face_not_visible"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/183192086@N05/55027133060/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/152995959@N03/52633756744/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.98,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/unkakunk/3647153493/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.98,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_visual_review_from_user_uploaded_original"
     }
   ]
 }

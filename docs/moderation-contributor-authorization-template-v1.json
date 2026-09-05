@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "instructions": "Copy this file locally to .tmp/moderation-contributor-images/authorization.json and replace every example value. Do not commit the completed authorization file or contributor images.",
+  "items": [
+    {
+      "fileName": "replace-with-exact-image-file-name.webp",
+      "sourcePoolId": "replace-with-stable-leakage-pool-id",
+      "rightsHolderConfirmed": true,
+      "moderationMlUseAuthorized": true,
+      "recognizablePeople": "present",
+      "allRecognizablePeopleAdultsConfirmed": true,
+      "modelPersonalityRightsConfirmed": true,
+      "authorizationScope": "Replace with who authorized this image and explicit permission for Artes moderation-model development and evaluation."
+    }
+  ]
+}

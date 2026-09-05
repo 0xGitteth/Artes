@@ -83,6 +83,8 @@ const findPossibleMinorSignal = (text) => {
 const collectAlbumPhotoLinks = (html, source) => {
   const matches = [];
   const seen = new Set();
+  const sourceAlbumUrl = assertFlickrUrl(source.sourceUrl, 'album');
+  const expectedOwner = sourceAlbumUrl.pathname.match(ALBUM_PATH)?.[1] || '';
   const pattern = /href=["'](https:\/\/(?:www\.)?flickr\.com\/photos\/[^"'#?]+\/\d+\/?|\/photos\/[^"'#?]+\/\d+\/?)["']/gi;
   let match;
   while ((match = pattern.exec(html)) !== null) {
@@ -93,10 +95,11 @@ const collectAlbumPhotoLinks = (html, source) => {
     } catch {
       continue;
     }
+    const pathMatch = url.pathname.match(EXACT_PHOTO_PATH);
+    if (!pathMatch || pathMatch[1] !== expectedOwner) continue;
     const identity = url.pathname.replace(/\/$/, '');
     if (seen.has(identity)) continue;
     seen.add(identity);
-    const pathMatch = url.pathname.match(EXACT_PHOTO_PATH);
     const contextStart = Math.max(0, match.index - 500);
     const contextEnd = Math.min(html.length, pattern.lastIndex + 1000);
     const localContext = stripTags(html.slice(contextStart, contextEnd)).slice(0, 1400);

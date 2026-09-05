@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "status": "research_public_fhg_source_discovery_only",
+  "purpose": "Discover publisher-hosted Free Hosted Galleries that are explicitly exposed from public affiliate/promotional pages. This lane is intended for professional adult research examples with better provenance than random tube thumbnails. Discovery metadata is never a detector label.",
+  "rules": {
+    "publicPagesOnly": true,
+    "noLoginOrPaywallBypass": true,
+    "noAffiliateAccountRequired": true,
+    "noAffiliateIdFabrication": true,
+    "noMemberArea": true,
+    "metadataDiscoveryOnly": true,
+    "downloadImageBytes": false,
+    "publisherHostedAssetsPreferred": true,
+    "sourceIntentIsLabelAuthority": false,
+    "humanVisualScreeningRequired": true,
+    "researchOnly": true,
+    "trainingReady": false,
+    "productionEligible": false
+  },
+  "sources": [
+    {
+      "sourceId": "mastasia_public_fhg_index",
+      "sourceType": "publisher_public_fhg_index",
+      "priority": "supplemental_explicit_anchor",
+      "indexUrl": "https://www.mastasia.com/affiliates/",
+      "allowedHosts": ["www.mastasia.com", "mastasia.com"],
+      "galleryPathPattern": "^/affiliates/fhg/.+\\.php$",
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
+      "ageContext": "Publisher affiliate rules expose free hosted galleries as promotional material; publisher site carries adult-content compliance context. Individual visuals still require human screening.",
+      "rightsContext": "Public affiliate rules state galleries in the free area may be used to promote Mastasia. Member-area content remains excluded.",
+      "termsStatus": "public_affiliate_promotional_use_research_only",
+      "maxGalleryPages": 24,
+      "notes": "Material is likely older than the preferred modern Artes distribution, so use as a supplemental hard-content pool rather than a dominant visual source."
+    },
+    {
+      "sourceId": "metart_public_fhg_current_example",
+      "sourceType": "publisher_exact_public_fhg",
+      "priority": "supplemental_art_nude",
+      "galleryUrls": [
+        "https://fhg.metart.com/2024-10-31/IM_YOUR_MUSE/"
+      ],
+      "allowedHosts": ["fhg.metart.com", "static-fhg.metart.com"],
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal", "art_nude"],
+      "ageContext": "MetArt professional adult art-nude publisher context; individual visuals remain human-reviewed.",
+      "rightsContext": "Public FHG is a promotional preview. Keep local research-only provenance and do not treat affiliate promotional terms as production rights.",
+      "termsStatus": "public_promotional_preview_research_only",
+      "maxGalleryPages": 1
+    }
+  ]
+}

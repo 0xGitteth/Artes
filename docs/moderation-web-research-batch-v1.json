@@ -9,7 +9,9 @@
     "localOnly": true,
     "commitImageBytes": false,
     "humanLabelRequired": true,
-    "skipIfMinorOrAgeSeemsUncertain": true,
+    "skipIfMinorOrAgeSeemsUncertain": false,
+    "skipIfMinorOrAgeSeemsUncertainWhenAdultOrSexualContent": true,
+    "ageUncertaintyAllowedForNonadultNonsexualContent": true,
     "trainingReady": false,
     "productionEligible": false
   },

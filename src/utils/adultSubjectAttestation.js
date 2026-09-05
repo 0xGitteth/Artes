@@ -11,6 +11,30 @@ export const ADULT_SUBJECT_ATTESTATION_RESOLVED_BY = Object.freeze({
 const hasAnonymousSubject = (credits = []) => (Array.isArray(credits) ? credits : [])
   .some((credit) => Boolean(credit?.isAnonymous) && ['model', 'assistent', 'fan'].includes(String(credit?.role || '').trim()));
 
+export const normalizeAdultSubjectAttestationDraftState = (source = {}) => {
+  const draft = source?.adultSubjectAttestationDraft && typeof source.adultSubjectAttestationDraft === 'object'
+    ? source.adultSubjectAttestationDraft
+    : source?.adultSubjectAttestation && typeof source.adultSubjectAttestation === 'object'
+      ? source.adultSubjectAttestation
+      : source;
+
+  return {
+    allDepictedSubjects18PlusConfirmed: draft?.allDepictedSubjects18PlusConfirmed === true,
+    anonymousSubjectPublicationConsentConfirmed: draft?.anonymousSubjectPublicationConsentConfirmed === true,
+  };
+};
+
+export const buildAdultSubjectAttestationDraftState = ({
+  allDepictedSubjects18PlusConfirmed = false,
+  anonymousSubjectPublicationConsentConfirmed = false,
+} = {}) => ({
+  adultSubjectAttestationDraft: {
+    version: 1,
+    allDepictedSubjects18PlusConfirmed: Boolean(allDepictedSubjects18PlusConfirmed),
+    anonymousSubjectPublicationConsentConfirmed: Boolean(anonymousSubjectPublicationConsentConfirmed),
+  },
+});
+
 export const getAdultSubjectAttestationState = ({
   credits = [],
   adultOrSexualContentPresent = false,

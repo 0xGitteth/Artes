@@ -26,10 +26,19 @@ assert.equal(artNudeInput.ageNotReliablyVerifiable, true);
 assert.equal(artNudeInput.possibleMinorConcern, false);
 
 const minorConcernInput = buildAdultSubjectAttestationInputFromModeration({
-  classification: 'allowed_adult_art_nude',
+  classification: 'uncertain_possible_explicit',
   forbiddenReasons: ['possible_minor_concern'],
 });
+assert.equal(minorConcernInput.adultOrSexualContentPresent, true);
+assert.equal(minorConcernInput.ageNotReliablyVerifiable, false);
 assert.equal(minorConcernInput.possibleMinorConcern, true);
+
+const explicitForbiddenInput = buildAdultSubjectAttestationInputFromModeration({
+  classification: 'disallowed_sexual_explicit',
+  forbiddenReasons: ['sexualExplicit'],
+});
+assert.equal(explicitForbiddenInput.adultOrSexualContentPresent, true);
+assert.equal(explicitForbiddenInput.ageNotReliablyVerifiable, false, 'forbidden explicit content is blocked by moderation, not solved through attestation');
 
 assert.equal(shouldBlockAdultSubjectAttestationForModeration({ classification: 'disallowed_sexual_explicit' }), true);
 assert.equal(shouldBlockAdultSubjectAttestationForModeration({ classification: 'allowed_adult_art_nude' }), false);

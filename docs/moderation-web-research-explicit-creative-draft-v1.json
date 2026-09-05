@@ -3,7 +3,7 @@
   "status": "research_only_fetch_prototype_not_final_batch",
   "batchVersion": "moderation_web_research_explicit_creative_draft_v1",
   "datasetSubdir": "web-research-explicit-creative-draft-v1",
-  "purpose": "Small mixed-source technical draft proving that Artes-representative public event/portfolio photography can join the explicit research pipeline without relying on Wikimedia Commons. Discovery facets are sourcing hints only, never detector labels.",
+  "purpose": "Mixed-source technical draft proving that Artes-representative public event/portfolio photography can join the explicit research pipeline without relying on Wikimedia Commons. Discovery facets are sourcing hints only, never detector labels.",
   "rules": {
     "publicPagesOnly": true,
     "noLoginOrPaywallBypass": true,
@@ -12,6 +12,8 @@
     "humanLabelRequired": true,
     "discoveryFacetIsLabelAuthority": false,
     "realPhotographyTarget": true,
+    "preferRecentRepresentativePhotography": true,
+    "preferMultiplePhotographersAndSourcePools": true,
     "trainingReady": false,
     "productionEligible": false
   },
@@ -112,6 +114,106 @@
       "creator": "istolethetv",
       "discoveryFacet": "bdsm_kink_candidate",
       "title": "diagonals",
+      "sourceYear": 2025,
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-lisxia-shibari-2024",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_lisxia_shibari_2024",
+      "sourcePageUrl": "https://www.flickr.com/photos/lisxiachieng/54110816202",
+      "creator": "Lis Xia / Luis Campillo",
+      "discoveryFacet": "bdsm_kink_candidate",
+      "title": "Shibari",
+      "sourceYear": 2024,
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-davina-latex-01-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_davina_latex_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/189368610@N06/54739685436",
+      "creator": "Davina Jane Williams",
+      "discoveryFacet": "fetish_latex_candidate",
+      "title": "Latex fetish Saturday",
+      "sourceYear": 2025,
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-davina-latex-02-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_davina_latex_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/189368610@N06/54736698412",
+      "creator": "Davina Jane Williams",
+      "discoveryFacet": "fetish_latex_candidate",
+      "title": "Latex Fetish Friday",
+      "sourceYear": 2025,
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-shinydivas-latex-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_shinydivas_latex_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/shinydivas/54872955918",
+      "creator": "shinydivas / Micha",
+      "discoveryFacet": "fetish_latex_candidate",
+      "title": "rainy day in latex, Teil 01",
+      "sourceYear": 2025,
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-atreides59-shibari-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_atreides59_shibari_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/atreides59/54744617749",
+      "creator": "Atreides59",
+      "discoveryFacet": "bdsm_kink_candidate",
+      "title": "Shibari",
+      "sourceYear": 2025,
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-fendarioto-shibari-01-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_fendarioto_shibari_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/187141696@N04/54420061719",
+      "creator": "Fen Darioto",
+      "discoveryFacet": "bdsm_kink_candidate",
+      "title": "Shibari with A",
+      "sourceYear": 2025,
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-fendarioto-shibari-02-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_fendarioto_shibari_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/187141696@N04/54420255980",
+      "creator": "Fen Darioto",
+      "discoveryFacet": "bdsm_kink_candidate",
+      "title": "Shibari with A",
+      "sourceYear": 2025,
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-faron-altar-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_faron_ard_artnude_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/livelikefaron/54850208383",
+      "creator": "Faron Ard",
+      "discoveryFacet": "adult_art_nude_gap_candidate",
+      "title": "An Altar Made of Wood and Light",
+      "sourceYear": 2025,
+      "ageEvidence": "source_description_explicitly_calls_subject_adult",
+      "termsStatus": "existing_flickr_web_research_contract"
+    },
+    {
+      "id": "creative-flickr-curtis-ruins-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_curtisjoe_artnude_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/curtisjoewalker/54889418829",
+      "creator": "Curtis Joe Walker",
+      "discoveryFacet": "adult_art_nude_gap_candidate",
+      "title": "At the ruins",
       "sourceYear": 2025,
       "termsStatus": "existing_flickr_web_research_contract"
     }

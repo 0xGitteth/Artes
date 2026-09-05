@@ -73,6 +73,17 @@ test('DINO preparation preserves research provenance and cannot promote examples
   assert.doesNotMatch(prepareSource, /trainingReady: true/);
 });
 
+test('DINO preparation resumes completed embeddings and persists partial progress', () => {
+  assert.match(prepareSource, /previousBySha/);
+  assert.match(prepareSource, /validReusableItem/);
+  assert.match(prepareSource, /Reused research embedding/);
+  assert.match(prepareSource, /persistPartial/);
+  assert.match(prepareSource, /Skipped research embedding/);
+  assert.match(prepareSource, /failedItemCount/);
+  assert.match(prepareSource, /reusedCount/);
+  assert.match(prepareSource, /embeddedCount/);
+});
+
 test('web research runner is local, resumable and isolated from existing seeds', () => {
   assert.match(runnerSource, /ENDPOINT="http:\/\/127\.0\.0\.1:8787"/);
   assert.match(runnerSource, /--host 127\.0\.0\.1/);

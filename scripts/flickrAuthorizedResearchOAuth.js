@@ -13,7 +13,6 @@ const ACCESS_PATH = path.join(STATE_DIR, 'access-token.json');
 const REQUEST_TOKEN_URL = 'https://www.flickr.com/services/oauth/request_token';
 const AUTHORIZE_URL = 'https://www.flickr.com/services/oauth/authorize';
 const ACCESS_TOKEN_URL = 'https://www.flickr.com/services/oauth/access_token';
-const DEFAULT_CALLBACK = 'https://example.com/artes-flickr-oauth';
 
 const writeSecretJson = async (filePath, value) => {
   await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
@@ -43,7 +42,10 @@ const setup = async () => {
 
 const requestToken = async () => {
   const consumer = await readJson(CONSUMER_PATH, 'flickr_consumer_credentials');
-  const callback = String(process.env.FLICKR_OAUTH_CALLBACK || DEFAULT_CALLBACK).trim();
+  const callback = String(process.env.FLICKR_OAUTH_CALLBACK || '').trim();
+  if (!callback) throw new Error('FLICKR_OAUTH_CALLBACK_required_use_codespace_authorizer_or_set_explicit_callback');
+  const parsedCallback = new URL(callback);
+  if (parsedCallback.protocol !== 'https:') throw new Error('flickr_oauth_callback_must_be_https');
   const response = await fetchSignedOAuthGet({
     url: REQUEST_TOKEN_URL,
     consumerKey: consumer.apiKey,

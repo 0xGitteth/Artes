@@ -1,16 +1,24 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "assistant_visual_screening_non_authoritative",
-  "purpose": "Persist the assistant's first visual screening of the 180-image creative explicit preview set. This is not a detector result and not a human-authoritative label set. Human review remains required before any dataset use.",
+  "purpose": "Persist the assistant's visual screening of the 180-image creative explicit preview set. This is not a detector result and not a human-authoritative label set. Human review remains required before any training-approved or production use.",
   "sourcePreviewSet": "creative-explicit-preview-screening-v1",
   "reviewedCount": 180,
   "humanAuthoritative": false,
   "researchOnly": true,
   "trainingReady": false,
   "productionEligible": false,
+  "ageHandling": {
+    "missingFaceIsNotMinorConcern": true,
+    "cropOrAnonymousSubjectIsNotMinorConcernByItself": true,
+    "publicFlickrAdultOrSexualCandidateMayRemainResearchEligibleWhenAgeIsNotProvableAndNoConcreteMinorConcernExists": true,
+    "publicSourceIsNotProofOfAdultAge": true,
+    "bodyShapeAloneIsNotAgeVerification": true,
+    "concreteMinorConcernStillRequiresSeparateSafetyReview": true
+  },
   "decisions": {
-    "keep_visual": [8,60,81,82,90,91,95,96,97,98,107,114,120,124,128,130,142,145,154,163,174],
-    "keep_visual_needs_age_review": [2,85,86,101,134,136,139,140,141,143,144,150,151,159,160,161,162,165,167,168,172,177],
+    "keep_visual": [2,8,60,81,82,85,86,90,91,95,96,97,98,101,107,114,120,124,128,130,134,136,139,140,141,142,145,150,151,154,159,160,161,162,163,165,167,168,172,174,177],
+    "hold_possible_minor_concern": [143,144],
     "keep_boundary": [87,93,94,138,146,153,169,171,173,175],
     "exclude_repetitive": [83,84,88,89],
     "exclude_nonphotographic": [13,18,22,25,26,28,30,31,37,40,51,61,100,102,103,104,105,106,108,110,112,113,115,117,118,119,123,127,129,133,135,152,156],
@@ -20,28 +28,27 @@
   },
   "screenedHardGapCandidates": {
     "explicit_act": {
-      "confirmedVisualCandidateIndexes": [8],
-      "needsAgeReviewIndexes": [2]
+      "visualCandidateIndexes": [2,8]
     },
     "genitalia_full_frontal": {
-      "confirmedVisualCandidateIndexes": [60]
+      "visualCandidateIndexes": [60]
     },
     "bare_buttocks": {
-      "confirmedVisualCandidateIndexes": [90],
-      "needsAgeReviewIndexes": [134,139,140,141]
+      "visualCandidateIndexes": [90,134,139,140,141]
     },
     "female_bare_breasts": {
-      "confirmedVisualCandidateIndexes": [142],
-      "needsAgeReviewIndexes": [144]
+      "visualCandidateIndexes": [142],
+      "possibleMinorConcernIndexes": [144]
     },
     "bdsm_kink_core": {
-      "confirmedVisualCandidateIndexes": [81,82,90,91,95,96,97,98,107,114,120,124,128,130],
-      "needsAgeReviewIndexes": [85,86,101]
+      "visualCandidateIndexes": [81,82,85,86,90,91,95,96,97,98,101,107,114,120,124,128,130]
     }
   },
   "notes": [
     "Flickr discovery buckets were heavily polluted by keyword collisions, non-human images, renders and irrelevant photos, especially explicit_act and full_frontal_genitalia.",
-    "Age-uncertain adult/sexual candidates are retained as needs_age_review rather than automatically discarded, so human age decisions remain authoritative.",
+    "A cropped, faceless or anonymous adult/sexual subject is not discarded merely because age cannot be visually proven. Such images are important research examples because Artes will receive similar uploads.",
+    "Public Flickr provenance is sufficient to keep a candidate in local web research when there is no concrete minor-safety concern, but Flickr publication is not stored as proof that a depicted subject is 18+.",
+    "Only affirmative minor-safety concern is separated for human safety review; inability to verify age alone is not treated as affirmative concern.",
     "Second-pass inspection corrected several contact-sheet overcalls: cropped/topless images without visible nipple were not counted as female_bare_breasts.",
     "Discovery tags are not detector labels and are not used as label authority."
   ]

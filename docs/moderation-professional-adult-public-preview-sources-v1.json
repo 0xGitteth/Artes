@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "status": "research_professional_adult_public_preview_sources",
   "purpose": "Source professional adult photography from publisher-owned public preview/FHG pages for the remaining explicit moderation gaps. Public promotional stills are preferred over random tube thumbnails because they preserve creator/site provenance, professional composition and adult-age context. Discovery intent is not a detector label.",
   "rules": {
@@ -9,6 +9,7 @@
     "noLoginBypass": true,
     "noAgeGateBypass": true,
     "noSessionCookieReuse": true,
+    "explicitAntiAutomationRestrictionBlocksAutomatedDiscovery": true,
     "publisherHostedAssetsPreferred": true,
     "professionalPhotographyPreferred": true,
     "sourceIntentIsLabelAuthority": false,
@@ -46,27 +47,6 @@
       "visualRationale": "Explicit black-and-white photography centered on BDSM, masculinity, kink and gay subcultures; strong Artes relevance and a different visual/source pool from studio adult publishers.",
       "termsStatus": "unverified_research_only",
       "seedPages": ["https://www.peterjuhan.com/photography"]
-    },
-    {
-      "sourceId": "photodromm_public_model_previews",
-      "sourceType": "photographer_public_model_preview",
-      "priority": "high",
-      "automatedDiscoveryEligible": true,
-      "baseHost": "www.photodromm.com",
-      "targetHints": ["genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "art_nude"],
-      "ageContext": "Official photographer site links an 18 U.S.C. 2257 compliance statement; individual visual screening remains required.",
-      "visualRationale": "Professional artistic nude photography by Filippo Sano with natural light, strong locations and full-body composition that is highly representative of Artes-quality nude work.",
-      "termsStatus": "copyright_notice_research_only",
-      "seedPages": [
-        "https://www.photodromm.com/models/alexa/",
-        "https://www.photodromm.com/models/shaky/",
-        "https://www.photodromm.com/models/anabel/",
-        "https://www.photodromm.com/models/marta/",
-        "https://www.photodromm.com/models/lena/",
-        "https://www.photodromm.com/models/faith/",
-        "https://www.photodromm.com/models/manuela/",
-        "https://www.photodromm.com/models/holly/"
-      ]
     }
   ],
   "styleReferenceLeads": [
@@ -86,6 +66,22 @@
       "visualRationale": "Large modern professional nude archive with named photographers; useful as a style/reference source.",
       "termsStatus": "explicit_no_reproduction_reference_only",
       "reasonNotAutomated": "Direct unauthenticated server fetches of /photos and /models redirect to the paid signup host, and the public signup/legal page explicitly says reproduction is prohibited without permission. Keep as visual/style research rather than a local automated asset source."
+    },
+    {
+      "sourceId": "photodromm_style_reference",
+      "sourceType": "photographer_public_reference",
+      "priority": "high_style_reference",
+      "automatedDiscoveryEligible": false,
+      "urls": [
+        "https://www.photodromm.com/models/alexa/",
+        "https://www.photodromm.com/models/shaky/",
+        "https://www.photodromm.com/models/anabel/"
+      ],
+      "targetHints": ["genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "art_nude"],
+      "ageContext": "Official photographer site links an 18 U.S.C. 2257 compliance statement.",
+      "visualRationale": "Professional artistic nude photography with natural light, locations and full-body composition that is highly representative of Artes-quality nude work.",
+      "termsStatus": "explicit_anti_automation_reference_only",
+      "reasonNotAutomated": "Photodromm terms explicitly prohibit robots, spiders, scrapers or other automated access without written permission. Keep as style/reference evidence and prefer the publisher's affiliate/promo channel when available."
     }
   ],
   "rightsConfirmedPromotionalLeads": [
@@ -101,8 +97,52 @@
       "targetHints": ["explicit_act", "genitalia_full_frontal", "bdsm_kink"],
       "ageContext": "Publisher states all models are adults and describes 2257 documentation for supplied promotional material.",
       "termsStatus": "promotional_use_explicitly_permitted_with_conditions",
-      "rightsContext": "FAQ states free content may be used when unmodified, with required watermark/link conditions; affiliate 2257 page states hosted promotional material includes both sexually explicit and non-explicit content.",
-      "nextStep": "Locate exact current publisher-hosted FHG/promotional gallery URLs before adding any automated resolver."
+      "rightsContext": "FAQ says free content may be used when unmodified, with watermark/link conditions; the affiliate 2257 page says publisher-hosted promotional material can include sexually explicit content and that records are maintained by the publisher.",
+      "nextStep": "Resolve exact current publisher-hosted FHG/promotional gallery URLs; do not substitute third-party mirrors."
+    },
+    {
+      "sourceId": "metartmoney_affiliate_promotional_material",
+      "sourceType": "adult_affiliate_licensed_promotional_lead",
+      "priority": "high_for_artes_style",
+      "automatedDiscoveryEligible": false,
+      "urls": [
+        "https://partners.metartmoney.com/faq/",
+        "https://partners.metartmoney.com/terms/"
+      ],
+      "targetHints": ["art_nude", "female_bare_breasts", "bare_buttocks", "genitalia_full_frontal", "explicit_act"],
+      "ageContext": "Adult publisher network; exact asset provenance remains required.",
+      "termsStatus": "affiliate_limited_license_after_program_access",
+      "rightsContext": "MetArtMoney advertises a large collection of free promotional content and its affiliate agreement grants a limited license to program-provided photographic/advertising materials for promotion.",
+      "nextStep": "Use only assets expressly supplied by the affiliate program after authorized access; do not scrape Photodromm/MetArt member sites directly."
+    }
+  ],
+  "affiliateGalleryLeads": [
+    {
+      "sourceId": "centroprofits_fhg",
+      "priority": "medium_high",
+      "automatedDiscoveryEligible": false,
+      "url": "https://centroprofits.com/",
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
+      "sourceContext": "Current affiliate program advertises weekly promo tools, gallery zip packages and Free Hosted Galleries.",
+      "nextStep": "Determine whether exact gallery pages are publicly addressable or require approved affiliate login before any local research use."
+    },
+    {
+      "sourceId": "spizcash_fhg",
+      "priority": "medium_high",
+      "automatedDiscoveryEligible": false,
+      "url": "https://www.spizcash.com/",
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
+      "sourceContext": "Current affiliate program explicitly advertises FHG, free sites and weekly content/promo tools.",
+      "nextStep": "Resolve whether hosted galleries are accessible without affiliate authentication."
+    },
+    {
+      "sourceId": "mastasia_legacy_public_fhg",
+      "priority": "low_supplement_only",
+      "automatedDiscoveryEligible": false,
+      "url": "https://www.mastasia.com/affiliates/",
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
+      "sourceContext": "Public affiliate page historically lists exact Free Hosted Photo Gallery links.",
+      "nextStep": "Use only if current HTTPS galleries still resolve and visual quality adds diversity; do not let legacy material dominate a modern Artes-representative set."
     }
   ],
   "adultEntranceLeads": [

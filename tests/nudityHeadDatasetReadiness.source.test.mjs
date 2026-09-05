@@ -21,8 +21,11 @@ test('nudity pilot defines all seven visual classes and keeps later moderation h
 
 test('experimental and preferred gates require both image and independent source-pool coverage', () => {
   assert.ok(plan.experimentalProbeGate.minimumTotalHumanLabeledImages >= 100);
+  assert.ok(plan.experimentalProbeGate.minimumImagesPerClass >= 15);
   assert.ok(plan.experimentalProbeGate.minimumSourcePoolsTotal >= 8);
+  assert.ok(plan.experimentalProbeGate.minimumSourcePoolsPerClass >= 3);
   assert.ok(plan.preferredPilotTrainingGate.minimumTotalHumanLabeledImages >= 250);
+  assert.ok(plan.preferredPilotTrainingGate.minimumImagesPerClass >= 30);
   assert.ok(plan.preferredPilotTrainingGate.minimumSourcePoolsTotal >= 15);
   assert.ok(plan.preferredPilotTrainingGate.minimumSourcePoolsPerClass >= 4);
   assert.ok(plan.preferredPilotTrainingGate.maxSingleSourcePoolFraction <= 0.2);
@@ -45,4 +48,14 @@ test('readiness assessment counts source pools per class and remains non-promoti
   assert.match(source, /fullEmbeddingsPrinted: false/);
   assert.match(source, /imageBytesPrinted: false/);
   assert.doesNotMatch(source, /trainingReady: true/);
+});
+
+test('one observed example cannot be presented as class coverage readiness', () => {
+  assert.match(source, /status = 'zero_coverage'/);
+  assert.match(source, /status = 'observed_only'/);
+  assert.match(source, /status = 'probe_floor_met'/);
+  assert.match(source, /underfilledClasses/);
+  assert.match(source, /remainingToProbeImageFloor/);
+  assert.match(source, /remainingToProbeSourcePoolFloor/);
+  assert.match(source, /probeFloorMet/);
 });

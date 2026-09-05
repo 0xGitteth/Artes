@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "status": "research_source_scout_only",
+  "purpose": "Second source-scout expansion focused on contemporary kink/event/erotic photography for Artes-representative explicit moderation research.",
+  "sources": [
+    {
+      "sourceId": "folsom_street_east_event_gallery",
+      "url": "https://www.folsomstreeteast.com/event-gallery",
+      "sourceType": "public_event_gallery",
+      "artesRelevance": "high",
+      "contentSignals": ["fetish_event", "leather", "pup", "rope_bondage", "restraints", "kink_context"],
+      "recentWork": true,
+      "termsStatus": "no_terms_privacy_or_copyright_reuse_block_found_on_gallery_page_reviewed",
+      "researchStatus": "green_candidate_source",
+      "notes": "Public archive includes 2025 photography credited to Michael Prestia and Artimus Prime, plus many earlier years. Especially useful as non-studio real-world kink context. Keep photographers/years as distinct source pools and cap contribution per photographer."
+    },
+    {
+      "sourceId": "flickr_istolethetv_folsom_2025",
+      "url": "https://www.flickr.com/photos/tags/folsomstreeteast2025/",
+      "sourceType": "flickr_public_photography",
+      "artesRelevance": "high",
+      "contentSignals": ["rope_bondage", "blindfold", "gag", "pup", "leather", "nipple_suction", "fetish_event"],
+      "recentWork": true,
+      "termsStatus": "use_existing_web_research_flickr_contract",
+      "researchStatus": "green_candidate_source",
+      "notes": "Strong 2025 event-context supplement. Search results show multiple individually described photos by istolethetv. Select exact public photo pages later; do not treat tags/descriptions as labels."
+    },
+    {
+      "sourceId": "hedoneye",
+      "url": "https://linktr.ee/hedoneye",
+      "sourceType": "creator_lead_only",
+      "artesRelevance": "high",
+      "contentSignals": ["nude_art", "shibari", "yoni", "tantra_event", "sex_positive", "kink"],
+      "recentWork": true,
+      "termsStatus": "linktree_terms_prohibit_automated_collection",
+      "researchStatus": "orange_lead_only_no_linktree_scrape",
+      "notes": "Use Linktree only to identify the creator and public external destinations. Do not scrape Linktree. Follow only independently public creator-owned pages that pass their own terms check."
+    },
+    {
+      "sourceId": "ken_marcus_gallery",
+      "url": "https://www.kenmarcusgallery.com/",
+      "sourceType": "commercial_erotic_photography_gallery",
+      "artesRelevance": "high",
+      "contentSignals": ["nudes", "erotica", "fetish", "bondage", "bdsm", "couples"],
+      "recentWork": false,
+      "termsStatus": "explicit_terms_link_present_not_yet_reviewed_successfully",
+      "researchStatus": "orange_manual_terms_check",
+      "notes": "Very broad historical erotic/fetish coverage and potentially useful hard examples, but site is commercial and exposes Terms & Conditions. Do not automate until terms page is successfully reviewed."
+    },
+    {
+      "sourceId": "dennis_gelner",
+      "url": "https://dennisgelner.com/en/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["fine_art_nude", "erotic_nude", "conceptual_portrait"],
+      "recentWork": true,
+      "termsStatus": "not_yet_fully_checked",
+      "researchStatus": "orange_manual_terms_check",
+      "notes": "Contemporary and visually strong for Artes-style nude/editorial representation, likely more useful for exposed-body classes than explicit acts."
+    },
+    {
+      "sourceId": "renee_jacobs",
+      "url": "https://www.reneejacobs.com/",
+      "sourceType": "fine_art_nude_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["female_nude", "fine_art_nude", "erotic_photography"],
+      "recentWork": true,
+      "termsStatus": "not_yet_fully_checked",
+      "researchStatus": "orange_manual_terms_check",
+      "notes": "Awarded fine-art nude photographer with contemporary publications. Good potential for strong artistic nudity but terms and concrete gallery delivery still require review."
+    },
+    {
+      "sourceId": "sacha_leyendecker",
+      "url": "https://en.sacha-leyendecker.com/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["sensual_portrait", "nude", "erotic_portrait"],
+      "recentWork": true,
+      "termsStatus": "not_yet_fully_checked",
+      "researchStatus": "orange_manual_terms_check",
+      "notes": "Strong natural-light nude/erotic portrait style. Likely useful for representative exposed-body coverage, not expected to provide many explicit-act examples."
+    }
+  ],
+  "nextAction": "Inspect green sources at concrete image/page level, verify direct asset delivery and build an initial mixed photographer/event candidate manifest. Continue searching for modern creative explicit-act photography so Commons remains an anchor minority rather than the dominant source."
+}

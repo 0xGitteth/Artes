@@ -6,7 +6,7 @@ import { createModerationCustomVisionClient } from '../functions/moderationCusto
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
-const DATASET_SUBDIR = 'web-research-v1';
+const DATASET_SUBDIR = String(process.env.ARTES_WEB_RESEARCH_DATASET_SUBDIR || 'web-research-v1').trim();
 const IMAGE_DIR = path.join(REPO_ROOT, '.tmp', 'moderation-test-images', DATASET_SUBDIR);
 const SOURCES_PATH = path.join(IMAGE_DIR, 'sources.json');
 const OUTPUT_DIR = path.join(REPO_ROOT, '.tmp', 'moderation-test-set', DATASET_SUBDIR);
@@ -16,6 +16,7 @@ const ENDPOINT = String(process.env.ARTES_CUSTOM_VISION_URL || 'http://127.0.0.1
 const TIMEOUT_MS = Number(process.env.ARTES_CUSTOM_VISION_TIMEOUT_MS || 300000);
 const EXPECTED_MODEL = 'dinov2_vitb14';
 const EXPECTED_DIMENSION = 768;
+const SAFE_DATASET_SUBDIR_PATTERN = /^[a-z0-9][a-z0-9._-]{2,79}$/;
 const MIME_BY_EXT = new Map([
   ['.jpg', 'image/jpeg'],
   ['.jpeg', 'image/jpeg'],
@@ -34,11 +35,14 @@ const assertLoopbackEndpoint = (value) => {
   return url.toString().replace(/\/$/, '');
 };
 
+if (!SAFE_DATASET_SUBDIR_PATTERN.test(DATASET_SUBDIR)) throw new Error('invalid_web_research_dataset_subdir');
+
 const sources = JSON.parse(await readFile(SOURCES_PATH, 'utf8'));
 if (sources?.researchOnly !== true || sources?.trainingReady !== false || sources?.productionEligible !== false) {
   throw new Error('invalid_web_research_sources_contract');
 }
 if (!Array.isArray(sources?.records) || sources.records.length === 0) throw new Error('web_research_sources_empty');
+if (sources?.datasetSubdir && sources.datasetSubdir !== DATASET_SUBDIR) throw new Error('web_research_sources_dataset_mismatch');
 
 await mkdir(OUTPUT_DIR, { recursive: true });
 let previous = { items: [] };
@@ -89,6 +93,8 @@ const persistPartial = async () => {
     failedItemCount: failures.length,
     sourcePoolCount,
     ageSafetyReviewRequired: true,
+    discoveryMetadataIsLabelAuthority: false,
+    rightsStatusIsResearchEligibilityGate: false,
     researchOnly: true,
     trainingReady: false,
     productionEligible: false,

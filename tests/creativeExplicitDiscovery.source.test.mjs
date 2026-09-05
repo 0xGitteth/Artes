@@ -9,7 +9,7 @@ test('explicit discovery is large-scale before another user download run', () =>
   assert.ok(config.minimumDiscoveryTarget >= 200);
   assert.ok(config.metadataShortlistTarget >= 180);
   assert.ok(config.desiredShortlistTarget >= 120);
-  assert.ok(config.tags.length >= 25);
+  assert.ok(config.tags.length >= 30);
   assert.ok(config.minimumMetadataShortlistOwners >= 60);
   assert.ok(config.maxMetadataShortlistPerOwner <= 3);
 });
@@ -19,6 +19,11 @@ test('discovery includes hard explicit gaps instead of only mild nude and kink t
   for (const required of ['fullfrontal', 'genitalia', 'vulva', 'penis', 'masturbation', 'oralsex', 'sexualintercourse']) {
     assert.ok(tags.has(required), `missing hard-explicit discovery tag ${required}`);
   }
+  const explicitTags = new Set(config.bucketTags.explicit_act.map((value) => String(value).toLowerCase()));
+  for (const required of ['masturbation', 'masturbazione', 'masturbationmonday', 'oralsex', 'orally', 'cunniligus', 'sexualintercourse', 'intercourse', 'couplesex']) {
+    assert.ok(explicitTags.has(required), `missing broadened explicit-act tag ${required}`);
+  }
+  assert.ok(explicitTags.size >= 10);
   assert.ok(config.bucketTargets.full_frontal_genitalia >= 40);
   assert.ok(config.bucketTargets.explicit_act >= 40);
 });

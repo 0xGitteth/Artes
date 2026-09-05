@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   ADULT_SUBJECT_ATTESTATION_RESOLVED_BY,
+  buildAdultSubjectAttestationDraftState,
   buildAdultSubjectAttestationSnapshot,
   getAdultSubjectAttestationState,
+  normalizeAdultSubjectAttestationDraftState,
   validateAdultSubjectAttestation,
 } from '../src/utils/adultSubjectAttestation.js';
 
@@ -95,5 +97,25 @@ const snapshot = buildAdultSubjectAttestationSnapshot({
 });
 assert.equal(snapshot.version, 1);
 assert.equal(snapshot.confirmedAt, '2026-09-05T20:00:00.000Z');
+
+const draftState = buildAdultSubjectAttestationDraftState({
+  allDepictedSubjects18PlusConfirmed: true,
+  anonymousSubjectPublicationConsentConfirmed: true,
+});
+assert.deepEqual(draftState, {
+  adultSubjectAttestationDraft: {
+    version: 1,
+    allDepictedSubjects18PlusConfirmed: true,
+    anonymousSubjectPublicationConsentConfirmed: true,
+  },
+});
+assert.deepEqual(normalizeAdultSubjectAttestationDraftState(draftState), {
+  allDepictedSubjects18PlusConfirmed: true,
+  anonymousSubjectPublicationConsentConfirmed: true,
+});
+assert.deepEqual(normalizeAdultSubjectAttestationDraftState({ adultSubjectAttestation: snapshot }), {
+  allDepictedSubjects18PlusConfirmed: true,
+  anonymousSubjectPublicationConsentConfirmed: true,
+});
 
 console.log('PASS adultSubjectAttestation.logic.test.mjs');

@@ -135,9 +135,7 @@ const resolveAlbumOwnerNsid = (source, albumHtml) => {
 
   const ownerIndex = albumHtml.toLowerCase().indexOf(ownerFromPath.toLowerCase());
   const windows = [];
-  if (ownerIndex >= 0) {
-    windows.push(albumHtml.slice(Math.max(0, ownerIndex - 5000), Math.min(albumHtml.length, ownerIndex + 5000)));
-  }
+  if (ownerIndex >= 0) windows.push(albumHtml.slice(Math.max(0, ownerIndex - 5000), Math.min(albumHtml.length, ownerIndex + 5000)));
   windows.push(albumHtml);
 
   const patterns = [
@@ -214,20 +212,14 @@ const safetyHolds = [];
 
 const addCandidate = (candidate) => {
   if (candidate.metadataPossibleMinorConcernSignal) {
-    safetyHolds.push({
-      ...candidate,
-      safetyHold: 'metadata_possible_minor_concern',
-      researchOnly: true,
-      trainingReady: false,
-      productionEligible: false,
-    });
-    return false;
+    safetyHolds.push({ ...candidate, safetyHold: 'metadata_possible_minor_concern', researchOnly: true, trainingReady: false, productionEligible: false });
+    return 'held';
   }
   const existing = candidateByUrl.get(candidate.sourcePageUrl);
   if (existing) {
     existing.curatedSourceIds = Array.from(new Set([...(existing.curatedSourceIds || []), candidate.curatedSourceId]));
     existing.targetHints = Array.from(new Set([...(existing.targetHints || []), ...(candidate.targetHints || [])]));
-    return false;
+    return 'duplicate';
   }
   candidateByUrl.set(candidate.sourcePageUrl, {
     sourceType: 'flickr_public_photo_page',
@@ -250,12 +242,14 @@ const addCandidate = (candidate) => {
     trainingReady: false,
     productionEligible: false,
   });
-  return true;
+  return 'new';
 };
 
 for (const source of config.sources) {
   const maxCandidates = Math.max(1, Number(source.maxCandidates || config.sourceCandidateCapDefault || 24));
+  let rawCandidateCount = 0;
   let discovered = 0;
+  let duplicates = 0;
   let held = 0;
   let error = null;
   let resolver = null;
@@ -269,25 +263,28 @@ for (const source of config.sources) {
         albumCandidates = collectPhotosetFeedPhotoLinks(feedXml, source);
         resolver = 'photoset_feed';
       }
-      for (const candidate of albumCandidates.slice(0, maxCandidates)) {
-        if (candidate.metadataPossibleMinorConcernSignal) held += 1;
-        if (addCandidate(candidate)) discovered += 1;
+      const selectedCandidates = albumCandidates.slice(0, maxCandidates);
+      rawCandidateCount = selectedCandidates.length;
+      for (const candidate of selectedCandidates) {
+        const result = addCandidate(candidate);
+        if (result === 'new') discovered += 1;
+        else if (result === 'duplicate') duplicates += 1;
+        else if (result === 'held') held += 1;
       }
     } else if (source.sourceType === 'flickr_exact_photos') {
       resolver = 'exact_photo_pages';
-      for (const rawUrl of (source.photoUrls || []).slice(0, maxCandidates)) {
+      const selectedUrls = (source.photoUrls || []).slice(0, maxCandidates);
+      rawCandidateCount = selectedUrls.length;
+      for (const rawUrl of selectedUrls) {
         const url = assertFlickrUrl(rawUrl, 'photo');
         const pathMatch = url.pathname.match(EXACT_PHOTO_PATH);
         const html = await fetchPublicHtml(url.toString(), 'photo');
         const pageContext = stripTags(html).slice(0, 5000);
-        const candidate = buildCandidate({
-          source,
-          ownerSlug: pathMatch[1],
-          photoId: pathMatch[2],
-          localContext: pageContext.slice(0, 1400),
-        });
-        if (candidate.metadataPossibleMinorConcernSignal) held += 1;
-        if (addCandidate(candidate)) discovered += 1;
+        const candidate = buildCandidate({ source, ownerSlug: pathMatch[1], photoId: pathMatch[2], localContext: pageContext.slice(0, 1400) });
+        const result = addCandidate(candidate);
+        if (result === 'new') discovered += 1;
+        else if (result === 'duplicate') duplicates += 1;
+        else if (result === 'held') held += 1;
       }
     } else {
       throw new Error(`unsupported_targeted_source_type:${source.sourceType}`);
@@ -302,11 +299,13 @@ for (const source of config.sources) {
     targetHints: source.targetHints || [],
     maxCandidates,
     resolver,
+    rawCandidateCount,
     newCandidateCount: discovered,
+    duplicateCount: duplicates,
     safetyHoldCount: held,
     error,
   });
-  process.stdout.write(`Targeted source ${source.sourceId}: ${discovered} new candidates, ${held} safety holds${resolver ? ` via ${resolver}` : ''}${error ? `, error ${error}` : ''}.\n`);
+  process.stdout.write(`Targeted source ${source.sourceId}: ${rawCandidateCount} raw, ${discovered} new, ${duplicates} duplicates, ${held} safety holds${resolver ? ` via ${resolver}` : ''}${error ? `, error ${error}` : ''}.\n`);
 }
 
 const candidates = [...candidateByUrl.values()];
@@ -319,7 +318,7 @@ const targetHintCounts = candidates.reduce((acc, candidate) => {
 
 await mkdir(OUTPUT_DIR, { recursive: true });
 await writeFile(OUTPUT_PATH, `${JSON.stringify({
-  schemaVersion: 2,
+  schemaVersion: 3,
   status: 'research_targeted_flickr_candidates_only',
   generatedFrom: path.relative(REPO_ROOT, CONFIG_PATH),
   candidateCount: candidates.length,

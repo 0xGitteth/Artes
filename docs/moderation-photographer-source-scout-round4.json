@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "status": "research_source_scout_only",
+  "purpose": "Explicit-act sourcing round. Determine which public erotic photographer portfolios can provide Artes-representative hard examples without login/paywall bypass or ignoring explicit client/image-use restrictions.",
+  "selectionPrinciples": {
+    "publicPagesOnly": true,
+    "noLoginOrPaywallBypass": true,
+    "preferCreativeRealPhotography": true,
+    "clientPrivacyAndExplicitImageUseRestrictionsAreRespected": true,
+    "publicVisibilityAloneDoesNotOverrideExplicitReuseRestrictions": true,
+    "commonsMayRemainHardAnchorSourceForExplicitActs": true,
+    "photographerPortfoliosShouldDominateArtNudeAndKinkStyleCoverage": true,
+    "trainingReady": false,
+    "productionEligible": false
+  },
+  "sources": [
+    {
+      "sourceId": "jen_fox_erotica",
+      "url": "https://jen-fox.com/erotic-couples-photography",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "very_high",
+      "contentSignals": ["explicit_erotic", "couples", "sex_photography", "fine_art", "nude"],
+      "recentWork": true,
+      "termsStatus": "public_site_states_online_sharing_requires_model_release",
+      "researchStatus": "orange_visual_reference_terms_asset_check",
+      "notes": "Excellent stylistic match: photographer explicitly offers fully explicit erotic couples photography and discusses photographing consensual sex. Main site states client photos are not uploaded publicly unless a model release grants permission. Use as visual/source lead; do not bulk-fetch until concrete public asset/terms context is checked."
+    },
+    {
+      "sourceId": "erotic_couples_photography",
+      "url": "https://eroticcouplesphotography.com/portfolio/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "very_high",
+      "contentSignals": ["erotic_couples", "explicit_sessions", "fetish", "ds", "same_sex", "groups"],
+      "recentWork": true,
+      "termsStatus": "explicit_images_mostly_not_public_and_sharing_requires_written_permission",
+      "researchStatus": "orange_style_reference_public_soft_examples_only",
+      "notes": "Very strong target-domain reference, but site says most sexually explicit images are not shared publicly; public portfolio contains only client-approved web-appropriate examples. Do not access Patreon/private material."
+    },
+    {
+      "sourceId": "misfits_like_me_explicitly_you",
+      "url": "https://www.misfitslikeme.com/explicitly-you/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["adult_erotic", "art_nude", "kink", "bdsm"],
+      "recentWork": true,
+      "termsStatus": "privacy_policy_states_images_belong_to_client_and_marketing_use_requires_explicit_written_consent",
+      "researchStatus": "red_no_automated_fetch",
+      "notes": "Strong content match but explicit client image-control statement is clear enough to exclude automated local research fetching."
+    },
+    {
+      "sourceId": "aczel_pictures",
+      "url": "https://www.aczel.pictures/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["nude_art", "fetish", "erotic", "creator_content"],
+      "recentWork": true,
+      "termsStatus": "creator_session_copy_rights_are_client_focused_portfolio_reuse_terms_not_resolved",
+      "researchStatus": "orange_manual_terms_and_asset_check",
+      "notes": "Modern creator-facing aesthetic and relevant genres. Public service page says delivered creator images belong to the client and can be used freely by them; this does not by itself grant third-party reuse of portfolio images."
+    },
+    {
+      "sourceId": "menart_london",
+      "url": "https://www.menart.co.uk/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["male_art_nude", "uncensored_nude", "body_diversity"],
+      "recentWork": true,
+      "termsStatus": "uncensored_gallery_requires_registration",
+      "researchStatus": "red_no_login_or_registration_bypass",
+      "notes": "Public site is a useful male-nude style reference, but uncensored images require registration. Do not register or bypass to source research images."
+    },
+    {
+      "sourceId": "prins_de_vos_patreon",
+      "url": "https://www.patreon.com/cw/prinsdevos",
+      "sourceType": "paywalled_creator_archive",
+      "artesRelevance": "very_high",
+      "contentSignals": ["queer_nude", "explicit_erotic", "documentary_intimacy"],
+      "recentWork": true,
+      "termsStatus": "uncensored_archive_paywalled",
+      "researchStatus": "red_no_paywall_bypass",
+      "notes": "Potentially excellent target-domain style but uncensored archive is subscriber-only. Exclude from automated research sourcing."
+    }
+  ],
+  "conclusion": "For explicit sexual acts, truly public and clearly adult photographic examples are harder to obtain from photographer portfolios without encountering deliberate privacy/paywall boundaries. Keep Commons/Flickr as hard-anchor sources for explicit_act, while shifting art-nude, exposed-body and BDSM/kink representation toward diverse photographer portfolios and public creative photography.",
+  "nextAction": "Continue building creative art-nude/kink/full-body explicit coverage from green public sources; separately expand hard explicit-act anchors from public sources with strong age provenance and then human-label all candidates."
+}

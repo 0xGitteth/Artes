@@ -30,7 +30,7 @@ test('creative explicit draft stays research-only and discovery facets are non-a
 test('portfolio fetcher is host-bounded and does not use auth or cookies', () => {
   assert.match(fetcher, /images\.squarespace-cdn\.com/);
   assert.match(fetcher, /folsomstreeteast\.com/);
-  assert.match(fetcher, /staticflickr\.com/);
+  assert.match(fetcher, /staticflickr\\\.com/);
   assert.match(fetcher, /MAX_IMAGE_BYTES = 15 \* 1024 \* 1024/);
   assert.match(fetcher, /humanAgeSafetyReviewRequired: true/);
   assert.match(fetcher, /trainingReady: false/);

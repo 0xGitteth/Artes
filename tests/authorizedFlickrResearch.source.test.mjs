@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const oauthHelper = await readFile(new URL('../scripts/lib/flickrOAuth1.js', import.meta.url), 'utf8');
 const oauthFlow = await readFile(new URL('../scripts/flickrAuthorizedResearchOAuth.js', import.meta.url), 'utf8');
+const codespaceAuth = await readFile(new URL('../scripts/authorizeFlickrResearchInCodespace.js', import.meta.url), 'utf8');
 const probe = await readFile(new URL('../scripts/probeAuthorizedFlickrRestrictedResearch.js', import.meta.url), 'utf8');
 const gitignore = await readFile(new URL('../.gitignore', import.meta.url), 'utf8');
 
@@ -16,16 +17,30 @@ test('Flickr authorized research uses OAuth 1.0a HMAC-SHA1 and Flickr-owned HTTP
   assert.match(oauthFlow, /services\/oauth\/authorize/);
   assert.match(oauthFlow, /services\/oauth\/access_token/);
   assert.match(oauthFlow, /requestedPermission: 'read'/);
+  assert.match(codespaceAuth, /requestedPermission: 'read'/);
 });
 
-test('OAuth secrets stay local and are never printed by the setup flow', () => {
+test('OAuth secrets stay local and are never printed by either setup flow', () => {
   assert.match(gitignore, /^\.tmp\/$/m);
   assert.match(oauthFlow, /\.tmp.*moderation-flickr-oauth/s);
   assert.match(oauthFlow, /mode: 0o600/);
+  assert.match(codespaceAuth, /mode: 0o600/);
   assert.match(oauthFlow, /secretPrinted: false/);
   assert.match(oauthFlow, /tokenSecretPrinted: false/);
   assert.match(oauthFlow, /tokenPrinted: false/);
-  assert.doesNotMatch(oauthFlow, /console\.log\([^\n]*(apiSecret|accessTokenSecret|requestTokenSecret)/);
+  assert.match(codespaceAuth, /secretPrinted: false/);
+  assert.match(codespaceAuth, /tokenPrinted: false/);
+  assert.doesNotMatch(oauthFlow, /example\.com/);
+  assert.doesNotMatch(codespaceAuth, /example\.com/);
+});
+
+test('Codespace authorization uses a dedicated HTTPS callback and validates returned token', () => {
+  assert.match(codespaceAuth, /GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN/);
+  assert.match(codespaceAuth, /CODESPACE_NAME/);
+  assert.match(codespaceAuth, /CALLBACK_PATH = '\/flickr\/callback'/);
+  assert.match(codespaceAuth, /returnedToken !== requestToken/);
+  assert.match(codespaceAuth, /server\.listen\(PORT, '0\.0\.0\.0'/);
+  assert.match(codespaceAuth, /TIMEOUT_MS = 10 \* 60 \* 1000/);
 });
 
 test('restricted proof compares authenticated safe and restricted visibility without downloading images', () => {

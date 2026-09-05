@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "status": "assistant_visual_screening_non_authoritative",
+  "datasetSubdir": "public-fhg-v1",
+  "screenedPreviewCount": 150,
+  "requestedCandidateCount": 186,
+  "fetchedPreviewCount": 150,
+  "failedPreviewCount": 36,
+  "failureInterpretation": {
+    "unsupportedGifUiAssets": 19,
+    "blockedNonImageOrExtraHosts": 15,
+    "notFound": 2,
+    "note": "Most preview failures are decorative UI/movie/cover assets rather than missing research photographs."
+  },
+  "sourceFirstPass": {
+    "mastasia_public_fhg_index": {
+      "previewCount": 126,
+      "visualAssessment": "Predominantly real adult photography but highly concentrated in an extreme-breast fetish niche with repeated models, poses and styling.",
+      "researchValue": [
+        "female_bare_breasts",
+        "fetish_or_suggestive_context",
+        "unusual_body_morphology_coverage"
+      ],
+      "weakFor": [
+        "explicit_act",
+        "broad_artes_visual_distribution"
+      ],
+      "recommendedUse": "Keep as a capped supplemental niche pool; do not let this source/style dominate training or benchmark splits."
+    },
+    "metart_public_fhg_current_example": {
+      "previewCount": 24,
+      "visualAssessment": "Professional art-nude/editorial photography with substantially cleaner composition and modern visual quality.",
+      "researchValue": [
+        "female_bare_breasts",
+        "bare_buttocks",
+        "genitalia_full_frontal",
+        "art_nude"
+      ],
+      "weakFor": [
+        "explicit_act"
+      ],
+      "recommendedUse": "Retain as an art-nude/full-body source pool; still human-label individual images."
+    }
+  },
+  "nextPriority": "Visually screen professional scene-oriented public previews from VivThomas and Peter Juhan because the remaining critical gap is explicit_act, not more mild/art-nude volume.",
+  "humanLabelsAuthoritative": false,
+  "sourceIntentIsLabelAuthority": false,
+  "researchOnly": true,
+  "trainingReady": false,
+  "productionEligible": false
+}

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "prefillVersion": "web_research_assistant_prefill_v1",
+  "datasetSubdir": "web-research-v1",
+  "suggestionSource": "assistant_visual_review",
+  "authoritative": false,
+  "humanConfirmationRequired": true,
+  "discoveryMetadataUsedAsLabelAuthority": false,
+  "status": "partial_waiting_visual_review",
+  "items": [
+    {
+      "sourceUrl": "https://www.flickr.com/photos/brookeshaden/54644412780/",
+      "ageSafetyDecision": "adult_clear",
+      "detectorLabel": {
+        "nudity": "none",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.99,
+        "uncertaintyFlags": []
+      },
+      "basis": "visual_review_from_user_provided_review_screenshot"
+    }
+  ]
+}

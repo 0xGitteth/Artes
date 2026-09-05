@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const reviewSource = readFileSync(new URL('../scripts/serveWebResearchModerationLabelReview.js', import.meta.url), 'utf8');
 const validateSource = readFileSync(new URL('../scripts/validateReviewedWebResearchModeration.js', import.meta.url), 'utf8');
+const assistantPrefill = JSON.parse(readFileSync(new URL('../docs/moderation-web-research-assistant-prefill-v1.json', import.meta.url), 'utf8'));
 
 test('web research review stays local and reviews the whole prepared batch', () => {
   assert.match(reviewSource, /HOST = '127\.0\.0\.1'/);
@@ -23,12 +24,31 @@ test('age safety is explicit and uncertain or possible minors are excluded rathe
   assert.match(reviewSource, /humanAgeSafetyReviewRequired: true/);
 });
 
-test('discovery metadata is context only and human labels remain authoritative', () => {
-  assert.match(reviewSource, /Discovery facet:/);
-  assert.match(reviewSource, /zoekhint, geen detectorlabel/);
-  assert.match(reviewSource, /discoveryMetadataIsLabelAuthority: false/);
+test('assistant visual prefill is separate from authoritative human review', () => {
+  assert.equal(assistantPrefill.suggestionSource, 'assistant_visual_review');
+  assert.equal(assistantPrefill.authoritative, false);
+  assert.equal(assistantPrefill.humanConfirmationRequired, true);
+  assert.equal(assistantPrefill.discoveryMetadataUsedAsLabelAuthority, false);
+  assert.match(reviewSource, /PREFILL_PATH/);
+  assert.match(reviewSource, /assistantSuggestion/);
+  assert.match(reviewSource, /Vooringevuld door assistent/);
   assert.match(reviewSource, /labelSource: 'local_human_review'/);
+  assert.match(reviewSource, /humanLabelsAuthoritative: true/);
+  assert.match(reviewSource, /assistantSuggestionAcceptedAsIs/);
+});
+
+test('discovery metadata remains provenance only and is hidden from the labeling interface', () => {
+  assert.doesNotMatch(reviewSource, /<strong>Discovery facet:<\/strong>/);
+  assert.match(reviewSource, /discoveryFacet: state\.source\.visualFacet \|\| null/);
+  assert.match(reviewSource, /discoveryMetadataIsLabelAuthority: false/);
   assert.doesNotMatch(reviewSource, /suggestionsByFacet/);
+});
+
+test('human review progress cannot be completed merely by assistant prefills', () => {
+  assert.match(reviewSource, /isHumanReviewed/);
+  assert.match(reviewSource, /items\.filter\(isHumanReviewed\)\.length/);
+  assert.match(reviewSource, /reviewStatus = items\.length === states\.length \? 'complete' : 'partial'/);
+  assert.match(reviewSource, /assistantPrefillCount/);
 });
 
 test('review output cannot become training, production or runtime authority', () => {

@@ -94,5 +94,11 @@
       "status": "creator_subject_and_cc0_clear_adult_status_pending"
     }
   ],
-  "nextAction": "Run sourcing rounds across all high-priority sources, optimize first for new independent source pools for implied_nude and male_topless, and batch only rights-cleared candidates for local DINO/human review."
+  "humanReviewBatching": {
+    "normalMinimumImagesPerReviewBatch": 5,
+    "normalMinimumIndependentSourcePoolsPerReviewBatch": 2,
+    "singleImageException": "Only for an explicit technical smoke test, a first end-to-end proof for a previously empty class, or a high-value edge case. A one-image batch never counts as meaningful class coverage.",
+    "reason": "Reduce reviewer churn and avoid presenting isolated observations as dataset progress."
+  },
+  "nextAction": "Run sourcing rounds across all high-priority sources, optimize first for new independent source pools for implied_nude and male_topless, batch rights-cleared candidates before human review, and use contributor-authorized intake when public sources cannot meet diversity gates."
 }

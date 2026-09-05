@@ -133,6 +133,42 @@
       "maxCandidates": 18
     },
     {
+      "sourceId": "flickr_alex88_nude_sexy",
+      "sourcePoolId": "flickr_alex88_nude_sexy",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/clickr88/albums/72157626881509036/",
+      "creator": "Alex88",
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal"],
+      "sourceContext": "Public 106-photo album titled Nude and Sexy Shots, described as models photographed by the account owner.",
+      "ageContext": "Nude photography context; individual adult-safety screening remains required.",
+      "termsStatus": "unverified_research_only",
+      "maxCandidates": 18
+    },
+    {
+      "sourceId": "flickr_bkort_fine_art_nude",
+      "sourcePoolId": "flickr_bkort_fine_art_nude",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/bkort/albums/72157634659449976/",
+      "creator": "Bkort photography",
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal"],
+      "sourceContext": "Public three-photo Fine art nude album; useful as a small independent creative source pool.",
+      "ageContext": "Fine-art nude context only; human safety screening remains required.",
+      "termsStatus": "unverified_research_only",
+      "maxCandidates": 3
+    },
+    {
+      "sourceId": "flickr_sharon_yanai_fine_art_nude",
+      "sourcePoolId": "flickr_sharon_yanai_fine_art_nude",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/syanai/albums/72177720305195565/",
+      "creator": "Sharon Yanai",
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal"],
+      "sourceContext": "Public five-photo Fine art nude album from a photographer portfolio account.",
+      "ageContext": "Fine-art nude context only; human safety screening remains required.",
+      "termsStatus": "unverified_research_only",
+      "maxCandidates": 5
+    },
+    {
       "sourceId": "flickr_ron_frazier_exact_recent_selfportraits",
       "sourcePoolId": "flickr_ron_frazier_adult_selfportrait",
       "sourceType": "flickr_exact_photos",

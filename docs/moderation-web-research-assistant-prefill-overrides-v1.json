@@ -12,6 +12,68 @@
       "ageSafetyDecision": null,
       "detectorLabel": null,
       "basis": "assistant_visual_review_corrected_after_human_noted_render_or_game_character"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/bluepoint951/441349241/",
+      "researchEligibilityDecision": "include_real_photograph",
+      "ageSafetyDecision": "not_required_nonadult_nonsexual",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.97,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_prefill_corrected_after_human_policy_clarification_age_not_blocking_nonsexual_male_topless"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/66414499@N05/6077958997/",
+      "researchEligibilityDecision": "include_real_photograph",
+      "ageSafetyDecision": "not_required_nonadult_nonsexual",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.98,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_prefill_corrected_after_human_policy_clarification_age_not_blocking_nonsexual_male_topless"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/andruco/4445005670/",
+      "researchEligibilityDecision": "include_real_photograph",
+      "ageSafetyDecision": "not_required_nonadult_nonsexual",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.93,
+        "uncertaintyFlags": [
+          "low_detail_silhouette"
+        ]
+      },
+      "basis": "assistant_prefill_corrected_after_human_policy_clarification_age_not_blocking_nonsexual_male_topless"
+    },
+    {
+      "sourceUrl": "https://www.flickr.com/photos/52809910@N00/52565942/",
+      "researchEligibilityDecision": "include_real_photograph",
+      "ageSafetyDecision": "not_required_nonadult_nonsexual",
+      "detectorLabel": {
+        "nudity": "male_topless",
+        "sexualContext": "none",
+        "graphicInjury": "none",
+        "sensitiveSignals": [],
+        "possibleMinorConcern": false,
+        "confidence": 0.96,
+        "uncertaintyFlags": []
+      },
+      "basis": "assistant_prefill_corrected_after_human_policy_clarification_age_not_blocking_nonsexual_male_topless"
     }
   ]
 }

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "status": "research_scale_gate",
+  "purpose": "Prevent premature handoff of explicit moderation research batches. Artes currently needs substantially more strong, representative explicit examples before another human review/download round is worth the user's time.",
+  "minimumBeforeNextUserDownloadRun": {
+    "newCandidateCount": 120,
+    "sourcePoolCount": 30,
+    "maxSingleSourcePoolShare": 0.10,
+    "realPhotographyRequired": true,
+    "artesRepresentativeCreativePhotographyPreferred": true,
+    "wikimediaMayBeAnchorMinorityButNotDominant": true
+  },
+  "discoveryTargets": {
+    "female_bare_breasts_or_art_nude": 25,
+    "bare_buttocks": 20,
+    "genitalia_or_full_frontal": 20,
+    "bdsm_kink": 25,
+    "explicit_act": 20,
+    "mixed_or_boundary": 10
+  },
+  "sourceMix": {
+    "preferPhotographerPortfoliosAndCreativePlatforms": true,
+    "includeFlickrPublicPhotography": true,
+    "includePublicEventPhotography": true,
+    "wikimediaCommonsRole": "hard_explicit_anchor_minority",
+    "avoidClinicalAnatomyDominatedDistribution": true,
+    "avoidSinglePhotographerStyleDominance": true
+  },
+  "safetyAndRights": {
+    "publicPagesOnly": true,
+    "noLoginOrPaywallBypass": true,
+    "noPrivateOrLeakedImages": true,
+    "adultOrSexualContentRequiresHumanAgeSafetyReview": true,
+    "explicitReuseRestrictionBlocksAutomatedFetch": true,
+    "copyrightFooterAloneIsNotAutomaticResearchExclusion": true,
+    "researchOnly": true,
+    "trainingReady": false,
+    "productionEligible": false
+  }
+}

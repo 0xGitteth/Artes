@@ -15,6 +15,8 @@ const OUTPUT_PATH = path.join(TEST_SET_DIR, 'research-dataset.json');
 const EXPECTED_MODEL = 'dinov2_vitb14';
 const EXPECTED_DIMENSION = 768;
 const NUDITY_VALUES = ['none', 'underwear_swimwear', 'implied_nude', 'bare_buttocks', 'female_bare_breasts', 'genitalia', 'male_topless'];
+const AGE_SAFETY_DECISIONS = ['not_required_nonadult_nonsexual', 'adult_clear', 'skip_minor_or_age_uncertain'];
+const AGE_SAFETY_RELEVANT_NUDITY = new Set(['implied_nude', 'bare_buttocks', 'female_bare_breasts', 'genitalia']);
 const RESEARCH_ELIGIBILITY_DECISIONS = ['include_real_photograph', 'exclude_non_photographic_or_synthetic'];
 
 const [intake, labels, sources] = await Promise.all([
@@ -56,6 +58,11 @@ const validateEmbedding = (item) => {
   }
 };
 
+const detectorLabelRequiresAgeSafety = (detectorLabel) => (
+  AGE_SAFETY_RELEVANT_NUDITY.has(detectorLabel?.nudity)
+  || (detectorLabel?.sexualContext && detectorLabel.sexualContext !== 'none')
+);
+
 for (const reviewed of reviewedItems) {
   const fileName = String(reviewed?.fileName || '').trim();
   if (!fileName || reviewedByFile.has(fileName)) throw new Error('duplicate_or_missing_web_research_review_file');
@@ -80,19 +87,30 @@ for (const reviewed of reviewedItems) {
     if (reviewed.labelStatus !== 'excluded_non_photographic' || reviewed.detectorLabel !== null || reviewed.ageSafetyDecision !== null) {
       throw new Error(`invalid_web_research_non_photographic_exclusion:${fileName}`);
     }
-  } else if (reviewed.ageSafetyDecision === 'adult_clear') {
-    if (reviewed.labelStatus !== 'human_confirmed' || reviewed.labelSource !== 'local_human_review') {
-      throw new Error(`web_research_label_not_human_confirmed:${fileName}`);
-    }
-    const validation = validateArtesDetectorLabel(reviewed.detectorLabel);
-    if (!validation.valid) throw new Error(`invalid_web_research_detector_label:${fileName}:${validation.errors.join(',')}`);
-    if (reviewed.detectorLabel.possibleMinorConcern !== false) throw new Error(`web_research_possible_minor_not_excluded:${fileName}`);
-  } else if (reviewed.ageSafetyDecision === 'skip_minor_or_age_uncertain') {
+    reviewedByFile.set(fileName, reviewed);
+    continue;
+  }
+
+  if (!AGE_SAFETY_DECISIONS.includes(reviewed.ageSafetyDecision)) {
+    throw new Error(`missing_web_research_age_decision:${fileName}`);
+  }
+
+  if (reviewed.ageSafetyDecision === 'skip_minor_or_age_uncertain') {
     if (reviewed.labelStatus !== 'excluded_age_safety' || reviewed.detectorLabel !== null) {
       throw new Error(`invalid_web_research_age_exclusion:${fileName}`);
     }
-  } else {
-    throw new Error(`missing_web_research_age_decision:${fileName}`);
+    reviewedByFile.set(fileName, reviewed);
+    continue;
+  }
+
+  if (reviewed.labelStatus !== 'human_confirmed' || reviewed.labelSource !== 'local_human_review') {
+    throw new Error(`web_research_label_not_human_confirmed:${fileName}`);
+  }
+  const validation = validateArtesDetectorLabel(reviewed.detectorLabel);
+  if (!validation.valid) throw new Error(`invalid_web_research_detector_label:${fileName}:${validation.errors.join(',')}`);
+  if (reviewed.detectorLabel.possibleMinorConcern !== false) throw new Error(`web_research_possible_minor_not_excluded:${fileName}`);
+  if (reviewed.ageSafetyDecision === 'not_required_nonadult_nonsexual' && detectorLabelRequiresAgeSafety(reviewed.detectorLabel)) {
+    throw new Error(`web_research_age_safety_required_for_adult_or_sexual_content:${fileName}`);
   }
   reviewedByFile.set(fileName, reviewed);
 }
@@ -126,7 +144,7 @@ for (const intakeItem of intakeItems) {
       sourcePoolId: intakeItem.sourcePoolId,
       sourceUrl: source.sourceUrl,
       discoveryFacet: source.visualFacet || null,
-      exclusionReason: 'minor_or_age_uncertain',
+      exclusionReason: 'minor_or_age_uncertain_when_age_safety_relevant',
     });
     continue;
   }
@@ -140,7 +158,7 @@ for (const intakeItem of intakeItems) {
     detectorLabel: reviewed.detectorLabel,
     humanConfirmed: true,
     researchEligibilityDecision: 'include_real_photograph',
-    ageSafetyDecision: 'adult_clear',
+    ageSafetyDecision: reviewed.ageSafetyDecision,
     embedding: intakeItem.embedding,
     semanticClusterId: null,
     semanticClusterApproved: false,
@@ -154,7 +172,8 @@ for (const intakeItem of intakeItems) {
 const nudityCounts = Object.fromEntries(NUDITY_VALUES.map((value) => [value, 0]));
 for (const item of researchItems) nudityCounts[item.detectorLabel.nudity] += 1;
 const sourcePoolCount = new Set(researchItems.map((item) => item.sourcePoolId)).size;
-const ageSafetyExcludedCount = excludedItems.filter((item) => item.exclusionReason === 'minor_or_age_uncertain').length;
+const ageSafetyNotRequiredCount = researchItems.filter((item) => item.ageSafetyDecision === 'not_required_nonadult_nonsexual').length;
+const ageSafetyExcludedCount = excludedItems.filter((item) => item.exclusionReason === 'minor_or_age_uncertain_when_age_safety_relevant').length;
 const nonPhotographicExcludedCount = excludedItems.filter((item) => item.exclusionReason === 'non_photographic_or_synthetic').length;
 
 const output = {
@@ -167,11 +186,13 @@ const output = {
   embeddingDimension: EXPECTED_DIMENSION,
   requestedItemCount: intakeItems.length,
   researchItemCount: researchItems.length,
+  ageSafetyNotRequiredCount,
   ageSafetyExcludedCount,
   nonPhotographicExcludedCount,
   sourcePoolCount,
   nudityCounts,
   humanLabelsAuthoritative: true,
+  ageSafetyAppliedOnlyWhenAdultOrSexualContent: true,
   realPhotographyResearchOnly: true,
   discoveryMetadataIsLabelAuthority: false,
   dinoSimilarityIsLabelAuthority: false,
@@ -193,6 +214,7 @@ process.stdout.write(`${JSON.stringify({
   datasetRole: output.datasetRole,
   requestedItemCount: output.requestedItemCount,
   researchItemCount: output.researchItemCount,
+  ageSafetyNotRequiredCount: output.ageSafetyNotRequiredCount,
   ageSafetyExcludedCount: output.ageSafetyExcludedCount,
   nonPhotographicExcludedCount: output.nonPhotographicExcludedCount,
   sourcePoolCount: output.sourcePoolCount,

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "research_professional_adult_public_preview_sources",
   "purpose": "Source professional adult photography from publisher-owned public preview/FHG pages for the remaining explicit moderation gaps. Public promotional stills are preferred over random tube thumbnails because they preserve creator/site provenance, professional composition and adult-age context. Discovery intent is not a detector label.",
   "rules": {
@@ -22,6 +22,7 @@
       "sourceId": "vivthomas_public_fhg",
       "sourceType": "publisher_public_preview_gallery",
       "priority": "high",
+      "automatedDiscoveryEligible": true,
       "baseHost": "fhg.vivthomas.com",
       "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
       "ageContext": "Public FHG pages carry an 18 U.S.C. 2257 statement that all models were at least 18 when photographed.",
@@ -35,24 +36,10 @@
       ]
     },
     {
-      "sourceId": "hegre_public_previews",
-      "sourceType": "publisher_public_scene_preview",
-      "priority": "high",
-      "baseHosts": ["www.hegre.com", "cdn.hegre.com"],
-      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "art_nude"],
-      "ageContext": "Hegre's public 2257 compliance statement says all persons appearing in sexual or other visual depictions on the site were at least 18 when produced.",
-      "visualRationale": "High-end erotic and explicit photography/film stills with strong lighting, styling and composition, highly representative of the quality level expected on Artes.",
-      "termsStatus": "all_rights_reserved_research_only",
-      "seedPages": [
-        "https://www.hegre.com/films/goro-and-desi-devi-the-photo-shoot",
-        "https://www.hegre.com/films/the-making-of-the-goro-and-helga-shoot"
-      ],
-      "notes": "Use only assets already exposed on public preview/scene pages. Do not fetch member downloads or bypass the adults-only entrance flow."
-    },
-    {
       "sourceId": "femjoy_public_photosets",
       "sourceType": "publisher_public_photoset_index",
       "priority": "high",
+      "automatedDiscoveryEligible": true,
       "baseHost": "www.femjoy.com",
       "targetHints": ["genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "art_nude"],
       "ageContext": "Femjoy's public pages state all models appearing on the website are 18 years or older and link a 2257 compliance statement.",
@@ -68,12 +55,64 @@
       "sourceId": "peter_juhan_public_explicit_portfolio",
       "sourceType": "photographer_public_portfolio",
       "priority": "medium_high",
+      "automatedDiscoveryEligible": true,
       "baseHost": "www.peterjuhan.com",
       "targetHints": ["bdsm_kink", "genitalia_full_frontal", "explicit_act", "male_topless"],
       "ageContext": "Professional adult/explicit photographer portfolio context; individual images still require normal human safety screening.",
       "visualRationale": "Explicit black-and-white photography centered on BDSM, masculinity, kink and gay subcultures; strong Artes relevance and a different visual/source pool from studio adult publishers.",
       "termsStatus": "unverified_research_only",
       "seedPages": ["https://www.peterjuhan.com/photography"]
+    }
+  ],
+  "adultEntranceLeads": [
+    {
+      "sourceId": "hegre_public_previews",
+      "sourceType": "publisher_adult_entrance_preview",
+      "priority": "high",
+      "automatedDiscoveryEligible": false,
+      "baseHosts": ["www.hegre.com", "cdn.hegre.com"],
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "art_nude"],
+      "ageContext": "Hegre's public 2257 compliance statement says all persons appearing in sexual or other visual depictions on the site were at least 18 when produced.",
+      "visualRationale": "High-end erotic and explicit photography/film stills with strong lighting, styling and composition, highly representative of the quality level expected on Artes.",
+      "termsStatus": "all_rights_reserved_research_only",
+      "seedPages": [
+        "https://www.hegre.com/films/goro-and-desi-devi-the-photo-shoot",
+        "https://www.hegre.com/films/the-making-of-the-goro-and-helga-shoot"
+      ],
+      "reasonNotAutomated": "Site presents an explicit adults-only entrance. Keep as a manual lead rather than extracting assets from raw HTML without the viewer making that age confirmation."
+    },
+    {
+      "sourceId": "xart_public_gallery_previews",
+      "sourceType": "publisher_adult_entrance_preview",
+      "priority": "high",
+      "automatedDiscoveryEligible": false,
+      "baseHost": "www.x-art.com",
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
+      "ageContext": "Adults-only publisher with explicit age confirmation at entry; exact performer-age provenance should be retained where the publisher exposes it.",
+      "visualRationale": "Recent professional erotic photo galleries including couples and group scenes, with polished editorial lighting/composition and large photo sets.",
+      "termsStatus": "unverified_research_only",
+      "seedPages": [
+        "https://www.x-art.com/",
+        "https://www.x-art.com/galleries/when-you-come",
+        "https://www.x-art.com/galleries/prelude-to-a-threesome"
+      ],
+      "reasonNotAutomated": "Public preview is fronted by an explicit 18+ entrance. Do not treat direct raw-HTML availability as permission to skip that interaction."
+    },
+    {
+      "sourceId": "joymii_public_pictures",
+      "sourceType": "publisher_adult_preview_index",
+      "priority": "high",
+      "automatedDiscoveryEligible": false,
+      "baseHosts": ["www.joymii.com", "images.ctfassets.net", "kosmos-assets-prod.react.gammacdn.com"],
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
+      "ageContext": "Professional Adult Time studio with a public 2257 compliance link; individual preview provenance remains attached during screening.",
+      "visualRationale": "Publisher explicitly positions the material as artful/sensual porn and exposes professional studio previews and a Pictures section.",
+      "termsStatus": "unverified_research_only",
+      "seedPages": [
+        "https://www.joymii.com/",
+        "https://www.joymii.com/en/photos"
+      ],
+      "reasonNotAutomated": "Keep as a reviewed adult-site lead until the site's current entrance/terms behavior is verified for automated research access."
     }
   ],
   "deferredSources": [

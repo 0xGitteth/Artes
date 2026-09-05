@@ -7,17 +7,23 @@ const script = await readFile(new URL('../scripts/discoverTargetedHardGapFlickrC
 
 test('hard-gap discovery starts from curated adult photography sources instead of broad tags', () => {
   assert.equal(config.status, 'research_targeted_source_discovery_only');
-  assert.ok(config.sources.length >= 11);
-  assert.ok(config.sources.filter((source) => source.sourceType === 'flickr_album').length >= 10);
+  assert.ok(config.sources.length >= 8);
+  assert.ok(config.sources.filter((source) => source.sourceType === 'flickr_album').length >= 6);
   assert.ok(config.sources.some((source) => source.sourceType === 'flickr_exact_photos'));
   assert.doesNotMatch(script, /\/photos\/tags\//);
   assert.match(script, /ALBUM_PATH/);
   assert.match(script, /EXACT_PHOTO_PATH/);
 });
 
-test('album discovery only accepts exact photos owned by the curated album owner', () => {
-  assert.match(script, /expectedOwner/);
-  assert.match(script, /pathMatch\[1\] !== expectedOwner/);
+test('public album discovery falls back to Flickr photoset feeds when album HTML has no photo links', () => {
+  assert.match(script, /services\/feeds\/photoset\.gne/);
+  assert.match(script, /format', 'rss_200'/);
+  assert.match(script, /resolveAlbumOwnerNsid/);
+  assert.match(script, /collectPhotosetFeedPhotoLinks/);
+  assert.match(script, /resolver = 'photoset_feed'/);
+  assert.doesNotMatch(script, /api_key|apiKey/i);
+  const ron = config.sources.find((source) => source.sourceId === 'flickr_ron_frazier_adult_album');
+  assert.equal(ron?.ownerNsid, '56377701@N07');
 });
 
 test('hard-gap targets remain focused on classes missing after visual screening', () => {

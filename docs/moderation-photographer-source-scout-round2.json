@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "status": "research_source_scout_only",
+  "purpose": "Track photographer/portfolio sources for Artes-representative explicit moderation research. This is a scouting log only. It does not grant training, production, or redistribution rights.",
+  "selectionPrinciples": {
+    "publicPagesOnly": true,
+    "noLoginOrPaywallBypass": true,
+    "preferArtesRepresentativeCreativePhotography": true,
+    "preferMultiplePhotographersAndSourcePools": true,
+    "avoidClinicalOrAnatomyDominatedDistribution": true,
+    "termsAndCopyrightCheckedBeforeAutomatedFetch": true,
+    "copyrightFooterAloneIsNotAutomaticResearchExclusion": true,
+    "explicitReuseRestrictionBlocksAutomatedFetch": true,
+    "trainingReady": false,
+    "productionEligible": false
+  },
+  "sources": [
+    {
+      "sourceId": "renee_de_sans",
+      "url": "https://renedesans.net/work/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["shibari", "rope_bondage", "fetish", "performance", "queer_editorial", "art_nude"],
+      "recentWork": true,
+      "termsStatus": "no_explicit_reuse_prohibition_found_in_public_pages_reviewed",
+      "researchStatus": "green_candidate_source",
+      "notes": "Strong contemporary editorial/artistic rope work. Portfolio includes FRAG.NOIR, Room 916, Queer Bodies Bound, Kink & Fashion, Red Latex and related projects. Copyright footer and privacy links visible, but no explicit no-download/no-research term found in reviewed public pages. Candidate images still require per-page human/technical screening."
+    },
+    {
+      "sourceId": "john_tisbury",
+      "url": "https://johntisbury.co.uk/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["erotic", "fetish", "rope_bondage", "art_nude", "boudoir"],
+      "recentWork": true,
+      "termsStatus": "copyright_footer_only_in_public_pages_reviewed",
+      "researchStatus": "green_candidate_source",
+      "notes": "Large public portfolio with separate Erotic, Fetish, Art Nude and Boudoir categories, including Rope Bondage, Hot Wax, Roxy, Bondage Ballet, Gestalta bondage and recent 2025 model work. Good visual diversity; cap per shoot/sourcePool to avoid style leakage."
+    },
+    {
+      "sourceId": "camera_shy_13",
+      "url": "https://www.camerashy13.com/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["shibari", "suspension", "fetish", "bodyscape", "submission"],
+      "recentWork": true,
+      "termsStatus": "public_portfolio_with_adult_recordkeeping_statement",
+      "researchStatus": "green_candidate_source",
+      "notes": "Public galleries include Strength in Submission and Freedom in Surrender, with many floorwork/suspension images. Site states persons in actual sexually explicit depictions were over 18, useful age provenance but not a replacement for human review."
+    },
+    {
+      "sourceId": "john_j_anklet",
+      "url": "https://johnjanklet.com/fetish-photography",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["kink", "fetish", "nude", "shibari", "bodyscape", "conceptual_nude"],
+      "recentWork": false,
+      "termsStatus": "no_explicit_reuse_prohibition_found_in_public_pages_reviewed",
+      "researchStatus": "green_candidate_source",
+      "notes": "Dedicated public galleries for women/men nude, Shibari, fetish, conceptual nude, black-light kink and related work. Older than preferred but visually representative enough for gap filling."
+    },
+    {
+      "sourceId": "shibari_photography_cylr",
+      "url": "https://shibari.photography/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["rope_bondage", "intense_bondage", "shibari"],
+      "recentWork": false,
+      "termsStatus": "copyright_footer_visible",
+      "researchStatus": "orange_manual_technical_check",
+      "notes": "Portfolio explicitly describes rope bondage work and an intense Strain Series. Individual gallery pages were not reliably retrievable through current web indexing, so do not automate until direct image delivery and terms are manually verified."
+    },
+    {
+      "sourceId": "martin_wieland_arts",
+      "url": "https://martin-wieland-arts.com/en/",
+      "sourceType": "photographer_portfolio_shop",
+      "artesRelevance": "high",
+      "contentSignals": ["fine_art_nude", "erotic", "editorial_nude"],
+      "recentWork": true,
+      "termsStatus": "commercial_print_and_download_site_requires_more_review",
+      "researchStatus": "orange_manual_terms_check",
+      "notes": "Strong contemporary fine art nude portfolio but site is closely tied to limited-edition print/download sales. Treat as visually useful scouting only until portfolio asset delivery and usage terms are checked more precisely."
+    },
+    {
+      "sourceId": "lumiere_nu",
+      "url": "https://lumierenu.ru/en/portfolio/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["fine_art_nude", "boudoir"],
+      "recentWork": true,
+      "termsStatus": "explicit_model_release_restricts_third_party_use",
+      "researchStatus": "red_no_automated_fetch",
+      "notes": "Visually relevant, but published model-release terms explicitly constrain publication/use and require separate written consent for passing material to third parties. Do not automatically fetch for research."
+    }
+  ],
+  "nextAction": "Expand green/orange sources, inspect concrete galleries and asset delivery, then build a mixed-source explicit manifest with photographer portfolios as the majority and Commons as anchor coverage only."
+}

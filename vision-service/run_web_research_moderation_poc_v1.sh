@@ -8,6 +8,7 @@ MODEL_CACHE="$SCRIPT_DIR/.model-cache/huggingface"
 ENDPOINT="http://127.0.0.1:8787"
 OUTPUT_SUBDIR="${ARTES_WEB_RESEARCH_DATASET_SUBDIR:-web-research-v1}"
 MANIFEST_RELATIVE="${ARTES_WEB_RESEARCH_MANIFEST:-docs/moderation-web-research-batch-v1.json}"
+FETCH_SCRIPT_RELATIVE="${ARTES_WEB_RESEARCH_FETCH_SCRIPT:-scripts/fetchWebResearchModerationImages.js}"
 LOG_FILE="$REPO_ROOT/.tmp/vision-${OUTPUT_SUBDIR}.log"
 IMAGE_DIR="$REPO_ROOT/.tmp/moderation-test-images/$OUTPUT_SUBDIR"
 OUTPUT_DIR="$REPO_ROOT/.tmp/moderation-test-set/$OUTPUT_SUBDIR"
@@ -23,8 +24,16 @@ if [[ "$MANIFEST_RELATIVE" = /* || "$MANIFEST_RELATIVE" == *".."* ]]; then
   echo "ARTES_WEB_RESEARCH_MANIFEST moet een repo-relatief manifestpad zijn." >&2
   exit 2
 fi
+if [[ "$FETCH_SCRIPT_RELATIVE" = /* || "$FETCH_SCRIPT_RELATIVE" == *".."* ]]; then
+  echo "ARTES_WEB_RESEARCH_FETCH_SCRIPT moet een repo-relatief scriptpad zijn." >&2
+  exit 2
+fi
 if [[ ! -f "$REPO_ROOT/$MANIFEST_RELATIVE" ]]; then
   echo "Web-research manifest ontbreekt: $MANIFEST_RELATIVE" >&2
+  exit 2
+fi
+if [[ ! -f "$REPO_ROOT/$FETCH_SCRIPT_RELATIVE" ]]; then
+  echo "Web-research fetchscript ontbreekt: $FETCH_SCRIPT_RELATIVE" >&2
   exit 2
 fi
 if [[ ! -x "$VENV_PYTHON" ]]; then
@@ -49,7 +58,7 @@ if [[ "$SKIP_FETCH" == "1" ]]; then
   fi
   echo "Reusing already fetched web research images from .tmp/moderation-test-images/$OUTPUT_SUBDIR"
 else
-  node scripts/fetchWebResearchModerationImages.js
+  node "$FETCH_SCRIPT_RELATIVE"
 fi
 
 cd "$SCRIPT_DIR"

@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "status": "research_professional_adult_public_preview_sources",
+  "purpose": "Source professional adult photography from publisher-owned public preview/FHG pages for the remaining explicit moderation gaps. Public promotional stills are preferred over random tube thumbnails because they preserve creator/site provenance, professional composition and adult-age context. Discovery intent is not a detector label.",
+  "rules": {
+    "publicPreviewOnly": true,
+    "noMemberArea": true,
+    "noPaywallBypass": true,
+    "noLoginBypass": true,
+    "noAgeGateBypass": true,
+    "noSessionCookieReuse": true,
+    "publisherHostedAssetsPreferred": true,
+    "professionalPhotographyPreferred": true,
+    "sourceIntentIsLabelAuthority": false,
+    "humanVisualScreeningRequired": true,
+    "researchOnly": true,
+    "trainingReady": false,
+    "productionEligible": false
+  },
+  "sources": [
+    {
+      "sourceId": "vivthomas_public_fhg",
+      "sourceType": "publisher_public_preview_gallery",
+      "priority": "high",
+      "baseHost": "fhg.vivthomas.com",
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
+      "ageContext": "Public FHG pages carry an 18 U.S.C. 2257 statement that all models were at least 18 when photographed.",
+      "visualRationale": "Professional studio adult photography with public scene previews; materially closer to Artes-style composed photography than generic tube thumbnails.",
+      "termsStatus": "copyright_notice_research_only",
+      "seedPages": [
+        "https://fhg.vivthomas.com/2024-03-22/SHARED_LOVE/",
+        "https://fhg.vivthomas.com/2024-02-02/LOOK_OF_LOVE/",
+        "https://fhg.vivthomas.com/2025-06-27/LANGUAGE_OF_LOVE/",
+        "https://fhg.vivthomas.com/2019-06-07/UNTAMED_DESIRE/"
+      ]
+    },
+    {
+      "sourceId": "hegre_public_previews",
+      "sourceType": "publisher_public_scene_preview",
+      "priority": "high",
+      "baseHosts": ["www.hegre.com", "cdn.hegre.com"],
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "art_nude"],
+      "ageContext": "Hegre's public 2257 compliance statement says all persons appearing in sexual or other visual depictions on the site were at least 18 when produced.",
+      "visualRationale": "High-end erotic and explicit photography/film stills with strong lighting, styling and composition, highly representative of the quality level expected on Artes.",
+      "termsStatus": "all_rights_reserved_research_only",
+      "seedPages": [
+        "https://www.hegre.com/films/goro-and-desi-devi-the-photo-shoot",
+        "https://www.hegre.com/films/the-making-of-the-goro-and-helga-shoot"
+      ],
+      "notes": "Use only assets already exposed on public preview/scene pages. Do not fetch member downloads or bypass the adults-only entrance flow."
+    },
+    {
+      "sourceId": "femjoy_public_photosets",
+      "sourceType": "publisher_public_photoset_index",
+      "priority": "high",
+      "baseHost": "www.femjoy.com",
+      "targetHints": ["genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "art_nude"],
+      "ageContext": "Femjoy's public pages state all models appearing on the website are 18 years or older and link a 2257 compliance statement.",
+      "visualRationale": "Large, current archive of professionally produced nude photosets with named photographers and modern editorial/boudoir presentation.",
+      "termsStatus": "all_rights_reserved_research_only",
+      "seedPages": [
+        "https://www.femjoy.com/photos",
+        "https://www.femjoy.com/models"
+      ],
+      "notes": "Most useful for hard nude anatomy classes; do not assume a photoset title predicts the detector label."
+    },
+    {
+      "sourceId": "peter_juhan_public_explicit_portfolio",
+      "sourceType": "photographer_public_portfolio",
+      "priority": "medium_high",
+      "baseHost": "www.peterjuhan.com",
+      "targetHints": ["bdsm_kink", "genitalia_full_frontal", "explicit_act", "male_topless"],
+      "ageContext": "Professional adult/explicit photographer portfolio context; individual images still require normal human safety screening.",
+      "visualRationale": "Explicit black-and-white photography centered on BDSM, masculinity, kink and gay subcultures; strong Artes relevance and a different visual/source pool from studio adult publishers.",
+      "termsStatus": "unverified_research_only",
+      "seedPages": ["https://www.peterjuhan.com/photography"]
+    }
+  ],
+  "deferredSources": [
+    {
+      "sourceId": "bentbox_mature_marketplace",
+      "reason": "Strong professional adult marketplace with creator verification/model-release requirements, but mature catalog access requires age verification. Do not automate until there is a deliberate authorized-user research lane."
+    },
+    {
+      "sourceId": "atelier_wilfredson_verified_archive",
+      "reason": "Complete explicit archive is limited to verified adult viewers; public introduction can be used as a lead but the verified archive is outside public-preview research."
+    },
+    {
+      "sourceId": "patreon_adult_creators",
+      "reason": "Adult explicit works must sit behind a subscription paywall under Patreon policy, so they are outside the public-preview lane."
+    }
+  ]
+}

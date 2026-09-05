@@ -15,6 +15,7 @@ const OUTPUT_PATH = path.join(TEST_SET_DIR, 'research-dataset.json');
 const EXPECTED_MODEL = 'dinov2_vitb14';
 const EXPECTED_DIMENSION = 768;
 const NUDITY_VALUES = ['none', 'underwear_swimwear', 'implied_nude', 'bare_buttocks', 'female_bare_breasts', 'genitalia', 'male_topless'];
+const RESEARCH_ELIGIBILITY_DECISIONS = ['include_real_photograph', 'exclude_non_photographic_or_synthetic'];
 
 const [intake, labels, sources] = await Promise.all([
   readFile(INTAKE_PATH, 'utf8').then(JSON.parse),
@@ -70,7 +71,16 @@ for (const reviewed of reviewedItems) {
   }
   validateEmbedding(intakeItem);
 
-  if (reviewed.ageSafetyDecision === 'adult_clear') {
+  const researchEligibilityDecision = reviewed.researchEligibilityDecision || 'include_real_photograph';
+  if (!RESEARCH_ELIGIBILITY_DECISIONS.includes(researchEligibilityDecision)) {
+    throw new Error(`invalid_web_research_eligibility_decision:${fileName}`);
+  }
+
+  if (researchEligibilityDecision === 'exclude_non_photographic_or_synthetic') {
+    if (reviewed.labelStatus !== 'excluded_non_photographic' || reviewed.detectorLabel !== null || reviewed.ageSafetyDecision !== null) {
+      throw new Error(`invalid_web_research_non_photographic_exclusion:${fileName}`);
+    }
+  } else if (reviewed.ageSafetyDecision === 'adult_clear') {
     if (reviewed.labelStatus !== 'human_confirmed' || reviewed.labelSource !== 'local_human_review') {
       throw new Error(`web_research_label_not_human_confirmed:${fileName}`);
     }
@@ -96,6 +106,19 @@ const excludedItems = [];
 for (const intakeItem of intakeItems) {
   const reviewed = reviewedByFile.get(intakeItem.fileName);
   const source = sourceByFile.get(intakeItem.fileName);
+  const researchEligibilityDecision = reviewed.researchEligibilityDecision || 'include_real_photograph';
+
+  if (researchEligibilityDecision === 'exclude_non_photographic_or_synthetic') {
+    excludedItems.push({
+      fileName: intakeItem.fileName,
+      sha256: intakeItem.sha256,
+      sourcePoolId: intakeItem.sourcePoolId,
+      sourceUrl: source.sourceUrl,
+      discoveryFacet: source.visualFacet || null,
+      exclusionReason: 'non_photographic_or_synthetic',
+    });
+    continue;
+  }
   if (reviewed.labelStatus === 'excluded_age_safety') {
     excludedItems.push({
       fileName: intakeItem.fileName,
@@ -116,6 +139,7 @@ for (const intakeItem of intakeItems) {
     discoveryFacet: source.visualFacet || null,
     detectorLabel: reviewed.detectorLabel,
     humanConfirmed: true,
+    researchEligibilityDecision: 'include_real_photograph',
     ageSafetyDecision: 'adult_clear',
     embedding: intakeItem.embedding,
     semanticClusterId: null,
@@ -130,6 +154,8 @@ for (const intakeItem of intakeItems) {
 const nudityCounts = Object.fromEntries(NUDITY_VALUES.map((value) => [value, 0]));
 for (const item of researchItems) nudityCounts[item.detectorLabel.nudity] += 1;
 const sourcePoolCount = new Set(researchItems.map((item) => item.sourcePoolId)).size;
+const ageSafetyExcludedCount = excludedItems.filter((item) => item.exclusionReason === 'minor_or_age_uncertain').length;
+const nonPhotographicExcludedCount = excludedItems.filter((item) => item.exclusionReason === 'non_photographic_or_synthetic').length;
 
 const output = {
   schemaVersion: 1,
@@ -141,10 +167,12 @@ const output = {
   embeddingDimension: EXPECTED_DIMENSION,
   requestedItemCount: intakeItems.length,
   researchItemCount: researchItems.length,
-  ageSafetyExcludedCount: excludedItems.length,
+  ageSafetyExcludedCount,
+  nonPhotographicExcludedCount,
   sourcePoolCount,
   nudityCounts,
   humanLabelsAuthoritative: true,
+  realPhotographyResearchOnly: true,
   discoveryMetadataIsLabelAuthority: false,
   dinoSimilarityIsLabelAuthority: false,
   thresholdSelected: false,
@@ -166,6 +194,7 @@ process.stdout.write(`${JSON.stringify({
   requestedItemCount: output.requestedItemCount,
   researchItemCount: output.researchItemCount,
   ageSafetyExcludedCount: output.ageSafetyExcludedCount,
+  nonPhotographicExcludedCount: output.nonPhotographicExcludedCount,
   sourcePoolCount: output.sourcePoolCount,
   nudityCounts: output.nudityCounts,
   humanLabelsAuthoritative: true,

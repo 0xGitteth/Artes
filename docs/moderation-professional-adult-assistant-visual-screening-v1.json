@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "status": "assistant_visual_screening_non_authoritative",
+  "sourceBatch": "professional-adult-preview-screening-v1",
+  "purpose": "Record assistant-only visual screening of 89 professional adult public-preview assets. These are research decisions for curation, not human detector labels and not model outputs.",
+  "humanLabelsAuthoritative": true,
+  "researchOnly": true,
+  "trainingReady": false,
+  "productionEligible": false,
+  "summary": {
+    "reviewedCount": 89,
+    "vivThomasCount": 79,
+    "peterJuhanCount": 10,
+    "clearExplicitActCount": 28,
+    "clearBdsmKinkCount": 16,
+    "irrelevantAssetCount": 24,
+    "notes": [
+      "VivThomas is the first sourced professional preview pool in this research round to provide substantial clear explicit-act coverage.",
+      "Peter Juhan's current scraped assets are predominantly branding/exhibition/portrait assets rather than useful explicit portfolio images.",
+      "The 28 explicit-act items are deliberately conservative and include only images where a sexual act is visually clear enough from the preview.",
+      "One publisher/source style must not dominate the eventual dataset; keep source-pool/style caps and add independent explicit-content pools."
+    ]
+  },
+  "assistantSelections": {
+    "clearExplicitActIds": [9, 10, 13, 14, 15, 16, 18, 19, 20, 23, 24, 25, 40, 41, 42, 43, 44, 46, 47, 52, 53, 55, 56, 61, 72, 74, 75, 79],
+    "clearBdsmKinkIds": [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79],
+    "irrelevantIds": [1, 2, 3, 4, 5, 6, 7, 8, 17, 26, 27, 28, 29, 30, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89],
+    "sexualContextBoundaryIds": [11, 12, 21, 22, 32, 33, 34, 35, 36, 37, 38, 39, 45, 48, 49, 50, 51, 54, 57, 58, 59, 60, 62, 63, 68, 69, 70, 71, 73, 76, 77, 78],
+    "keepForNudityCoverageIds": [11, 12, 13, 14, 15, 16, 18, 19, 20, 23, 24, 25, 31, 33, 34, 35, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 72, 74, 75, 79]
+  },
+  "sourceAssessment": {
+    "vivthomas_public_fhg": {
+      "decision": "keep_with_source_cap",
+      "reason": "High-yield professional explicit photography with 18+ publisher provenance and multiple visually useful hard-content examples, but one studio/style should not dominate the dataset."
+    },
+    "peter_juhan_public_explicit_portfolio": {
+      "decision": "drop_current_scrape_revisit_different_gallery_route",
+      "reason": "Current scrape captured branding/exhibition/portrait assets rather than the explicit portfolio work sought from this photographer."
+    }
+  }
+}

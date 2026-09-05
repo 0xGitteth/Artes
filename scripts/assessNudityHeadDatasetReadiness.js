@@ -37,12 +37,11 @@ const totalSourcePools = sourcePoolCounts.size;
 const largestSourcePoolCount = Math.max(...sourcePoolCounts.values());
 const largestSourcePoolFraction = items.length ? largestSourcePoolCount / items.length : 1;
 
-const evaluateGate = (gate, { useTargetPerClass = false } = {}) => {
-  const perClassFloor = useTargetPerClass ? gate.targetImagesPerClass : gate.minimumImagesPerClass;
+const evaluateGate = (gate) => {
   const reasons = [];
   if (items.length < gate.minimumTotalHumanLabeledImages) reasons.push('total_images_below_gate');
   for (const value of classes) {
-    if (countByClass[value] < perClassFloor) reasons.push(`class_images_below_gate:${value}`);
+    if (countByClass[value] < gate.minimumImagesPerClass) reasons.push(`class_images_below_gate:${value}`);
     if (sourcePoolsPerClass[value] < gate.minimumSourcePoolsPerClass) reasons.push(`class_source_pools_below_gate:${value}`);
   }
   if (totalSourcePools < gate.minimumSourcePoolsTotal) reasons.push('total_source_pools_below_gate');
@@ -53,6 +52,37 @@ const evaluateGate = (gate, { useTargetPerClass = false } = {}) => {
 const experimental = evaluateGate(plan.experimentalProbeGate);
 const preferred = evaluateGate(plan.preferredPilotTrainingGate);
 const missingClasses = classes.filter((value) => countByClass[value] === 0);
+
+const classCoverage = Object.fromEntries(classes.map((value) => {
+  const images = countByClass[value];
+  const sourcePools = sourcePoolsPerClass[value];
+  const probeImageFloor = plan.experimentalProbeGate.minimumImagesPerClass;
+  const probePoolFloor = plan.experimentalProbeGate.minimumSourcePoolsPerClass;
+  const pilotImageFloor = plan.preferredPilotTrainingGate.minimumImagesPerClass;
+  const pilotPoolFloor = plan.preferredPilotTrainingGate.minimumSourcePoolsPerClass;
+  const pilotTarget = plan.preferredPilotTrainingGate.targetImagesPerClass || pilotImageFloor;
+  const probeFloorMet = images >= probeImageFloor && sourcePools >= probePoolFloor;
+  const pilotFloorMet = images >= pilotImageFloor && sourcePools >= pilotPoolFloor;
+  const pilotTargetMet = images >= pilotTarget && sourcePools >= pilotPoolFloor;
+  let status = 'zero_coverage';
+  if (images > 0) status = 'observed_only';
+  if (probeFloorMet) status = 'probe_floor_met';
+  if (pilotFloorMet) status = 'pilot_floor_met';
+  if (pilotTargetMet) status = 'pilot_target_met';
+  return [value, {
+    status,
+    images,
+    sourcePools,
+    probeFloorMet,
+    pilotFloorMet,
+    pilotTargetMet,
+    remainingToProbeImageFloor: Math.max(probeImageFloor - images, 0),
+    remainingToProbeSourcePoolFloor: Math.max(probePoolFloor - sourcePools, 0),
+    remainingToPilotImageFloor: Math.max(pilotImageFloor - images, 0),
+    remainingToPilotSourcePoolFloor: Math.max(pilotPoolFloor - sourcePools, 0),
+  }];
+}));
+const underfilledClasses = classes.filter((value) => !classCoverage[value].probeFloorMet);
 
 const summary = {
   ok: true,
@@ -65,13 +95,15 @@ const summary = {
   countByClass,
   sourcePoolsPerClass,
   missingClasses,
+  underfilledClasses,
+  classCoverage,
   experimentalProbeGate: experimental,
   preferredPilotTrainingGate: preferred,
   trainingPromotionReady: false,
   runtimeEligible: false,
   nextMilestone: experimental.ready ? 'preferred_pilot_training_gate' : 'experimental_probe_gate',
   fullEmbeddingsPrinted: false,
-  imageBytesPrinted: false
+  imageBytesPrinted: false,
 };
 
 process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);

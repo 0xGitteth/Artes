@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
-const MANIFEST_PATH = path.join(REPO_ROOT, 'docs', 'moderation-web-research-batch-v1.json');
-const OUTPUT_SUBDIR = 'web-research-v1';
+const MANIFEST_PATH = path.resolve(
+  REPO_ROOT,
+  String(process.env.ARTES_WEB_RESEARCH_MANIFEST || 'docs/moderation-web-research-batch-v1.json').trim(),
+);
+const OUTPUT_SUBDIR = String(process.env.ARTES_WEB_RESEARCH_DATASET_SUBDIR || 'web-research-v1').trim();
 const OUTPUT_DIR = path.join(REPO_ROOT, '.tmp', 'moderation-test-images', OUTPUT_SUBDIR);
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Map([
@@ -18,10 +21,13 @@ const ALLOWED_FLICKR_SOURCE_HOSTS = new Set(['www.flickr.com', 'flickr.com']);
 const ALLOWED_STATIC_HOST = /^(?:live|farm\d+)\.staticflickr\.com$/i;
 const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{2,159}$/;
 const SAFE_POOL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/;
+const SAFE_DATASET_SUBDIR_PATTERN = /^[a-z0-9][a-z0-9._-]{2,79}$/;
 
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 const clean = (value) => String(value || '').trim();
 const safeError = (error) => clean(error?.message || error || 'unknown_error').slice(0, 160);
+
+if (!SAFE_DATASET_SUBDIR_PATTERN.test(OUTPUT_SUBDIR)) throw new Error('invalid_web_research_dataset_subdir');
 
 const assertExactPublicFlickrPhotoUrl = (value) => {
   const url = new URL(value);
@@ -126,6 +132,9 @@ if (manifest?.status !== 'research_only_not_training_approved' || !Array.isArray
 if (manifest?.rules?.trainingReady !== false || manifest?.rules?.productionEligible !== false || manifest?.rules?.publicPagesOnly !== true) {
   throw new Error('unsafe_web_research_manifest_rules');
 }
+if (manifest?.datasetSubdir && manifest.datasetSubdir !== OUTPUT_SUBDIR) {
+  throw new Error('web_research_manifest_dataset_subdir_mismatch');
+}
 
 await mkdir(OUTPUT_DIR, { recursive: true });
 const records = [];
@@ -176,6 +185,7 @@ const metadataPath = path.join(OUTPUT_DIR, 'sources.json');
 await writeFile(metadataPath, `${JSON.stringify({
   schemaVersion: 1,
   batchVersion: manifest.batchVersion,
+  datasetSubdir: OUTPUT_SUBDIR,
   outputSubdir: OUTPUT_SUBDIR,
   outputScope: 'local_visual_research_only',
   requestedCount: manifest.entries.length,
@@ -184,6 +194,8 @@ await writeFile(metadataPath, `${JSON.stringify({
   sourcePoolCount,
   meaningfulReviewBatch,
   ageSafetyReviewRequired: true,
+  discoveryMetadataIsLabelAuthority: false,
+  rightsStatusIsResearchEligibilityGate: false,
   researchOnly: true,
   trainingReady: false,
   productionEligible: false,
@@ -193,6 +205,8 @@ await writeFile(metadataPath, `${JSON.stringify({
 
 process.stdout.write(`${JSON.stringify({
   ok: true,
+  batchVersion: manifest.batchVersion,
+  datasetSubdir: OUTPUT_SUBDIR,
   requested: manifest.entries.length,
   fetched: records.length,
   failed: failures.length,

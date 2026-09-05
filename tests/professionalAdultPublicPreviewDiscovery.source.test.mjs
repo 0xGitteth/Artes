@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+
+const config = JSON.parse(await readFile(new URL('../docs/moderation-professional-adult-public-preview-sources-v1.json', import.meta.url), 'utf8'));
+const script = await readFile(new URL('../scripts/discoverProfessionalAdultPublicPreviewAssets.js', import.meta.url), 'utf8');
+
+test('professional adult sourcing starts from publisher and photographer previews, not random tube thumbnails', () => {
+  assert.equal(config.status, 'research_professional_adult_public_preview_sources');
+  assert.ok(config.sources.some((source) => source.sourceId === 'vivthomas_public_fhg'));
+  assert.ok(config.sources.some((source) => source.sourceId === 'femjoy_public_photosets'));
+  assert.ok(config.sources.some((source) => source.sourceId === 'peter_juhan_public_explicit_portfolio'));
+  assert.equal(config.rules.publisherHostedAssetsPreferred, true);
+  assert.equal(config.rules.professionalPhotographyPreferred, true);
+});
+
+test('adult entrance sites are leads but are not silently automated', () => {
+  assert.ok(Array.isArray(config.adultEntranceLeads));
+  assert.ok(config.adultEntranceLeads.some((source) => source.sourceId === 'hegre_public_previews'));
+  assert.ok(config.adultEntranceLeads.some((source) => source.sourceId === 'xart_public_gallery_previews'));
+  for (const source of config.adultEntranceLeads) assert.equal(source.automatedDiscoveryEligible, false);
+  assert.equal(config.rules.noAgeGateBypass, true);
+});
+
+test('public preview discovery is metadata-only and never enters members areas', () => {
+  assert.equal(config.rules.publicPreviewOnly, true);
+  assert.equal(config.rules.noMemberArea, true);
+  assert.equal(config.rules.noPaywallBypass, true);
+  assert.equal(config.rules.noLoginBypass, true);
+  assert.equal(config.rules.noSessionCookieReuse, true);
+  assert.match(script, /imageBytesDownloaded: false/);
+  assert.match(script, /sourceIntentIsLabelAuthority: false/);
+  assert.match(script, /trainingReady: false/);
+  assert.match(script, /productionEligible: false/);
+  assert.doesNotMatch(script, /Authorization|Bearer/);
+  assert.doesNotMatch(script, /['"]Cookie['"]\s*:/i);
+});
+
+test('discovery records asset hosts before any image fetcher can be built', () => {
+  assert.match(script, /assetHostCounts/);
+  assert.match(script, /collectHtmlImageCandidates/);
+  assert.match(script, /og:image/);
+  assert.match(script, /srcset/);
+  assert.doesNotMatch(script, /arrayBuffer\(/);
+});

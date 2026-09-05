@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "status": "research_targeted_source_discovery_only",
+  "datasetSubdir": "hard-gap-targeted-v1",
+  "purpose": "Curated source-page discovery for the hard explicit moderation gaps that remained after visual screening of creative-explicit-v1. Source-page intent is a sourcing hint only, never a detector label. This pass deliberately avoids broad keyword/tag discovery and starts from public adult/nude/erotic photography albums or exact photo pages with materially better context.",
+  "currentVisualGapBaseline": {
+    "explicit_act": 2,
+    "genitalia_full_frontal": 1,
+    "bare_buttocks": 5,
+    "female_bare_breasts": 1,
+    "bdsm_kink_core": 17
+  },
+  "desiredAdditionalVisualCandidates": {
+    "explicit_act": 20,
+    "genitalia_full_frontal": 20,
+    "bare_buttocks": 15,
+    "female_bare_breasts": 15
+  },
+  "rules": {
+    "publicPagesOnly": true,
+    "noLoginOrPaywallBypass": true,
+    "noAuthOrCookies": true,
+    "metadataDiscoveryOnly": true,
+    "downloadImageBytes": false,
+    "sourceIntentIsLabelAuthority": false,
+    "humanVisualScreeningRequired": true,
+    "missingFaceIsNotMinorConcern": true,
+    "cropRearViewOrAnonymousIsNotMinorConcernByItself": true,
+    "concreteMinorConcernStillRequiresSafetyHold": true,
+    "allRightsReservedMayBeUsedForLocalResearch": true,
+    "ordinaryCopyrightNoticeIsNotResearchEligibilityGate": true,
+    "explicitNoReuseRestrictionBlocksAutomatedFetch": true,
+    "researchOnly": true,
+    "trainingReady": false,
+    "productionEligible": false
+  },
+  "sourceCandidateCapDefault": 24,
+  "sources": [
+    {
+      "sourceId": "flickr_erosunfoto_self_arousal",
+      "sourcePoolId": "flickr_erosunfoto_self_arousal",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/128438623@N07/sets/72157651222352217",
+      "creator": "erosunfoto",
+      "targetHints": ["explicit_act"],
+      "sourceContext": "Public album titled nude / self-arousal; album description says Auto-erotic art.",
+      "ageContext": "Companion public nude/erotic album from the same creator states all models are consenting adults over 21; retain as provenance only, not image-level age proof.",
+      "termsStatus": "unverified_research_only",
+      "maxCandidates": 6
+    },
+    {
+      "sourceId": "flickr_erosunfoto_nude_erotic",
+      "sourcePoolId": "flickr_erosunfoto_nude_erotic",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/128438623@N07/sets/72157650849252192",
+      "creator": "erosunfoto",
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal", "explicit_act"],
+      "sourceContext": "Public album titled nude / erotic.",
+      "ageContext": "Album description states adult only and all models are consenting adults over 21.",
+      "termsStatus": "unverified_research_only",
+      "maxCandidates": 6
+    },
+    {
+      "sourceId": "flickr_reografie_portrait_sexy_adult",
+      "sourcePoolId": "flickr_reografie_adult_studio",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/reografie/albums/72157612941514688/",
+      "creator": "Reografie",
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal"],
+      "sourceContext": "Public studio album titled Portrait Sexy Adult with moderated/adult content and multiple nude/bodyshape series.",
+      "ageContext": "Adult/moderated source context; individual images still require human safety review for concrete minor concerns.",
+      "termsStatus": "unverified_research_only",
+      "maxCandidates": 24
+    },
+    {
+      "sourceId": "flickr_ron_frazier_adult_album",
+      "sourcePoolId": "flickr_ron_frazier_adult_selfportrait",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/tomronworldwide/albums/72157638970074073/",
+      "creator": "Ronald Douglas Frazier",
+      "targetHints": ["genitalia_full_frontal", "explicit_act", "bare_buttocks"],
+      "sourceContext": "Public Flickr album titled The Male Photographer (must be over 18), containing restricted adult material, self portraits and multiple items titled Oral.",
+      "ageContext": "Album says viewers must be over 18 and photographs are of the adult creator, taken by himself or a guest photographer.",
+      "termsStatus": "album_cc_by_sa_research_only_exact_item_rights_unverified",
+      "maxCandidates": 24
+    },
+    {
+      "sourceId": "flickr_scumbagbinky_adult_nude",
+      "sourcePoolId": "flickr_scumbagbinky_adult_nude",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/203739503@N02/sets/72177720329990240",
+      "creator": "scumbagbinky",
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal"],
+      "sourceContext": "Public six-photo album titled Adult/nude and described as Nudes and adult content.",
+      "ageContext": "Adult source context only; not stored as proof of exact subject age.",
+      "termsStatus": "unverified_research_only",
+      "maxCandidates": 6
+    },
+    {
+      "sourceId": "flickr_chuck_smith_male_nude",
+      "sourcePoolId": "flickr_chuck_smith_erotic",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/chucksmitherotic/albums/72157627819604354/",
+      "creator": "Chuck Smith",
+      "targetHints": ["genitalia_full_frontal", "bare_buttocks"],
+      "sourceContext": "Public album titled Male Nude Photography; creator profile describes a mature-audience erotic photography collection.",
+      "ageContext": "Creator profile states all models are of full legal age and consent. This guides review but is not detector label authority.",
+      "termsStatus": "copyright_notice_research_only",
+      "maxCandidates": 6
+    },
+    {
+      "sourceId": "flickr_edward_olive_erotic_nude",
+      "sourcePoolId": "flickr_edward_olive_erotic_nude",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/edwardolive/albums/72157600173942385/",
+      "creator": "Edward Olive",
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal"],
+      "sourceContext": "Public 112-photo fine-art nude, lingerie and erotic photography album. Use only a capped sample to prevent source/style dominance.",
+      "ageContext": "Adult/erotic portfolio context; concrete minor concern still requires separate safety hold.",
+      "termsStatus": "copyright_notice_research_only",
+      "maxCandidates": 18
+    },
+    {
+      "sourceId": "flickr_venus_berlin_erotic_trade_fair",
+      "sourcePoolId": "flickr_schnella_schnyder_venus_berlin",
+      "sourceType": "flickr_album",
+      "sourceUrl": "https://www.flickr.com/photos/schnellaschnyder/sets/72157622486164913/",
+      "creator": "Schnella Schnyder",
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal", "bdsm_kink"],
+      "sourceContext": "Public 39-photo event album from the Venus Berlin Erotic Trade Fair, described as containing many nude adults and erotic tools/context.",
+      "ageContext": "Adult trade-fair context; individual visual screening remains required.",
+      "termsStatus": "unverified_research_only",
+      "maxCandidates": 18
+    },
+    {
+      "sourceId": "flickr_ron_frazier_exact_recent_selfportraits",
+      "sourcePoolId": "flickr_ron_frazier_adult_selfportrait",
+      "sourceType": "flickr_exact_photos",
+      "creator": "Ronald Douglas Frazier",
+      "targetHints": ["genitalia_full_frontal", "bare_buttocks"],
+      "sourceContext": "Exact public self-portrait pages retained as high-confidence provenance candidates independent of album link extraction.",
+      "ageContext": "Adult creator self-portrait context; content class remains human-visual.",
+      "termsStatus": "some_rights_reserved_research_only",
+      "maxCandidates": 7,
+      "photoUrls": [
+        "https://www.flickr.com/photos/tomronworldwide/55133873401",
+        "https://www.flickr.com/photos/tomronworldwide/51305074946",
+        "https://www.flickr.com/photos/tomronworldwide/50948459937",
+        "https://www.flickr.com/photos/tomronworldwide/51372185656",
+        "https://www.flickr.com/photos/tomronworldwide/51655294758",
+        "https://www.flickr.com/photos/tomronworldwide/32944532728",
+        "https://www.flickr.com/photos/tomronworldwide/54631853870"
+      ]
+    }
+  ],
+  "portfolioLeadsNotYetAutomated": [
+    {
+      "sourceId": "cherry_pie_boudoir_public_portfolios",
+      "urls": [
+        "https://www.cherrypieboudoir.com/portfolio-nudes/",
+        "https://www.cherrypieboudoir.com/portfolio-couples/"
+      ],
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal", "explicit_act"],
+      "reason": "Very high Artes relevance, but use a separate whitelisted public-portfolio asset resolver rather than mixing arbitrary-domain scraping into the Flickr discovery script."
+    },
+    {
+      "sourceId": "rachel_schwebach_public_portfolio",
+      "urls": ["https://www.rachelschwebach.com/"],
+      "targetHints": ["female_bare_breasts", "bare_buttocks", "genitalia_full_frontal"],
+      "reason": "Public sex-positive fine-art nude portfolio lead; gated Patreon/full sets are explicitly outside this research route."
+    }
+  ]
+}

@@ -14,6 +14,9 @@ const USER_AGENT = 'ArtesModerationResearch/1.0';
 const clean = (value) => String(value || '').trim();
 const normalizeText = (value) => clean(value).replace(/\s+/g, ' ').toLowerCase();
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const findWholeSignal = (text, signals) => signals.find((signal) => (
+  new RegExp(`(^|[^a-z0-9])${escapeRegex(signal)}([^a-z0-9]|$)`, 'i').test(text)
+)) || null;
 
 const config = JSON.parse(await readFile(CONFIG_PATH, 'utf8'));
 if (
@@ -30,6 +33,7 @@ if (
 }
 
 const blockedSignals = (config.obviousNonPhotoTextSignals || []).map(normalizeText).filter(Boolean);
+const minorConcernSignals = (config.obviousMinorConcernTextSignals || []).map(normalizeText).filter(Boolean);
 const candidatesByUrl = new Map();
 const tagStats = [];
 
@@ -72,7 +76,8 @@ const collectPhotoLinks = (html, tag) => {
     const contextEnd = Math.min(html.length, linkPattern.lastIndex + 900);
     const context = stripTags(html.slice(contextStart, contextEnd));
     const normalized = normalizeText(context);
-    const blocked = blockedSignals.find((signal) => normalized.includes(signal)) || null;
+    const blocked = findWholeSignal(normalized, blockedSignals);
+    const minorConcern = findWholeSignal(normalized, minorConcernSignals);
     matches.push({
       sourcePageUrl: `https://www.flickr.com/photos/${pathMatch[1]}/${pathMatch[2]}`,
       ownerSlug: pathMatch[1],
@@ -81,6 +86,7 @@ const collectPhotoLinks = (html, tag) => {
       discoveryTag: tag,
       context: context.slice(0, 1200),
       obviousNonPhotoSignal: blocked,
+      obviousMinorConcernSignal: minorConcern,
     });
   }
   return matches;
@@ -94,9 +100,14 @@ for (const rawTag of config.tags) {
     const found = collectPhotoLinks(html, tag);
     let acceptedFromTag = 0;
     let blockedFromTag = 0;
+    let blockedMinorConcernFromTag = 0;
     for (const item of found) {
       if (item.obviousNonPhotoSignal) {
         blockedFromTag += 1;
+        continue;
+      }
+      if (item.obviousMinorConcernSignal) {
+        blockedMinorConcernFromTag += 1;
         continue;
       }
       const existing = candidatesByUrl.get(item.sourcePageUrl);
@@ -114,6 +125,7 @@ for (const rawTag of config.tags) {
         discoveryContext: item.context,
         discoveryOnly: true,
         humanVisualScreeningRequired: true,
+        humanAgeSafetyReviewRequired: true,
         detectorLabel: null,
         researchOnly: true,
         trainingReady: false,
@@ -121,10 +133,24 @@ for (const rawTag of config.tags) {
       });
       acceptedFromTag += 1;
     }
-    tagStats.push({ tag, rawLinkCount: found.length, newCandidateCount: acceptedFromTag, blockedObviousNonPhotoCount: blockedFromTag, error: null });
-    process.stdout.write(`Discovered ${acceptedFromTag} new candidates for tag ${tag}; blocked ${blockedFromTag} obvious non-photo candidates.\n`);
+    tagStats.push({
+      tag,
+      rawLinkCount: found.length,
+      newCandidateCount: acceptedFromTag,
+      blockedObviousNonPhotoCount: blockedFromTag,
+      blockedObviousMinorConcernCount: blockedMinorConcernFromTag,
+      error: null,
+    });
+    process.stdout.write(`Discovered ${acceptedFromTag} new candidates for tag ${tag}; blocked ${blockedFromTag} obvious non-photo and ${blockedMinorConcernFromTag} obvious minor-concern candidates.\n`);
   } catch (error) {
-    tagStats.push({ tag, rawLinkCount: 0, newCandidateCount: 0, blockedObviousNonPhotoCount: 0, error: clean(error?.message || error).slice(0, 180) });
+    tagStats.push({
+      tag,
+      rawLinkCount: 0,
+      newCandidateCount: 0,
+      blockedObviousNonPhotoCount: 0,
+      blockedObviousMinorConcernCount: 0,
+      error: clean(error?.message || error).slice(0, 180),
+    });
     process.stdout.write(`Skipped discovery tag ${tag}: ${clean(error?.message || error).slice(0, 180)}\n`);
   }
 }
@@ -139,17 +165,20 @@ const largestOwnerCount = Math.max(0, ...Object.values(ownerCounts));
 
 await mkdir(OUTPUT_DIR, { recursive: true });
 await writeFile(OUTPUT_PATH, `${JSON.stringify({
-  schemaVersion: 1,
+  schemaVersion: 2,
   status: 'research_discovery_only',
   generatedFrom: path.relative(REPO_ROOT, CONFIG_PATH),
   candidateCount: candidates.length,
   ownerCount,
   largestOwnerCount,
   minimumDiscoveryTarget: config.minimumDiscoveryTarget,
+  metadataShortlistTarget: config.metadataShortlistTarget,
   desiredShortlistTarget: config.desiredShortlistTarget,
   targetReached: candidates.length >= Number(config.minimumDiscoveryTarget || 0),
   discoveryIsLabelAuthority: false,
   humanVisualScreeningRequired: true,
+  humanAgeSafetyReviewRequired: true,
+  obviousMinorConcernFilterEnabled: minorConcernSignals.length > 0,
   imageBytesDownloaded: false,
   researchOnly: true,
   trainingReady: false,
@@ -165,11 +194,13 @@ process.stdout.write(`${JSON.stringify({
   ownerCount,
   largestOwnerCount,
   minimumDiscoveryTarget: config.minimumDiscoveryTarget,
+  metadataShortlistTarget: config.metadataShortlistTarget,
   desiredShortlistTarget: config.desiredShortlistTarget,
   targetReached: candidates.length >= Number(config.minimumDiscoveryTarget || 0),
   output: path.relative(REPO_ROOT, OUTPUT_PATH),
   imageBytesDownloaded: false,
   discoveryIsLabelAuthority: false,
+  humanAgeSafetyReviewRequired: true,
   researchOnly: true,
   trainingReady: false,
   productionEligible: false

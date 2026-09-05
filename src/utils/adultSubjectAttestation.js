@@ -8,9 +8,6 @@ export const ADULT_SUBJECT_ATTESTATION_RESOLVED_BY = Object.freeze({
   HUMAN_REVIEW: 'humanReview',
 });
 
-const hasAnonymousSubject = (credits = []) => (Array.isArray(credits) ? credits : [])
-  .some((credit) => Boolean(credit?.isAnonymous) && ['model', 'assistent', 'fan'].includes(String(credit?.role || '').trim()));
-
 export const normalizeAdultSubjectAttestationDraftState = (source = {}) => {
   const draft = source?.adultSubjectAttestationDraft && typeof source.adultSubjectAttestationDraft === 'object'
     ? source.adultSubjectAttestationDraft
@@ -20,41 +17,32 @@ export const normalizeAdultSubjectAttestationDraftState = (source = {}) => {
 
   return {
     allDepictedSubjects18PlusConfirmed: draft?.allDepictedSubjects18PlusConfirmed === true,
-    anonymousSubjectPublicationConsentConfirmed: draft?.anonymousSubjectPublicationConsentConfirmed === true,
   };
 };
 
 export const buildAdultSubjectAttestationDraftState = ({
   allDepictedSubjects18PlusConfirmed = false,
-  anonymousSubjectPublicationConsentConfirmed = false,
 } = {}) => ({
   adultSubjectAttestationDraft: {
     version: 1,
     allDepictedSubjects18PlusConfirmed: Boolean(allDepictedSubjects18PlusConfirmed),
-    anonymousSubjectPublicationConsentConfirmed: Boolean(anonymousSubjectPublicationConsentConfirmed),
   },
 });
 
 export const getAdultSubjectAttestationState = ({
-  credits = [],
   adultOrSexualContentPresent = false,
   ageNotReliablyVerifiable = false,
   possibleMinorConcern = false,
   allDepictedSubjects18PlusConfirmed = false,
-  anonymousSubjectPublicationConsentConfirmed = false,
 } = {}) => {
-  const anonymousSubjectPresent = hasAnonymousSubject(credits);
   const humanReviewRequired = Boolean(adultOrSexualContentPresent && possibleMinorConcern);
   const attestationRequired = Boolean(
     adultOrSexualContentPresent
     && ageNotReliablyVerifiable
     && !possibleMinorConcern
   );
-  const anonymousConsentConfirmationRequired = Boolean(attestationRequired && anonymousSubjectPresent);
   const ageConfirmationResolved = !attestationRequired || Boolean(allDepictedSubjects18PlusConfirmed);
-  const anonymousConsentResolved = !anonymousConsentConfirmationRequired
-    || Boolean(anonymousSubjectPublicationConsentConfirmed);
-  const resolved = !humanReviewRequired && ageConfirmationResolved && anonymousConsentResolved;
+  const resolved = !humanReviewRequired && ageConfirmationResolved;
 
   let resolvedBy = null;
   if (humanReviewRequired) {
@@ -70,12 +58,9 @@ export const getAdultSubjectAttestationState = ({
     adultOrSexualContentPresent: Boolean(adultOrSexualContentPresent),
     ageNotReliablyVerifiable: Boolean(ageNotReliablyVerifiable),
     possibleMinorConcern: Boolean(possibleMinorConcern),
-    anonymousSubjectPresent,
     attestationRequired,
     humanReviewRequired,
     allDepictedSubjects18PlusConfirmed: Boolean(allDepictedSubjects18PlusConfirmed),
-    anonymousConsentConfirmationRequired,
-    anonymousSubjectPublicationConsentConfirmed: Boolean(anonymousSubjectPublicationConsentConfirmed),
     resolved,
     resolvedBy,
   };
@@ -92,10 +77,6 @@ export const validateAdultSubjectAttestation = (input = {}) => {
 
   if (state.attestationRequired && !state.allDepictedSubjects18PlusConfirmed) {
     errors.adultAgeConfirmation = 'We kunnen de leeftijd van het model niet goed bevestigen. Bevestig dat alle afgebeelde modellen 18 jaar of ouder waren op het moment van de opname.';
-  }
-
-  if (state.anonymousConsentConfirmationRequired && !state.anonymousSubjectPublicationConsentConfirmed) {
-    errors.anonymousSubjectConsent = 'Bevestig dat het anonieme model toestemming heeft gegeven voor het plaatsen van deze foto.';
   }
 
   return errors;

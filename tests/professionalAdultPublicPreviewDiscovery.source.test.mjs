@@ -8,10 +8,29 @@ const script = await readFile(new URL('../scripts/discoverProfessionalAdultPubli
 test('professional adult sourcing starts from publisher and photographer previews, not random tube thumbnails', () => {
   assert.equal(config.status, 'research_professional_adult_public_preview_sources');
   assert.ok(config.sources.some((source) => source.sourceId === 'vivthomas_public_fhg'));
-  assert.ok(config.sources.some((source) => source.sourceId === 'femjoy_public_photosets'));
   assert.ok(config.sources.some((source) => source.sourceId === 'peter_juhan_public_explicit_portfolio'));
+  assert.ok(config.sources.some((source) => source.sourceId === 'photodromm_public_model_previews'));
   assert.equal(config.rules.publisherHostedAssetsPreferred, true);
   assert.equal(config.rules.professionalPhotographyPreferred, true);
+});
+
+test('Femjoy is retained as style evidence but not repeatedly treated as an automated local source', () => {
+  assert.ok(Array.isArray(config.styleReferenceLeads));
+  const femjoy = config.styleReferenceLeads.find((source) => source.sourceId === 'femjoy_public_index_style_reference');
+  assert.ok(femjoy);
+  assert.equal(femjoy.automatedDiscoveryEligible, false);
+  assert.equal(femjoy.termsStatus, 'explicit_no_reproduction_reference_only');
+  assert.match(femjoy.reasonNotAutomated, /signup/i);
+  assert.match(femjoy.reasonNotAutomated, /reproduction/i);
+});
+
+test('rights-confirmed adult promotional leads are kept separate until exact hosted galleries are resolved', () => {
+  assert.ok(Array.isArray(config.rightsConfirmedPromotionalLeads));
+  const curiousCash = config.rightsConfirmedPromotionalLeads.find((source) => source.sourceId === 'curiouscash_public_promotional_material');
+  assert.ok(curiousCash);
+  assert.equal(curiousCash.automatedDiscoveryEligible, false);
+  assert.equal(curiousCash.termsStatus, 'promotional_use_explicitly_permitted_with_conditions');
+  assert.match(curiousCash.nextStep, /exact current publisher-hosted/i);
 });
 
 test('adult entrance sites are leads but are not silently automated', () => {
@@ -33,7 +52,7 @@ test('public preview discovery is metadata-only and never enters members areas',
   assert.match(script, /trainingReady: false/);
   assert.match(script, /productionEligible: false/);
   assert.doesNotMatch(script, /Authorization|Bearer/);
-  assert.doesNotMatch(script, /['"]Cookie['"]\s*:/i);
+  assert.doesNotMatch(script, /['\"]Cookie['\"]\s*:/i);
 });
 
 test('discovery records asset hosts before any image fetcher can be built', () => {

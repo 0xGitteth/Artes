@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "status": "research_only_fetch_prototype_not_final_batch",
+  "batchVersion": "moderation_web_research_explicit_creative_draft_v1",
+  "datasetSubdir": "web-research-explicit-creative-draft-v1",
+  "purpose": "Small mixed-source technical draft proving that Artes-representative public event/portfolio photography can join the explicit research pipeline without relying on Wikimedia Commons. Discovery facets are sourcing hints only, never detector labels.",
+  "rules": {
+    "publicPagesOnly": true,
+    "noLoginOrPaywallBypass": true,
+    "localOnly": true,
+    "commitImageBytes": false,
+    "humanLabelRequired": true,
+    "discoveryFacetIsLabelAuthority": false,
+    "realPhotographyTarget": true,
+    "trainingReady": false,
+    "productionEligible": false
+  },
+  "entries": [
+    {
+      "id": "creative-fse-2025-prestia-01",
+      "sourceType": "direct_public_portfolio_asset",
+      "sourcePoolId": "folsom_2025_michael_prestia",
+      "sourcePageUrl": "https://www.folsomstreeteast.com/event-gallery",
+      "assetUrl": "https://images.squarespace-cdn.com/content/v1/600f4920259c4028f7f7876f/baa7aea6-5999-4d2e-a001-509ce6c42ee5/IMG_4656.png",
+      "creator": "Michael Prestia",
+      "discoveryFacet": "fetish_event_candidate",
+      "sourceYear": 2025,
+      "termsStatus": "no_explicit_reuse_block_found_on_public_gallery_page_research_only"
+    },
+    {
+      "id": "creative-fse-2025-prestia-02",
+      "sourceType": "direct_public_portfolio_asset",
+      "sourcePoolId": "folsom_2025_michael_prestia",
+      "sourcePageUrl": "https://www.folsomstreeteast.com/event-gallery",
+      "assetUrl": "https://images.squarespace-cdn.com/content/v1/600f4920259c4028f7f7876f/d4a6e7a6-ea54-4a91-89d3-ef6b909318d0/IMG_4913.JPG",
+      "creator": "Michael Prestia",
+      "discoveryFacet": "fetish_event_candidate",
+      "sourceYear": 2025,
+      "termsStatus": "no_explicit_reuse_block_found_on_public_gallery_page_research_only"
+    },
+    {
+      "id": "creative-fse-2025-prestia-03",
+      "sourceType": "direct_public_portfolio_asset",
+      "sourcePoolId": "folsom_2025_michael_prestia",
+      "sourcePageUrl": "https://www.folsomstreeteast.com/event-gallery",
+      "assetUrl": "https://images.squarespace-cdn.com/content/v1/600f4920259c4028f7f7876f/727b3675-b59a-41c7-833f-b4ceac43dd72/IMG_4727.png",
+      "creator": "Michael Prestia",
+      "discoveryFacet": "fetish_event_candidate",
+      "sourceYear": 2025,
+      "termsStatus": "no_explicit_reuse_block_found_on_public_gallery_page_research_only"
+    },
+    {
+      "id": "creative-fse-2025-prestia-04",
+      "sourceType": "direct_public_portfolio_asset",
+      "sourcePoolId": "folsom_2025_michael_prestia",
+      "sourcePageUrl": "https://www.folsomstreeteast.com/event-gallery",
+      "assetUrl": "https://images.squarespace-cdn.com/content/v1/600f4920259c4028f7f7876f/18e2f87d-1fc2-4a29-b076-9689c738c3a5/IMG_4712.png",
+      "creator": "Michael Prestia",
+      "discoveryFacet": "fetish_event_candidate",
+      "sourceYear": 2025,
+      "termsStatus": "no_explicit_reuse_block_found_on_public_gallery_page_research_only"
+    },
+    {
+      "id": "creative-fse-2025-artimus-01",
+      "sourceType": "direct_public_portfolio_asset",
+      "sourcePoolId": "folsom_2025_artimus_prime",
+      "sourcePageUrl": "https://www.folsomstreeteast.com/event-gallery",
+      "assetUrl": "https://images.squarespace-cdn.com/content/v1/600f4920259c4028f7f7876f/5fd3004d-ee67-486e-b01a-22f9fbb15301/_DWP7986%2Bcopy.jpg",
+      "creator": "Artimus Prime",
+      "discoveryFacet": "fetish_event_candidate",
+      "sourceYear": 2025,
+      "termsStatus": "no_explicit_reuse_block_found_on_public_gallery_page_research_only"
+    },
+    {
+      "id": "creative-fse-2025-artimus-02",
+      "sourceType": "direct_public_portfolio_asset",
+      "sourcePoolId": "folsom_2025_artimus_prime",
+      "sourcePageUrl": "https://www.folsomstreeteast.com/event-gallery",
+      "assetUrl": "https://images.squarespace-cdn.com/content/v1/600f4920259c4028f7f7876f/cd103c6a-f538-4161-8671-3dbee2940035/_DWP7760%2Bcopy.jpg",
+      "creator": "Artimus Prime",
+      "discoveryFacet": "fetish_event_candidate",
+      "sourceYear": 2025,
+      "termsStatus": "no_explicit_reuse_block_found_on_public_gallery_page_research_only"
+    },
+    {
+      "id": "creative-fse-2025-artimus-03",
+      "sourceType": "direct_public_portfolio_asset",
+      "sourcePoolId": "folsom_2025_artimus_prime",
+      "sourcePageUrl": "https://www.folsomstreeteast.com/event-gallery",
+      "assetUrl": "https://images.squarespace-cdn.com/content/v1/600f4920259c4028f7f7876f/c03397a9-cd97-4c49-83c5-8ab8f6cb8382/_DWP7725%2Bcopy.jpg",
+      "creator": "Artimus Prime",
+      "discoveryFacet": "fetish_event_candidate",
+      "sourceYear": 2025,
+      "termsStatus": "no_explicit_reuse_block_found_on_public_gallery_page_research_only"
+    },
+    {
+      "id": "creative-fse-2025-artimus-04",
+      "sourceType": "direct_public_portfolio_asset",
+      "sourcePoolId": "folsom_2025_artimus_prime",
+      "sourcePageUrl": "https://www.folsomstreeteast.com/event-gallery",
+      "assetUrl": "https://images.squarespace-cdn.com/content/v1/600f4920259c4028f7f7876f/fce617f2-89f1-46ff-b34e-3ab1e44f586d/_DWP7856%2Bcopy.jpg",
+      "creator": "Artimus Prime",
+      "discoveryFacet": "fetish_event_candidate",
+      "sourceYear": 2025,
+      "termsStatus": "no_explicit_reuse_block_found_on_public_gallery_page_research_only"
+    },
+    {
+      "id": "creative-flickr-istolethetv-diagonals-2025",
+      "sourceType": "flickr_public_photo_page",
+      "sourcePoolId": "flickr_istolethetv_folsom_2025",
+      "sourcePageUrl": "https://www.flickr.com/photos/istolethetv/54591212927",
+      "creator": "istolethetv",
+      "discoveryFacet": "bdsm_kink_candidate",
+      "title": "diagonals",
+      "sourceYear": 2025,
+      "termsStatus": "existing_flickr_web_research_contract"
+    }
+  ]
+}

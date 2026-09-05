@@ -1,9 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "research_discovery_only",
-  "purpose": "Large candidate discovery pass for Artes-representative explicit moderation research. These tags are search directions only. A discovered Flickr photo is never a detector label, never human-reviewed by discovery, and never training/production eligible.",
+  "purpose": "Large candidate discovery pass for Artes-representative explicit moderation research. Tags are search directions only. A discovered Flickr photo is never a detector label, never human-reviewed by discovery, and never training/production eligible.",
   "minimumDiscoveryTarget": 200,
+  "metadataShortlistTarget": 180,
   "desiredShortlistTarget": 120,
+  "maxMetadataShortlistPerOwner": 3,
+  "minimumMetadataShortlistOwners": 60,
   "tags": [
     "shibari",
     "shibariart",
@@ -22,8 +25,68 @@
     "artisticnude",
     "nudephotography",
     "nudeart",
-    "bodyscape"
+    "bodyscape",
+    "fullfrontal",
+    "fullfrontalnude",
+    "genitalia",
+    "genitals",
+    "vulva",
+    "penis",
+    "eroticphotography",
+    "eroticnude",
+    "eroticcouple",
+    "sexpositive",
+    "masturbation",
+    "oralsex",
+    "sexualintercourse"
   ],
+  "bucketTargets": {
+    "bdsm_kink": 55,
+    "art_nude": 45,
+    "full_frontal_genitalia": 40,
+    "explicit_act": 40
+  },
+  "bucketTags": {
+    "bdsm_kink": [
+      "shibari",
+      "shibariart",
+      "ropebondage",
+      "bondageart",
+      "fetishphotography",
+      "latexphotography",
+      "fetishlatex",
+      "bdsmcommunity",
+      "folsomstreeteast2025",
+      "folsomleatherfest"
+    ],
+    "art_nude": [
+      "finenudeart",
+      "fineartnude",
+      "nudefineart",
+      "artnude",
+      "artisticnude",
+      "nudephotography",
+      "nudeart",
+      "bodyscape",
+      "eroticphotography",
+      "eroticnude"
+    ],
+    "full_frontal_genitalia": [
+      "fullfrontal",
+      "fullfrontalnude",
+      "genitalia",
+      "genitals",
+      "vulva",
+      "penis"
+    ],
+    "explicit_act": [
+      "eroticcouple",
+      "sexpositive",
+      "masturbation",
+      "oralsex",
+      "sexualintercourse"
+    ]
+  },
   "obviousNonPhotoTextSignals": [
     "second life",
     "maps.secondlife.com",
@@ -37,6 +100,19 @@
     "3d render",
     "game screenshot"
   ],
+  "obviousMinorConcernTextSignals": [
+    "child",
+    "children",
+    "kid",
+    "kids",
+    "teen",
+    "teenager",
+    "minor",
+    "underage",
+    "preteen",
+    "schoolgirl",
+    "schoolboy"
+  ],
   "rules": {
     "publicPagesOnly": true,
     "noLoginOrPaywallBypass": true,
@@ -45,6 +121,7 @@
     "downloadImageBytes": false,
     "discoveryIsLabelAuthority": false,
     "humanVisualScreeningRequiredBeforeManifest": true,
+    "hardExplicitCandidatesRequireHumanAgeSafetyReview": true,
     "researchOnly": true,
     "trainingReady": false,
     "productionEligible": false

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "overrideVersion": "web_research_assistant_prefill_overrides_v1",
+  "datasetSubdir": "web-research-v1",
+  "purpose": "Non-authoritative visual-review corrections layered over the full assistant prefill without rewriting human labels.",
+  "authoritative": false,
+  "humanConfirmationRequired": true,
+  "items": [
+    {
+      "sourceUrl": "https://www.flickr.com/photos/183192086@N05/55027133060/",
+      "researchEligibilityDecision": "exclude_non_photographic_or_synthetic",
+      "ageSafetyDecision": null,
+      "detectorLabel": null,
+      "basis": "assistant_visual_review_corrected_after_human_noted_render_or_game_character"
+    }
+  ]
+}

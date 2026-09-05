@@ -200,6 +200,7 @@ for (const entry of manifest.entries) {
       sourceYear: Number.isInteger(entry.sourceYear) ? entry.sourceYear : null,
       rightsStatus: 'unverified_research_only',
       termsStatus: clean(entry.termsStatus) || 'unverified_research_only',
+      ageEvidence: clean(entry.ageEvidence) || null,
       mimeType: downloaded.mimeType,
       byteLength: downloaded.buffer.length,
       sha256: sha256(downloaded.buffer),

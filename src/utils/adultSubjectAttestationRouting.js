@@ -18,9 +18,7 @@ export const isAllowedAdultClassification = (classification) => ALLOWED_ADULT_CL
 export const buildAdultSubjectAttestationInputFromModeration = ({
   classification = null,
   forbiddenReasons = [],
-  credits = [],
   allDepictedSubjects18PlusConfirmed = false,
-  anonymousSubjectPublicationConsentConfirmed = false,
 } = {}) => {
   const normalizedClassification = String(classification || '').trim();
   const allowedAdultContent = isAllowedAdultClassification(normalizedClassification);
@@ -28,15 +26,13 @@ export const buildAdultSubjectAttestationInputFromModeration = ({
   const possibleMinorConcern = hasPossibleMinorConcern(forbiddenReasons);
 
   return {
-    credits,
     adultOrSexualContentPresent: Boolean(allowedAdultContent || disallowedSexualExplicit || possibleMinorConcern),
     // Until Artes has verified age evidence for every depicted contributor, an allowed
-    // adult upload is treated as requiring uploader age attestation. This avoids trying
-    // to infer adulthood from a face or body shape.
+    // adult upload can require uploader age attestation. Contributor publication consent
+    // is a separate future workflow and must not be inferred from this age confirmation.
     ageNotReliablyVerifiable: allowedAdultContent,
     possibleMinorConcern,
     allDepictedSubjects18PlusConfirmed,
-    anonymousSubjectPublicationConsentConfirmed,
   };
 };
 

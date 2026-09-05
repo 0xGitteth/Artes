@@ -1,7 +1,19 @@
 {
   "schemaVersion": 1,
   "status": "research_source_scout_only",
-  "purpose": "Second source-scout expansion focused on contemporary kink/event/erotic photography for Artes-representative explicit moderation research.",
+  "purpose": "Expanded source-scout round focused on contemporary kink/event/erotic photography for Artes-representative explicit moderation research. This log records both candidate sources and explicit rejections.",
+  "selectionPrinciples": {
+    "publicPagesOnly": true,
+    "noLoginOrPaywallBypass": true,
+    "preferArtesRepresentativeCreativePhotography": true,
+    "preferRecentWork": true,
+    "preferMultiplePhotographersAndSourcePools": true,
+    "explicitReuseRestrictionBlocksAutomatedFetch": true,
+    "discoveryFacetIsNotDetectorLabel": true,
+    "humanAgeSafetyReviewRequiredForAdultOrSexualContent": true,
+    "trainingReady": false,
+    "productionEligible": false
+  },
   "sources": [
     {
       "sourceId": "folsom_street_east_event_gallery",
@@ -11,19 +23,96 @@
       "contentSignals": ["fetish_event", "leather", "pup", "rope_bondage", "restraints", "kink_context"],
       "recentWork": true,
       "termsStatus": "no_terms_privacy_or_copyright_reuse_block_found_on_gallery_page_reviewed",
-      "researchStatus": "green_candidate_source",
-      "notes": "Public archive includes 2025 photography credited to Michael Prestia and Artimus Prime, plus many earlier years. Especially useful as non-studio real-world kink context. Keep photographers/years as distinct source pools and cap contribution per photographer."
+      "researchStatus": "green_fetch_proven",
+      "notes": "Public archive includes 2025 photography credited to Michael Prestia and Artimus Prime. Nine-image mixed-source technical probe later proved these assets are publicly fetchable without auth/cookies; cap per photographer to avoid source/style dominance."
     },
     {
       "sourceId": "flickr_istolethetv_folsom_2025",
-      "url": "https://www.flickr.com/photos/tags/folsomstreeteast2025/",
+      "url": "https://www.flickr.com/photos/istolethetv/54591212927",
       "sourceType": "flickr_public_photography",
       "artesRelevance": "high",
       "contentSignals": ["rope_bondage", "blindfold", "gag", "pup", "leather", "nipple_suction", "fetish_event"],
       "recentWork": true,
       "termsStatus": "use_existing_web_research_flickr_contract",
-      "researchStatus": "green_candidate_source",
-      "notes": "Strong 2025 event-context supplement. Search results show multiple individually described photos by istolethetv. Select exact public photo pages later; do not treat tags/descriptions as labels."
+      "researchStatus": "green_fetch_proven",
+      "notes": "Strong 2025 event-context supplement. Exact public Flickr photo page fetched and embedded successfully in the creative probe."
+    },
+    {
+      "sourceId": "flickr_lis_xia_shibari",
+      "url": "https://www.flickr.com/photos/lisxiachieng/54110816202",
+      "sourceType": "flickr_public_photo_page",
+      "artesRelevance": "high",
+      "contentSignals": ["shibari", "editorial", "model_collaboration"],
+      "recentWork": true,
+      "termsStatus": "use_existing_web_research_flickr_contract",
+      "researchStatus": "green_concrete_candidate",
+      "notes": "2024 collaborative shibari portrait with photographer, model/art direction and production credits on the public photo page."
+    },
+    {
+      "sourceId": "flickr_davina_jane_williams_latex",
+      "url": "https://www.flickr.com/photos/189368610@N06/54739685436",
+      "sourceType": "flickr_public_photo_page",
+      "artesRelevance": "high",
+      "contentSignals": ["latex", "fetish", "portrait"],
+      "recentWork": true,
+      "termsStatus": "use_existing_web_research_flickr_contract",
+      "researchStatus": "green_concrete_candidate",
+      "notes": "Multiple 2025 latex/fetish photographs. Cap sourcePool contribution to avoid style leakage."
+    },
+    {
+      "sourceId": "flickr_shinydivas_latex",
+      "url": "https://www.flickr.com/photos/shinydivas/54872955918",
+      "sourceType": "flickr_public_photo_page",
+      "artesRelevance": "high",
+      "contentSignals": ["latex", "fetish", "location_portrait"],
+      "recentWork": true,
+      "termsStatus": "use_existing_web_research_flickr_contract",
+      "researchStatus": "green_concrete_candidate",
+      "notes": "2025 real-world fetish photography, useful counterweight to studio-only BDSM examples."
+    },
+    {
+      "sourceId": "flickr_atreides59_shibari",
+      "url": "https://www.flickr.com/photos/atreides59/54744617749",
+      "sourceType": "flickr_public_photo_page",
+      "artesRelevance": "high",
+      "contentSignals": ["shibari", "rope_bondage", "portrait"],
+      "recentWork": true,
+      "termsStatus": "use_existing_web_research_flickr_contract",
+      "researchStatus": "green_concrete_candidate",
+      "notes": "Public 2025 shibari photograph, exact Flickr photo page."
+    },
+    {
+      "sourceId": "flickr_fen_darioto_shibari",
+      "url": "https://www.flickr.com/photos/187141696@N04/54420061719",
+      "sourceType": "flickr_public_photo_page",
+      "artesRelevance": "high",
+      "contentSignals": ["shibari", "rope_bondage", "portrait"],
+      "recentWork": true,
+      "termsStatus": "use_existing_web_research_flickr_contract",
+      "researchStatus": "green_concrete_candidate",
+      "notes": "2025 shibari shoot with multiple exact public Flickr photo pages; keep only a small number from the same shoot."
+    },
+    {
+      "sourceId": "flickr_faron_ard_art_nude",
+      "url": "https://www.flickr.com/photos/livelikefaron/54850208383",
+      "sourceType": "flickr_public_photo_page",
+      "artesRelevance": "high",
+      "contentSignals": ["fine_art_nude", "full_body", "editorial"],
+      "recentWork": true,
+      "termsStatus": "use_existing_web_research_flickr_contract",
+      "researchStatus": "green_concrete_candidate",
+      "notes": "Public fine-art nude uploaded 2025. Source description explicitly identifies the subject as an adult woman; this supports provenance but does not replace human age-safety review."
+    },
+    {
+      "sourceId": "flickr_curtis_joe_walker_art_nude",
+      "url": "https://www.flickr.com/photos/curtisjoewalker/54889418829",
+      "sourceType": "flickr_public_photo_page",
+      "artesRelevance": "high",
+      "contentSignals": ["art_nude", "lingerie", "location_shoot"],
+      "recentWork": true,
+      "termsStatus": "use_existing_web_research_flickr_contract",
+      "researchStatus": "green_concrete_candidate",
+      "notes": "Recent public 2025 art-nude/location photography. Candidate remains human-label dependent."
     },
     {
       "sourceId": "hedoneye",
@@ -34,7 +123,7 @@
       "recentWork": true,
       "termsStatus": "linktree_terms_prohibit_automated_collection",
       "researchStatus": "orange_lead_only_no_linktree_scrape",
-      "notes": "Use Linktree only to identify the creator and public external destinations. Do not scrape Linktree. Follow only independently public creator-owned pages that pass their own terms check."
+      "notes": "Use Linktree only as a lead. Follow independently public creator-owned destinations and check those separately."
     },
     {
       "sourceId": "ken_marcus_gallery",
@@ -45,7 +134,7 @@
       "recentWork": false,
       "termsStatus": "explicit_terms_link_present_not_yet_reviewed_successfully",
       "researchStatus": "orange_manual_terms_check",
-      "notes": "Very broad historical erotic/fetish coverage and potentially useful hard examples, but site is commercial and exposes Terms & Conditions. Do not automate until terms page is successfully reviewed."
+      "notes": "Very broad historical erotic/fetish coverage but commercial site with explicit Terms & Conditions. Do not automate until terms are successfully reviewed."
     },
     {
       "sourceId": "dennis_gelner",
@@ -56,7 +145,7 @@
       "recentWork": true,
       "termsStatus": "not_yet_fully_checked",
       "researchStatus": "orange_manual_terms_check",
-      "notes": "Contemporary and visually strong for Artes-style nude/editorial representation, likely more useful for exposed-body classes than explicit acts."
+      "notes": "Contemporary and visually strong for Artes-style nude/editorial representation."
     },
     {
       "sourceId": "renee_jacobs",
@@ -67,7 +156,7 @@
       "recentWork": true,
       "termsStatus": "not_yet_fully_checked",
       "researchStatus": "orange_manual_terms_check",
-      "notes": "Awarded fine-art nude photographer with contemporary publications. Good potential for strong artistic nudity but terms and concrete gallery delivery still require review."
+      "notes": "Strong fine-art nude potential; terms and concrete asset delivery still require review."
     },
     {
       "sourceId": "sacha_leyendecker",
@@ -76,10 +165,65 @@
       "artesRelevance": "high",
       "contentSignals": ["sensual_portrait", "nude", "erotic_portrait"],
       "recentWork": true,
-      "termsStatus": "not_yet_fully_checked",
+      "termsStatus": "workshop_usage_terms_found_portfolio_specific_reuse_not_resolved",
       "researchStatus": "orange_manual_terms_check",
-      "notes": "Strong natural-light nude/erotic portrait style. Likely useful for representative exposed-body coverage, not expected to provide many explicit-act examples."
+      "notes": "Strong natural-light nude/erotic portrait style. Public workshop terms contain detailed usage-rights rules; do not infer unrestricted portfolio reuse from gallery visibility."
+    },
+    {
+      "sourceId": "konterfei_photography",
+      "url": "https://www.konterfei-photography.at/portfolio/",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["art_nude", "boudoir", "bondage", "fetish", "bdsm"],
+      "recentWork": true,
+      "termsStatus": "client_publication_contractually_regulated",
+      "researchStatus": "orange_terms_and_asset_check",
+      "notes": "Highly relevant genre mix, but photographer explicitly states publication of client images is contractually regulated."
+    },
+    {
+      "sourceId": "shibari_photo",
+      "url": "https://shibari.photo/work",
+      "sourceType": "photographer_portfolio",
+      "artesRelevance": "high",
+      "contentSignals": ["art_nude", "rope_bondage", "shibari"],
+      "recentWork": true,
+      "termsStatus": "portfolio_specific_terms_not_yet_resolved",
+      "researchStatus": "orange_asset_and_terms_check",
+      "notes": "Public portfolio advertises favorite bondage photos 2025 and art-nude/shibari work. Direct assets and terms still need checking."
+    },
+    {
+      "sourceId": "photovlam",
+      "url": "https://www.fotovlam.com/",
+      "sourceType": "commercial_erotic_photography_site",
+      "artesRelevance": "medium",
+      "contentSignals": ["artistic_nude", "explicit_erotic", "couples"],
+      "recentWork": true,
+      "termsStatus": "publication_and_usage_controlled_by_agreed_model_terms_and_exclusive_client_rights",
+      "researchStatus": "red_no_automated_fetch",
+      "notes": "Useful as market/context research, but site explicitly describes controlled publication and exclusive client usage rights."
+    },
+    {
+      "sourceId": "flickr_adda_dada",
+      "url": "https://www.flickr.com/photos/addadada/54901579340",
+      "sourceType": "flickr_public_photo_page",
+      "artesRelevance": "high",
+      "contentSignals": ["adult_event", "leather", "fetish", "nude_18_plus"],
+      "recentWork": true,
+      "termsStatus": "explicit_no_reproduction_copy_or_use_statement",
+      "researchStatus": "red_no_automated_fetch",
+      "notes": "Excluded despite strong adult/consent provenance because source explicitly forbids reproduction, copying, blogging or use in any form."
+    },
+    {
+      "sourceId": "skyclad_pagan",
+      "url": "https://www.flickr.com/people/skycladart/",
+      "sourceType": "flickr_profile",
+      "artesRelevance": "medium",
+      "contentSignals": ["male_nude", "shibari", "self_portrait"],
+      "recentWork": true,
+      "termsStatus": "explicit_permission_required_and_bondage_friend_only",
+      "researchStatus": "red_no_automated_fetch",
+      "notes": "Profile explicitly says not to use photos without permission; bondage work is friend-only."
     }
   ],
-  "nextAction": "Inspect green sources at concrete image/page level, verify direct asset delivery and build an initial mixed photographer/event candidate manifest. Continue searching for modern creative explicit-act photography so Commons remains an anchor minority rather than the dominant source."
+  "nextAction": "Continue scouting for full-body explicit nude and creative explicit-act photography from additional public photographer portfolios, while keeping Wikimedia Commons only as hard-anchor coverage."
 }

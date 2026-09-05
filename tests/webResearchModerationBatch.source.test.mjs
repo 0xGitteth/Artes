@@ -27,7 +27,9 @@ test('manifest separates research collection from training and production approv
   assert.equal(manifest.rules.localOnly, true);
   assert.equal(manifest.rules.commitImageBytes, false);
   assert.equal(manifest.rules.humanLabelRequired, true);
-  assert.equal(manifest.rules.skipIfMinorOrAgeSeemsUncertain, true);
+  assert.equal(manifest.rules.skipIfMinorOrAgeSeemsUncertain, false);
+  assert.equal(manifest.rules.skipIfMinorOrAgeSeemsUncertainWhenAdultOrSexualContent, true);
+  assert.equal(manifest.rules.ageUncertaintyAllowedForNonadultNonsexualContent, true);
   assert.equal(manifest.rules.trainingReady, false);
   assert.equal(manifest.rules.productionEligible, false);
   for (const entry of manifest.entries) {

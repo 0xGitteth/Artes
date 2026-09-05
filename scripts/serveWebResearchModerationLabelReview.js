@@ -21,7 +21,8 @@ const ALLOWED_NUDITY = ['none', 'underwear_swimwear', 'implied_nude', 'bare_butt
 const ALLOWED_SEXUAL_CONTEXT = ['none', 'suggestive', 'bdsm_kink', 'explicit_act'];
 const ALLOWED_GRAPHIC_INJURY = ['none', 'mild', 'graphic'];
 const SENSITIVE_SIGNALS = ['bloodInjury', 'selfHarm', 'suicide', 'eatingDisorder', 'substanceDistress', 'violence', 'horrorScare'];
-const AGE_SAFETY_DECISIONS = ['adult_clear', 'skip_minor_or_age_uncertain'];
+const AGE_SAFETY_DECISIONS = ['not_required_nonadult_nonsexual', 'adult_clear', 'skip_minor_or_age_uncertain'];
+const AGE_SAFETY_RELEVANT_NUDITY = new Set(['implied_nude', 'bare_buttocks', 'female_bare_breasts', 'genitalia']);
 const RESEARCH_ELIGIBILITY_DECISIONS = ['include_real_photograph', 'exclude_non_photographic_or_synthetic'];
 const MIME_BY_EXT = new Map([
   ['.jpg', 'image/jpeg'],
@@ -47,6 +48,13 @@ const eligibilityOptionHtml = (selected) => [
   `<option value="exclude_non_photographic_or_synthetic"${selected === 'exclude_non_photographic_or_synthetic' ? ' selected' : ''}>uitsluiten: illustratie / render / game / synthetisch</option>`,
 ].join('');
 
+const ageSafetyOptionHtml = (selected) => [
+  '<option value="">Kies…</option>',
+  `<option value="not_required_nonadult_nonsexual"${selected === 'not_required_nonadult_nonsexual' ? ' selected' : ''}>niet nodig: geen adult/seksuele content</option>`,
+  `<option value="adult_clear"${selected === 'adult_clear' ? ' selected' : ''}>volwassene voldoende duidelijk</option>`,
+  `<option value="skip_minor_or_age_uncertain"${selected === 'skip_minor_or_age_uncertain' ? ' selected' : ''}>uitsluiten: minderjarig of leeftijd onzeker waar leeftijd relevant is</option>`,
+].join('');
+
 const readOptionalJson = async (filePath, fallback) => {
   try {
     return JSON.parse(await readFile(filePath, 'utf8'));
@@ -67,6 +75,11 @@ const validateResearchInputs = (intake, sources) => {
   if (!Array.isArray(sources?.records) || sources.records.length === 0) throw new Error('web_research_sources_empty');
 };
 
+const detectorLabelRequiresAgeSafety = (detectorLabel) => (
+  AGE_SAFETY_RELEVANT_NUDITY.has(detectorLabel?.nudity)
+  || (detectorLabel?.sexualContext && detectorLabel.sexualContext !== 'none')
+);
+
 const normalizeSuggestionEligibility = (suggestion) => suggestion?.researchEligibilityDecision || 'include_real_photograph';
 
 const validateAssistantSuggestion = (suggestion, sourceUrl) => {
@@ -80,17 +93,22 @@ const validateAssistantSuggestion = (suggestion, sourceUrl) => {
     }
     return;
   }
+
   if (!AGE_SAFETY_DECISIONS.includes(suggestion?.ageSafetyDecision)) {
     throw new Error(`invalid_assistant_prefill_age_decision:${sourceUrl}`);
   }
-  if (suggestion.ageSafetyDecision === 'adult_clear') {
-    const validation = validateArtesDetectorLabel(suggestion.detectorLabel);
-    if (!validation.valid) throw new Error(`invalid_assistant_prefill_label:${sourceUrl}:${validation.errors.join(',')}`);
-    if (suggestion.detectorLabel.possibleMinorConcern !== false) {
-      throw new Error(`assistant_prefill_possible_minor_must_be_skipped:${sourceUrl}`);
-    }
-  } else if (suggestion.detectorLabel !== null) {
-    throw new Error(`assistant_prefill_age_exclusion_must_not_have_label:${sourceUrl}`);
+  if (suggestion.ageSafetyDecision === 'skip_minor_or_age_uncertain') {
+    if (suggestion.detectorLabel !== null) throw new Error(`assistant_prefill_age_exclusion_must_not_have_label:${sourceUrl}`);
+    return;
+  }
+
+  const validation = validateArtesDetectorLabel(suggestion.detectorLabel);
+  if (!validation.valid) throw new Error(`invalid_assistant_prefill_label:${sourceUrl}:${validation.errors.join(',')}`);
+  if (suggestion.detectorLabel.possibleMinorConcern !== false) {
+    throw new Error(`assistant_prefill_possible_minor_must_be_skipped:${sourceUrl}`);
+  }
+  if (suggestion.ageSafetyDecision === 'not_required_nonadult_nonsexual' && detectorLabelRequiresAgeSafety(suggestion.detectorLabel)) {
+    throw new Error(`assistant_prefill_age_safety_required_for_adult_or_sexual_content:${sourceUrl}`);
   }
 };
 
@@ -197,6 +215,7 @@ const renderPage = async () => {
   const reviewedCount = items.filter(isHumanReviewed).length;
   const includedCount = items.filter((item) => item.reviewed?.labelStatus === 'human_confirmed').length;
   const ageExcludedCount = items.filter((item) => item.reviewed?.labelStatus === 'excluded_age_safety').length;
+  const ageNotRequiredCount = items.filter((item) => item.reviewed?.labelStatus === 'human_confirmed' && item.reviewed?.ageSafetyDecision === 'not_required_nonadult_nonsexual').length;
   const nonPhotoExcludedCount = items.filter((item) => item.reviewed?.labelStatus === 'excluded_non_photographic').length;
   const prefilledCount = items.filter((item) => item.assistantSuggestion).length;
   const acceptedAsIsCount = items.filter((item) => item.reviewed?.assistantSuggestionAcceptedAsIs === true).length;
@@ -228,7 +247,7 @@ const renderPage = async () => {
     const statusText = nonPhotoExcluded
       ? '↷ uitgesloten: geen echte fotografie'
       : ageExcluded
-        ? '↷ overgeslagen wegens leeftijdsveiligheid'
+        ? '↷ uitgesloten wegens leeftijdsveiligheid'
         : confirmed
           ? '✓ menselijk bevestigd'
           : suggested
@@ -250,7 +269,7 @@ const renderPage = async () => {
           <p><strong>Source pool:</strong> ${escapeHtml(item.sourcePoolId)}</p>
           <p><strong>Maker:</strong> ${escapeHtml(item.source.creator || 'onbekend')}</p>
           ${suggested && !isHumanReviewed(item) ? '<p class="assistant-note"><strong>Assistentvoorstel:</strong> velden hieronder zijn al ingevuld. Corrigeer alleen wat niet klopt en bevestig daarna.</p>' : ''}
-          <p class="hint">Deze researchbatch is bedoeld voor echte fotografie. Illustraties, renders, gamebeelden en andere synthetische/non-photographic beelden worden uitgesloten. Bij een vermoedelijke minderjarige of echte leeftijdstwijfel: kies skip_minor_or_age_uncertain.</p>
+          <p class="hint">Leeftijd is alleen een blocker wanneer het beeld adult nudity of seksuele context bevat. Niet-seksuele male topless, gewone underwear/swimwear en andere niet-adult content mogen dus gelabeld worden zonder 18+ vast te stellen. Illustraties, renders, gamebeelden en andere synthetische/non-photographic beelden worden voor deze batch apart uitgesloten.</p>
 
           <label>Research image type
             <select name="researchEligibilityDecision" onchange="syncEligibility(this)">${eligibilityOptionHtml(eligibilityDecision)}</select>
@@ -258,7 +277,7 @@ const renderPage = async () => {
 
           <div class="age-fields">
             <label>Age safety decision
-              <select name="ageSafetyDecision" onchange="syncAgeDecision(this)">${optionHtml(AGE_SAFETY_DECISIONS, ageDecision)}</select>
+              <select name="ageSafetyDecision" onchange="syncAgeDecision(this)">${ageSafetyOptionHtml(ageDecision)}</select>
             </label>
           </div>
 
@@ -291,7 +310,7 @@ const renderPage = async () => {
 body{font-family:system-ui,sans-serif;margin:0;background:#f4f4f4;color:#171717}.wrap{max-width:1180px;margin:auto;padding:24px}.summary{position:sticky;top:0;z-index:5;background:#fff;padding:12px 16px;border:1px solid #ddd;border-radius:10px}.card{display:grid;grid-template-columns:minmax(300px,48%) 1fr;background:white;margin:20px 0;border-radius:12px;overflow:hidden;box-shadow:0 1px 8px #0002}.card.suggested{outline:2px solid #ddd}.card.excluded{opacity:.72}.card img{width:100%;height:100%;max-height:760px;object-fit:contain;background:#111}.body{padding:20px}.body label{display:block;margin:12px 0}.body select,.body input{width:100%;padding:8px;margin-top:4px}.body fieldset label{display:inline-block;margin:4px 12px 4px 0}.body fieldset input{width:auto}.hint{font-size:.92rem;opacity:.72}.assistant-note{padding:10px 12px;background:#f3f3f3;border-radius:8px}.status{display:inline-block;margin-left:12px}.disabled{opacity:.45;pointer-events:none}button{padding:10px 16px;cursor:pointer}@media(max-width:780px){.card{grid-template-columns:1fr}.card img{max-height:600px}}
 </style></head><body><div class="wrap">
 <h1>Artes web research detectorlabels</h1>
-<div class="summary"><strong>${reviewedCount}/${items.length} menselijk beoordeeld</strong> · ${prefilledCount} vooringevuld · ${includedCount} gelabeld · ${ageExcludedCount} leeftijdsveiligheid uitgesloten · ${nonPhotoExcludedCount} non-photographic uitgesloten · ${acceptedAsIsCount} assistentvoorstellen ongewijzigd bevestigd · ${correctedCount} aangepast. Research only.</div>
+<div class="summary"><strong>${reviewedCount}/${items.length} menselijk beoordeeld</strong> · ${prefilledCount} vooringevuld · ${includedCount} gelabeld · ${ageNotRequiredCount} zonder leeftijdsblok · ${ageExcludedCount} leeftijdsveiligheid uitgesloten · ${nonPhotoExcludedCount} non-photographic uitgesloten · ${acceptedAsIsCount} assistentvoorstellen ongewijzigd bevestigd · ${correctedCount} aangepast. Research only.</div>
 <p>Waar een assistentvoorstel beschikbaar is, zijn de velden al ingevuld op basis van visuele beoordeling. Discovery metadata wordt niet getoond en is geen labelbron. Jouw bevestiging is authoritative.</p>
 ${cards}
 </div>
@@ -316,7 +335,8 @@ async function saveCard(button){
   const excludedNonPhoto=researchEligibilityDecision==='exclude_non_photographic_or_synthetic';
   const ageSafetyDecision=excludedNonPhoto?null:pick('ageSafetyDecision').value;
   const confidenceRaw=pick('confidence').value.trim();
-  const detectorLabel=!excludedNonPhoto && ageSafetyDecision==='adult_clear'?{
+  const shouldLabel=!excludedNonPhoto && ageSafetyDecision && ageSafetyDecision!=='skip_minor_or_age_uncertain';
+  const detectorLabel=shouldLabel?{
     nudity:pick('nudity').value,
     sexualContext:pick('sexualContext').value,
     graphicInjury:pick('graphicInjury').value,
@@ -333,11 +353,11 @@ async function saveCard(button){
   if(result.labelStatus==='excluded_non_photographic'){
     card.classList.add('excluded');status.textContent='↷ uitgesloten: geen echte fotografie';button.textContent='Beslissing opnieuw opslaan';
   }else if(result.labelStatus==='excluded_age_safety'){
-    card.classList.add('excluded');status.textContent='↷ overgeslagen wegens leeftijdsveiligheid';button.textContent='Beslissing opnieuw opslaan';
+    card.classList.add('excluded');status.textContent='↷ uitgesloten wegens leeftijdsveiligheid';button.textContent='Beslissing opnieuw opslaan';
   }else{
     card.classList.remove('excluded');status.textContent='✓ menselijk bevestigd';button.textContent='Label opnieuw bevestigen';
   }
-  document.querySelector('.summary').innerHTML='<strong>'+result.reviewedCount+'/'+result.totalCount+' menselijk beoordeeld</strong> · '+result.prefilledCount+' vooringevuld · '+result.includedLabelCount+' gelabeld · '+result.ageSafetyExcludedCount+' leeftijdsveiligheid uitgesloten · '+result.nonPhotographicExcludedCount+' non-photographic uitgesloten · '+result.assistantAcceptedAsIsCount+' assistentvoorstellen ongewijzigd bevestigd · '+result.assistantCorrectedCount+' aangepast. Research only.';
+  document.querySelector('.summary').innerHTML='<strong>'+result.reviewedCount+'/'+result.totalCount+' menselijk beoordeeld</strong> · '+result.prefilledCount+' vooringevuld · '+result.includedLabelCount+' gelabeld · '+result.ageSafetyNotRequiredCount+' zonder leeftijdsblok · '+result.ageSafetyExcludedCount+' leeftijdsveiligheid uitgesloten · '+result.nonPhotographicExcludedCount+' non-photographic uitgesloten · '+result.assistantAcceptedAsIsCount+' assistentvoorstellen ongewijzigd bevestigd · '+result.assistantCorrectedCount+' aangepast. Research only.';
 }
 </script></body></html>`;
 };
@@ -374,13 +394,17 @@ const saveHumanReview = async (payload) => {
   } else {
     if (!AGE_SAFETY_DECISIONS.includes(payload?.ageSafetyDecision)) throw new Error('invalid_age_safety_decision');
     ageSafetyDecision = payload.ageSafetyDecision;
-    labelStatus = 'excluded_age_safety';
-    if (ageSafetyDecision === 'adult_clear') {
+    if (ageSafetyDecision === 'skip_minor_or_age_uncertain') {
+      labelStatus = 'excluded_age_safety';
+    } else {
       const validation = validateArtesDetectorLabel(payload?.detectorLabel);
       if (!validation.valid) throw new Error(`invalid_detector_label:${validation.errors.join(',')}`);
       detectorLabel = normalizeArtesDetectorLabel(payload.detectorLabel);
       if (detectorLabel.possibleMinorConcern !== false) {
         throw new Error('web_research_possible_minor_must_be_skipped');
+      }
+      if (ageSafetyDecision === 'not_required_nonadult_nonsexual' && detectorLabelRequiresAgeSafety(detectorLabel)) {
+        throw new Error('web_research_age_safety_required_for_adult_or_sexual_content');
       }
       labelStatus = 'human_confirmed';
     }
@@ -392,7 +416,7 @@ const saveHumanReview = async (payload) => {
     const suggestion = state.assistantSuggestion;
     const suggestedEligibility = suggestion.researchEligibilityDecision || 'include_real_photograph';
     const suggestedAge = suggestedEligibility === 'include_real_photograph' ? suggestion.ageSafetyDecision : null;
-    const suggestedLabel = suggestedEligibility === 'include_real_photograph' && suggestedAge === 'adult_clear'
+    const suggestedLabel = suggestedEligibility === 'include_real_photograph' && suggestedAge !== 'skip_minor_or_age_uncertain'
       ? normalizeArtesDetectorLabel(suggestion.detectorLabel)
       : null;
     assistantSuggestionAcceptedAsIs = suggestedEligibility === payload.researchEligibilityDecision
@@ -427,6 +451,7 @@ const saveHumanReview = async (payload) => {
   items.sort((a, b) => a.fileName.localeCompare(b.fileName));
 
   const includedLabelCount = items.filter((item) => item.labelStatus === 'human_confirmed').length;
+  const ageSafetyNotRequiredCount = items.filter((item) => item.labelStatus === 'human_confirmed' && item.ageSafetyDecision === 'not_required_nonadult_nonsexual').length;
   const ageSafetyExcludedCount = items.filter((item) => item.labelStatus === 'excluded_age_safety').length;
   const nonPhotographicExcludedCount = items.filter((item) => item.labelStatus === 'excluded_non_photographic').length;
   const assistantAcceptedAsIsCount = items.filter((item) => item.assistantSuggestionAcceptedAsIs === true).length;
@@ -442,6 +467,7 @@ const saveHumanReview = async (payload) => {
     totalItemCount: states.length,
     reviewedItemCount: items.length,
     includedLabelCount,
+    ageSafetyNotRequiredCount,
     ageSafetyExcludedCount,
     nonPhotographicExcludedCount,
     assistantPrefillUsed: prefilledCount > 0,
@@ -450,6 +476,7 @@ const saveHumanReview = async (payload) => {
     assistantCorrectedCount,
     humanLabelsAuthoritative: true,
     humanAgeSafetyReviewRequired: true,
+    ageSafetyAppliedOnlyWhenAdultOrSexualContent: true,
     realPhotographyResearchOnly: true,
     discoveryMetadataIsLabelAuthority: false,
     researchOnly: true,
@@ -466,6 +493,7 @@ const saveHumanReview = async (payload) => {
     reviewedCount: items.length,
     prefilledCount,
     includedLabelCount,
+    ageSafetyNotRequiredCount,
     ageSafetyExcludedCount,
     nonPhotographicExcludedCount,
     assistantAcceptedAsIsCount,

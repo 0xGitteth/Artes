@@ -24,13 +24,13 @@
     "productionEligible": false
   },
   "selectionPlan": {
-    "requestedCandidateCount": 43,
+    "requestedCandidateCount": 40,
     "reasoning": "V1 already contains strong male_topless coverage but only one none example and zero examples in bare_buttocks, female_bare_breasts and genitalia. V2 therefore deliberately spends most candidate slots on ordinary negatives, broad adult art-nude gap candidates, implied nude, and suggestive-vs-bdsm boundary cases rather than mechanically repeating the V1 distribution.",
     "discoveryTargets": {
       "none_negative": 12,
       "underwear_suggestive_boundary": 10,
-      "implied_nude": 7,
-      "adult_art_nude_gap": 13,
+      "implied_nude": 6,
+      "adult_art_nude_gap": 11,
       "male_topless_low_priority": 1
     }
   },
@@ -64,7 +64,6 @@
     {"id":"webresearch-v2-implied-dinka-blue","sourcePoolId":"flickr_dinka_self_or_model","sourceUrl":"https://www.flickr.com/photos/dinka1974/45569770752/","creator":"Diana","discoveryFacet":"implied_nude","title":"Blue Monday","sourceYear":null,"rightsStatus":"unverified_research_only"},
     {"id":"webresearch-v2-implied-boudoirstudio-veil","sourcePoolId":"flickr_boudoir_photo_studio","sourceUrl":"https://www.flickr.com/photos/boudoirphotostudio/52447003737/","creator":"Boudoir Photo","discoveryFacet":"implied_nude","title":"Boudoir studio candidate - bare back and veil","sourceYear":null,"rightsStatus":"unverified_research_only"},
     {"id":"webresearch-v2-implied-cariad-2022","sourcePoolId":"flickr_barrie_spence_cariad","sourceUrl":"https://www.flickr.com/photos/entropictendencies/53187561440/","creator":"Barrie Spence","discoveryFacet":"implied_nude","title":"Cariad Celis","sourceYear":2022,"rightsStatus":"all_rights_reserved_research_only"},
-    {"id":"webresearch-v2-implied-cariad-2025","sourcePoolId":"flickr_barrie_spence_cariad","sourceUrl":"https://www.flickr.com/photos/entropictendencies/55489996373/","creator":"Barrie Spence","discoveryFacet":"implied_nude","title":"Cariad Celis","sourceYear":2025,"rightsStatus":"all_rights_reserved_research_only"},
     {"id":"webresearch-v2-implied-denis-meduse","sourcePoolId":"flickr_denis_guillaume_oboudoir","sourceUrl":"https://www.flickr.com/photos/denisbook/54493252658/","creator":"Denis GUILLAUME","discoveryFacet":"implied_nude","title":"2025 - Melle Méduse - O Boudoir","sourceYear":2025,"rightsStatus":"all_rights_reserved_research_only"},
 
     {"id":"webresearch-v2-artnude-faron-skin","sourcePoolId":"flickr_faron_ard_artnude","sourceUrl":"https://www.flickr.com/photos/livelikefaron/27526113538/","creator":"Faron Ard","discoveryFacet":"adult_art_nude_gap","title":"The Skin That Learned Light","sourceYear":2018,"rightsStatus":"all_rights_reserved_research_only"},
@@ -76,10 +75,8 @@
     {"id":"webresearch-v2-artnude-golden-nymph","sourcePoolId":"flickr_henrik_sundholm_varga","sourceUrl":"https://www.flickr.com/photos/visualideas/26467311841/","creator":"Henrik Sundholm","discoveryFacet":"adult_art_nude_gap","title":"A Golden Nymph","sourceYear":2015,"rightsStatus":"unverified_research_only"},
     {"id":"webresearch-v2-artnude-creature","sourcePoolId":"flickr_henrik_sundholm_rosetta","sourceUrl":"https://www.flickr.com/photos/visualideas/20661627960/","creator":"Henrik Sundholm","discoveryFacet":"adult_art_nude_gap","title":"A Creature of Nature","sourceYear":2015,"rightsStatus":"unverified_research_only"},
     {"id":"webresearch-v2-artnude-arielle","sourcePoolId":"flickr_gary_thatcher_arielle","sourceUrl":"https://www.flickr.com/photos/garythatcher/26601344080/","creator":"Gary Thatcher","discoveryFacet":"adult_art_nude_gap","title":"Art Nude BWM-0127","sourceYear":2016,"rightsStatus":"unverified_research_only"},
-    {"id":"webresearch-v2-artnude-satine","sourcePoolId":"flickr_onno_veerman_satine","sourceUrl":"https://www.flickr.com/photos/onno-veerman/27173472151/","creator":"Female beauties","discoveryFacet":"adult_art_nude_gap","title":"Satine art nude candidate","sourceYear":null,"rightsStatus":"unverified_research_only"},
-    {"id":"webresearch-v2-artnude-zoi","sourcePoolId":"flickr_onno_veerman_zoi","sourceUrl":"https://www.flickr.com/photos/onno-veerman/29634906022/","creator":"Female beauties","discoveryFacet":"adult_art_nude_gap","title":"Zoi art nude candidate","sourceYear":null,"rightsStatus":"unverified_research_only"},
-    {"id":"webresearch-v2-artnude-gala","sourcePoolId":"flickr_onno_veerman_gala","sourceUrl":"https://www.flickr.com/photos/onno-veerman/50133724976/","creator":"Female beauties","discoveryFacet":"adult_art_nude_gap","title":"Gala art nude candidate","sourceYear":null,"rightsStatus":"unverified_research_only"},
     {"id":"webresearch-v2-artnude-cariad-recent","sourcePoolId":"flickr_barrie_spence_cariad","sourceUrl":"https://www.flickr.com/photos/entropictendencies/55489996373/","creator":"Barrie Spence","discoveryFacet":"adult_art_nude_gap","title":"Cariad Celis","sourceYear":2025,"rightsStatus":"all_rights_reserved_research_only"},
+    {"id":"webresearch-v2-artnude-pufferclub-topless","sourcePoolId":"flickr_pufferclub_topless","sourceUrl":"https://www.flickr.com/photos/pufferclub/54743001037/","creator":"PufferClub","discoveryFacet":"adult_art_nude_gap","title":"Sexy Topless Woman Only In Black Leggings And Shiny Puffer Hooded Down Jacket","sourceYear":2025,"rightsStatus":"unverified_research_only"},
 
     {"id":"webresearch-v2-male-topless-jose","sourcePoolId":"flickr_groucho10_jose","sourceUrl":"https://www.flickr.com/photos/51385164@N04/54904309591/","creator":"Jose","discoveryFacet":"male_topless_low_priority","title":"Topless","sourceYear":2025,"rightsStatus":"all_rights_reserved_research_only"}
   ]

@@ -21,6 +21,23 @@ test('balanced target-scene preview fetcher allows only observed AdultLabs Pixbo
   assert.match(script, /balanced_target_preview_asset_shape_not_allowed/);
 });
 
+test('balanced target-scene preview fetcher avoids AVIF negotiation and safely resolves octet-stream images', () => {
+  assert.match(script, /image\/jpeg,image\/png,image\/webp/);
+  assert.doesNotMatch(script, /Accept:\s*['\"]image\/avif/);
+  assert.match(script, /sniffSupportedImage/);
+  assert.match(script, /application\/octet-stream/);
+  assert.match(script, /magic_bytes_from_octet_stream/);
+  assert.match(script, /responseMimeType/);
+  assert.match(script, /mimeResolutionCounts/);
+});
+
+test('balanced target-scene preview fetcher keeps source-specific bounded size caps', () => {
+  assert.match(script, /MAX_PIXBOOST_PREVIEW_BYTES = 4 \* 1024 \* 1024/);
+  assert.match(script, /MAX_DIRECT_PREVIEW_BYTES = 12 \* 1024 \* 1024/);
+  assert.match(script, /maxBytesFor/);
+  assert.match(script, /maxPreviewBytesByShape/);
+});
+
 test('balanced target-scene preview fetcher preserves provenance and screening-only status', () => {
   assert.match(script, /sourcePoolId/);
   assert.match(script, /targetFacet/);

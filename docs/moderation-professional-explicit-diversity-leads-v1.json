@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "research_professional_explicit_source_diversity_leads",
   "purpose": "Increase explicit-act source/style diversity after VivThomas proved high-yield but single-publisher-heavy. Leads are not detector labels and are not approved image sources until their exact public hosted-gallery routes are resolved.",
   "researchOnly": true,
@@ -19,40 +19,48 @@
     {
       "sourceId": "paperstreetcash_public_fhg_examples",
       "priority": "high",
+      "publicProbeEligible": true,
+      "publicResolutionStatus": "examples_visible_but_nonstandard_linking",
       "urls": [
         "https://www.paperstreetcash.com/external.php?page=adtools",
         "https://www.paperstreetcash.com/"
       ],
       "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
-      "sourceContext": "Publisher affiliate site publicly states it offers hundreds of Free Hosted Galleries and shows example links on its sales-tools page.",
-      "nextStep": "Resolve the public Example 1-4 gallery URLs locally and verify whether they expose publisher-hosted image previews without affiliate authentication."
+      "sourceContext": "Publisher affiliate site publicly states it offers hundreds of Free Hosted Galleries and visibly lists Example 1-4 on its sales-tools page, but the initial plain-anchor parser resolved zero concrete links.",
+      "nextStep": "Resolve the public Example 1-4 gallery URLs from nonstandard HTML/JavaScript/data attributes and verify whether they expose publisher-hosted image previews without affiliate authentication."
     },
     {
       "sourceId": "buddyprofits_hosted_galleries",
       "priority": "high_for_male_diversity",
+      "publicProbeEligible": false,
+      "publicResolutionStatus": "marketing_only_assets_affiliate_area",
       "urls": ["https://www.buddyprofits.com/"],
       "targetHints": ["explicit_act", "genitalia_full_frontal", "male_topless"],
-      "sourceContext": "Gay adult affiliate network publicly advertises many exclusive hosted galleries across a large site network.",
-      "nextStep": "Probe only public marketing/gallery links; do not enter affiliate dashboard or member areas."
+      "sourceContext": "Gay adult affiliate network publicly advertises many exclusive hosted galleries and promo sets, but the current public marketing page points affiliates to member/affiliate tooling rather than exposing concrete gallery URLs.",
+      "nextStep": "Keep as a source-diversity lead. Do not enter affiliate/member areas merely to resolve galleries. Revisit only if exact public gallery URLs surface independently."
     },
     {
       "sourceId": "glowdollars_hosted_galleries",
       "priority": "high_for_modern_male_diversity",
+      "publicProbeEligible": false,
+      "publicResolutionStatus": "partner_dashboard_only",
       "urls": ["https://glowdollars.com/"],
       "targetHints": ["explicit_act", "genitalia_full_frontal", "male_topless"],
-      "sourceContext": "Current adult affiliate program advertises gallery zips and hosted galleries and states all models were at least 18 at production.",
-      "nextStep": "Check whether any current hosted gallery examples are public outside the partner dashboard; otherwise retain as authorized-program lead only."
+      "sourceContext": "Current adult affiliate program advertises gallery zips and hosted galleries and states all models were at least 18 at production, but says the actual galleries and creatives live in the partner dashboard.",
+      "nextStep": "Retain as an authorized-program lead only. Do not treat marketing copy as a public asset route."
     },
     {
       "sourceId": "curiouscash_hosted_explicit_material",
       "priority": "high",
+      "publicProbeEligible": true,
+      "publicResolutionStatus": "rights_confirmed_but_gallery_urls_unresolved",
       "urls": [
         "https://curiouscash.com/affiliate2257.php",
         "https://curiouscash.com/faq.php"
       ],
       "targetHints": ["explicit_act", "genitalia_full_frontal", "bdsm_kink"],
-      "sourceContext": "Publisher explicitly documents both sexually explicit and non-explicit hosted promotional material and 2257 coverage.",
-      "nextStep": "Continue resolving exact current CuriousCash-hosted gallery URLs without affiliate authentication."
+      "sourceContext": "Publisher explicitly documents both sexually explicit and non-explicit hosted promotional material and 2257 coverage. FAQ permits free-content use under watermark/link conditions, but the initial probe did not prove that its two matching links were actual galleries.",
+      "nextStep": "Separate true FHG/gallery links from generic marketing links; continue resolving exact current public hosted galleries without affiliate authentication."
     }
   ]
 }

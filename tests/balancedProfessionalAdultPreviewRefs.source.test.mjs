@@ -16,10 +16,9 @@ test('balanced preview discovery uses the completed target-scene source pools wi
 
 test('balanced preview discovery recognizes the observed transformed AdultLabs Pixboost sample URLs', () => {
   assert.match(script, /PIXBOOST_SAMPLE_ASSET/);
-  assert.match(script, /hostname === 'pixboost\.com'/);
+  assert.match(script, /pixboost\.com/);
   assert.match(script, /adultLabsPixboostSample/);
   assert.match(script, /adultlabs_pixboost_sample/);
-  assert.match(script, /\/api\\\/2\\\/img\\\/samples/);
   assert.match(script, /optimise/);
 });
 

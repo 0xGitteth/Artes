@@ -9,7 +9,6 @@ const OUTPUT_PATH = path.join(OUTPUT_DIR, 'adultlabs-attribute-filters.json');
 const BASE_URL = 'https://adultlabs.com/content';
 const USER_AGENT = 'ArtesModerationResearch/1.0';
 const MAX_PAGES = 80;
-const MAX_EXAMPLES_PER_ATTRIBUTE = 8;
 
 const clean = (value) => String(value || '').trim();
 const decodeHtml = (value) => String(value || '')
@@ -80,21 +79,6 @@ const collectProductAttributeAnchors = (html, pageUrl) => {
   return results;
 };
 
-const collectPhotoProductCards = (html, pageUrl) => {
-  const productPattern = /<a\b[^>]*href=["']([^"']*\/content\/set\/[^"']*photo-set[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  const products = [];
-  let match;
-  while ((match = productPattern.exec(html)) !== null) {
-    let productUrl;
-    try { productUrl = new URL(decodeHtml(match[1]), pageUrl); } catch { continue; }
-    if (!['adultlabs.com', 'www.adultlabs.com'].includes(productUrl.hostname.toLowerCase())) continue;
-    const setId = productUrl.pathname.match(/-(\d+)\/?$/)?.[1];
-    if (!setId) continue;
-    products.push({ setId, productUrl: productUrl.toString(), title: stripTags(match[2]).slice(0, 240) || null });
-  }
-  return [...new Map(products.map((item) => [item.setId, item])).values()];
-};
-
 const targetsForLabel = (label) => Object.entries(TARGETS)
   .filter(([, patterns]) => patterns.some((pattern) => pattern.test(label)))
   .map(([target]) => target);
@@ -109,29 +93,25 @@ for (let page = 1; page <= MAX_PAGES; page += 1) {
   url.searchParams.set('Product_page', String(page));
   const { html, finalUrl } = await fetchHtml(url);
   scannedPages += 1;
-  const products = collectPhotoProductCards(html, finalUrl);
+  const productIds = extractPhotoProductIds(html);
   const anchors = collectProductAttributeAnchors(html, finalUrl);
 
   for (const anchor of anchors) {
     const key = `${anchor.label.toLowerCase()}::${anchor.id}`;
-    const record = attributeMap.get(key) || { label: anchor.label, id: anchor.id, occurrences: 0, pages: [], exampleProducts: [] };
+    const record = attributeMap.get(key) || { label: anchor.label, id: anchor.id, occurrences: 0, pages: [] };
     record.occurrences += 1;
     if (!record.pages.includes(page)) record.pages.push(page);
-    for (const product of products.slice(0, 3)) {
-      if (record.exampleProducts.length >= MAX_EXAMPLES_PER_ATTRIBUTE) break;
-      if (!record.exampleProducts.some((item) => item.setId === product.setId)) record.exampleProducts.push(product);
-    }
     attributeMap.set(key, record);
     for (const facet of targetsForLabel(anchor.label)) facetIds.get(facet)?.add(anchor.id);
   }
 
-  pageSummaries.push({ page, productCount: products.length, attributeAnchorCount: anchors.length });
+  pageSummaries.push({ page, photoProductCount: productIds.length, attributeAnchorCount: anchors.length });
 
-  const hasRequired = REQUIRED_FOR_STOP.every((facet) => (facetIds.get(facet)?.size || 0) > 0);
-  if (page % 10 === 0 || hasRequired) {
-    process.stdout.write(`AdultLabs attribute scan: ${page} pages; ${Object.fromEntries(REQUIRED_FOR_STOP.map((facet) => [facet, facetIds.get(facet)?.size || 0]))}\n`);
+  const hasRequiredCandidates = REQUIRED_FOR_STOP.every((facet) => (facetIds.get(facet)?.size || 0) > 0);
+  if (page % 10 === 0 || hasRequiredCandidates) {
+    process.stdout.write(`AdultLabs attribute scan: ${page} pages; ${JSON.stringify(Object.fromEntries(REQUIRED_FOR_STOP.map((facet) => [facet, facetIds.get(facet)?.size || 0])))}\n`);
   }
-  if (hasRequired) break;
+  if (hasRequiredCandidates) break;
 }
 
 const baseline = await fetchHtml(BASE_URL);
@@ -142,18 +122,22 @@ const validateFacetCandidate = async (facet, id) => {
   url.searchParams.append('n[]', id);
   const { html, finalUrl } = await fetchHtml(url);
   const productIds = extractPhotoProductIds(html);
-  const labels = collectProductAttributeAnchors(html, finalUrl).map((item) => item.label);
-  const targetEvidence = labels.filter((label) => targetsForLabel(label).includes(facet));
+  const anchors = collectProductAttributeAnchors(html, finalUrl);
+  const targetAnchors = anchors.filter((item) => targetsForLabel(item.label).includes(facet));
   const sameProductSet = productIds.length === baselineProductIds.length
     && productIds.every((value, index) => value === baselineProductIds[index]);
+  const targetAttributeOccurrenceCount = targetAnchors.length;
+  const enoughTargetEvidence = productIds.length > 0 && targetAttributeOccurrenceCount >= productIds.length;
+
   return {
     id,
     url: finalUrl.toString(),
     productCount: productIds.length,
     productIds,
     changedFromBaseline: !sameProductSet,
-    targetAttributeEvidence: [...new Set(targetEvidence)],
-    validated: productIds.length > 0 && !sameProductSet && targetEvidence.length > 0,
+    targetAttributeOccurrenceCount,
+    targetAttributeEvidence: [...new Set(targetAnchors.map((item) => item.label))],
+    validated: productIds.length > 0 && !sameProductSet && enoughTargetEvidence,
   };
 };
 

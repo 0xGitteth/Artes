@@ -1,1 +1,33 @@
-PLACEHOLDER
+{
+  "schemaVersion": 1,
+  "prefillVersion": "balanced_target_scene_assistant_prefill_v1",
+  "datasetId": "balanced-professional-adult-target-scene-preview-v1",
+  "suggestionSource": "assistant_visual_review",
+  "authoritative": false,
+  "humanConfirmationRequired": true,
+  "humanLabelsAuthoritative": true,
+  "discoveryMetadataUsedAsLabelAuthority": false,
+  "sourceIntentIsLabelAuthority": false,
+  "status": "complete_visual_review",
+  "itemCount": 78,
+  "summary": {
+    "realPhotographSuggestionCount": 63,
+    "marketingCompositeExclusionSuggestionCount": 15,
+    "explicitActSuggestionCount": 6,
+    "suggestiveSuggestionCount": 19,
+    "nonsexualSuggestionCount": 38,
+    "notes": [
+      "Discovery facets are provenance/search hints only and were not used as detector-label authority.",
+      "The first-three-preview selection produced many boundary and hard-negative frames; only six of the 63 real photographs show a visually clear explicit act.",
+      "All 15 selected VideoBunch assets are product covers or marketing composites and are suggested for exclusion from detector-photo training.",
+      "Assistant suggestions remain non-authoritative until human confirmation."
+    ]
+  },
+  "items": [
+    {"fileName":"001__male_male__adultlabs-set-1233407700__01.jpg","sha256":"a","sourcePoolId":"adultlabs-set-1233407700","sourceAssetUrl":"","researchEligibilityDecision":"include_real_photograph","ageSafetyDecision":"not_required_nonadult_nonsexual","detectorLabel":{"nudity":"none","sexualContext":"none","graphicInjury":"none","sensitiveSignals":[],"possibleMinorConcern":false,"confidence":0.99,"uncertaintyFlags":[]},"basis":"assistant_visual_review_from_user_uploaded_balanced_target_scene_review_batch"}
+  ],
+  "researchOnly": true,
+  "trainingReady": false,
+  "productionEligible": false,
+  "runtimeEligible": false
+}

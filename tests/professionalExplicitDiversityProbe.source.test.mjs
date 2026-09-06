@@ -13,6 +13,16 @@ test('explicit diversity research does not accept one adult publisher as suffici
   assert.ok(config.leads.some((lead) => lead.sourceId === 'glowdollars_hosted_galleries'));
 });
 
+test('dashboard-only leads are not repeatedly probed as if their galleries were public', () => {
+  const glow = config.leads.find((lead) => lead.sourceId === 'glowdollars_hosted_galleries');
+  const buddy = config.leads.find((lead) => lead.sourceId === 'buddyprofits_hosted_galleries');
+  assert.equal(glow.publicProbeEligible, false);
+  assert.equal(glow.publicResolutionStatus, 'partner_dashboard_only');
+  assert.equal(buddy.publicProbeEligible, false);
+  assert.match(buddy.publicResolutionStatus, /marketing_only/);
+  assert.match(script, /publicProbeEligible !== false/);
+});
+
 test('diversity probe is public metadata-only research and cannot enter affiliate or member areas', () => {
   assert.equal(config.rules.noAffiliateLoginBypass, true);
   assert.equal(config.rules.noMemberArea, true);
@@ -25,11 +35,19 @@ test('diversity probe is public metadata-only research and cannot enter affiliat
   assert.doesNotMatch(script, /['\"]Cookie['\"]\s*:/i);
 });
 
-test('probe looks for actual hosted-gallery evidence rather than treating marketing copy as an image label', () => {
-  assert.match(script, /LINK_HINT/);
-  assert.match(script, /fhg/);
-  assert.match(script, /hosted/);
-  assert.match(script, /galler/);
+test('probe resolves nonstandard public gallery links rather than only ordinary anchors', () => {
+  assert.match(script, /anchor_onclick/);
+  assert.match(script, /data-gallery/);
+  assert.match(script, /plain_html_url/);
+  assert.match(script, /extractUrlishFragments/);
+  assert.match(script, /exampleMarkerCount/);
+});
+
+test('probe separates strong gallery evidence from weak marketing links', () => {
+  assert.match(script, /STRONG_GALLERY_HINT/);
+  assert.match(script, /WEAK_MARKETING_HINT/);
+  assert.match(script, /strongGalleryLinks/);
+  assert.match(script, /weakMarketingLinks/);
   assert.match(script, /sourceIntentIsLabelAuthority: false/);
   assert.match(script, /trainingReady: false/);
   assert.match(script, /productionEligible: false/);

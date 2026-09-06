@@ -4,13 +4,14 @@ import test from 'node:test';
 
 const script = await readFile(new URL('../scripts/discoverVideoBunchMaleFemaleSourcePools.js', import.meta.url), 'utf8');
 
-test('VideoBunch discovery fills only the remaining male-female source-pool shortage', () => {
+test('VideoBunch discovery fills the remaining male-female source-pool shortage from AdultLabs only', () => {
   assert.match(script, /TARGET_TOTAL_MALE_FEMALE_POOLS/);
+  assert.match(script, /adultlabs-target-scene-source-pools\.json/);
   assert.match(script, /existingAdultLabsMaleFemale/);
-  assert.match(script, /existingPhotoramaMaleFemale/);
-  assert.match(script, /existingWeShootAdultMaleFemale/);
   assert.match(script, /neededFromVideoBunch/);
   assert.match(script, /remainingShortage/);
+  assert.doesNotMatch(script, /Photorama|photorama/);
+  assert.doesNotMatch(script, /WeShootAdult|weshootadult/);
 });
 
 test('VideoBunch discovery requires product Content Info evidence and studio diversity', () => {

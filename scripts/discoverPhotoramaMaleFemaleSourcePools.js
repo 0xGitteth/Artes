@@ -56,6 +56,10 @@ const extractTitle = (html) => stripTags(html.match(/<title\b[^>]*>([\s\S]*?)<\/
 const extractMetaDescription = (html) => decodeHtml(html.match(/<meta\b[^>]*\bname=["']description["'][^>]*\bcontent=["']([^"']*)["'][^>]*>/i)?.[1]
   || html.match(/<meta\b[^>]*\bcontent=["']([^"']*)["'][^>]*\bname=["']description["'][^>]*>/i)?.[1]
   || '').slice(0, 500) || null;
+const extractHeadings = (html) => [...html.matchAll(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/gi)]
+  .map((match) => stripTags(match[1]))
+  .filter(Boolean)
+  .slice(0, 12);
 
 const collectProducerHints = (text) => {
   const hints = new Set();
@@ -135,10 +139,11 @@ for (const product of productLinks) {
     const { html, finalUrl } = await fetchHtml(product.url);
     const title = extractTitle(html);
     const description = extractMetaDescription(html);
+    const headings = extractHeadings(html);
     const bodyText = stripTags(html);
-    const evidenceText = normalizeWhitespace(`${product.anchorText || ''} ${title || ''} ${description || ''} ${bodyText}`);
-    const maleFemaleSupportedByMetadata = MALE_FEMALE.test(evidenceText);
-    const explicitActSupportedByMetadata = EXPLICIT_ACT.test(evidenceText);
+    const primaryEvidenceText = normalizeWhitespace(`${product.anchorText || ''} ${title || ''} ${description || ''} ${headings.join(' ')}`);
+    const maleFemaleSupportedByMetadata = MALE_FEMALE.test(primaryEvidenceText);
+    const explicitActSupportedByMetadata = EXPLICIT_ACT.test(primaryEvidenceText);
     const record = {
       sourceId: 'photorama_public_catalog',
       sourcePoolId: stablePoolId(finalUrl),
@@ -146,18 +151,20 @@ for (const product of productLinks) {
       anchorText: product.anchorText,
       title,
       metaDescription: description,
+      headings,
       targetFacet: 'male_female',
       discoveryFacets: [
         ...(maleFemaleSupportedByMetadata ? ['male_female'] : []),
         ...(explicitActSupportedByMetadata ? ['explicit_act_discovery'] : []),
       ],
+      metadataEvidenceScope: 'anchor_title_meta_headings_only',
       maleFemaleSupportedByMetadata,
       explicitActSupportedByMetadata,
       acceptedForMaleFemaleDiscovery: maleFemaleSupportedByMetadata && explicitActSupportedByMetadata,
-      producerHints: collectProducerHints(evidenceText),
-      youthCodedMarketingContext: YOUTH_CODED.test(evidenceText),
+      producerHints: collectProducerHints(bodyText),
+      youthCodedMarketingContext: YOUTH_CODED.test(primaryEvidenceText),
       youthCodedMarketingIsNotAgeProof: true,
-      metadataTextPreview: bodyText.slice(0, 900),
+      metadataTextPreview: primaryEvidenceText.slice(0, 900),
       sourceIntentIsLabelAuthority: false,
       humanVisualScreeningRequired: true,
       humanAgeSafetyReviewRequired: true,
@@ -174,6 +181,7 @@ for (const product of productLinks) {
       sourcePoolId: stablePoolId(product.url),
       productUrl: product.url,
       targetFacet: 'male_female',
+      metadataEvidenceScope: 'anchor_title_meta_headings_only',
       maleFemaleSupportedByMetadata: false,
       explicitActSupportedByMetadata: false,
       acceptedForMaleFemaleDiscovery: false,
@@ -207,6 +215,7 @@ await writeFile(OUTPUT_PATH, `${JSON.stringify({
   remainingShortage,
   producerHintCount,
   youthCodedPoolCount,
+  metadataEvidenceScope: 'anchor_title_meta_headings_only',
   youthCodedMarketingIsNotAgeProof: true,
   imageBytesDownloaded: false,
   authenticationUsed: false,
@@ -231,10 +240,12 @@ process.stdout.write(`${JSON.stringify({
   remainingShortage,
   producerHintCount,
   youthCodedPoolCount,
+  metadataEvidenceScope: 'anchor_title_meta_headings_only',
   sampleAccepted: accepted.slice(0, 10).map((record) => ({
     sourcePoolId: record.sourcePoolId,
     productUrl: record.productUrl,
     title: record.title,
+    headings: record.headings,
     producerHints: record.producerHints,
   })),
   output: path.relative(REPO_ROOT, OUTPUT_PATH),

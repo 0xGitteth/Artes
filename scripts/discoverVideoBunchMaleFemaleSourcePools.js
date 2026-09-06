@@ -7,8 +7,6 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 const ROOT = path.join(REPO_ROOT, '.tmp', 'moderation-research-discovery', 'professional-adult-b2b-public-catalog-v1');
 const ADULTLABS_PATH = path.join(ROOT, 'adultlabs-target-scene-source-pools.json');
-const PHOTORAMA_PATH = path.join(ROOT, 'photorama-male-female-source-pools.json');
-const WESHOOTADULT_PATH = path.join(ROOT, 'weshootadult-male-female-source-pools.json');
 const OUTPUT_PATH = path.join(ROOT, 'videobunch-male-female-source-pools.json');
 const BASE_URL = 'https://www.videobunch.com/';
 const USER_AGENT = 'ArtesModerationResearch/1.0';
@@ -120,38 +118,21 @@ const extractSubStudio = (contentInfo) => {
   return normalizeWhitespace(match?.[1] || '').slice(0, 160) || null;
 };
 
-const readOptionalResearchJson = async (filePath, expectedStatus) => {
-  try {
-    const value = JSON.parse(await readFile(filePath, 'utf8'));
-    if (
-      value?.status !== expectedStatus
-      || value?.imageBytesDownloaded !== false
-      || value?.authenticationUsed !== false
-      || value?.purchasePerformed !== false
-      || value?.sourceIntentIsLabelAuthority !== false
-      || value?.researchOnly !== true
-      || value?.trainingReady !== false
-      || value?.productionEligible !== false
-    ) throw new Error(`videobunch_input_not_research_safe:${path.basename(filePath)}`);
-    return value;
-  } catch (error) {
-    if (error?.code === 'ENOENT') return null;
-    throw error;
-  }
-};
-
-const adultLabs = await readOptionalResearchJson(ADULTLABS_PATH, 'research_adultlabs_target_scene_source_pool_discovery_only');
-if (!adultLabs) throw new Error('videobunch_adultlabs_input_missing');
-const photorama = await readOptionalResearchJson(PHOTORAMA_PATH, 'research_photorama_male_female_source_pool_discovery_only');
-const weShootAdult = await readOptionalResearchJson(WESHOOTADULT_PATH, 'research_weshootadult_male_female_source_pool_discovery_only');
+const adultLabs = JSON.parse(await readFile(ADULTLABS_PATH, 'utf8'));
+if (
+  adultLabs?.status !== 'research_adultlabs_target_scene_source_pool_discovery_only'
+  || adultLabs?.imageBytesDownloaded !== false
+  || adultLabs?.authenticationUsed !== false
+  || adultLabs?.purchasePerformed !== false
+  || adultLabs?.sourceIntentIsLabelAuthority !== false
+  || adultLabs?.researchOnly !== true
+  || adultLabs?.trainingReady !== false
+  || adultLabs?.productionEligible !== false
+) throw new Error('videobunch_adultlabs_input_not_research_safe');
 
 const existingAdultLabsMaleFemale = (adultLabs.acceptedRecords || [])
   .filter((record) => record.targetFacet === 'male_female' && record.targetFacetSupportedByMetadata === true);
-const existingPhotoramaMaleFemale = (photorama?.acceptedRecords || [])
-  .filter((record) => record.targetFacet === 'male_female' && record.acceptedForMaleFemaleDiscovery === true);
-const existingWeShootAdultMaleFemale = (weShootAdult?.acceptedRecords || [])
-  .filter((record) => record.targetFacet === 'male_female' && record.acceptedForMaleFemaleDiscovery === true);
-const existingMaleFemaleCount = existingAdultLabsMaleFemale.length + existingPhotoramaMaleFemale.length + existingWeShootAdultMaleFemale.length;
+const existingMaleFemaleCount = existingAdultLabsMaleFemale.length;
 const neededFromVideoBunch = Math.max(0, TARGET_TOTAL_MALE_FEMALE_POOLS - existingMaleFemaleCount);
 
 const homepage = await fetchHtml(BASE_URL);
@@ -274,8 +255,6 @@ await writeFile(OUTPUT_PATH, `${JSON.stringify({
   status: 'research_videobunch_male_female_source_pool_discovery_only',
   targetTotalMaleFemalePools: TARGET_TOTAL_MALE_FEMALE_POOLS,
   existingAdultLabsMaleFemaleCount: existingAdultLabsMaleFemale.length,
-  existingPhotoramaMaleFemaleCount: existingPhotoramaMaleFemale.length,
-  existingWeShootAdultMaleFemaleCount: existingWeShootAdultMaleFemale.length,
   existingMaleFemaleCount,
   neededFromVideoBunch,
   homepageProductLinkCount: homepageLinks.productLinks.length,
@@ -305,7 +284,7 @@ await writeFile(OUTPUT_PATH, `${JSON.stringify({
 
 process.stdout.write(`${JSON.stringify({
   ok: true,
-  existingMaleFemaleCount,
+  existingAdultLabsMaleFemaleCount: existingAdultLabsMaleFemale.length,
   neededFromVideoBunch,
   homepageProductLinkCount: homepageLinks.productLinks.length,
   viewAllLinkCount: homepageLinks.viewAllLinks.length,

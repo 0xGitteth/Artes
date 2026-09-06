@@ -26,13 +26,15 @@ test('assistant screening identifies current batch yield and marketing composite
 });
 
 test('review stays local, prefilled and hides discovery facets from the interface', () => {
-  assert.match(review, /HOST = '127\.0\.0\.1'/);
-  assert.match(review, /moderation-balanced-target-scene-assistant-prefill-v1\.json/);
+  assert.match(review, /HOST = '127\\.0\\.0\\.1'/);
+  assert.match(review, /moderation-balanced-target-scene-assistant-prefill-v1\\.json/);
   assert.match(review, /Vooringevuld door assistent/);
-  assert.match(review, /Voorstel klopt \/ bevestigen/);
+  assert.match(review, /Voorstel klopt \\/ bevestigen/);
   assert.match(review, /Discovery facets zijn bewust verborgen/);
-  assert.doesNotMatch(review, />Discovery facet</);
-  assert.doesNotMatch(review, /targetFacet[^\n]*<\/|<[^>]*>[^<]*targetFacet/);
+  assert.doesNotMatch(review, />\\s*Discovery facet\\s*</i);
+  assert.doesNotMatch(review, /\\$\\{[^}\\n]*targetFacet[^}\\n]*\\}/);
+  assert.doesNotMatch(review, /<[^>\\n]*>[^<\\n]*targetFacet[^<\\n]*</i);
+  assert.match(review, /discoveryFacet: record\\.targetFacet \\|\\| null/);
 });
 
 test('review keeps human labels authoritative and cannot promote data', () => {

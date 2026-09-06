@@ -11,11 +11,14 @@ test('Photorama discovery fills only the remaining male-female source-pool short
   assert.match(script, /remainingShortage/);
 });
 
-test('Photorama discovery requires both male-female and explicit-act metadata support', () => {
+test('Photorama discovery requires product-specific male-female and explicit-act metadata support', () => {
   assert.match(script, /MALE_FEMALE/);
   assert.match(script, /EXPLICIT_ACT/);
-  assert.match(script, /maleFemaleSupportedByMetadata/);
-  assert.match(script, /explicitActSupportedByMetadata/);
+  assert.match(script, /extractHeadings/);
+  assert.match(script, /primaryEvidenceText/);
+  assert.match(script, /anchor_title_meta_headings_only/);
+  assert.match(script, /maleFemaleSupportedByMetadata = MALE_FEMALE\.test\(primaryEvidenceText\)/);
+  assert.match(script, /explicitActSupportedByMetadata = EXPLICIT_ACT\.test\(primaryEvidenceText\)/);
   assert.match(script, /acceptedForMaleFemaleDiscovery: maleFemaleSupportedByMetadata && explicitActSupportedByMetadata/);
   assert.match(script, /humanVisualScreeningRequired: true/);
 });

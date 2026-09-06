@@ -47,6 +47,16 @@ const fetchHtml = async (rawUrl) => {
   return { html: await response.text(), finalUrl };
 };
 
+const DIRECT_IMAGE_ASSET = /\.(?:jpe?g|png|webp)$/i;
+const PIXBOOST_SAMPLE_ASSET = /^\/api\/2\/img\/samples\/\d+\/[A-Za-z0-9_-]+\/[^/?#]+\.(?:jpe?g|png|webp)\/optimise$/i;
+
+const classifyAssetUrl = (url) => {
+  const hostname = url.hostname.toLowerCase();
+  const directImage = DIRECT_IMAGE_ASSET.test(url.pathname);
+  const adultLabsPixboostSample = hostname === 'pixboost.com' && PIXBOOST_SAMPLE_ASSET.test(url.pathname);
+  return { directImage, adultLabsPixboostSample };
+};
+
 const normalizeAssetUrl = (raw, pageUrl) => {
   const value = decodeHtml(clean(raw));
   if (!value || value.startsWith('data:') || value.startsWith('blob:') || value.startsWith('javascript:')) return null;
@@ -55,8 +65,9 @@ const normalizeAssetUrl = (raw, pageUrl) => {
   if (url.protocol === 'http:') url.protocol = 'https:';
   if (url.protocol !== 'https:') return null;
   url.hash = '';
-  if (!/\.(?:jpe?g|png|webp)(?:$|\?)/i.test(url.pathname + url.search)) return null;
-  return url;
+  const assetShape = classifyAssetUrl(url);
+  if (!assetShape.directImage && !assetShape.adultLabsPixboostSample) return null;
+  return { url, ...assetShape };
 };
 
 const NEGATIVE_ASSET = /(?:logo|icon|sprite|banner|button|payment|flag|avatar|loader|loading|social|header|footer|favicon|blank|pixel|spacer|captcha|rating|star|badge)/i;
@@ -65,17 +76,25 @@ const POSITIVE_ASSET = /(?:preview|sample|screenshot|gallery|photo|image|content
 const collectAssetRefs = (html, pageUrl) => {
   const byUrl = new Map();
   const add = (rawUrl, origin, context = '') => {
-    const url = normalizeAssetUrl(rawUrl, pageUrl);
-    if (!url) return;
+    const normalized = normalizeAssetUrl(rawUrl, pageUrl);
+    if (!normalized) return;
+    const { url, directImage, adultLabsPixboostSample } = normalized;
     const evidence = `${url.pathname} ${url.search} ${origin} ${context}`;
     if (NEGATIVE_ASSET.test(evidence)) return;
     const key = url.toString();
-    const score = (POSITIVE_ASSET.test(evidence) ? 4 : 0)
-      + (/\.(?:jpe?g|webp)$/i.test(url.pathname) ? 1 : 0)
+    const score = (adultLabsPixboostSample ? 8 : 0)
+      + (POSITIVE_ASSET.test(evidence) ? 4 : 0)
+      + (directImage && /\.(?:jpe?g|webp)$/i.test(url.pathname) ? 1 : 0)
       + (/href_image|srcset|data-src|data-original/i.test(origin) ? 1 : 0);
     const existing = byUrl.get(key);
     if (!existing) {
-      byUrl.set(key, { assetUrl: key, assetHost: url.hostname.toLowerCase(), origins: [origin], score });
+      byUrl.set(key, {
+        assetUrl: key,
+        assetHost: url.hostname.toLowerCase(),
+        origins: [origin],
+        score,
+        assetShape: adultLabsPixboostSample ? 'adultlabs_pixboost_sample' : 'direct_image',
+      });
     } else {
       existing.origins = [...new Set([...existing.origins, origin])];
       existing.score = Math.max(existing.score, score);
@@ -215,6 +234,11 @@ const assetHostCounts = records.flatMap((record) => record.selectedAssetRefs || 
   acc[ref.assetHost] = (acc[ref.assetHost] || 0) + 1;
   return acc;
 }, {});
+const assetShapeCounts = records.flatMap((record) => record.selectedAssetRefs || []).reduce((acc, ref) => {
+  const key = clean(ref.assetShape || 'unknown');
+  acc[key] = (acc[key] || 0) + 1;
+  return acc;
+}, {});
 const studioCounts = records.reduce((acc, record) => {
   const key = clean(record.studio || 'unknown');
   acc[key] = (acc[key] || 0) + record.selectedAssetRefCount;
@@ -237,6 +261,7 @@ await writeFile(OUTPUT_PATH, `${JSON.stringify({
   refsByFacet,
   poolsByFacet,
   assetHostCounts,
+  assetShapeCounts,
   studioCounts,
   previewOnly: true,
   imageBytesDownloaded: false,
@@ -262,6 +287,7 @@ process.stdout.write(`${JSON.stringify({
   selectedRefCount,
   refsByFacet,
   assetHostCounts,
+  assetShapeCounts,
   studioCounts,
   output: path.relative(REPO_ROOT, OUTPUT_PATH),
   imageBytesDownloaded: false,

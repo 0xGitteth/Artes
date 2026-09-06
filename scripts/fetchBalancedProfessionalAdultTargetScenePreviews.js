@@ -10,7 +10,8 @@ const INPUT_PATH = path.join(ROOT, 'balanced-target-scene-preview-refs.json');
 const PREVIEW_DIR = path.join(ROOT, 'balanced-target-scene-previews');
 const OUTPUT_PATH = path.join(ROOT, 'balanced-target-scene-preview-screening.json');
 const USER_AGENT = 'ArtesModerationResearch/1.0';
-const MAX_PREVIEW_BYTES = 4 * 1024 * 1024;
+const MAX_PIXBOOST_PREVIEW_BYTES = 4 * 1024 * 1024;
+const MAX_DIRECT_PREVIEW_BYTES = 12 * 1024 * 1024;
 const EXPECTED_REF_COUNT = 78;
 const EXPECTED_POOL_COUNT = 26;
 
@@ -23,6 +24,29 @@ const ALLOWED_MIME_TYPES = new Map([
 const clean = (value) => String(value || '').trim();
 const safeError = (error) => clean(error?.message || error || 'unknown_error').slice(0, 260);
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
+
+const sniffSupportedImage = (buffer) => {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return { mimeType: 'image/jpeg', extension: '.jpg' };
+  }
+  if (
+    buffer.length >= 8
+    && buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+    && buffer[4] === 0x0d
+    && buffer[5] === 0x0a
+    && buffer[6] === 0x1a
+    && buffer[7] === 0x0a
+  ) return { mimeType: 'image/png', extension: '.png' };
+  if (
+    buffer.length >= 12
+    && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) return { mimeType: 'image/webp', extension: '.webp' };
+  return null;
+};
 
 const classifyAllowedAsset = (rawUrl) => {
   const url = new URL(rawUrl);
@@ -39,30 +63,58 @@ const classifyAllowedAsset = (rawUrl) => {
   throw new Error('balanced_target_preview_asset_shape_not_allowed');
 };
 
+const requestHeadersFor = (assetShape) => ({
+  Accept: assetShape === 'adultlabs_pixboost_sample'
+    ? 'image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.1'
+    : 'image/jpeg,image/png,image/webp,*/*;q=0.5',
+  'User-Agent': USER_AGENT,
+});
+
+const maxBytesFor = (assetShape) => (
+  assetShape === 'adultlabs_pixboost_sample'
+    ? MAX_PIXBOOST_PREVIEW_BYTES
+    : MAX_DIRECT_PREVIEW_BYTES
+);
+
 const downloadPreview = async (rawUrl) => {
   const requested = classifyAllowedAsset(rawUrl);
+  const maxBytes = maxBytesFor(requested.shape);
   const response = await fetch(requested.url, {
-    headers: {
-      Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5',
-      'User-Agent': USER_AGENT,
-    },
+    headers: requestHeadersFor(requested.shape),
     redirect: 'follow',
   });
   if (!response.ok) throw new Error(`balanced_target_preview_http_${response.status}`);
   const resolved = classifyAllowedAsset(response.url);
-  const mimeType = clean(response.headers.get('content-type')).split(';')[0].toLowerCase();
-  const extension = ALLOWED_MIME_TYPES.get(mimeType);
-  if (!extension) throw new Error(`balanced_target_preview_unsupported_mime:${mimeType || 'missing'}`);
+  if (resolved.shape !== requested.shape) throw new Error('balanced_target_preview_asset_shape_changed');
+
   const declaredLength = Number(response.headers.get('content-length') || 0);
-  if (declaredLength > MAX_PREVIEW_BYTES) throw new Error('balanced_target_preview_declared_too_large');
+  if (declaredLength > maxBytes) throw new Error(`balanced_target_preview_declared_too_large:${declaredLength}`);
   const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.length === 0 || buffer.length > MAX_PREVIEW_BYTES) throw new Error('balanced_target_preview_size_invalid');
+  if (buffer.length === 0 || buffer.length > maxBytes) throw new Error(`balanced_target_preview_size_invalid:${buffer.length}`);
+
+  const headerMimeType = clean(response.headers.get('content-type')).split(';')[0].toLowerCase();
+  const headerExtension = ALLOWED_MIME_TYPES.get(headerMimeType) || null;
+  const sniffed = sniffSupportedImage(buffer);
+  let mimeType = headerMimeType;
+  let extension = headerExtension;
+  let mimeResolution = 'response_header';
+
+  if (!extension && headerMimeType === 'application/octet-stream' && sniffed) {
+    mimeType = sniffed.mimeType;
+    extension = sniffed.extension;
+    mimeResolution = 'magic_bytes_from_octet_stream';
+  }
+  if (!extension) throw new Error(`balanced_target_preview_unsupported_mime:${headerMimeType || 'missing'}`);
+
   return {
     buffer,
     extension,
     mimeType,
+    responseMimeType: headerMimeType || null,
+    mimeResolution,
     resolvedUrl: resolved.url.toString(),
     assetShape: resolved.shape,
+    maxBytes,
   };
 };
 
@@ -132,7 +184,10 @@ for (let index = 0; index < flattened.length; index += 1) {
       resolvedImageHost: new URL(downloaded.resolvedUrl).hostname.toLowerCase(),
       assetShape: downloaded.assetShape,
       mimeType: downloaded.mimeType,
+      responseMimeType: downloaded.responseMimeType,
+      mimeResolution: downloaded.mimeResolution,
       byteLength: downloaded.buffer.length,
+      maxAllowedBytesForShape: downloaded.maxBytes,
       sha256: hash,
       exactByteDuplicate: Boolean(duplicateOf),
       duplicateOf,
@@ -171,6 +226,10 @@ const countsByHost = records.reduce((acc, record) => {
   acc[record.resolvedImageHost] = (acc[record.resolvedImageHost] || 0) + 1;
   return acc;
 }, {});
+const mimeResolutionCounts = records.reduce((acc, record) => {
+  acc[record.mimeResolution] = (acc[record.mimeResolution] || 0) + 1;
+  return acc;
+}, {});
 const uniquePoolCount = new Set(records.map((record) => record.sourcePoolId)).size;
 const duplicateCount = records.filter((record) => record.exactByteDuplicate).length;
 
@@ -184,8 +243,12 @@ await writeFile(OUTPUT_PATH, `${JSON.stringify({
   countsByFacet,
   countsBySource,
   countsByHost,
+  mimeResolutionCounts,
   duplicateCount,
-  maxPreviewBytes: MAX_PREVIEW_BYTES,
+  maxPreviewBytesByShape: {
+    adultlabs_pixboost_sample: MAX_PIXBOOST_PREVIEW_BYTES,
+    direct_image: MAX_DIRECT_PREVIEW_BYTES,
+  },
   publicCdnSignedQueryMayBePresent: true,
   sessionAuthenticationUsed: false,
   purchasePerformed: false,
@@ -208,6 +271,7 @@ process.stdout.write(`${JSON.stringify({
   countsByFacet,
   countsBySource,
   countsByHost,
+  mimeResolutionCounts,
   duplicateCount,
   previewDirectory: path.relative(REPO_ROOT, PREVIEW_DIR),
   metadataFile: path.relative(REPO_ROOT, OUTPUT_PATH),

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "status": "research_professional_explicit_source_diversity_leads",
   "purpose": "Increase explicit-act source/style diversity after VivThomas proved high-yield but single-publisher-heavy. Leads are not detector labels and are not approved image sources until their exact public hosted-gallery routes are resolved.",
   "researchOnly": true,
@@ -18,16 +18,16 @@
   "leads": [
     {
       "sourceId": "paperstreetcash_public_fhg_examples",
-      "priority": "high",
-      "publicProbeEligible": true,
-      "publicResolutionStatus": "examples_visible_but_nonstandard_linking",
+      "priority": "deferred",
+      "publicProbeEligible": false,
+      "publicResolutionStatus": "public_route_exhausted_examples_not_resolvable",
       "urls": [
         "https://www.paperstreetcash.com/external.php?page=adtools",
         "https://www.paperstreetcash.com/"
       ],
       "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks"],
-      "sourceContext": "Publisher affiliate site publicly states it offers hundreds of Free Hosted Galleries and visibly lists Example 1-4 on its sales-tools page, but the initial plain-anchor parser resolved zero concrete links.",
-      "nextStep": "Resolve the public Example 1-4 gallery URLs from nonstandard HTML/JavaScript/data attributes and verify whether they expose publisher-hosted image previews without affiliate authentication."
+      "sourceContext": "Publisher publicly advertises hundreds of Free Hosted Galleries and exposes four Example markers, but two increasingly broad public-HTML probes resolved zero strong gallery URLs. Do not keep adding parser complexity without new independent evidence of a concrete public gallery route.",
+      "nextStep": "Revisit only if an exact publisher-hosted gallery URL surfaces independently."
     },
     {
       "sourceId": "buddyprofits_hosted_galleries",
@@ -51,16 +51,16 @@
     },
     {
       "sourceId": "curiouscash_hosted_explicit_material",
-      "priority": "high",
-      "publicProbeEligible": true,
-      "publicResolutionStatus": "rights_confirmed_but_gallery_urls_unresolved",
+      "priority": "deferred_rights_confirmed",
+      "publicProbeEligible": false,
+      "publicResolutionStatus": "rights_confirmed_public_gallery_route_unresolved",
       "urls": [
         "https://curiouscash.com/affiliate2257.php",
         "https://curiouscash.com/faq.php"
       ],
       "targetHints": ["explicit_act", "genitalia_full_frontal", "bdsm_kink"],
-      "sourceContext": "Publisher explicitly documents both sexually explicit and non-explicit hosted promotional material and 2257 coverage. FAQ permits free-content use under watermark/link conditions, but the initial probe did not prove that its two matching links were actual galleries.",
-      "nextStep": "Separate true FHG/gallery links from generic marketing links; continue resolving exact current public hosted galleries without affiliate authentication."
+      "sourceContext": "Publisher explicitly documents sexually explicit hosted promotional material and permits supplied free-content use under conditions, but two public probes resolved zero strong current gallery URLs. The remaining links are marketing/FAQ links, not proven FHGs.",
+      "nextStep": "Retain because provenance/rights context is unusually strong; revisit only when an exact current hosted-gallery URL is independently discoverable."
     }
   ]
 }

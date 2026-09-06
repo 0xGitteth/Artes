@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "status": "research_professional_adult_b2b_public_catalog_sources",
+  "purpose": "Discover professionally produced adult photo-set previews from public B2B content catalogs. This lane exists to add source, gender and scene diversity to explicit-act research without reverse-engineering affiliate dashboards. Catalog metadata and marketing labels are discovery evidence only, never detector labels.",
+  "rules": {
+    "publicCatalogPagesOnly": true,
+    "noLogin": true,
+    "noPurchase": true,
+    "noPaywallBypass": true,
+    "noSessionCookieReuse": true,
+    "metadataDiscoveryOnly": true,
+    "downloadImageBytes": false,
+    "sourceIntentIsLabelAuthority": false,
+    "humanVisualScreeningRequired": true,
+    "youthCodedMarketingIsNotAgeProof": true,
+    "researchOnly": true,
+    "trainingReady": false,
+    "productionEligible": false
+  },
+  "sources": [
+    {
+      "sourceId": "adultlabs_public_catalog",
+      "priority": "high_explicit_diversity",
+      "allowedHosts": ["adultlabs.com", "www.adultlabs.com"],
+      "seedPages": [
+        "https://adultlabs.com/content?Product_page=1",
+        "https://adultlabs.com/content?Product_page=2",
+        "https://adultlabs.com/content?Product_page=3",
+        "https://adultlabs.com/content?Product_page=4",
+        "https://adultlabs.com/content?Product_page=5",
+        "https://adultlabs.com/content?Product_page=6",
+        "https://adultlabs.com/content?Product_page=7",
+        "https://adultlabs.com/content?Product_page=8"
+      ],
+      "productEvidencePatterns": ["photo\\s+set", "hardcore", "screenshots?", "matched\\s+set"],
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "male_explicit_diversity"],
+      "ageContext": "AdultLabs states that all models appearing on the site were above 18 at the time of shooting and that IDs/model releases and 2257 documentation are on file.",
+      "rightsContext": "Public catalog previews are research-only. Commercial publication/use requires the applicable purchased license; public visibility is not production permission.",
+      "sourceDiversityContext": "Catalog exposes professional photo/video sets across Hardcore, Lesbo, Boys Solo and Boys Hardcore categories and multiple performers/scenes."
+    },
+    {
+      "sourceId": "weshootadult_public_catalog",
+      "priority": "high_gender_diversity",
+      "allowedHosts": ["www.weshootadult.com", "weshootadult.com"],
+      "seedPages": [
+        "https://www.weshootadult.com/",
+        "https://www.weshootadult.com/content"
+      ],
+      "productEvidencePatterns": ["/[a-z0-9]+-[pv]\\d+\\.html", "photo\\s*sets?", "gay\\s+sex", "straight\\s+sex", "lesbian", "screenshots?"],
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "male_explicit_diversity", "female_bare_breasts", "bare_buttocks"],
+      "ageContext": "WeShootAdult states all models are above 18 during shooting and that IDs/model releases are provided with licensed content.",
+      "rightsContext": "Public catalog previews are research-only. Distribution licenses are sold separately and are not inferred from public visibility.",
+      "sourceDiversityContext": "Provider publicly advertises straight, gay, lesbian, solo women and solo men content and reports hundreds of male and female models."
+    },
+    {
+      "sourceId": "photorama_public_catalog",
+      "priority": "medium_high_multi_producer_diversity",
+      "allowedHosts": ["www.photorama.nl", "photorama.nl", "secure.photorama.nl"],
+      "seedPages": [
+        "https://secure.photorama.nl/",
+        "https://www.photorama.nl/shop/",
+        "https://www.photorama.nl/shop/usc.php"
+      ],
+      "productEvidencePatterns": ["photo\\s*set", "hardcore", "model", "set", "sample", "thumbnail"],
+      "targetHints": ["explicit_act", "genitalia_full_frontal", "female_bare_breasts", "bare_buttocks", "source_style_diversity"],
+      "ageContext": "Photorama states all depicted persons were over 18 when photographed or filmed and that 2257 legal documentation is supplied with content.",
+      "rightsContext": "Provider sells usage rights; public samples remain research-only and do not grant production rights.",
+      "sourceDiversityContext": "Photorama says its catalog contains more than 12,000 sets from various photographers/producers across niches from solo to hardcore, with complete photo-set samples viewable publicly."
+    }
+  ]
+}

@@ -304,7 +304,10 @@ export const publishPost = async (post) => {
 
   logFirestoreOp('WRITE', 'posts/{auto}', 'publishPost');
   const isCodexActor = await isCodexDevUser(auth.currentUser);
-  return addDoc(collection(db, isCodexActor ? 'codexDevPosts' : 'posts'), {
+  if (!isCodexActor) {
+    throw new Error('Direct production post creation is disabled; publish through a moderated upload.');
+  }
+  return addDoc(collection(db, 'codexDevPosts'), {
     ...post,
     ...authorFields,
     credits: normalizedCredits,

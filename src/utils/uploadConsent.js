@@ -142,6 +142,52 @@ export const normalizeConsentException = (exception = {}) => {
   };
 };
 
+const DEFAULT_CONSENT_DRAFT_SELF_MAKER_ROLE = 'photographer';
+
+const normalizeConsentDraftMakerRole = (value, fallback = null) => {
+  const normalized = normalizeRoleValue(value);
+  return isMakerRole(normalized) ? normalized : fallback;
+};
+
+export const normalizeConsentDraftState = (draft = {}) => {
+  const rawException = draft?.consentException && typeof draft.consentException === 'object'
+    ? draft.consentException
+    : {};
+  const normalizedException = normalizeConsentException(rawException);
+  const selectedExceptionType = Object.values(CONSENT_EXCEPTION_REASONS).includes(rawException?.type)
+    ? rawException.type
+    : CONSENT_EXCEPTION_REASONS.STREET;
+  const selectedSelfMakerRole = normalizeConsentDraftMakerRole(
+    draft?.selectedSelfMakerRole,
+    DEFAULT_CONSENT_DRAFT_SELF_MAKER_ROLE,
+  );
+  const pendingSelfMakerRole = normalizeConsentDraftMakerRole(draft?.pendingSelfMakerRole, null);
+  const rawConfirmation = draft?.selfMakerRoleConfirmation && typeof draft.selfMakerRoleConfirmation === 'object'
+    ? draft.selfMakerRoleConfirmation
+    : {};
+  const confirmedRole = normalizeConsentDraftMakerRole(rawConfirmation?.role, null);
+  const confirmed = Boolean(rawConfirmation?.confirmed && confirmedRole);
+  const confirmedAtValue = String(rawConfirmation?.confirmedAt || '').trim();
+
+  return {
+    consentException: {
+      enabled: normalizedException.enabled,
+      type: normalizedException.type || selectedExceptionType,
+      reason: normalizedException.enabled ? normalizedException.reason : '',
+    },
+    aiPeoplePresent: draft?.aiPeoplePresent === true,
+    subjectWarningAcknowledged: draft?.subjectWarningAcknowledged === true,
+    missingMakerPromptShown: draft?.missingMakerPromptShown === true,
+    selectedSelfMakerRole,
+    pendingSelfMakerRole,
+    selfMakerRoleConfirmation: confirmed
+      ? { confirmed: true, role: confirmedRole, confirmedAt: confirmedAtValue || null }
+      : { confirmed: false, role: '', confirmedAt: null },
+  };
+};
+
+export const buildConsentDraftState = (state = {}) => normalizeConsentDraftState(state);
+
 export const sanitizePostCreditForWrite = (credit = {}) => {
   const safeCredit = {};
   [

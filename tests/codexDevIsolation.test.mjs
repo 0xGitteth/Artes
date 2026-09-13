@@ -376,8 +376,9 @@ test('moderateImage derives all quarantine decisions from production-deny identi
   const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));
   assert.match(moderate, /const isCodexActor = isCodexDevForProductionDeny\(decoded\)\s*\|\| await isKnownCodexDevActorUid/);
   assert.match(moderate, /isCodexActor \? null : await findExactModerationExample/);
-  assert.match(moderate, /findExactUpload\([^\n]+\{ isCodexActor \}/);
-  assert.match(moderate, /shouldCreateProductionReviewCase\(\{ isCodexActor/);
+  assert.match(moderate, /findExactUpload\(fingerprints\.sha256,\s*\{[\s\S]{0,240}?isCodexActor,[\s\S]{0,240}?themes: normalizedThemes,[\s\S]{0,240}?makerTags: normalizedMakerTags,[\s\S]{0,240}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);
+  assert.match(moderate, /findNearDuplicateUpload\(fingerprints,\s*\{[\s\S]{0,280}?isCodexActor,[\s\S]{0,280}?themes: normalizedThemes,[\s\S]{0,280}?makerTags: normalizedMakerTags,[\s\S]{0,280}?userId,[\s\S]{0,160}?currentGeneration: requestModerationGeneration,[\s\S]{0,40}?\}\)/);
+  assert.match(moderate, /shouldFinalizeAutomaticReview = Boolean\([\s\S]{0,420}?shouldCreateProductionReviewCase\(\{[\s\S]{0,180}?isCodexActor,/);
   assert.match(moderate, /\.\.\.\(isCodexActor \? \{ testActor: CODEX_DEV_ACTOR \} : \{\}\)/);
   assert.doesNotMatch(moderate, /isCodexDevUid\(userId\)/);
 });
@@ -451,8 +452,28 @@ test('remaining reviewed production callables deny historical registry actors be
 test('moderation and moderator claim writes serialize registry reads with production mutations', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const moderate = source.slice(source.indexOf('export const moderateImage'), source.indexOf('export const isModerator'));
-  assert.match(moderate, /runTransaction[^]*isKnownCodexDevActorUid\(\{ db, uid: userId, transaction \}\)[^]*transaction\.create\(reviewRef/);
-  assert.match(moderate, /runTransaction[^]*!isCodexActor && await isKnownCodexDevActorUid[^]*transaction\.create\(uploadRef/);
+  const mediaAnchorStart = moderate.indexOf("const uploadRef = db.collection('uploads').doc();");
+  const storageWrite = moderate.indexOf('persistModerationPreview({', mediaAnchorStart);
+  const mediaAnchor = moderate.slice(mediaAnchorStart, storageWrite);
+  const anchorTransaction = mediaAnchor.indexOf('await db.runTransaction');
+  const anchorRegistryGuard = mediaAnchor.indexOf('await isKnownCodexDevActorUid({ db, uid: userId, transaction })', anchorTransaction);
+  const anchorCreate = mediaAnchor.indexOf('transaction.create(uploadRef', anchorTransaction);
+  assert.ok(anchorTransaction !== -1 && anchorTransaction < anchorRegistryGuard && anchorRegistryGuard < anchorCreate,
+    'durable upload anchor serializes the historical-registry read before creation');
+
+  const finalizationStart = moderate.indexOf('const finalizationResult = await db.runTransaction');
+  const finalizationEnd = moderate.indexOf("if (finalizationOutcome === 'ready')", finalizationStart);
+  const finalization = moderate.slice(finalizationStart, finalizationEnd);
+  const finalizationRegistryGuard = finalization.indexOf('isKnownCodexDevActorUid({ db, uid: userId, transaction })');
+  const suppressionCleanup = finalization.indexOf("mediaCleanupReason: 'historical_registry_suppressed'", finalizationRegistryGuard);
+  const automaticReviewCreate = finalization.indexOf('transaction.create(automaticReviewRef', finalizationRegistryGuard);
+  const readyMutation = finalization.indexOf("mediaState: 'ready'", finalizationRegistryGuard);
+  assert.ok(finalizationStart !== -1 && finalizationRegistryGuard !== -1,
+    'post-Storage finalization transaction rechecks historical registry');
+  assert.ok(finalizationRegistryGuard < suppressionCleanup && suppressionCleanup < readyMutation,
+    'registry denial is resolved before cleanup scheduling or ready state');
+  assert.ok(automaticReviewCreate === -1 || finalizationRegistryGuard < automaticReviewCreate,
+    'automatic review creation cannot precede the transactional historical-registry guard');
   const approve = source.slice(source.indexOf('export const moderatorApproveClaimRequest'), source.indexOf('export const getVouchRequests'));
   assert.match(approve, /denyActorUid: requestedByUid/);
   assert.match(approve, /freshRequestSnap[^]*isKnownCodexDevActorUid\(\{ db, uid: freshRequestedByUid, transaction \}\)/);
@@ -483,10 +504,20 @@ test('latest historical-registry races are guarded at their final authoritative 
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const moderate = section('export const moderateImage', 'export const isModerator');
-  const suppression = moderate.indexOf('uploadSuppressedByHistoricalRegistry = true');
-  const previewDelete = moderate.indexOf("file(persistedPreview.storagePath).delete({ ignoreNotFound: true })");
-  assert.ok(suppression < previewDelete, 'only authoritative historical suppression triggers preview cleanup');
-  assert.match(moderate, /previewCreatedByRequest && persistedPreview\?\.storagePath/);
+  const mediaAnchorStart = moderate.indexOf("const uploadRef = db.collection('uploads').doc();");
+  const mediaAnchorEnd = moderate.indexOf('if (reviewCaseId && uploadId)', mediaAnchorStart);
+  const mediaAnchor = moderate.slice(mediaAnchorStart, mediaAnchorEnd);
+  const finalizationStart = mediaAnchor.indexOf('await db.runTransaction', mediaAnchor.indexOf('transaction.create(uploadRef'));
+  const finalRegistryGuard = mediaAnchor.indexOf('await isKnownCodexDevActorUid({ db, uid: userId, transaction })', finalizationStart);
+  const cleanupPending = mediaAnchor.indexOf("mediaState: 'cleanup_pending'", finalRegistryGuard);
+  const historicalCleanupReason = mediaAnchor.indexOf("mediaCleanupReason: 'historical_registry_suppressed'", cleanupPending);
+  const readyState = mediaAnchor.indexOf("mediaState: 'ready'", historicalCleanupReason);
+  assert.ok(mediaAnchorStart !== -1 && finalizationStart !== -1 && finalRegistryGuard < cleanupPending
+    && cleanupPending < historicalCleanupReason && historicalCleanupReason < readyState,
+    'late historical denial is serialized before ready state and hands cleanup to the upload anchor');
+  assert.match(mediaAnchor, /finalizationOutcome === 'suppressed'[\s\S]*uploadSuppressedByHistoricalRegistry = true[\s\S]*persistedPreview = null/);
+  assert.doesNotMatch(mediaAnchor, /file\(persistedPreview\.storagePath\)\.delete/,
+    'request path must not bypass upload-owned cleanup authority with a direct Storage delete');
 
   const report = section('export const reportPost', 'export const requestUploadReviewCase');
   assert.ok(report.indexOf('db.runTransaction') < report.indexOf('transaction.create(reviewRef'));
@@ -497,11 +528,12 @@ test('latest historical-registry races are guarded at their final authoritative 
   const finalTransaction = uploadReview.lastIndexOf('await db.runTransaction');
   const registryGuard = uploadReview.indexOf('isKnownCodexDevActorUid({ db, uid: decoded.uid, transaction })', finalTransaction);
   const freshUploadRead = uploadReview.indexOf('transaction.get(uploadRef)', finalTransaction);
-  const candidateRead = uploadReview.indexOf('transaction.get(candidateReviewRef)', finalTransaction);
+  const candidateLoop = uploadReview.indexOf('for (const candidateReviewCaseId of candidateReviewCaseIds)', finalTransaction);
+  const candidateRead = uploadReview.indexOf('transaction.get(candidateRef)', candidateLoop);
   const caseCreate = uploadReview.indexOf('transaction.create(reviewRef', finalTransaction);
   const uploadLink = uploadReview.indexOf('transaction.set(uploadRef', finalTransaction);
   assert.ok(finalTransaction < registryGuard && registryGuard < freshUploadRead);
-  assert.ok(freshUploadRead < candidateRead && candidateRead < caseCreate, 'all reuse reads precede new-case writes');
+  assert.ok(freshUploadRead < candidateLoop && candidateLoop < candidateRead && candidateRead < caseCreate, 'all reuse reads precede new-case writes');
   assert.ok(caseCreate < uploadLink, 'case creation and upload linkage share the authoritative transaction');
   assert.doesNotMatch(uploadReview, /await uploadRef\.set\(/);
 

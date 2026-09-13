@@ -1,11 +1,4 @@
-const CLOSED_PUBLICATION_STATUSES = new Set([
-  'published',
-  'discarded',
-  'draft',
-  'blocked',
-  'needs_user_correction',
-  'user_disagreed',
-]);
+import { isClientUploadAllowedPending } from './moderationUploadLifecycle.js';
 
 export function resolveUploadTimestampMs(value) {
   if (!value) return 0;
@@ -19,9 +12,7 @@ export function isPendingApprovedUploadCandidate(upload = {}, options = {}) {
   const uploadId = String(upload?.id || '').trim();
   if (!uploadId) return false;
   if (options.acknowledgedUploadIds?.has?.(uploadId)) return false;
-  if (upload?.reviewStatus !== 'approved') return false;
-  const publicationStatus = String(upload?.publicationStatus || upload?.publishStatus || '').trim();
-  if (CLOSED_PUBLICATION_STATUSES.has(publicationStatus)) return false;
+  if (!isClientUploadAllowedPending(upload)) return false;
   if (upload?.publishedAt || upload?.postId) return false;
   if (upload?.discardedAt || upload?.discardedByUid) return false;
   if (upload?.publicationPromptOpenedAt || upload?.publicationPromptDismissedAt) return false;

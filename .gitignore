@@ -26,5 +26,6 @@ dist-ssr
 .tmp/
 tmp/cleanup-exports/
 **/serviceAccountKey.json
+gha-creds-*.json
 
 functions/.env*

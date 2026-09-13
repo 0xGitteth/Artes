@@ -1,3 +1,5 @@
+import { normalizeProfileRoles } from './roles.js';
+
 export const cleanPublicStringArray = (value) => (Array.isArray(value)
   ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
   : []);
@@ -29,7 +31,10 @@ export const normalizePublicProfileField = (key, value) => {
     return typeof value === 'string' ? value.trim().toLowerCase() || undefined : undefined;
   }
   if (key === 'headerPosition') return typeof value === 'string' && value ? value : 'center';
-  if (key === 'roles' || key === 'themes' || key === 'quickProfilePostIds') {
+  if (key === 'roles') {
+    return normalizeProfileRoles(cleanPublicStringArray(value));
+  }
+  if (key === 'themes' || key === 'quickProfilePostIds') {
     return cleanPublicStringArray(value);
   }
   if (key === 'quickProfilePreviewMode') {

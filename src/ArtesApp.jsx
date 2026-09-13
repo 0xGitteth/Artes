@@ -126,7 +126,7 @@ import AppLogo from './components/branding/AppLogo';
 import { normalizeDomain, normalizeEmail, normalizeInstagram } from './utils/contributorClaims';
 import { selectPendingApprovedUploadReminder } from './utils/pendingApprovedUpload';
 
-import { ROLE_OPTIONS, normalizeRoleValue } from './utils/roles';
+import { ROLE_OPTIONS, normalizeProfileRoles, normalizeRoleValue, toggleProfileRole } from './utils/roles';
 import {
   ALL_PROFILE_PORTFOLIO_TAB,
   filterProfilePostsByRole,
@@ -702,9 +702,11 @@ const normalizeProfileData = (profileData = {}, fallbackSeed = 'artes', options 
   // quickProfilePostIds: array of post IDs to preview when mode is "manual".
   const seed = profileData?.uid || profileData?.displayName || fallbackSeed;
   const fallbackRoles = Array.isArray(options?.fallbackRoles) ? options.fallbackRoles : ['fan'];
-  const roles = Array.isArray(profileData?.roles) && profileData.roles.length
-    ? profileData.roles
-    : fallbackRoles;
+  const roles = normalizeProfileRoles(
+    Array.isArray(profileData?.roles) && profileData.roles.length
+      ? profileData.roles
+      : fallbackRoles,
+  );
   const themes = Array.isArray(profileData?.themes) ? profileData.themes : [];
   const triggerVisibility = normalizeTriggerPreferences(profileData?.preferences?.triggerVisibility);
   const themePreference = profileData?.preferences?.theme || 'light';
@@ -801,7 +803,7 @@ const SEED_USERS = [
   { uid: 'user_sophie', displayName: 'Sophie de Vries', bio: 'Freelance model met liefde voor vintage.', roles: ['model', 'stylist'], linkedAgencyName: 'Jax Models', linkedAgencyLink: '', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200', themes: ['Vintage', 'Fashion'] },
   { uid: 'user_marcus', displayName: 'Marcus Lens', bio: 'Capture the silence.', roles: ['photographer', 'art_director'], avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200', themes: ['Architecture', 'Street'] },
   { uid: 'user_nina', displayName: 'Nina Artistry', bio: 'MUA specialized in SFX.', roles: ['mua', 'artist'], avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=200', themes: ['Beauty', 'Conceptual'] },
-  { uid: 'user_kai', displayName: 'Kai Sato', bio: 'Nature documentarian.', roles: ['photographer', 'fan'], avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200', themes: ['Nature', 'Landscape'] },
+  { uid: 'user_kai', displayName: 'Kai Sato', bio: 'Nature documentarian.', roles: ['photographer'], avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200', themes: ['Nature', 'Landscape'] },
   { uid: 'user_elena', displayName: 'Elena Visuals', bio: 'Conceptual photographer.', roles: ['photographer', 'retoucher'], avatar: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&q=80&w=200', themes: ['Conceptual', 'Black & White'] },
   { uid: 'user_luna', displayName: 'Luna Shade', bio: 'Dancer & Art Model.', roles: ['model'], linkedAgencyName: 'Jax Models', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200', themes: ['Art Nude', 'Boudoir'] },
   { uid: 'user_tom', displayName: 'Tom Analog', bio: '35mm & 120mm only.', roles: ['photographer'], avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&q=80&w=200', themes: ['Vintage', 'Street'] }
@@ -2279,7 +2281,7 @@ export default function ArtesApp() {
     }
   };
 
-  const canUpload = profile && (!profile.roles.includes('fan') || profile.roles.length > 1);
+  const canUpload = profile && normalizeProfileRoles(profile.roles).some((role) => role !== 'fan');
   const requiresEmailVerification = verificationGateState.hasUser
     && verificationGateState.hasPasswordProvider
     && !verificationGateState.emailVerified;
@@ -2364,7 +2366,7 @@ export default function ArtesApp() {
       uid: authUser?.uid,
       displayName: profileData.displayName || 'Nieuwe Maker',
       bio: profileData.bio,
-      roles,
+      roles: normalizeProfileRoles(roles, { fallbackToFan: true }),
       themes: Array.isArray(profileData.themes) ? profileData.themes : [],
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.uid || 'artes'}`,
       linkedAgencyName: profileData.linkedAgencyName,
@@ -4261,7 +4263,7 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
         <h1 className="text-3xl font-bold dark:text-white mb-6">Kies je rol(len)</h1>
         <div className="grid grid-cols-2 gap-4 mb-8 h-96 overflow-y-auto no-scrollbar">
           {ROLES.map(r => (
-            <button key={r.id} onClick={() => setRoles(prev => prev.includes(r.id) ? prev.filter(x => x !== r.id) : [...prev, r.id])} className={`p-4 border-2 rounded-xl text-left transition-all ${roles.includes(r.id) ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
+            <button key={r.id} onClick={() => setRoles((prev) => toggleProfileRole(prev, r.id))} className={`p-4 border-2 rounded-xl text-left transition-all ${roles.includes(r.id) ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
               <div className="font-bold text-sm dark:text-white">{r.label}</div>
               <div className="text-xs text-slate-500">{r.desc}</div>
             </button>
@@ -4364,9 +4366,9 @@ function Onboarding({ setView, users, onSignup, onCompleteProfile, onDeclineDidi
     );
 
     if (step === 5) {
-      const effectiveRoles = roles.length
-        ? roles
-        : (Array.isArray(profile?.roles) ? profile.roles : []);
+      const effectiveRoles = normalizeProfileRoles(
+        roles.length ? roles : (Array.isArray(profile?.roles) ? profile.roles : []),
+      );
       return (
       <div className="max-w-lg mx-auto py-12 px-4 animate-in slide-in-from-right duration-300">
         <h2 className="text-sm font-bold text-blue-600 uppercase mb-1">Stap 5/5</h2>
@@ -10018,7 +10020,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
      const quickProfilePostIds = Array.from(new Set(manualPostIds));
      const payload = {
        ...formData,
-       roles: formData.roles?.length ? formData.roles : ['fan'],
+       roles: normalizeProfileRoles(formData.roles, { fallbackToFan: true }),
        themes: formData.themes || [],
        linkedAgencyName: formData.linkedAgencyName || '',
        linkedCompanyName: formData.linkedCompanyName || '',
@@ -10064,7 +10066,7 @@ function EditProfileModal({ onClose, profile, user, posts, users = [], onOpenQui
     }
     setFormData((prev) => ({
       ...prev,
-      roles: [...(prev.roles || []), roleId],
+      roles: toggleProfileRole(prev.roles || [], roleId),
     }));
   };
 
@@ -11411,7 +11413,7 @@ function UserPreviewModal({ userId, onClose, onFullProfile, posts, allUsers, cur
 
   // All hooks must be called in the same order on every render
   // Moved BEFORE the early return to prevent "Rendered more hooks" error
-  const roles = userProfile?.roles || [];
+  const roles = normalizeProfileRoles(userProfile?.roles || []);
   const themes = userProfile?.themes || [];
   const roleLabel = (roleId) => ROLES.find((x) => x.id === roleId)?.label || 'Onbekende rol';
   const userPosts = useMemo(() => getProfileVisiblePosts(posts, userId, userProfile?.contributorId), [posts, userId, userProfile?.contributorId]);

@@ -15,6 +15,8 @@ export const ROLE_OPTIONS = [
   { id: 'fan', label: 'Fan', desc: 'Word fan van je favoriete makers en bewaar inspiratie.' },
 ];
 
+export const FAN_ROLE_ID = 'fan';
+
 const normalizeRoleString = (value) => String(value || '').trim();
 const normalizeRoleLookupKey = (value) => normalizeRoleString(value).toLowerCase();
 const ROLE_LOOKUP = new Map(ROLE_OPTIONS.flatMap((role) => [
@@ -45,6 +47,42 @@ export const normalizeRoleValue = (roleValue, fallback = '') => {
   }
 
   return canonicalizeRoleValue(roleValue || fallback);
+};
+
+const uniqueCanonicalProfileRoles = (roleValues = []) => Array.from(new Set(
+  (Array.isArray(roleValues) ? roleValues : [])
+    .map((role) => normalizeRoleValue(role))
+    .filter(Boolean),
+));
+
+export const normalizeProfileRoles = (roleValues = [], { fallbackToFan = false } = {}) => {
+  const canonicalRoles = uniqueCanonicalProfileRoles(roleValues);
+  const nonFanRoles = canonicalRoles.filter((role) => role !== FAN_ROLE_ID);
+
+  // Legacy mixed data keeps the genuine creator/profile roles and drops fan.
+  if (nonFanRoles.length > 0) return nonFanRoles;
+  if (canonicalRoles.includes(FAN_ROLE_ID)) return [FAN_ROLE_ID];
+  return fallbackToFan ? [FAN_ROLE_ID] : [];
+};
+
+export const toggleProfileRole = (roleValues = [], roleValue) => {
+  const selectedRoles = normalizeProfileRoles(roleValues);
+  const role = normalizeRoleValue(roleValue);
+  if (!role) return selectedRoles;
+
+  if (selectedRoles.includes(role)) {
+    return selectedRoles.filter((selectedRole) => selectedRole !== role);
+  }
+
+  if (role === FAN_ROLE_ID) return [FAN_ROLE_ID];
+  return [...selectedRoles.filter((selectedRole) => selectedRole !== FAN_ROLE_ID), role];
+};
+
+export const hasExclusiveFanProfileRole = (roleValues = []) => {
+  if (!Array.isArray(roleValues)) return false;
+  const canonicalRoles = uniqueCanonicalProfileRoles(roleValues);
+  return !canonicalRoles.includes(FAN_ROLE_ID)
+    || canonicalRoles.every((role) => role === FAN_ROLE_ID);
 };
 
 export const getRoleLabel = (roleValue, fallback = 'Maker') => {

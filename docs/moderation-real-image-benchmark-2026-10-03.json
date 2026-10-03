@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-03",
+  "status": "real_image_diagnostic_completed_training_input_pending",
+  "trainingPerformed": false,
+  "productionApproved": false,
+  "productionChanged": false,
+  "humanEvaluation": {
+    "availableConfirmedImages": 63,
+    "independentSourcePools": 21,
+    "labelsPreservedSha256": "b87e87c437da2749c78588ef637bbee85c2c8b0d50de98dc3d4af822821bf28c",
+    "nudityDistribution": {
+      "genitalia": 58,
+      "underwear_swimwear": 3,
+      "female_bare_breasts": 1,
+      "bare_buttocks": 1
+    },
+    "imageDimensions": [
+      [
+        133,
+        200
+      ],
+      [
+        200,
+        133
+      ]
+    ],
+    "researchOnly": true,
+    "otherCompletedBatchMissingLocally": 78,
+    "missingFile": "balanced-target-scene-labels.reviewed.json"
+  },
+  "diagnosticModels": [
+    {
+      "name": "320",
+      "modelSha256": "c15d8273adad2d0a92f014cc69ab2d6c311a06777a55545f2c4eb46f51911f0f",
+      "imageCount": 123,
+      "meanSecondsPerImage": 0.02276305783737452,
+      "thresholds": {
+        "0.25": {
+          "humanExamples": 63,
+          "humanSourceGroups": 21,
+          "exactNudityMatches": 44,
+          "genitalTruthExamples": 58,
+          "genitalTruthDetected": 43,
+          "humanConfusion": {
+            "genitalia->genitalia": 43,
+            "genitalia->underwear_swimwear": 2,
+            "genitalia->male_topless": 5,
+            "genitalia->female_bare_breasts": 4,
+            "underwear_swimwear->undetermined": 1,
+            "genitalia->bare_buttocks": 2,
+            "underwear_swimwear->female_bare_breasts": 1,
+            "underwear_swimwear->bare_buttocks": 1,
+            "female_bare_breasts->female_bare_breasts": 1,
+            "bare_buttocks->genitalia": 1,
+            "genitalia->undetermined": 2
+          },
+          "assistantControls": 60,
+          "controlExposedBodyDetections": 0
+        },
+        "0.5": {
+          "humanExamples": 63,
+          "humanSourceGroups": 21,
+          "exactNudityMatches": 33,
+          "genitalTruthExamples": 58,
+          "genitalTruthDetected": 32,
+          "humanConfusion": {
+            "genitalia->genitalia": 32,
+            "genitalia->undetermined": 14,
+            "genitalia->male_topless": 7,
+            "genitalia->female_bare_breasts": 5,
+            "underwear_swimwear->undetermined": 2,
+            "underwear_swimwear->female_bare_breasts": 1,
+            "female_bare_breasts->female_bare_breasts": 1,
+            "bare_buttocks->genitalia": 1
+          },
+          "assistantControls": 60,
+          "controlExposedBodyDetections": 0
+        },
+        "0.75": {
+          "humanExamples": 63,
+          "humanSourceGroups": 21,
+          "exactNudityMatches": 9,
+          "genitalTruthExamples": 58,
+          "genitalTruthDetected": 9,
+          "humanConfusion": {
+            "genitalia->genitalia": 9,
+            "genitalia->undetermined": 46,
+            "genitalia->male_topless": 2,
+            "genitalia->female_bare_breasts": 1,
+            "underwear_swimwear->undetermined": 3,
+            "female_bare_breasts->undetermined": 1,
+            "bare_buttocks->undetermined": 1
+          },
+          "assistantControls": 60,
+          "controlExposedBodyDetections": 0
+        }
+      }
+    },
+    {
+      "name": "640",
+      "modelSha256": "5fd488c39acfb268efb4a92bce4fbc95967c059bd7ee1c01026fcaf81aec5c9e",
+      "imageCount": 123,
+      "meanSecondsPerImage": 0.46196518394309327,
+      "thresholds": {
+        "0.25": {
+          "humanExamples": 63,
+          "humanSourceGroups": 21,
+          "exactNudityMatches": 47,
+          "genitalTruthExamples": 58,
+          "genitalTruthDetected": 46,
+          "humanConfusion": {
+            "genitalia->genitalia": 46,
+            "genitalia->undetermined": 2,
+            "genitalia->bare_buttocks": 4,
+            "genitalia->male_topless": 4,
+            "underwear_swimwear->undetermined": 1,
+            "underwear_swimwear->female_bare_breasts": 1,
+            "underwear_swimwear->bare_buttocks": 1,
+            "female_bare_breasts->female_bare_breasts": 1,
+            "bare_buttocks->genitalia": 1,
+            "genitalia->female_bare_breasts": 1,
+            "genitalia->underwear_swimwear": 1
+          },
+          "assistantControls": 60,
+          "controlExposedBodyDetections": 0
+        },
+        "0.5": {
+          "humanExamples": 63,
+          "humanSourceGroups": 21,
+          "exactNudityMatches": 34,
+          "genitalTruthExamples": 58,
+          "genitalTruthDetected": 33,
+          "humanConfusion": {
+            "genitalia->genitalia": 33,
+            "genitalia->bare_buttocks": 1,
+            "genitalia->male_topless": 9,
+            "genitalia->undetermined": 12,
+            "underwear_swimwear->undetermined": 2,
+            "genitalia->female_bare_breasts": 2,
+            "underwear_swimwear->female_bare_breasts": 1,
+            "female_bare_breasts->female_bare_breasts": 1,
+            "bare_buttocks->genitalia": 1,
+            "genitalia->underwear_swimwear": 1
+          },
+          "assistantControls": 60,
+          "controlExposedBodyDetections": 0
+        },
+        "0.75": {
+          "humanExamples": 63,
+          "humanSourceGroups": 21,
+          "exactNudityMatches": 11,
+          "genitalTruthExamples": 58,
+          "genitalTruthDetected": 10,
+          "humanConfusion": {
+            "genitalia->genitalia": 10,
+            "genitalia->undetermined": 45,
+            "genitalia->female_bare_breasts": 1,
+            "genitalia->male_topless": 2,
+            "underwear_swimwear->undetermined": 3,
+            "female_bare_breasts->undetermined": 1,
+            "bare_buttocks->bare_buttocks": 1
+          },
+          "assistantControls": 60,
+          "controlExposedBodyDetections": 0
+        }
+      }
+    }
+  ],
+  "untrainedEnsembleDiagnostic": {
+    "0.25": {
+      "humanGenitalExamples": 58,
+      "unionGenitalHits": 48,
+      "diagnosticOnly": true,
+      "thresholdChosenUsingHumanHoldout": false
+    },
+    "0.5": {
+      "humanGenitalExamples": 58,
+      "unionGenitalHits": 35,
+      "diagnosticOnly": true,
+      "thresholdChosenUsingHumanHoldout": false
+    },
+    "0.75": {
+      "humanGenitalExamples": 58,
+      "unionGenitalHits": 13,
+      "diagnosticOnly": true,
+      "thresholdChosenUsingHumanHoldout": false
+    }
+  },
+  "evaluationLimitations": [
+    "63 images are small previews, with 58 genitalia labels; this does not establish whole-taxonomy accuracy.",
+    "60 CC0 controls use assistant screening labels, not independently confirmed human ground truth.",
+    "No detection is undetermined, never a safe/nonsexual decision.",
+    "Sexual contact, minor concern and sensitive-content interpretation are not assessed by these body-part detectors.",
+    "No threshold was calibrated or approved for runtime."
+  ],
+  "nudenetLicenseEvidence": {
+    "installedPackage": "nudenet 3.4.2",
+    "installedLicense": "AGPL-3.0",
+    "pypiMetadataClaim": "MIT",
+    "runtimeIntegrationPerformed": false,
+    "largeWeightProvenance": {
+      "source": "https://huggingface.co/zhangsongbo365/nudenet_onnx/resolve/main/640m.onnx",
+      "bytes": 103538690,
+      "sha256": "5fd488c39acfb268efb4a92bce4fbc95967c059bd7ee1c01026fcaf81aec5c9e",
+      "officialReleaseSizeMatches": true,
+      "officialReleaseDigestAvailable": false,
+      "byteIdentityToOfficialReleaseProven": false
+    }
+  },
+  "preparedFeatures": {
+    "count": 243,
+    "humanResearchImages": 63,
+    "copyrightCompatibleCandidates": 180,
+    "modelId": "facebook/dinov2-base",
+    "revision": "f9e44c814b77203eaa57a6bdbbd535f21ede1415",
+    "dimension": 768,
+    "modelSafetensorsSha256": "d73036b56966966d07975d696bde331762f37297e2f095de8cea0040c3aa0841",
+    "maximumNormError": 1.1461095184017722e-07,
+    "exactDuplicateHashes": 0,
+    "meanCpuSecondsPerImage": 0.3265831440987515,
+    "trainingApprovalGranted": false
+  },
+  "localServiceCheck": {
+    "realModelInference": true,
+    "mocked": false,
+    "statusCode": 200,
+    "embeddingDimension": 768,
+    "maximumDifferenceFromPreparedFeature": 0.0,
+    "embeddingReadyAfterRequest": true,
+    "trainedDetectorPresent": false,
+    "detectorResult": null
+  },
+  "trainingReadiness": {
+    "approvedNewTrainingItems": 0,
+    "copyrightCompatibleAssistantSuggestionCounts": {
+      "none": 122,
+      "underwear_swimwear": 8,
+      "implied_nude": 2,
+      "bare_buttocks": 8,
+      "female_bare_breasts": 8,
+      "genitalia": 24,
+      "male_topless": 8
+    },
+    "humanConfirmationStillRequired": true,
+    "copyrightLicenseNotSoleApproval": true,
+    "researchOnlyReviewsMayNotBePromotedAutomatically": true,
+    "missingHumanReviewFileDoesNotByItselfApproveTraining": true
+  },
+  "privateArtifactsContainOriginalImageBytes": false
+}

@@ -147,7 +147,19 @@ const ageOptions = (selected) => [
   ['adult_clear', 'volwassene voldoende duidelijk'],
   ['skip_minor_or_age_uncertain', 'uitsluiten: minderjarig of relevante leeftijd onzeker'],
 ].map(([value, label]) => `<option value="${value}"${selected === value ? ' selected' : ''}>${label}</option>`).join('');
-const enumOptions = (values, selected) => values.map((value) => `<option value="${value}"${selected === value ? ' selected' : ''}>${value}</option>`).join('');
+const LABEL_TEXT = {
+  none: 'Geen',
+  underwear_swimwear: 'Ondergoed of zwemkleding',
+  implied_nude: 'Naakt gesuggereerd; intieme lichaamsdelen niet zichtbaar',
+  bare_buttocks: 'Blote billen',
+  female_bare_breasts: 'Blote vrouwelijke borsten',
+  genitalia: 'Zichtbare geslachtsdelen',
+  male_topless: 'Ontbloot mannelijk bovenlichaam',
+  suggestive: 'Erotische context zonder zichtbare expliciete seksuele handeling',
+  bdsm_kink: 'BDSM of kink zonder zichtbare expliciete seksuele handeling',
+  explicit_act: 'Zichtbare masturbatie, orale seks of penetratie',
+};
+const enumOptions = (values, selected) => values.map((value) => `<option value="${value}"${selected === value ? ' selected' : ''}>${escapeHtml(LABEL_TEXT[value] || value)}</option>`).join('');
 
 const renderPage = async () => {
   const { manifest, prefill, suggestionByIndex, reviewedByFile } = await loadState();
@@ -167,12 +179,12 @@ const renderPage = async () => {
         <label>Gebruik voor research<select name="eligibility">${eligibilityOptions(base.researchEligibilityDecision)}</select></label>
         <label>Leeftijdsbeslissing<select name="age">${ageOptions(base.ageSafetyDecision || '')}</select></label>
         <div class="labelFields">
-          <label>Nudity<select name="nudity">${enumOptions(ALLOWED_NUDITY, label.nudity)}</select></label>
-          <label>Sexual context<select name="sexualContext">${enumOptions(ALLOWED_SEXUAL_CONTEXT, label.sexualContext)}</select></label>
-          <label>Confidence<input name="confidence" type="number" min="0" max="1" step="0.01" value="${escapeHtml(label.confidence ?? 0.95)}"></label>
-          <label>Uncertainty flags<input name="flags" value="${escapeHtml((label.uncertaintyFlags || []).join(', '))}" placeholder="comma separated"></label>
+          <label>Naaktheid<select name="nudity">${enumOptions(ALLOWED_NUDITY, label.nudity)}</select></label>
+          <label>Seksuele context<select name="sexualContext">${enumOptions(ALLOWED_SEXUAL_CONTEXT, label.sexualContext)}</select></label>
+          <details><summary>Technische metadata (optioneel)</summary><p class="note">Deze gegevens zijn van de assistent. Je hoeft ze niet aan te passen om een inhoudelijke keuze te bevestigen.</p><label>Confidence<input name="confidence" type="number" min="0" max="1" step="0.01" value="${escapeHtml(label.confidence ?? 0.95)}"></label>
+          <label>Uncertainty flags<input name="flags" value="${escapeHtml((label.uncertaintyFlags || []).join(', '))}" placeholder="comma separated"></label></details>
         </div>
-        <button type="button" class="save">Voorstel klopt / bevestigen</button>
+        <button type="button" class="restore" data-suggestion="${escapeHtml(JSON.stringify(suggestion))}">Oorspronkelijk assistentvoorstel terugzetten</button>\n        <button type="button" class="save">Voorstel klopt / bevestigen</button>
         <div class="msg"></div>
       </div>
     </article>`;
@@ -180,11 +192,11 @@ const renderPage = async () => {
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(BATCH.title)}</title>
   <style>
   body{font-family:system-ui,sans-serif;margin:0;background:#f5f5f5;color:#151515}header{position:sticky;top:0;z-index:2;background:white;padding:14px 20px;border-bottom:1px solid #ddd}main{max-width:1200px;margin:auto;padding:18px}.card{display:grid;grid-template-columns:minmax(260px,420px) 1fr;gap:22px;background:white;border:1px solid #ddd;border-radius:14px;padding:16px;margin:0 0 18px}.media{position:relative}.media img{display:block;max-width:100%;max-height:520px;margin:auto}.idx{position:absolute;top:6px;left:6px;background:#fff;padding:4px 7px;border-radius:6px;font-weight:700}.controls{display:grid;gap:11px;align-content:start}.status{font-weight:700}.controls label{display:grid;gap:5px;font-weight:600}.controls select,.controls input{font:inherit;padding:8px}.save{font:inherit;font-weight:700;padding:10px 14px;cursor:pointer}.msg{min-height:1.2em}.note{font-size:.92rem;color:#555}@media(max-width:760px){.card{grid-template-columns:1fr}}
-  </style></head><body><header><strong>${escapeHtml(BATCH.title)}</strong> · <span id="progress">${reviewedCount}/${BATCH.itemCount} menselijk beoordeeld</span><div class="note">Alles is al vooringevuld door de assistent. Discovery facets zijn bewust verborgen en zijn geen labelautoriteit.</div></header><main>${cards}</main>
+  </style></head><body><header><strong>${escapeHtml(BATCH.title)}</strong> · <span id="progress">${reviewedCount}/${BATCH.itemCount} menselijk beoordeeld</span><div class="note">Eerdere beoordelingen blijven bewaard. Terugzetten vult het oorspronkelijke voorstel in; pas bevestigen slaat het op. Discovery facets zijn bewust verborgen en zijn geen labelautoriteit.</div><div class="note">Naaktheid en seksuele context zijn aparte keuzes. Masturbatie, orale seks en penetratie vallen onder expliciete handelingen. Een seksspeeltje dat alleen aanwezig is of als attribuut wordt gebruikt, is niet automatisch expliciet. Zichtbare seksuele stimulatie of penetratie met een speeltje wel. Beoordeel de zichtbare handeling, ongeacht het geslacht van de personen.</div></header><main>${cards}</main>
   <script>
   const itemCount=${BATCH.itemCount};const cards=[...document.querySelectorAll('.card')];
   function sync(card){const excluded=card.querySelector('[name=eligibility]').value!=='include_real_photograph';card.querySelector('[name=age]').disabled=excluded;card.querySelector('.labelFields').style.opacity=excluded?'.4':'1';for(const el of card.querySelectorAll('.labelFields input,.labelFields select'))el.disabled=excluded;}
-  for(const card of cards){sync(card);card.querySelector('[name=eligibility]').addEventListener('change',()=>sync(card));card.querySelector('.save').addEventListener('click',async()=>{const eligibility=card.querySelector('[name=eligibility]').value;const excluded=eligibility!=='include_real_photograph';const payload={fileName:card.dataset.file,researchEligibilityDecision:eligibility,ageSafetyDecision:excluded?null:card.querySelector('[name=age]').value,detectorLabel:excluded?null:{nudity:card.querySelector('[name=nudity]').value,sexualContext:card.querySelector('[name=sexualContext]').value,graphicInjury:'none',sensitiveSignals:[],possibleMinorConcern:false,confidence:Number(card.querySelector('[name=confidence]').value),uncertaintyFlags:card.querySelector('[name=flags]').value.split(',').map(v=>v.trim()).filter(Boolean)}};const msg=card.querySelector('.msg');msg.textContent='opslaan…';const res=await fetch('/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok){msg.textContent='Fout: '+(data.error||res.status);return;}msg.textContent='✓ opgeslagen';card.querySelector('.status').textContent=data.labelStatus==='human_confirmed'?'✓ menselijk bevestigd':'↷ menselijk uitgesloten';document.querySelector('#progress').textContent=data.reviewedCount+'/'+itemCount+' menselijk beoordeeld';});}
+  for(const card of cards){sync(card);card.querySelector('.restore').addEventListener('click',()=>{const suggestion=JSON.parse(card.querySelector('.restore').dataset.suggestion);const label=suggestion.detectorLabel||{nudity:'none',sexualContext:'none',confidence:0.95,uncertaintyFlags:[]};card.querySelector('[name=eligibility]').value=suggestion.researchEligibilityDecision;card.querySelector('[name=age]').value=suggestion.ageSafetyDecision||'';for(const key of ['nudity','sexualContext','confidence'])card.querySelector('[name='+key+']').value=label[key];card.querySelector('[name=flags]').value=(label.uncertaintyFlags||[]).join(', ');sync(card);card.querySelector('.msg').textContent='Oorspronkelijk voorstel ingevuld. Controleer en bevestig om op te slaan.';});card.querySelector('[name=eligibility]').addEventListener('change',()=>sync(card));card.querySelector('.save').addEventListener('click',async()=>{const eligibility=card.querySelector('[name=eligibility]').value;const excluded=eligibility!=='include_real_photograph';const payload={fileName:card.dataset.file,researchEligibilityDecision:eligibility,ageSafetyDecision:excluded?null:card.querySelector('[name=age]').value,detectorLabel:excluded?null:{nudity:card.querySelector('[name=nudity]').value,sexualContext:card.querySelector('[name=sexualContext]').value,graphicInjury:'none',sensitiveSignals:[],possibleMinorConcern:false,confidence:Number(card.querySelector('[name=confidence]').value),uncertaintyFlags:card.querySelector('[name=flags]').value.split(',').map(v=>v.trim()).filter(Boolean)}};const msg=card.querySelector('.msg');msg.textContent='opslaan…';const res=await fetch('/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok){msg.textContent='Fout: '+(data.error||res.status);return;}msg.textContent='✓ opgeslagen';card.querySelector('.status').textContent=data.labelStatus==='human_confirmed'?'✓ menselijk bevestigd':'↷ menselijk uitgesloten';document.querySelector('#progress').textContent=data.reviewedCount+'/'+itemCount+' menselijk beoordeeld';});}
   </script></body></html>`;
 };
 

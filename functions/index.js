@@ -35,6 +35,7 @@ import {
 } from './moderationExamplesLookup.js';
 import { composeModerationPolicyResult } from './moderationPolicy.js';
 import { MODERATION_RUNTIME_MODES, assertRuntimeProviderInvocationAllowed, buildManualReviewFallback, resolveModerationRuntimeMode } from './moderationRuntimeProvider.js';
+import { runCustomDetectorInference, enforceCustomDetectorReview } from './moderationCustomDetector.js';
 import { runGeminiClassifier as runGeminiClassifierV2 } from './geminiModerationClassifier.js';
 import { GEMINI_MODERATION_PROMPT_VERSION } from './geminiModerationContract.js';
 import { routeGeminiForbiddenReasons } from './geminiModerationRouting.js';
@@ -1514,9 +1515,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const moderationRuntime = resolveModerationRuntimeMode({
     projectId: moderationRuntimeProjectId,
     requestedMode: process.env.MODERATION_RUNTIME_MODE || null,
-    // Fail closed until the custom detector is actually invoked by this handler.
-    // Merely setting an environment variable must never activate an unwired provider.
-    customProviderConfigured: false,
+    customProviderConfigured: Boolean(process.env.ARTES_VISION_ENDPOINT),
   });
   const moderationManualFallback = moderationRuntime.mode === MODERATION_RUNTIME_MODES.manualOnly
     ? buildManualReviewFallback({ reason: moderationRuntime.reason })
@@ -1632,6 +1631,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     && previousExampleIsFinalDecision
     && previousExampleRouteAllowed;
   const cachedGeminiDiagnostics = matchedUpload?.data && matchedFingerprintType === 'sha256'
+    && moderationRuntime.mode === MODERATION_RUNTIME_MODES.legacyGemini
     ? buildReusableCacheGeminiDiagnostics({
         uploadData: matchedUpload.data,
         expectedPromptVersion: GEMINI_MODERATION_PROMPT_VERSION,
@@ -1658,6 +1658,17 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   const forbiddenReasons = [];
   let aiSafetySignals = [];
 
+  // Start independent inference while coarse Vision signals are read.
+  const customDetectorTask = !cachedResult && !shouldRouteByPreviousExample
+    && moderationRuntime.mode === MODERATION_RUNTIME_MODES.artesCustom
+    ? runCustomDetectorInference({
+        image: parsed, endpoint: process.env.ARTES_VISION_ENDPOINT,
+        timeoutMs: process.env.ARTES_VISION_TIMEOUT_MS || 15000,
+        bearerToken: process.env.ARTES_VISION_AUTH_TOKEN || null,
+        releaseJson: process.env.ARTES_VISION_RELEASE_JSON || null,
+      })
+    : null;
+
   const imageAnnotator = new ImageAnnotatorClient();
   let labels = [];
   let safeSearch = null;
@@ -1666,27 +1677,15 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     labels = [];
   }
 
-  if (!cachedResult) {
-    try {
-      const [safeSearchResult] = await imageAnnotator.safeSearchDetection({
-        image: { content: parsed.buffer },
-      });
-      safeSearch = safeSearchResult.safeSearchAnnotation || null;
-    } catch (error) {
-      logger.error('SafeSearch detectie mislukt.', error);
-    }
-  }
-
-  if (!cachedResult) {
-    try {
-      const [labelResult] = await imageAnnotator.labelDetection({
-        image: { content: parsed.buffer },
-        maxResults: 15,
-      });
-      labels = labelResult.labelAnnotations || [];
-    } catch (error) {
-      logger.error('Label detectie mislukt.', error);
-    }
+  if (!cachedResult && !shouldRouteByPreviousExample) {
+    const [safety, descriptions] = await Promise.allSettled([
+      imageAnnotator.safeSearchDetection({ image: { content: parsed.buffer } }),
+      imageAnnotator.labelDetection({ image: { content: parsed.buffer }, maxResults: 15 }),
+    ]);
+    if (safety.status === 'fulfilled') safeSearch = safety.value[0]?.safeSearchAnnotation || null;
+    else logger.error('SafeSearch detectie mislukt.', safety.reason);
+    if (descriptions.status === 'fulfilled') labels = descriptions.value[0]?.labelAnnotations || [];
+    else logger.error('Label detectie mislukt.', descriptions.reason);
   }
 
   if (!cachedResult && safeSearch) {
@@ -1773,7 +1772,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     });
   }
 
-  if (!cachedResult && moderationRuntime.mode === MODERATION_RUNTIME_MODES.legacyGemini) {
+  if (!cachedResult && moderationRuntime.mode === MODERATION_RUNTIME_MODES.legacyGemini && !shouldRouteByPreviousExample) {
     assertRuntimeProviderInvocationAllowed({
       projectId: moderationRuntimeProjectId,
       providerGenerative: true,
@@ -1880,7 +1879,21 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
 
   }
 
-  const policyResult = composeModerationPolicyResult({
+  let customDetectorAssessment = null;
+  let customDetectorEvidence = null;
+  let customDetectorDiagnostics = null;
+  if (customDetectorTask) {
+    const customResult = await customDetectorTask;
+    customDetectorAssessment = customResult.assessment;
+    customDetectorEvidence = customResult.evidence;
+    customDetectorDiagnostics = customResult.diagnostics;
+    if (customDetectorEvidence) {
+      appliedTriggers.push(...customDetectorEvidence.appliedTriggers);
+      forbiddenReasons.push(...customDetectorEvidence.forbiddenReasons);
+    }
+  }
+
+  let policyResult = composeModerationPolicyResult({
     cachedResult,
     appliedTriggers,
     suggestedTriggers,
@@ -1900,7 +1913,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     forbiddenThreshold,
     mediumLogThreshold,
     geminiDiagnostics,
+    customDetectorEvidence,
   });
+  if (moderationRuntime.mode !== MODERATION_RUNTIME_MODES.legacyGemini) {
+    policyResult = enforceCustomDetectorReview({
+      policyResult, assessment: customDetectorAssessment,
+      previousAuthority: policyResult.previousModeratorExample?.routingApplied === true,
+    });
+  }
 
   const finalAppliedTriggers = policyResult.appliedTriggers;
   const finalSuggestedTriggers = policyResult.suggestedTriggers;
@@ -1916,7 +1936,8 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
   let reviewCreated = false;
   let hasReviewRights = true;
   let reviewCapacityAvailable = true;
-  const policyRequiresReview = Boolean(moderationManualFallback?.forceReview)
+  const policyRequiresReview = (Boolean(moderationManualFallback?.forceReview)
+    && policyResult.previousModeratorExample?.routingApplied !== true)
     || policyResult.shouldReview
     || policyResult.outcome === 'review';
   const routedFinalModeratorRejection = policyResult.previousModeratorExample?.routingApplied === true
@@ -1996,6 +2017,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       manualReviewFallback: Boolean(moderationManualFallback),
     },
     geminiDiagnostics,
+    customDetectorDiagnostics,
     userSelectedTaxonomy: policyResult.userSelectedTaxonomy,
     moderationGeneration: requestModerationGeneration,
     moderationScopeKey: requestModerationScope.scopeKey,
@@ -2105,6 +2127,7 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
         publishBlocked,
         moderationSignals: response.moderationSignals || null,
         moderationRuntime: response.moderationRuntime || null,
+        customDetectorDiagnostics: response.customDetectorDiagnostics || null,
         appliedTriggers: finalAppliedTriggers,
         suggestedTriggers: finalSuggestedTriggers,
         forbiddenReasons: finalForbiddenReasons,

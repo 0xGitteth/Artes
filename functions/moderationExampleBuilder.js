@@ -68,6 +68,7 @@ export const buildCommonModerationExample = ({
       ? uploadData.shouldReview
       : (typeof reviewAiSummary?.shouldReview === 'boolean' ? reviewAiSummary.shouldReview : null);
   const aiGeminiDiagnostics = aiResult?.geminiDiagnostics || uploadData?.geminiDiagnostics || reviewAiSummary?.geminiDiagnostics || null;
+  const customDetectorDiagnostics = aiResult?.customDetectorDiagnostics || uploadData?.customDetectorDiagnostics || reviewAiSummary?.customDetectorDiagnostics || null;
   const effectiveModerationGeneration = normalizeModerationGeneration(
     moderationGeneration
       ?? uploadData?.moderationGeneration
@@ -103,6 +104,7 @@ export const buildCommonModerationExample = ({
     adultDecision: effectiveModerationSignals?.adultDecision ?? null,
     sexualExplicitConfidence: effectiveModerationSignals?.sexualExplicitConfidence ?? null,
     geminiDiagnostics: aiGeminiDiagnostics,
+    customDetectorDiagnostics,
     moderationGeneration: effectiveModerationGeneration,
   };
 
@@ -150,6 +152,11 @@ export const buildCommonModerationExample = ({
       sourceEndpoint: source,
       policyVersion: uploadData?.policyVersion || reviewData?.policyVersion || null,
       modelVersions: aiResult?.modelVersions || effectiveModerationSignals?.modelVersions || null,
+      customVision: customDetectorDiagnostics?.modelVersion ? {
+        modelVersion: customDetectorDiagnostics.modelVersion,
+        datasetVersion: customDetectorDiagnostics.datasetVersion || null,
+        labelVersion: customDetectorDiagnostics.labelVersion || null,
+      } : null,
       moderationGeneration: effectiveModerationGeneration,
       createdAt: now,
       updatedAt: now,

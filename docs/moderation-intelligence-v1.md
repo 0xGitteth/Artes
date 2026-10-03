@@ -1,6 +1,14 @@
 # Artes moderation intelligence v1
 
-Status: design and implementation foundation. This work starts from PR #380 head `b11d71f641c66490b3cabedf29ad09f590c888eb` and must remain isolated from production until explicitly approved.
+Status: implementation candidate with connected custom runtime, supervised JSON-head training, calibration and independent evaluation. No real detector has been trained or approved by this change. This work starts from PR #380 head `b11d71f641c66490b3cabedf29ad09f590c888eb` and must remain isolated from production until explicitly approved.
+
+## Connected detector implementation
+
+`vision-service/train_detector.py` now fits Artes detector heads on approved DINOv2 features, chooses confidence thresholds on validation and measures automation/error rates on a separate test split. The Functions upload route calls the custom service, applies a server-owned per-category release gate and sends missing/unvalidated/disagreeing evidence to a blocked review. Existing moderator decisions retain their lifecycle authority. Coarse Vision signals and custom inference run concurrently; reuse of a resolved moderator example avoids repeat model calls.
+
+The release gate does not trust a provider's confidence as proof of accuracy. It binds model/dataset/label/policy versions and requires independent benchmark evidence. Possible minor concern, incomplete heads, unresolved uncertainty and sensitive contexts outside the current evidence contract remain review cases. See [vision-service/README.md](../vision-service/README.md) for the input/export contract, rollout configuration and external training job.
+
+The reviewed professional-preview batches remain research-only. The local curation screenshot reports 141 reviewed entries, 15 excluded composites and 126 included unique images, of which 34 are quarantined and 92 are provisional train/validation candidates. The final reviewed files and approved durable training assets are not part of this git checkout. Neither the screenshot nor those provisional counts establishes training rights, complete category coverage, independent test quality or permission to promote a model. The confirmed human labels are preserved; this implementation does not require repeating all 141 reviews.
 
 ## Goal
 

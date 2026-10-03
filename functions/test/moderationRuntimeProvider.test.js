@@ -49,6 +49,16 @@ test('production defaults preserve current legacy behavior until deliberate migr
   assert.equal(resolved.mode, MODERATION_RUNTIME_MODES.legacyGemini);
   assert.equal(resolved.reason, 'preserve_existing_production_behavior');
 });
+test('production custom and manual modes prohibit generative calls; unknown modes fail closed', () => {
+  const custom = resolveModerationRuntimeMode({ projectId: ARTES_PRODUCTION_PROJECT_ID, requestedMode: MODERATION_RUNTIME_MODES.artesCustom, customProviderConfigured: true });
+  assert.equal(custom.generativeAllowed, false);
+  assert.throws(() => assertRuntimeProviderInvocationAllowed({ projectId: ARTES_PRODUCTION_PROJECT_ID, mode: custom.mode, providerGenerative: true }), /custom_mode_generative_provider_forbidden/);
+  for (const requestedMode of ['typo', MODERATION_RUNTIME_MODES.artesCustom, MODERATION_RUNTIME_MODES.manualOnly]) {
+    const resolved = resolveModerationRuntimeMode({ projectId: ARTES_PRODUCTION_PROJECT_ID, requestedMode });
+    assert.equal(resolved.mode, MODERATION_RUNTIME_MODES.manualOnly);
+    assert.equal(resolved.generativeAllowed, false);
+  }
+});
 
 test('generative provider invocation is blocked in staging', () => {
   assert.throws(() => assertRuntimeProviderInvocationAllowed({

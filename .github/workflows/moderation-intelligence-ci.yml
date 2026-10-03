@@ -1,0 +1,46 @@
+name: Moderation intelligence checks
+
+on:
+  push:
+    branches:
+      - 'chatgpt/moderation-*'
+  pull_request:
+    paths:
+      - 'functions/**'
+      - 'vision-service/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package*.json'
+      - '.github/workflows/moderation-*.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: moderation-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  moderation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix functions --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run build
+      - run: node --test functions/test/*.test.js tests/*Source.test.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: vision-service/requirements-test.txt
+      - run: python -m pip install -r vision-service/requirements-test.txt
+      - run: python -m unittest discover -s vision-service -p 'test_*.py' -v

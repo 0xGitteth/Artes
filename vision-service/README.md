@@ -1,40 +1,65 @@
 # Artes custom moderation vision service
 
-Staging/local proof of concept only. This service is not a moderation policy engine and must not be deployed to production from this branch.
+Implementation candidate for staging. Production still uses its existing runtime unless explicitly migrated. A trained, benchmarked detector and an approved hosted endpoint are required before enabling automation.
 
-## Current output
+## Runtime
 
-`POST /v1/infer` accepts a JPEG, PNG, or WebP image as base64 and returns:
+`POST /v1/infer` accepts JPEG, PNG or WebP bytes and returns a normalized, 768-dimensional DINOv2 embedding. When an `ARTES_DETECTOR_ARTIFACT` is installed, it also returns supervised labels for nudity, sexual context, injury, minor concern and seven sensitive signals. Otherwise `detectorResult` remains `null` and the custom moderation route requires review.
 
-- provider: `artes_custom_vision`
-- model: `dinov2_vitb14`
-- a normalized 768-dimensional DINOv2 embedding
-- `detectorResult: null`
+The model returns visual evidence. Deterministic Artes policy owns publication, 18+ categories and forbidden decisions. The service cannot return `finalOutcome`, `policyDecision` or `accessLevel`.
 
-The detector is intentionally absent until Artes has a curated labeled dataset and a trained detector artifact. The service never returns `finalOutcome`, `policyDecision`, or `accessLevel`.
+The Functions integration runs independent Vision calls and custom inference concurrently. Resolved moderator-example reuse skips those model calls. Gemini caches only apply in the legacy runtime; switching providers cannot reuse an older Gemini result as custom-model authority.
 
-## Local POC
+Service configuration:
 
-Create an isolated Python environment, install `requirements.txt`, and start:
+| Variable | Purpose |
+| --- | --- |
+| `ARTES_DINOV2_REVISION` | Exact 40-character model commit used to extract training features. Required with a detector. |
+| `ARTES_DETECTOR_ARTIFACT` | Path to the approved JSON heads. Missing classes always produce uncertainty flags. |
+| `ARTES_VISION_AUTH_TOKEN` | Shared server token. Set for any hosted service; keep inference on a private network or authenticated TLS endpoint. |
+
+Functions configuration:
+
+| Variable | Purpose |
+| --- | --- |
+| `MODERATION_RUNTIME_MODE=artes_custom_vision` | Deliberately select the custom provider. |
+| `ARTES_VISION_ENDPOINT` | Service base URL. |
+| `ARTES_VISION_AUTH_TOKEN` | Matching service token. |
+| `ARTES_VISION_TIMEOUT_MS` | Request and response-body deadline, default 15 seconds. |
+| `ARTES_VISION_RELEASE_JSON` | Server-controlled release approval, bound to model, dataset, label and policy versions. |
+
+The service warms an installed detector and its embedding model before accepting requests. Invalid artifacts fail startup. Missing/invalid responses, version mismatches, unsupported labels, possible minor concern, out-of-support embeddings and below-threshold predictions require review. Current sensitive labels lack encouragement/instruction and total-impact semantics, so those cases also require review.
+
+## Training and independent evaluation
+
+`functions/moderationTrainingExport.js` joins approved learning records, a frozen group manifest and features tied to the exact image hash/model revision. It rejects research-only previews, benchmark-only rows, revoked assets, uncertainty flags and any image/source/semantic group crossing split boundaries. Export does not mutate the original human labels or reassign the frozen holdout.
+
+The export has `schemaVersion: 1`, `labelVersion: artes_detector_v1`, `datasetVersion`, `embedding: {modelId, revision, dimension}` and `items`. Each item includes the original approval/provenance fields plus `datasetSplit`, `datasetSplitFinal: true`, `leakageGroupId` and `embeddingVector`. The trainer also accepts approved local `imagePath` values instead of vectors; these must be inside the dataset directory and match `sourceFingerprintSha256`.
+
+Run one training/evaluation job on approved input:
 
 ```bash
-uvicorn app:app --host 127.0.0.1 --port 8787
+python vision-service/train_detector.py --dataset approved-dataset/dataset.json --output-dir detector-output
 ```
 
-Run that command from the `vision-service` directory.
+Install CPU PyTorch and `requirements-training.txt` in an isolated environment first, or use the `Train approved moderation detector` GitHub Actions workflow after this workflow has been registered on the default branch. That workflow consumes an existing approved dataset artifact and produces the three outputs without Codespaces transfers:
 
-The first inference downloads the configured DINOv2 model (`facebook/dinov2-base` by default), so it can take noticeably longer and consume local disk/cache space. Do not start that download merely to run the JavaScript contract tests.
+- `detector.json`: JSON linear heads and calibrated embedding support. No pickle/code loading.
+- `benchmark.json`: missing label coverage, independent-group errors, critical misses, confidence thresholds and manual-review rate.
+- `release-candidate.json`: version-bound release metadata, always `approved: false`.
 
-## Privacy boundary
+Only the training split fits weights. Validation chooses score scaling, support and thresholds. The untouched test split measures release suitability. Correlated examples count as one group; a group only succeeds if all automated labels in it are correct. Runtime requires a validated per-category threshold, at least 100 held-out automated examples and 20 independent groups, zero critical misses and a 95% Wilson precision lower bound of at least 0.99. These are conservative release gates, not an accuracy claim. For example, 100 perfect independent cases do not pass the statistical gate.
 
-Images are decoded in memory for inference. This service does not intentionally write uploaded image bytes to disk or a training store. Training retention is a separate, explicit Artes data decision.
+Review the independent benchmark and hosting/retention/cost decision before approving a candidate. Research curation alone does not approve image rights, training retention or production promotion. Keep approved training inputs and derived artifacts within the authorized training environment.
 
-## Promotion boundary
+## Checks
 
-A later staging integration may call this service only after:
+```bash
+npm run test:moderation-intelligence
+python -m pip install -r vision-service/requirements-test.txt
+python -m unittest discover -s vision-service -p 'test_*.py' -v
+```
 
-1. an authorized image test set exists;
-2. embedding output passes the Artes provider contract;
-3. detector labels are separately curated;
-4. any detector artifact is benchmarked against the frozen golden set;
-5. runtime and infrastructure costs are explicitly reviewed before hosted deployment.
+The GitHub checks run backend regressions, Python contract/training tests, lint and build automatically. Tests use synthetic embeddings and mock DINO feature extraction; they do not download a base model or establish real-image accuracy. The deployed model must still pass independent image benchmarks.
+
+Images are decoded in memory for inference and are not retained by this endpoint. Training retention remains a separate approved data lifecycle.

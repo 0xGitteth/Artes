@@ -6,6 +6,15 @@ import { buildCommonModerationExample, mapFinalOutcomeByAction } from '../modera
 const nowFactory = () => 'NOW';
 const base = () => ({ source: 'moderatorDecide', nowFactory, uploadId: 'u1', reviewCaseId: 'r1', uploaderUid: 'owner1' });
 
+test('custom detector evidence survives a moderator decision without replacing human authority', () => {
+  const diagnostics = { modelVersion: 'heads1', datasetVersion: 'data1', labelVersion: 'artes_detector_v1', automated: false, reason: 'below_calibrated_threshold', detectorLabel: { nudity: 'none' } };
+  const result = buildCommonModerationExample({ ...base(), uploadData: { customDetectorDiagnostics: diagnostics }, moderatorDecision: { action: 'rejectForbidden' }, decision: 'rejected' });
+  assert.deepEqual(result.aiSnapshot.customDetectorDiagnostics, diagnostics);
+  assert.deepEqual(result.provenance.customVision, { modelVersion: 'heads1', datasetVersion: 'data1', labelVersion: 'artes_detector_v1' });
+  assert.equal(result.finalOutcome, 'forbidden');
+  assert.equal(result.learningStatus, 'resolved');
+});
+
 test('upload payload in index preserves userId with uploaderUid additive', () => {
   const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
   assert.match(source, /userId:\s*userId\s*\|\|\s*null/);

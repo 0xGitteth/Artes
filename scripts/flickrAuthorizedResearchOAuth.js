@@ -119,8 +119,8 @@ const status = async () => {
   let consumer = false;
   let request = false;
   let access = null;
-  try { await readFile(CONSUMER_PATH, 'utf8'); consumer = true; } catch {}
-  try { await readFile(REQUEST_PATH, 'utf8'); request = true; } catch {}
+  try { await readFile(CONSUMER_PATH, 'utf8'); consumer = true; } catch { /* Absent credentials are a valid status. */ }
+  try { await readFile(REQUEST_PATH, 'utf8'); request = true; } catch { /* No pending request is a valid status. */ }
   try {
     const parsed = JSON.parse(await readFile(ACCESS_PATH, 'utf8'));
     access = { present: true, userNsid: parsed.userNsid || null, username: parsed.username || null, permission: parsed.permission || null };

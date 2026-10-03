@@ -2,24 +2,36 @@ import base64
 import io
 import logging
 import os
+import secrets
 from functools import lru_cache
+from contextlib import asynccontextmanager
 
-import torch
-import torch.nn.functional as F
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel, Field
 from PIL import Image
-from transformers import AutoImageProcessor, AutoModel
+from detector import load_detector, infer_detector
 
+MODEL_REVISION = os.getenv('ARTES_DINOV2_REVISION')
+DETECTOR_PATH = os.getenv('ARTES_DETECTOR_ARTIFACT')
 MODEL_ID = os.getenv('ARTES_DINOV2_MODEL_ID', 'facebook/dinov2-base')
 PROVIDER = 'artes_custom_vision'
 MODEL_NAME = 'dinov2_vitb14'
 EMBEDDING_DIMENSION = 768
 MAX_IMAGE_BYTES = int(os.getenv('ARTES_VISION_MAX_IMAGE_BYTES', str(15 * 1024 * 1024)))
+AUTH_TOKEN = os.getenv('ARTES_VISION_AUTH_TOKEN')
 ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 logger = logging.getLogger('artes.vision')
 
-app = FastAPI(title='Artes moderation vision POC', version='1')
+@asynccontextmanager
+async def lifespan(_app):
+    # Warm an installed detector before accepting upload requests.
+    if DETECTOR_PATH:
+        configured_detector()
+        load_model()
+    yield
+
+
+app = FastAPI(title='Artes moderation vision service', version='1', lifespan=lifespan)
 
 
 class ImagePayload(BaseModel):
@@ -46,10 +58,20 @@ class InferenceResponse(BaseModel):
 
 @lru_cache(maxsize=1)
 def load_model():
-    processor = AutoImageProcessor.from_pretrained(MODEL_ID)
-    model = AutoModel.from_pretrained(MODEL_ID)
+    from transformers import AutoImageProcessor, AutoModel
+    processor = AutoImageProcessor.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
+    model = AutoModel.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
     model.eval()
     return processor, model
+
+
+@lru_cache(maxsize=1)
+def configured_detector():
+    if not DETECTOR_PATH:
+        return None
+    if not MODEL_REVISION:
+        raise ValueError('pinned_embedding_revision_required_for_detector')
+    return load_detector(DETECTOR_PATH, MODEL_ID, MODEL_REVISION)
 
 
 def decode_image(payload: ImagePayload) -> Image.Image:
@@ -73,6 +95,8 @@ def decode_image(payload: ImagePayload) -> Image.Image:
 
 
 def embed_image(image: Image.Image) -> list[float]:
+    import torch
+    import torch.nn.functional as F
     processor, model = load_model()
     inputs = processor(images=image, return_tensors='pt')
     with torch.inference_mode():
@@ -94,11 +118,19 @@ def health():
         'modelId': MODEL_ID,
         'embeddingDimension': EMBEDDING_DIMENSION,
         'generative': False,
-        'detectorConfigured': False,
+        'detectorConfigured': bool(DETECTOR_PATH),
+        'embeddingRevision': MODEL_REVISION,
+        'detectorReady': bool(configured_detector()),
+        'embeddingReady': bool(load_model.cache_info().currsize),
     }
 
 
-@app.post('/v1/infer', response_model=InferenceResponse)
+def authorize(authorization: str | None = Header(default=None)):
+    if AUTH_TOKEN and not secrets.compare_digest(authorization or '', 'Bearer ' + AUTH_TOKEN):
+        raise HTTPException(status_code=401, detail='unauthorized')
+
+
+@app.post('/v1/infer', response_model=InferenceResponse, dependencies=[Depends(authorize)])
 def infer(request: InferenceRequest):
     if request.contractVersion != 1:
         raise HTTPException(status_code=400, detail='unsupported_contract_version')
@@ -109,6 +141,8 @@ def infer(request: InferenceRequest):
     image = decode_image(request.image)
     try:
         vector = embed_image(image)
+        detector = configured_detector() if 'detector' in requested else None
+        detector_result = infer_detector(detector, vector) if detector else None
     except HTTPException:
         raise
     except Exception as error:
@@ -121,6 +155,5 @@ def infer(request: InferenceRequest):
             model=MODEL_NAME,
             vector=vector,
         ),
-        # Deliberately absent until a supervised Artes detector artifact exists.
-        detectorResult=None,
+        detectorResult=detector_result,
     )

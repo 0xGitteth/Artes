@@ -67,6 +67,7 @@ export const createModerationCustomVisionClient = ({
   endpoint,
   descriptor = DINO_V2_VIT_B14_POC,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  bearerToken = null,
   fetchImpl = fetch,
 } = {}) => {
   const normalizedEndpoint = normalizeCustomVisionEndpoint(endpoint);
@@ -84,14 +85,16 @@ export const createModerationCustomVisionClient = ({
     const requestBody = buildCustomVisionRequest({ buffer, mimeType });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), resolvedTimeoutMs);
-    let response;
+    let response; let payload;
     try {
       response = await fetchImpl(`${normalizedEndpoint}/v1/infer`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}) },
+        redirect: 'error',
         body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
+      payload = await parseResponseJson(response);
     } catch (error) {
       if (error?.name === 'AbortError') throw new Error('custom_vision_timeout');
       throw new Error(`custom_vision_request_failed:${clean(error?.message) || 'network_error'}`);
@@ -99,7 +102,6 @@ export const createModerationCustomVisionClient = ({
       clearTimeout(timer);
     }
 
-    const payload = await parseResponseJson(response);
     if (!response.ok) {
       const safeCode = resolveHttpErrorCode(payload, response.status);
       throw new Error(`custom_vision_http_error:${safeCode.slice(0, 120)}`);

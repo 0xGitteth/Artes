@@ -178,7 +178,7 @@ test("reopened correction reviews restore the user's open review counter", () =>
 
 
 test('reasonless review outcomes create cases even without forbidden reasons', () => {
-  assert.ok(indexSource.includes("const policyRequiresReview = policyResult.shouldReview || policyResult.outcome === 'review';"));
+  assert.match(indexSource, /const policyRequiresReview =[\s\S]*?policyResult\.shouldReview\s*\|\| policyResult\.outcome === 'review';/);
   assert.match(indexSource, /shouldFinalizeAutomaticReview = Boolean\([\s\S]{0,320}?shouldCreateProductionReviewCase\(\{[\s\S]{0,180}?shouldReview: policyRequiresReview/);
   assert.ok(indexSource.includes("? 'forbiddenOutcomeAutoReview'"));
   assert.ok(indexSource.includes(": 'policyReviewAuto';"));

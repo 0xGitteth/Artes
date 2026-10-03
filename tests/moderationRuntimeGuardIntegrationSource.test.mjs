@@ -13,14 +13,14 @@ const moderateImageSource = moderateStart >= 0 && moderateEnd > moderateStart
 test('moderateImage imports and resolves provider-neutral runtime guard', () => {
   assert.match(source, /from '\.\/moderationRuntimeProvider\.js'/);
   assert.match(moderateImageSource, /resolveModerationRuntimeMode\(\{/);
-  assert.match(moderateImageSource, /customProviderConfigured: false/);
+  assert.match(moderateImageSource, /customProviderConfigured: Boolean\(process\.env\.ARTES_VISION_ENDPOINT\)/);
   assert.match(moderateImageSource, /buildManualReviewFallback\(\{ reason: moderationRuntime\.reason \}\)/);
 });
 
 test('moderateImage cannot invoke Gemini outside legacy production runtime mode', () => {
   assert.match(
     moderateImageSource,
-    /if \(!cachedResult && moderationRuntime\.mode === MODERATION_RUNTIME_MODES\.legacyGemini\) \{[\s\S]*?assertRuntimeProviderInvocationAllowed\(\{[\s\S]*?providerGenerative: true,[\s\S]*?runGeminiClassifierV2\(parsed\)/,
+    /if \(!cachedResult && moderationRuntime\.mode === MODERATION_RUNTIME_MODES\.legacyGemini && !shouldRouteByPreviousExample\) \{[\s\S]*?assertRuntimeProviderInvocationAllowed\(\{[\s\S]*?providerGenerative: true,[\s\S]*?runGeminiClassifierV2\(parsed\)/,
   );
   assert.match(
     moderateImageSource,
@@ -31,7 +31,7 @@ test('moderateImage cannot invoke Gemini outside legacy production runtime mode'
 test('manual-only staging runtime forces review without inventing a detector result', () => {
   assert.match(
     moderateImageSource,
-    /const policyRequiresReview = Boolean\(moderationManualFallback\?\.forceReview\)[\s\S]*?policyResult\.shouldReview/,
+    /const policyRequiresReview = \(Boolean\(moderationManualFallback\?\.forceReview\)[\s\S]*?routingApplied !== true\)[\s\S]*?policyResult\.shouldReview/,
   );
   assert.match(moderateImageSource, /manualReviewFallback: Boolean\(moderationManualFallback\)/);
   assert.match(moderateImageSource, /moderationRuntime: response\.moderationRuntime \|\| null/);

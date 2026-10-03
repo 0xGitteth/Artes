@@ -107,3 +107,11 @@ test('client rejects detector output that tries to own final policy', async () =
     /final_outcome_not_allowed/,
   );
 });
+
+test('timeout also covers reading a stalled response body', async () => {
+  const client = createModerationCustomVisionClient({
+    endpoint: 'http://127.0.0.1:8787', timeoutMs: 1000,
+    fetchImpl: async (_url, { signal }) => ({ ok: true, text: () => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })) }),
+  });
+  await assert.rejects(client.infer({ buffer: Buffer.from('image'), mimeType: 'image/png' }), /custom_vision_timeout/);
+});

@@ -42,10 +42,16 @@ export const resolveModerationRuntimeMode = ({
   }
 
   if (project === ARTES_PRODUCTION_PROJECT_ID) {
+    if (requested && !Object.values(MODERATION_RUNTIME_MODES).includes(requested)) {
+      return { mode: MODERATION_RUNTIME_MODES.manualOnly, reason: 'unknown_runtime_mode', generativeAllowed: false };
+    }
+    if (requested === MODERATION_RUNTIME_MODES.artesCustom && !customProviderConfigured) {
+      return { mode: MODERATION_RUNTIME_MODES.manualOnly, reason: 'custom_provider_not_configured', generativeAllowed: false };
+    }
     return {
       mode: requested || MODERATION_RUNTIME_MODES.legacyGemini,
       reason: requested ? 'explicit_production_mode' : 'preserve_existing_production_behavior',
-      generativeAllowed: true,
+      generativeAllowed: !requested || requested === MODERATION_RUNTIME_MODES.legacyGemini,
     };
   }
 
@@ -69,6 +75,9 @@ export const assertRuntimeProviderInvocationAllowed = ({
   }
   if (runtimeMode === MODERATION_RUNTIME_MODES.manualOnly && providerGenerative) {
     throw new Error('manual_only_mode_provider_invocation_forbidden');
+  }
+  if (runtimeMode === MODERATION_RUNTIME_MODES.artesCustom && providerGenerative) {
+    throw new Error('custom_mode_generative_provider_forbidden');
   }
   if (project !== ARTES_PRODUCTION_PROJECT_ID
     && project !== ARTES_STAGING_PROJECT_ID

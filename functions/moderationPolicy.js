@@ -134,7 +134,13 @@ export function composeModerationPolicyResult({
   forbiddenThreshold = 0.7,
   mediumLogThreshold = 0.4,
   geminiDiagnostics = null,
+  customDetectorEvidence = null,
 }) {
+  const customDecisionReliable = customDetectorEvidence?.reliable === true;
+  if (customDecisionReliable) {
+    geminiAdultDecision = customDetectorEvidence.adultDecision;
+    geminiSexualExplicitConfidence = customDetectorEvidence.sexualExplicitConfidence;
+  }
   const cachedAppliedTriggers = normalizeArray(cachedResult?.appliedTriggers);
   const cachedSuggestedTriggers = normalizeArray(cachedResult?.suggestedTriggers);
   const cachedForbiddenReasons = normalizeArray(cachedResult?.forbiddenReasons);
@@ -339,7 +345,7 @@ export function composeModerationPolicyResult({
     || hasHighConfidenceGeminiKinkBdsmSignal;
   const hasGeminiForbiddenSignal = finalForbiddenReasons.some((reason) => reason?.trigger === 'gemini' || reason?.trigger === 'gemini_uncertain_fallback');
   const hasGeminiUncertainFallbackSuggestion = finalSuggestedTriggers.some((item) => item?.trigger === 'gemini_uncertain_fallback');
-  const geminiDecisionIsReliable = hasReliableGeminiDecision({ geminiAdultDecision, geminiDiagnostics });
+  const geminiDecisionIsReliable = customDecisionReliable || hasReliableGeminiDecision({ geminiAdultDecision, geminiDiagnostics });
   const hasMixedAdultSignalsWithoutReliableGemini = !geminiDecisionIsReliable
     && safeSearchAdultScore >= forbiddenThreshold
     && safeSearchNudityScore >= mediumLogThreshold;

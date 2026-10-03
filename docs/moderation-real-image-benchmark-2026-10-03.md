@@ -1,3 +1,5 @@
+Deze eerste controle van 63 beoordelingen is opgevolgd door [de volledige controle van 141 beoordelingen](moderation-confirmed-review-corpus-2026-10-03.md). De ontbrekende 78 beoordelingen en hun afbeeldingen zijn inmiddels ontvangen en gecontroleerd.
+
 De echte modelcontrole is uitgevoerd. Er is nog geen nieuwe classifier getraind of live gezet.
 
 Twee bestaande NudeNet-detectoren zijn getoetst op de 63 beschikbare, door jou bevestigde beelden. Bij dezelfde diagnostische scoregrens van 0,25:

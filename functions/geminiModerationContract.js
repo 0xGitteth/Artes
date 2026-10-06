@@ -1,4 +1,4 @@
-export const GEMINI_MODERATION_PROMPT_VERSION = 'gemini_moderation_v2';
+export const GEMINI_MODERATION_PROMPT_VERSION = 'gemini_moderation_v3_pubic_region';
 export const DEFAULT_GEMINI_MODERATION_MODEL = 'gemini-2.5-flash';
 const DURABLE_ADULT_CONTEXT_CONFIDENCE = 0.7;
 
@@ -67,8 +67,10 @@ export const buildGeminiModerationPrompt = () => [
   '- bare buttocks;',
   '- visible female nipples or bare female breasts;',
   '- visible genitalia;',
+  '- the visible unclothed female pubic region in frontal nudity, including pubic hair covering the vulva; separately visible vulva details are not required;',
   '- transparent clothing that visibly exposes those intimate areas;',
   '- non-explicit artistic nude photography.',
+  'A visible pubic region or pubic hair alone is nudity, not evidence of an explicit sexual act. Judge sexual activity independently.',
   '',
   'Do NOT classify these as adult nudity by themselves:',
   '- a bare male chest;',

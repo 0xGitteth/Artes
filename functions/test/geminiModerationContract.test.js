@@ -12,7 +12,7 @@ import {
 
 test('uses the stable Gemini 2.5 Flash moderation default', () => {
   assert.equal(DEFAULT_GEMINI_MODERATION_MODEL, 'gemini-2.5-flash');
-  assert.equal(GEMINI_MODERATION_PROMPT_VERSION, 'gemini_moderation_v2');
+  assert.equal(GEMINI_MODERATION_PROMPT_VERSION, 'gemini_moderation_v3_pubic_region');
 });
 
 test('prompt encodes the agreed Artes nudity boundaries', () => {

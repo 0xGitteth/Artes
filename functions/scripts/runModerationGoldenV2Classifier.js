@@ -22,7 +22,7 @@ const cases = [
   {
     id: 'BOUDOIR_01',
     file: 'testing/moderation_goldens_v1/images/boudoir/BOUDOIR_01.jpg',
-    policyExpectation: 'general allow when intimate parts remain covered and no other adult context is present; provider safety block may fail closed to review',
+    policyExpectation: 'automatic general allow when intimate parts remain covered and no other adult context is present',
   },
   {
     id: 'BORDERLINE_01',
@@ -32,7 +32,7 @@ const cases = [
   {
     id: 'EXPLICIT_01',
     file: 'testing/moderation_goldens_v1/images/explicit/EXPLICIT_01.jpg',
-    policyExpectation: 'forbidden when a clear explicit sexual act is present; provider safety block is also fail closed',
+    policyExpectation: 'automatic forbidden when a clear explicit sexual act is present; provider refusal is an unresolved classifier failure',
   },
 ];
 
@@ -122,7 +122,8 @@ const main = async () => {
       ...summarizeClassifierEvaluation(results),
       expectationPasses: results.filter((item) => item.expectationPassed === true).length,
       expectationFailures: results.filter((item) => item.expectationPassed === false).length,
-      note: 'A safety-block fallback can pass the fail-closed expectation but never counts as a correct classification. Four fixtures do not establish batch accuracy.',
+      automaticDecisionGoalMet: results.every((item) => item.expectationPassed === true && item.requiresManualReview === false),
+      note: 'All four clear fixtures require automatic Artes decisions. A provider refusal or a review outcome fails that automation goal. These are classifier tests, not full-app or batch accuracy.',
     },
   };
   const outputPath = path.resolve(repoRoot, outputArgument);

@@ -4,12 +4,11 @@ import logging
 import os
 from functools import lru_cache
 
-import torch
-import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from PIL import Image
-from transformers import AutoImageProcessor, AutoModel
+from PIL import Image, ImageOps
+from dino_features import DinoFeatures
+from linear_heads import load_artifact, predict_heads, build_head_result
 
 MODEL_ID = os.getenv('ARTES_DINOV2_MODEL_ID', 'facebook/dinov2-base')
 PROVIDER = 'artes_custom_vision'
@@ -42,14 +41,24 @@ class EmbeddingPayload(BaseModel):
 class InferenceResponse(BaseModel):
     embedding: EmbeddingPayload
     detectorResult: dict | None = None
+    headPredictions: dict | None = None
 
 
 @lru_cache(maxsize=1)
 def load_model():
-    processor = AutoImageProcessor.from_pretrained(MODEL_ID)
-    model = AutoModel.from_pretrained(MODEL_ID)
-    model.eval()
-    return processor, model
+    artifact = load_classifier()
+    revision = artifact['featureDefinition']['revision'] if artifact else os.getenv('ARTES_DINOV2_REVISION', 'main')
+    features = DinoFeatures(MODEL_ID, revision)
+    if artifact:
+        from linear_heads import validate_artifact
+        validate_artifact(artifact, features.definition)
+    return features
+
+
+@lru_cache(maxsize=1)
+def load_classifier():
+    path = os.getenv('ARTES_CLASSIFIER_ARTIFACT')
+    return load_artifact(path) if path else None
 
 
 def decode_image(payload: ImagePayload) -> Image.Image:
@@ -67,19 +76,13 @@ def decode_image(payload: ImagePayload) -> Image.Image:
     try:
         image = Image.open(io.BytesIO(raw))
         image.load()
-        return image.convert('RGB')
+        return ImageOps.exif_transpose(image).convert('RGB')
     except Exception as error:
         raise HTTPException(status_code=400, detail='invalid_image') from error
 
 
 def embed_image(image: Image.Image) -> list[float]:
-    processor, model = load_model()
-    inputs = processor(images=image, return_tensors='pt')
-    with torch.inference_mode():
-        outputs = model(**inputs)
-        vector = outputs.last_hidden_state[:, 0, :]
-        vector = F.normalize(vector, p=2, dim=1)
-    values = vector[0].detach().cpu().tolist()
+    values = load_model().embed([image])[0].tolist()
     if len(values) != EMBEDDING_DIMENSION:
         raise RuntimeError(f'unexpected_embedding_dimension:{len(values)}')
     return [float(value) for value in values]
@@ -87,6 +90,11 @@ def embed_image(image: Image.Image) -> list[float]:
 
 @app.get('/health')
 def health():
+    try:
+        artifact = load_classifier()
+    except Exception:
+        logger.exception('Classifier artifact could not be loaded.')
+        raise HTTPException(status_code=503, detail='classifier_artifact_invalid')
     return {
         'status': 'ok',
         'provider': PROVIDER,
@@ -95,6 +103,9 @@ def health():
         'embeddingDimension': EMBEDDING_DIMENSION,
         'generative': False,
         'detectorConfigured': False,
+        'classifierHeadsConfigured': artifact is not None,
+        'classifierModelVersion': artifact['modelVersion'] if artifact else None,
+        'runtimeEligible': False,
     }
 
 
@@ -115,12 +126,21 @@ def infer(request: InferenceRequest):
         logger.exception('Vision model inference failed.')
         raise HTTPException(status_code=503, detail='vision_model_unavailable') from error
 
+    try:
+        artifact = load_classifier()
+        heads = build_head_result(artifact, predict_heads(artifact, vector)[0]) if artifact else None
+    except Exception as error:
+        logger.exception('Classifier inference failed.')
+        raise HTTPException(status_code=503, detail='classifier_unavailable') from error
+
     return InferenceResponse(
         embedding=EmbeddingPayload(
             provider=PROVIDER,
             model=MODEL_NAME,
             vector=vector,
         ),
-        # Deliberately absent until a supervised Artes detector artifact exists.
+        # Two experimental heads do not implement the full safety contract.
+        # Keep their predictions separate instead of inventing safety labels.
         detectorResult=None,
+        headPredictions=heads,
     )

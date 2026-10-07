@@ -3,4 +3,6 @@ uvicorn[standard]>=0.29,<1
 pillow>=10,<13
 torch>=2.2,<3
 torchvision>=0.17,<1
-transformers>=4.38,<6
+transformers>=4.48,<5
+scikit-learn>=1.5,<2
+numpy>=1.26,<3

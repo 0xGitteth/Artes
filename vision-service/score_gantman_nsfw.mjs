@@ -22,11 +22,15 @@ function assertScore(scores) {
 }
 
 const args = process.argv.slice(2);
-if (args.length !== 2) {
+if (args.length !== 2 && args.length !== 3) {
   process.stderr.write('Usage: node score_gantman_nsfw.mjs <private-manifest> <private-score-cache>\n');
   process.exit(2);
 }
-const [manifestPath, cachePath] = args.map(item => path.resolve(item));
+const [manifestPath, cachePath] = args.slice(0, 2).map(item => path.resolve(item));
+const maxNew = args.length === 3 ? Number(args[2]) : null;
+if (maxNew !== null && (!Number.isSafeInteger(maxNew) || maxNew < 1 || maxNew > 375)) {
+  throw new Error('invalid_max_new_images');
+}
 const manifest = fs.readFileSync(manifestPath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
 const existing = new Set();
 if (fs.existsSync(cachePath)) {
@@ -48,7 +52,8 @@ for (const row of manifest) {
 }
 if ([...existing].some(id => !ids.has(id))) throw new Error('cache_contains_unknown_image');
 
-const pending = manifest.filter(item => !existing.has(item.sha256));
+const uncached = manifest.filter(item => !existing.has(item.sha256));
+const pending = maxNew === null ? uncached : uncached.slice(0, maxNew);
 if (!pending.length) {
   process.stdout.write('GantMan family: all predictions already cached.\n');
   process.exit(0);

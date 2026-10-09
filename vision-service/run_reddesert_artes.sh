@@ -69,6 +69,21 @@ for file in evaluate_reddesert_artes.py resnet34_no_torchvision.py evaluate_nsfw
   fi
   git show "FETCH_HEAD:vision-service/$file" > "$WORK/$file"
 done
+# Verify that the pure-PyTorch replacement can build both documented publisher
+# state_dict layouts before downloading 85 MB of model weights.
+"$PY" - "$WORK" <<'PYTEST'
+import sys
+sys.path.insert(0, sys.argv[1])
+from resnet34_no_torchvision import build_red_desert_resnet34
+for layout in ('torchvision', 'fastai_sequential'):
+    model = build_red_desert_resnet34(layout, num_classes=11)
+    state = model.state_dict()
+    required = ('conv1.weight', 'fc.weight') if layout == 'torchvision' else ('0.0.weight', '1.7.weight')
+    if not all(key in state for key in required):
+        raise ValueError('local_model_architecture_missing_required_weights')
+    print('Lokaal ResNet34-model gebouwd:', layout, flush=True)
+    del model
+PYTEST
 echo "RedDesert: authentieke modelgewichten controleren en lokaal op 375 bestaande afbeeldingen testen."
 echo "ResNet34 wordt met de bestaande PyTorch gebouwd, zonder torchvision te installeren."
 echo "Modeldownload max. 85 MB, geen beeld-API, geen serverinstallatie, geen code uit modelrepository uitgevoerd."

@@ -12,6 +12,9 @@ const WORK = path.join(ROOT, '.tmp/moderation-nsfw-pilot');
 const OUT = path.join(WORK, 'gemini-luke-private-scores.jsonl');
 const LUKE = path.join(WORK, 'nsfw-luke-private-scores.jsonl');
 const VALID_STATUSES = new Set(['ok', 'safety_blocked', 'invalid_response', 'api_error']);
+// This user's approval is for up to 12 Google API attempts TOTAL, not per rerun.
+// Increasing the lifetime cap requires a separate explicit approval and code change.
+const APPROVED_CUMULATIVE_CALL_CAP = 12;
 const ALLOWED_MIMES = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
 const POSITIVE = 'explicit_act';
 const NUDE = new Set(['implied_nude', 'bare_buttocks', 'female_bare_breasts', 'genitalia']);
@@ -26,7 +29,7 @@ const parseOption = (arg, fallback) => {
 const preview = !process.argv.includes('--run');
 const limit = parseOption('--limit', 82);
 const maxNew = parseOption('--max-new', 12);
-if (limit < 12 || limit > 120 || maxNew < 1 || maxNew > 120) throw new Error('comparison_limits_exceeded');
+if (limit < 12 || limit > 120 || maxNew < 1 || maxNew > APPROVED_CUMULATIVE_CALL_CAP) throw new Error('comparison_limits_exceeded');
 
 function readJsonl(file) {
   return fs.existsSync(file)
@@ -78,6 +81,8 @@ function checkCache(rows, targetModel, promptVersion) {
     if (!known.has(item.sha256) || found.has(item.sha256) || !VALID_STATUSES.has(item.status)) throw new Error('invalid_existing_gemini_cache');
     if (item.modelVersion !== targetModel || item.promptVersion !== promptVersion) throw new Error('gemini_model_or_prompt_changed_in_cache');
     if (item.status === 'ok' && !['none', 'borderline', 'explicit'].includes(item.adultDecision)) throw new Error('invalid_cached_gemini_decision');
+    if (item.status !== 'ok' && item.adultDecision !== null) throw new Error('invalid_cached_unavailable_decision');
+    if (typeof item.sexualExplicitUncertain !== 'boolean') throw new Error('invalid_cached_uncertainty');
     found.set(item.sha256, item);
   }
   return found;
@@ -94,6 +99,9 @@ const targetModel = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODERATION_MODEL;
 const cached = checkCache(rows, targetModel, GEMINI_MODERATION_PROMPT_VERSION);
 const selected = selectSamples(rows, limit);
 const outstanding = selected.filter(row => !cached.has(row.sha256));
+if (cached.size > APPROVED_CUMULATIVE_CALL_CAP) throw new Error('existing_gemini_calls_exceed_approved_pilot');
+const remainingApprovedCalls = APPROVED_CUMULATIVE_CALL_CAP - cached.size;
+const permittedCallsThisRun = Math.min(maxNew, outstanding.length, remainingApprovedCalls);
 const counts = {
   explicit: selected.filter(r => r.sexualContext === POSITIVE).length,
   otherNude: selected.filter(r => r.sexualContext !== POSITIVE && NUDE.has(r.nudity)).length,
@@ -103,6 +111,9 @@ process.stdout.write(JSON.stringify({
   mode: preview ? 'preview_no_api_calls' : 'explicitly_requested_external_google_api',
   model: targetModel, promptVersion: GEMINI_MODERATION_PROMPT_VERSION,
   selected: selected.length, cached: selected.length - outstanding.length, remaining: outstanding.length,
+  totalCachedGeminiCalls: cached.size,
+  approvedCumulativeLimit: APPROVED_CUMULATIVE_CALL_CAP,
+  callsAllowedThisRun: permittedCallsThisRun,
   humanSampleGroups: counts,
   warning: 'Existing development images, stratified intentionally; not independent. Gemini usage may be billed.',
 }, null, 2) + '\n');
@@ -123,14 +134,14 @@ if (process.env.GOOGLE_CLOUD_PROJECT !== 'artes-staging') {
 if (process.env.ENABLE_GEMINI_CLASSIFIER !== 'true') {
   throw new Error('gemini_classifier_must_be_explicitly_enabled');
 }
-if (!outstanding.length) {
-  process.stdout.write('All selected Gemini predictions already cached. No calls needed.\n');
+if (!permittedCallsThisRun) {
+  process.stdout.write('Gemini pilot already complete or total approved limit reached; zero new calls.\n');
   process.exit(0);
 }
 const { runGeminiClassifier } = await import(localModule('geminiModerationClassifier.js'));
 let attempted = 0;
 let errorCount = 0;
-for (const row of outstanding.slice(0, maxNew)) {
+for (const row of outstanding.slice(0, permittedCallsThisRun)) {
   attempted += 1;
   let record;
   try {
@@ -157,9 +168,9 @@ for (const row of outstanding.slice(0, maxNew)) {
   }
   // File is in gitignored .tmp, contains no image bytes, prompts or raw Gemini text.
   fs.appendFileSync(OUT, JSON.stringify(record) + '\n');
-  process.stdout.write('Gemini pilot processed ' + attempted + '/' + Math.min(maxNew, outstanding.length) + '; unresolved ' + errorCount + '\n');
-  if (errorCount >= 3) {
-    process.stdout.write('Stopping after three unavailable/error responses to avoid unnecessary external calls.\n');
+  process.stdout.write('Gemini pilot processed ' + attempted + '/' + permittedCallsThisRun + '; unresolved ' + errorCount + '\n');
+  if (record.status === 'api_error' || record.status === 'invalid_response') {
+    process.stdout.write('Stopping on first API failure or invalid contract to avoid spending more calls.\n');
     break;
   }
 }

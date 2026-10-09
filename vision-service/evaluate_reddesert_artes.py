@@ -80,13 +80,26 @@ def download_verified_weight(work, revision):
 
 
 def validate_probabilities(scores):
-    if not isinstance(scores, (list, tuple)) or len(scores) != len(CLASSES):
+    """Normalize both publisher output arrays and our persisted named score maps.
+
+    Inference produces an 11-element list, but the validated JSONL cache
+    deliberately stores a class-name-to-probability dict. Both representations
+    must have exactly the same 11 class labels.
+    """
+    if isinstance(scores, dict):
+        if set(scores) != set(CLASSES) or len(scores) != len(CLASSES):
+            raise ValueError('unexpected_red_desert_output_dim')
+        values = [scores[name] for name in CLASSES]
+    elif isinstance(scores, (list, tuple)) and len(scores) == len(CLASSES):
+        values = scores
+    else:
         raise ValueError('unexpected_red_desert_output_dim')
-    if any(not isinstance(x, (int, float)) or not math.isfinite(x) or x < 0 or x > 1 for x in scores):
+    if any(type(x) not in (int, float) or not math.isfinite(x) or x < 0 or x > 1
+           for x in values):
         raise ValueError('invalid_probability')
-    if abs(sum(scores) - 1) > .005:
+    if abs(sum(values) - 1) > .005:
         raise ValueError('invalid_probability_sum')
-    return dict(zip(CLASSES, map(float, scores)))
+    return dict(zip(CLASSES, map(float, values)))
 
 
 def read_cache(path, rows):

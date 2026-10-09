@@ -3,9 +3,10 @@
 // Does not affect the Artes upload or production moderation path.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const localModule = (name) => pathToFileURL(path.join(ROOT, 'functions', name)).href;
 const DATA = path.join(ROOT, '.tmp/moderation-v2/Artes_training_v2/Artes_dataset_v2_volledig');
 const WORK = path.join(ROOT, '.tmp/moderation-nsfw-pilot');
 const OUT = path.join(WORK, 'gemini-luke-private-scores.jsonl');
@@ -34,7 +35,8 @@ function readJsonl(file) {
 }
 
 function selectSamples(rows, count) {
-  const sorted = [...rows].sort((a, b) => a.sha256.localeCompare(b.sha256));
+  const orderBySha = (a, b) => a.sha256 < b.sha256 ? -1 : a.sha256 > b.sha256 ? 1 : 0;
+  const sorted = [...rows].sort(orderBySha);
   const positives = sorted.filter(row => row.sexualContext === POSITIVE);
   const negatives = sorted.filter(row => row.sexualContext !== POSITIVE);
   const nudes = negatives.filter(row => NUDE.has(row.nudity));
@@ -46,7 +48,7 @@ function selectSamples(rows, count) {
   chosen.push(...others.slice(0, Math.floor(remaining / 2)));
   const seen = new Set(chosen.map(row => row.sha256));
   chosen.push(...sorted.filter(row => !seen.has(row.sha256)).slice(0, count - chosen.length));
-  return chosen.sort((a, b) => a.sha256.localeCompare(b.sha256));
+  return chosen.sort(orderBySha);
 }
 
 function readManifest() {
@@ -87,7 +89,7 @@ const lukeRows = readJsonl(LUKE);
 if (lukeRows.length !== 375 || new Set(lukeRows.map(r => r.sha256)).size !== 375) {
   throw new Error('luke_375_predictions_missing');
 }
-const { DEFAULT_GEMINI_MODERATION_MODEL, GEMINI_MODERATION_PROMPT_VERSION } = await import('../geminiModerationContract.js');
+const { DEFAULT_GEMINI_MODERATION_MODEL, GEMINI_MODERATION_PROMPT_VERSION } = await import(localModule('geminiModerationContract.js'));
 const targetModel = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODERATION_MODEL;
 const cached = checkCache(rows, targetModel, GEMINI_MODERATION_PROMPT_VERSION);
 const selected = selectSamples(rows, limit);
@@ -125,7 +127,7 @@ if (!outstanding.length) {
   process.stdout.write('All selected Gemini predictions already cached. No calls needed.\n');
   process.exit(0);
 }
-const { runGeminiClassifier } = await import('../geminiModerationClassifier.js');
+const { runGeminiClassifier } = await import(localModule('geminiModerationClassifier.js'));
 let attempted = 0;
 let errorCount = 0;
 for (const row of outstanding.slice(0, maxNew)) {

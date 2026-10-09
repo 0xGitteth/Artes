@@ -124,30 +124,9 @@ def infer_publisher_layout(keys):
 
 
 def build_local_publisher_model(layout, class_count):
-    """Recreate only the documented architecture, never import publisher Python."""
-    import torch
-    from torch import nn
-    from torchvision.models import resnet34
-    if layout == 'torchvision':
-        return resnet34(weights=None, num_classes=class_count)
-    if layout != 'fastai_sequential':
-        raise ValueError('unsupported_publisher_resnet_layout')
-
-    class AdaptiveConcatPool2d(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.ap = nn.AdaptiveAvgPool2d(1)
-            self.mp = nn.AdaptiveMaxPool2d(1)
-        def forward(self, x):
-            return torch.cat([self.mp(x), self.ap(x)], dim=1)
-
-    base = resnet34(weights=None)
-    backbone = nn.Sequential(*list(base.children())[:-2])
-    head = nn.Sequential(
-        AdaptiveConcatPool2d(), nn.Flatten(1), nn.BatchNorm1d(1024),
-        nn.Dropout(.25), nn.Linear(1024, 512), nn.ReLU(),
-        nn.BatchNorm1d(512), nn.Dropout(.5), nn.Linear(512, class_count))
-    return nn.Sequential(backbone, head)
+    """Recreate documented ResNet34 from existing torch, no torchvision install."""
+    from resnet34_no_torchvision import build_red_desert_resnet34
+    return build_red_desert_resnet34(layout, class_count)
 
 
 def score_local_images(rows, path, weights):

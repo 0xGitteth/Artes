@@ -25,7 +25,7 @@ NUDITY = frozenset(('none', 'implied_nude', 'bare_buttocks',
                     'female_bare_breasts', 'genitalia'))
 EXTENSIONS = frozenset(('.jpg', '.jpeg', '.png', '.webp'))
 IMAGE_LIMIT_BYTES = 30 * 1024 * 1024
-Image.MAX_IMAGE_PIXELS = 25_000_000
+Image.MAX_IMAGE_PIXELS = 85_000_000
 DUPLICATE_DISTANCE = 6
 
 

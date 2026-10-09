@@ -99,7 +99,7 @@ def inspect_archive(archive):
                 p = PurePosixPath(name)
                 # Never extract any of these files, including benign entries.
                 if (not name or '\\' in name or p.is_absolute()
-                    or '..' in p.parts or ':' in p.parts[0]
+                    or '..' in p.parts or not p.parts or ':' in p.parts[0]
                     or member.issym() or member.islnk()
                     or not (member.isfile() or member.isdir())):
                     unsafe.append(name[:160])
@@ -139,7 +139,7 @@ def preflight(work, offline_archive=None):
         download_archive(archive, revision)
     if not archive.is_file():
         raise ValueError('model_archive_unavailable')
-    digest = hashlib.file_digest(archive.open('rb'), 'sha256').hexdigest()
+    with archive.open('rb') as source:\n        digest = hashlib.file_digest(source, 'sha256').hexdigest()
     inspection = inspect_archive(archive)
     has_weights = bool(inspection['modelWeightCandidates'])
     status = ('blocked_unsafe_archive' if inspection['unsafeArchiveEntries']

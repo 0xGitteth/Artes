@@ -237,12 +237,26 @@ def main():
     (work / 'photo-discovery-candidates-private.json').write_text(
         json.dumps({'schemaVersion': VERSION, 'candidates': results}, indent=2) + '\n',
         encoding='utf-8')
+    # Public original-source references only: this can be handed back to the
+    # assistant for review. No images, image hashes, private scores or secrets.
+    review_refs = [{
+        'sceneHintNotHumanLabel': item['sceneHintNotHumanLabel'],
+        'discoveryQuery': item['discoveryQuery'],
+        'title': item['title'],
+        'originalSourceUrl': item['originalSourceUrl'],
+        'indicativeLicense': item['indicativeLicense'],
+        'status': 'rights_and_age_unverified',
+    } for item in results]
+    (work / 'photo-discovery-public-review-links.json').write_text(
+        json.dumps({'schemaVersion': VERSION, 'links': review_refs},
+                   indent=2, ensure_ascii=False) + '\\n', encoding='utf-8')
     (work / 'photo-discovery-aggregate.json').write_text(
         json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print('Metadata candidates only:', len(results))
     print('Discovery categories:', dict(report['perSceneHintNotLabels']))
-    print('Share ONLY:', work / 'photo-discovery-aggregate.json')
-    print('No images, rights, labels, weights, datasets, or individual URLs uploaded.')
+    print('Share PUBLIC metadata links only:', work / 'photo-discovery-public-review-links.json')
+    print('Optional aggregate:', work / 'photo-discovery-aggregate.json')
+    print('No images, private rights records, labels, weights or per-image scores leave Codespaces.')
 
 
 if __name__ == '__main__':

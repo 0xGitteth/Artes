@@ -38,7 +38,7 @@ EXCLUDE_KEYWORDS = frozenset((
     'ai generated', 'ai-generated', 'generative ai', 'rawpixel',
     'wallpaper', 'teenager', 'schoolgirl', 'schoolboy', 'underage',
     'preteen', 'pre-teen', 'child', 'children', 'minor', 'lolita',
-)))
+))
 QUERIES = {
     'editorial_fashion': (
         'fashion editorial portrait', 'editorial fashion photography',

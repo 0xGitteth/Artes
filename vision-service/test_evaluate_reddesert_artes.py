@@ -2,10 +2,23 @@ import unittest
 
 from evaluate_reddesert_artes import (
     CLASSES, FILE_SHA256, aggregate, validate_probabilities,
+    infer_publisher_layout,
 )
 
 
 class RedDesertArtesTests(unittest.TestCase):
+    def test_publisher_architecture_layout_is_explicitly_verified(self):
+        self.assertEqual(infer_publisher_layout(['0.0.weight', '1.7.bias']),
+                         'fastai_sequential')
+        self.assertEqual(infer_publisher_layout(['conv1.weight', 'layer1.0.bn1.weight']),
+                         'torchvision')
+        with self.assertRaisesRegex(ValueError, 'mixed_publisher'):
+            infer_publisher_layout(['0.0.weight', 'conv1.weight'])
+        with self.assertRaisesRegex(ValueError, 'empty_publisher'):
+            infer_publisher_layout([])
+        with self.assertRaisesRegex(ValueError, 'unknown_publisher'):
+            infer_publisher_layout(['model.other'])
+
     def test_probability_validation(self):
         scores = [0.] * len(CLASSES)
         scores[0] = .2

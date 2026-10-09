@@ -5,6 +5,9 @@ export const SHADOW_SIGNAL_TYPES = Object.freeze([
   'nudity', 'sexual_suggestive', 'sexual_explicit', 'possible_minor_concern',
   'violence', 'graphic_injury', 'self_harm', 'eating_disorder_promotion',
   'dangerous_content',
+  // Raw five-class NSFW model scores: porn != a proven explicit sexual act.
+  'nsfw_normal_category', 'nsfw_porn_category', 'nsfw_hentai_category',
+  'nsfw_drawing_category', 'nsfw_sexy_category',
 ]);
 const SIGNAL_SET = new Set(SHADOW_SIGNAL_TYPES);
 const FORBIDDEN_POLICY_FIELDS = [

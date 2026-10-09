@@ -85,6 +85,30 @@ python vision-service/benchmark_nsfw_shadow.py \
 
 The tool prints only aggregate observed count, mean and p95 wall time, CPU seconds, process memory peak (Linux) and estimated CPU-hours per 1,000 uploads. An optional `--eur-per-vcpu-hour` computes an estimate from a **supplied** rate. No model price or hosting cost is assumed. Model weights download once from Hugging Face when the real test is deliberately started; no download occurs during unit tests. Do not interpret this as a complete infrastructure budget.
 
+## Decision point: compare three specialist models, then choose one
+
+User-directed change in scope: instead of indefinitely adding encoder experiments, compare **exactly three** preselected sexual-content classifiers on the **same 375 existing human-labeled development images**. This does not establish independent out-of-sample accuracy, because these examples were previously studied.
+
+- NSFW Detection 2 Mini: reuse the existing local 375-image score cache, **no reprocessing**.
+- LukeJacob2023/nsfw-image-detector: a pinned ViT model via the existing Python CPU/PyTorch environment; ~343 MB free model download, which may use substantial Codespaces network, disk, RAM and CPU.
+- GantMan MobileNet family: use the bundled **NSFWJS MobileNetV2 model**, not the legacy standalone TensorFlow 2.1/Keras executable, to avoid a separate heavy native TensorFlow installation. It is a comparable GantMan-family implementation but not a guarantee of identical model bytes to GantMan's original Keras H5. Dependencies \`nsfwjs@4.1.0\`, \`@tensorflow/tfjs@4.22.0\`, \`sharp@0.34.5\` are installed under ignored \`.tmp/\` only; do not modify app runtime dependencies.
+
+Run **only when the existing Codespace usage budget allows**:
+
+\`\`\`bash
+cd /workspaces/Artes
+git fetch origin chatgpt/moderation-multidetector-shadow
+git show FETCH_HEAD:vision-service/run_three_nsfw_comparison.sh | bash
+\`\`\`
+
+The shell script independently tests LukeJacob and GantMan-family on three images first, before the whole 375. It caches scores by existing SHA fingerprints; subsequent runs skip previously completed photos. No photo data or image path is transmitted to any image moderation API. The model weights and npm dependencies are downloaded from their normal public package/model registries. This may require Codespaces disk space and free core-hour capacity; **it does not provision a new server or paid API**.
+
+The ONLY file to upload to ChatGPT afterward is \`.tmp/moderation-nsfw-pilot/nsfw-three-way-summary.json\`. Scores and image paths stay inside ignored \`.tmp/\`, for follow-up comparison and controlled, rights-eligible model training. Failed/incompatible models are flagged as *incomplete*, not assigned an accuracy value.
+
+Ranking metrics include AUROC and average precision for the explicit-act human label. A \`porn >= 0.5\` cutoff is included solely for apples-to-apples descriptive counts of misses and false alarms, especially non-explicit nudity, not as an automatic moderation rule. We prefer the model with the right balance of missed explicit content, artistic-nude false positives, inference speed, memory and operational cost. As soon as one reasonable candidate is selected, pause new model searches; build the moderation feedback loop within staging.
+
+For any eventual production automation, use separate newly sourced independent holdout images, calibrated thresholds, policy guardrails, explicit approval of training rights, and staged release/rollback. No model automatically learns from its own predictions.
+
 ## Safety and limitations
 
 - Only `artes-staging` and only opt-in. All other projects run zero shadow-provider calls.

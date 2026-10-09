@@ -143,9 +143,14 @@ def preflight(work, offline_archive=None):
         digest = hashlib.file_digest(source, 'sha256').hexdigest()
     inspection = inspect_archive(archive)
     has_weights = bool(inspection['modelWeightCandidates'])
+    archive_exts = inspection['extensions']
+    is_tf_checkpoint = (archive_exts.get('.index', 0) > 0
+                        and archive_exts.get('.meta', 0) > 0
+                        and any(ext.startswith('.data-') for ext in archive_exts))
     status = ('blocked_unsafe_archive' if inspection['unsafeArchiveEntries']
-              else 'no_recognized_model_weights' if not has_weights
-              else 'inspected_not_executed')
+              else 'inspected_not_executed' if has_weights
+              else 'tensorflow_checkpoint_architecture_unverified' if is_tf_checkpoint
+              else 'no_recognized_model_weights')
     output = {
         'status': status,
         'purpose': 'private_research_only_no_inference_no_deployment',
@@ -167,7 +172,7 @@ def preflight(work, offline_archive=None):
     print('Model archive status:', status)
     print('Model formats found:', output['extensions'])
     print('Send ONLY this report:', report_path)
-    if status != 'inspected_not_executed':
+    if status not in ('inspected_not_executed', 'tensorflow_checkpoint_architecture_unverified'):
         raise ValueError('model_artifact_requires_manual_review')
     return output
 

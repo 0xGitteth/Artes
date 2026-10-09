@@ -29,7 +29,7 @@ class HoldoutIntakeTests(unittest.TestCase):
         self.expected = visual_hash(self.image)
         self.assertGreater(hamming(self.expected, '0000000000000000'), 6)
 
-    def fake_development(self):
+    def fake_development(self, _development=None):
         return set(), {'training_group'}, ['0000000000000000']
 
     def test_scan_then_complete_rights_and_seal_without_private_image_paths(self):

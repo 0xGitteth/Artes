@@ -139,7 +139,8 @@ def preflight(work, offline_archive=None):
         download_archive(archive, revision)
     if not archive.is_file():
         raise ValueError('model_archive_unavailable')
-    with archive.open('rb') as source:\n        digest = hashlib.file_digest(source, 'sha256').hexdigest()
+    with archive.open('rb') as source:
+        digest = hashlib.file_digest(source, 'sha256').hexdigest()
     inspection = inspect_archive(archive)
     has_weights = bool(inspection['modelWeightCandidates'])
     status = ('blocked_unsafe_archive' if inspection['unsafeArchiveEntries']

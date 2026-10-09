@@ -49,7 +49,7 @@ class RedDesertArtesTests(unittest.TestCase):
                 'sha256': sha, 'sourceGroup': 'one',
                 'weightsSha256': FILE_SHA256,
                 'scores': ordered_backwards,
-            }) + '\\n', encoding='utf-8')
+            }) + '\n', encoding='utf-8')
             restored = read_cache(path, [row])
             self.assertEqual(restored[sha], scores)
 

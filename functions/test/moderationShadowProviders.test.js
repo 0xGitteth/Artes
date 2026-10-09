@@ -149,3 +149,22 @@ test('hanging provider is bounded even if fetch ignores the abort signal', async
   assert.deepEqual(result.providers.map((x) => x.status), ['timeout', 'ok']);
   assert.ok(result.providers[0].elapsedMs < 1800);
 });
+
+
+test('five NSFW raw categories remain observations, not explicit-act evidence', async () => {
+  const signals = [
+    { type: 'nsfw_normal_category', confidence: 0.01 },
+    { type: 'nsfw_porn_category', confidence: 0.88 },
+    { type: 'nsfw_hentai_category', confidence: 0.02 },
+    { type: 'nsfw_drawing_category', confidence: 0.01 },
+    { type: 'nsfw_sexy_category', confidence: 0.08 },
+  ];
+  const result = await runStagingModerationShadow({
+    ...staging,
+    fetchImpl: async (url) => http(good(url.includes('nsfw') ? 'nsfw' : 'safety', signals)),
+  });
+  assert.deepEqual(result.providers[0].signals, signals);
+  assert.equal(JSON.stringify(result).includes('sexual_explicit'), false);
+  assert.equal(JSON.stringify(result).includes('finalOutcome'), false);
+  assert.equal(result.providers[0].uncertain, false); // mock uncertainty, never approval
+});

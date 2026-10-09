@@ -37,7 +37,7 @@ class LocalResNet34Tests(unittest.TestCase):
         self.assertEqual(tuple(state['0.0.weight'].shape), (64, 3, 7, 7))
         self.assertEqual(tuple(state['0.4.0.conv1.weight'].shape), (64, 64, 3, 3))
         self.assertEqual(tuple(state['1.4.weight'].shape), (512, 1024))
-        self.assertEqual(tuple(state['1.7.weight'].shape), (11, 512))
+        self.assertEqual(tuple(state['1.8.weight'].shape), (11, 512))
         self.assertNotIn('fc.weight', state)
 
     def test_forward_both_layouts_on_cpu(self):

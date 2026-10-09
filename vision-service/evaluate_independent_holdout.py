@@ -179,8 +179,8 @@ def score_new_images(rows, holdout, work, seal):
             luke_scores = {
                 ('normal' if label == 'neutral' else
                  'drawing' if label == 'drawings' else label): float(prob)
-                for label, prob in zip(id2label.values(),
-                    torch.softmax(luke_logits, dim=-1).tolist())
+                for label, prob in ((id2label[index], probability) for index, probability
+                     in enumerate(torch.softmax(luke_logits, dim=-1).tolist()))
             }
             luke_scores = safe_scores(luke_scores)
             record = {

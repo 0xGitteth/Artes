@@ -1,8 +1,11 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from evaluate_reddesert_artes import (
     CLASSES, FILE_SHA256, aggregate, validate_probabilities,
-    infer_publisher_layout,
+    infer_publisher_layout, read_cache,
 )
 
 
@@ -30,6 +33,37 @@ class RedDesertArtesTests(unittest.TestCase):
             validate_probabilities([1.0])
         with self.assertRaisesRegex(ValueError, 'invalid_probability_sum'):
             validate_probabilities([0.1] * len(CLASSES))
+
+    def test_persisted_class_name_cache_round_trip(self):
+        # The real research runner saves named score maps rather than arrays.
+        scores = {category: 0.0 for category in CLASSES}
+        scores['neutral'] = .75
+        scores['bdsm'] = .25
+        ordered_backwards = dict(reversed(list(scores.items())))
+        self.assertEqual(validate_probabilities(ordered_backwards), scores)
+        with tempfile.TemporaryDirectory() as dirname:
+            path = Path(dirname) / 'scores.jsonl'
+            sha = 'a' * 64
+            row = {'sha256': sha, 'sourceGroup': 'one'}
+            path.write_text(json.dumps({
+                'sha256': sha, 'sourceGroup': 'one',
+                'weightsSha256': FILE_SHA256,
+                'scores': ordered_backwards,
+            }) + '\\n', encoding='utf-8')
+            restored = read_cache(path, [row])
+            self.assertEqual(restored[sha], scores)
+
+    def test_rejects_incorrect_cached_labels_or_invalid_score_types(self):
+        scores = {category: 0.0 for category in CLASSES}
+        scores['neutral'] = 1.0
+        with self.assertRaisesRegex(ValueError, 'unexpected_red_desert_output_dim'):
+            validate_probabilities({k: v for k, v in scores.items() if k != 'x'})
+        with self.assertRaisesRegex(ValueError, 'unexpected_red_desert_output_dim'):
+            validate_probabilities({**scores, 'unverified': 0.0})
+        with self.assertRaisesRegex(ValueError, 'invalid_probability'):
+            validate_probabilities({**scores, 'neutral': True})
+        with self.assertRaisesRegex(ValueError, 'invalid_probability_sum'):
+            validate_probabilities({**scores, 'neutral': .4})
 
     def test_aggregate_is_private_and_does_not_reinterpret_undefined_classes(self):
         rows, predictions = [], {}

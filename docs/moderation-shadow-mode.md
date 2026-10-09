@@ -48,6 +48,30 @@ Response (example based on synthetic data):
 
 Allowed signal types are exported as `SHADOW_SIGNAL_TYPES` by `functions/moderationShadowProviders.js`. Scores must be finite numbers in [0, 1]. Unknown categories, invalid responses, policy-owned fields and provider mismatches are rejected. These categories are **observations**, not final Artes labels.
 
+## First local specialized model: NSFW Detection 2 Mini
+
+Implementation: \`vision-service/nsfw_shadow.py\` and the existing FastAPI service's optional \`POST /v1/signals\` route. This reuses the **existing** vision-service container/process. No paid API, no separate cloud service, no model download in automated tests, and no new mandatory runtime dependency.
+
+- Upstream model: https://huggingface.co/viddexa/nsfw-detection-2-mini
+- Model weights license as declared by publisher: Apache-2.0. Keep attribution/license obligations and check dependencies before deployment.
+- Five source categories: \`Normal\`, \`Porn\`, \`Hentai\`, \`Drawing\`, \`Sexy\`. **The \`Porn\` category is NOT proof of a visible sexual act**, and the model's published F1 is not an Artes-specific accuracy estimate.
+- It returns five raw signals: \`nsfw_normal_category\`, \`nsfw_porn_category\`, \`nsfw_hentai_category\`, \`nsfw_drawing_category\`, \`nsfw_sexy_category\`. None maps to \`sexual_explicit\` or directly to a publication decision. Results are always marked uncalibrated/uncertain.
+- CPU by default. No GPU or paid inference endpoint needed to test. Measured CPU latency, RAM and minimum hosting resources are still **unknown**; evaluate on the intended inexpensive European server size before activating.
+
+This adapter is OFF by default. To use it **only after separate staging approval and deployment**, configure the existing vision service in staging with:
+
+- \`ARTES_NSFW_SHADOW_ENABLED=true\`
+- \`ARTES_NSFW_SHADOW_TOKEN=<random server secret>\` (mandatory; endpoint refuses unauthenticated inference even if the existing /v1/infer endpoint has no auth configured)
+- \`ARTES_NSFW_MODEL_REVISION=<verified full 40-character Hugging Face commit SHA>\` (mandatory, pinned/reproducible; never \`main\`)
+
+The existing Functions environment for \`artes-staging\` must then set \`ARTES_SHADOW_ENABLED=true\` and e.g.
+\`ARTES_SHADOW_PROVIDERS_JSON=[{"id":"nsfw","endpoint":"https://<staging-vision-service-host>","tokenEnv":"ARTES_SHADOW_TOKEN_NSFW"}]\`
+with \`ARTES_SHADOW_TOKEN_NSFW\` matching the service's \`ARTES_NSFW_SHADOW_TOKEN\`. The full endpoint must use approved HTTPS and no untrusted request-supplied URL.
+
+**No live endpoint or env var has been configured by this PR.** Loading the model and downloading its weights happens only after an authenticated request reaches the explicitly enabled endpoint. The route fails closed when disabled, unpinned, unauthenticated or inference is unavailable.
+
+The existing Python test suite verifies only the integration contract with synthetic images and mock inference. Running the real pretrained model, collecting timing/memory and benchmarking the 375 development + fresh independent test images are separate steps. Do not classify the model as production-ready merely because CI passes.
+
 ## Safety and limitations
 
 - Only `artes-staging` and only opt-in. All other projects run zero shadow-provider calls.

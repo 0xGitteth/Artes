@@ -78,7 +78,7 @@ from resnet34_no_torchvision import build_red_desert_resnet34
 for layout in ('torchvision', 'fastai_sequential'):
     model = build_red_desert_resnet34(layout, num_classes=11)
     state = model.state_dict()
-    required = ('conv1.weight', 'fc.weight') if layout == 'torchvision' else ('0.0.weight', '1.7.weight')
+    required = ('conv1.weight', 'fc.weight') if layout == 'torchvision' else ('0.0.weight', '1.8.weight')
     if not all(key in state for key in required):
         raise ValueError('local_model_architecture_missing_required_weights')
     print('Lokaal ResNet34-model gebouwd:', layout, flush=True)

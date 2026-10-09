@@ -28,7 +28,7 @@ def collect_images(directory, maximum):
     if not folder.is_dir():
         raise ValueError('images_directory_missing')
     images = [
-        path for path in sorted(folder.iterdir())
+        path for path in sorted(folder.rglob('*'))
         if path.is_file() and path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.webp'}
     ]
     return images[:maximum]

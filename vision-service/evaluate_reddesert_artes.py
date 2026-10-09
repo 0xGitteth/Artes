@@ -107,6 +107,49 @@ def read_cache(path, rows):
     return records
 
 
+def infer_publisher_layout(keys):
+    """The publisher documents torchvision and FastAI-style ResNet34 layouts."""
+    keys = tuple(keys)
+    if not keys:
+        raise ValueError('empty_publisher_weight_checkpoint')
+    fastai_keys = any(k.startswith('0.') or k.startswith('1.') for k in keys)
+    torchvision_keys = any(k.startswith('conv1.') or k.startswith('layer1.') for k in keys)
+    if fastai_keys and torchvision_keys:
+        raise ValueError('mixed_publisher_resnet_weight_layouts')
+    if fastai_keys:
+        return 'fastai_sequential'
+    if torchvision_keys:
+        return 'torchvision'
+    raise ValueError('unknown_publisher_resnet_weight_layout')
+
+
+def build_local_publisher_model(layout, class_count):
+    """Recreate only the documented architecture, never import publisher Python."""
+    import torch
+    from torch import nn
+    from torchvision.models import resnet34
+    if layout == 'torchvision':
+        return resnet34(weights=None, num_classes=class_count)
+    if layout != 'fastai_sequential':
+        raise ValueError('unsupported_publisher_resnet_layout')
+
+    class AdaptiveConcatPool2d(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.ap = nn.AdaptiveAvgPool2d(1)
+            self.mp = nn.AdaptiveMaxPool2d(1)
+        def forward(self, x):
+            return torch.cat([self.mp(x), self.ap(x)], dim=1)
+
+    base = resnet34(weights=None)
+    backbone = nn.Sequential(*list(base.children())[:-2])
+    head = nn.Sequential(
+        AdaptiveConcatPool2d(), nn.Flatten(1), nn.BatchNorm1d(1024),
+        nn.Dropout(.25), nn.Linear(1024, 512), nn.ReLU(),
+        nn.BatchNorm1d(512), nn.Dropout(.5), nn.Linear(512, class_count))
+    return nn.Sequential(backbone, head)
+
+
 def score_local_images(rows, path, weights):
     cached = read_cache(path, rows)
     remaining = [r for r in rows if r['sha256'] not in cached]
@@ -117,13 +160,13 @@ def score_local_images(rows, path, weights):
     import torch
     from PIL import Image
     from safetensors.torch import load_file
-    from torchvision.models import resnet34
     torch.set_num_threads(min(2, max(1, os.cpu_count() or 1)))
-    model = resnet34(weights=None, num_classes=len(CLASSES))
     state = load_file(str(weights), device='cpu')
+    layout = infer_publisher_layout(state.keys())
+    model = build_local_publisher_model(layout, len(CLASSES))
     model.load_state_dict(state, strict=True)
     model.eval().to('cpu')
-    print('Publisher ResNet34 weights verified and loaded without remote Python code.', flush=True)
+    print(f'Publisher ResNet34 ({layout}) loaded exactly, without remote Python code.', flush=True)
     mean = np.asarray((.485, .456, .406), dtype='float32').reshape(3, 1, 1)
     std = np.asarray((.229, .224, .225), dtype='float32').reshape(3, 1, 1)
     with path.open('a', encoding='utf-8') as out:

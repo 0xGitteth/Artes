@@ -102,6 +102,8 @@ def run_luke(rows, output_dir, max_new=None):
     if set(id2label.values()) != {'drawings', 'hentai', 'neutral', 'porn', 'sexy'}:
         raise ValueError('unexpected_luke_model_labels')
 
+    failures = 0
+    successes = 0
     with path.open('a', encoding='utf-8') as output:
         for i, row in enumerate(pending, 1):
             start = time.perf_counter()
@@ -125,11 +127,18 @@ def run_luke(rows, output_dir, max_new=None):
                 }
                 output.write(json.dumps(record, separators=(',', ':')) + '\n')
                 output.flush()
+                successes += 1
             except Exception:
+                failures += 1
                 # Intentionally avoid logging private file paths or image contents.
                 print(f'LukeJacob: image {i} could not be processed; rerunning later is safe.', flush=True)
             if i % 25 == 0 or i == len(pending):
                 print(f'LukeJacob processed {i}/{len(pending)} newly attempted images.', flush=True)
+
+    if successes == 0 and pending:
+        raise RuntimeError('luke_model_smoke_failed_no_images_scored')
+    if failures:
+        print(f'LukeJacob incomplete; {failures} images can be retried.', flush=True)
 
 
 def statistics_for_model(rows, cache, key):

@@ -30,7 +30,7 @@ for candidate in "${CANDIDATES[@]}"; do
   full_path="$(realpath "$candidate")"
   [[ -z "${CHECKED[$full_path]:-}" ]] || continue
   CHECKED[$full_path]=1
-  if "$candidate" -c 'import torch, torchvision, safetensors.torch, PIL.Image, numpy, sklearn.metrics; from torchvision.models import resnet34' >/dev/null 2>&1; then
+  if "$candidate" -c 'import torch, safetensors.torch, PIL.Image, numpy, sklearn.metrics' >/dev/null 2>&1; then
     PY="$candidate"
     break
   fi
@@ -49,7 +49,7 @@ if [[ -z "$PY" ]]; then
 import importlib
 import sys
 print("Python:", sys.executable)
-for module in ("torch", "torchvision", "safetensors.torch", "PIL.Image", "numpy", "sklearn.metrics"):
+for module in ("torch", "safetensors.torch", "PIL.Image", "numpy", "sklearn.metrics"):
     try:
         importlib.import_module(module)
         print("  OK:", module)
@@ -62,7 +62,7 @@ PYTEST
 fi
 echo "Werkende bestaande Python-omgeving: $PY"
 mkdir -p "$WORK"
-for file in evaluate_reddesert_artes.py evaluate_nsfw_development.py nsfw_shadow.py; do
+for file in evaluate_reddesert_artes.py resnet34_no_torchvision.py evaluate_nsfw_development.py nsfw_shadow.py; do
   if ! git cat-file -e "FETCH_HEAD:vision-service/$file" 2>/dev/null; then
     echo "Haal de onderzoeksbranch eerst op met git fetch." >&2
     exit 1
@@ -70,6 +70,7 @@ for file in evaluate_reddesert_artes.py evaluate_nsfw_development.py nsfw_shadow
   git show "FETCH_HEAD:vision-service/$file" > "$WORK/$file"
 done
 echo "RedDesert: authentieke modelgewichten controleren en lokaal op 375 bestaande afbeeldingen testen."
+echo "ResNet34 wordt met de bestaande PyTorch gebouwd, zonder torchvision te installeren."
 echo "Modeldownload max. 85 MB, geen beeld-API, geen serverinstallatie, geen code uit modelrepository uitgevoerd."
 echo "RedDesert kent BDSM wel, maar geen aantoonbaar afzonderlijke sexual_act klasse."
 "$PY" "$WORK/evaluate_reddesert_artes.py" --dataset "$DATA" --work "$WORK"

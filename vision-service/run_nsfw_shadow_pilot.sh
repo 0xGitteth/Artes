@@ -8,7 +8,7 @@ WORK=".tmp/moderation-nsfw-pilot"
 DATA=".tmp/moderation-v2/Artes_training_v2/Artes_dataset_v2_volledig"
 PY=".tmp/moderation-v5-siglip2/.venv/bin/python"
 REF="FETCH_HEAD"
-REV="a81db255af5ce19fc2f2a4385611510576805835"
+REV="7c914c1a94ac1a8d16af7982101756f5650b870a"
 
 if [[ ! -x "$PY" ]]; then
   echo "Bestaande Python-omgeving ontbreekt: $PY. Stop zonder installatie." >&2

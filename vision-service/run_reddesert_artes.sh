@@ -5,15 +5,62 @@ set -euo pipefail
 cd /workspaces/Artes
 WORK=".tmp/moderation-nsfw-pilot"
 DATA=".tmp/moderation-v2/Artes_training_v2/Artes_dataset_v2_volledig"
-PY=".tmp/moderation-v5-siglip2/.venv/bin/python"
-if [[ ! -x "$PY" || ! -f "$DATA/train.json" || ! -f "$DATA/validation.json" ]]; then
-  echo "Bestaande dataset of Python-omgeving ontbreekt; niets gedownload." >&2
+if [[ ! -f "$DATA/train.json" || ! -f "$DATA/validation.json" ]]; then
+  echo "De bestaande Artes-beelden of hun manifests ontbreken; niets gedownload." >&2
   exit 1
 fi
-if ! "$PY" -c 'import torch, torchvision, safetensors, PIL, numpy, sklearn' >/dev/null 2>&1; then
-  echo "Een bestaande Python-bibliotheek ontbreekt; niets geïnstalleerd of gedownload. Stuur deze fout." >&2
+
+# Prefer the successful research environment, but use an existing activated or
+# repository venv when it already contains all compatible scientific libraries.
+# Do not install or change the contents of any venv automatically.
+CANDIDATES=(".tmp/moderation-v5-siglip2/.venv/bin/python" ".venv/bin/python")
+if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+  CANDIDATES+=("$VIRTUAL_ENV/bin/python")
+fi
+if command -v python3 >/dev/null 2>&1; then
+  CANDIDATES+=("$(command -v python3)")
+fi
+if command -v python >/dev/null 2>&1; then
+  CANDIDATES+=("$(command -v python)")
+fi
+declare -A CHECKED=()
+PY=""
+for candidate in "${CANDIDATES[@]}"; do
+  [[ -x "$candidate" ]] || continue
+  full_path="$(realpath "$candidate")"
+  [[ -z "${CHECKED[$full_path]:-}" ]] || continue
+  CHECKED[$full_path]=1
+  if "$candidate" -c 'import torch, torchvision, safetensors.torch, PIL.Image, numpy, sklearn.metrics; from torchvision.models import resnet34' >/dev/null 2>&1; then
+    PY="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$PY" ]]; then
+  echo "Geen bestaande Python-omgeving heeft alle werkende RedDesert-bibliotheken." >&2
+  echo "Dit is de diagnostiek (nog steeds zonder downloads of installaties):" >&2
+  declare -A DIAGNOSED=()
+  for candidate in "${CANDIDATES[@]}"; do
+    [[ -x "$candidate" ]] || continue
+    full_path="$(realpath "$candidate")"
+    [[ -z "${DIAGNOSED[$full_path]:-}" ]] || continue
+    DIAGNOSED[$full_path]=1
+    "$candidate" - <<'PYTEST' >&2
+import importlib
+import sys
+print("Python:", sys.executable)
+for module in ("torch", "torchvision", "safetensors.torch", "PIL.Image", "numpy", "sklearn.metrics"):
+    try:
+        importlib.import_module(module)
+        print("  OK:", module)
+    except Exception as exc:
+        print("  PROBLEEM:", module, "=>", type(exc).__name__, str(exc)[:350])
+PYTEST
+  done
+  echo "Stuur bovenstaande PROBLEEM-regels door; ik pas alleen de noodzakelijke afhankelijkheid aan." >&2
   exit 1
 fi
+echo "Werkende bestaande Python-omgeving: $PY"
 mkdir -p "$WORK"
 for file in evaluate_reddesert_artes.py evaluate_nsfw_development.py nsfw_shadow.py; do
   if ! git cat-file -e "FETCH_HEAD:vision-service/$file" 2>/dev/null; then

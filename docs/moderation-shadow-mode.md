@@ -72,6 +72,19 @@ with \`ARTES_SHADOW_TOKEN_NSFW\` matching the service's \`ARTES_NSFW_SHADOW_TOKE
 
 The existing Python test suite verifies only the integration contract with synthetic images and mock inference. Running the real pretrained model, collecting timing/memory and benchmarking the 375 development + fresh independent test images are separate steps. Do not classify the model as production-ready merely because CI passes.
 
+### Offline CPU cost check
+
+Run on existing Codespaces CPU, without creating a new hosting subscription, after explicitly reviewing model download size and the availability of the approved local image set:
+
+```sh
+python vision-service/benchmark_nsfw_shadow.py \
+  --images-dir /path/to/approved-images \
+  --model-revision <full-40-character-model-commit> \
+  --max-images 100
+```
+
+The tool prints only aggregate observed count, mean and p95 wall time, CPU seconds, process memory peak (Linux) and estimated CPU-hours per 1,000 uploads. An optional `--eur-per-vcpu-hour` computes an estimate from a **supplied** rate. No model price or hosting cost is assumed. Model weights download once from Hugging Face when the real test is deliberately started; no download occurs during unit tests. Do not interpret this as a complete infrastructure budget.
+
 ## Safety and limitations
 
 - Only `artes-staging` and only opt-in. All other projects run zero shadow-provider calls.

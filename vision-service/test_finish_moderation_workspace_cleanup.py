@@ -61,6 +61,8 @@ class FinishCleanupTests(unittest.TestCase):
         settings = json.loads((self.root / ".vscode" / "settings.json").read_text())
         for key, value in EDITOR_GLOBS.items():
             self.assertEqual(settings["files.exclude"][key], value)
+        self.assertTrue(settings["explorer.fileNesting.enabled"])
+        self.assertEqual(settings["explorer.fileNesting.patterns"]["README-MODERATION.md"], "moderation-*")
         undone = undo(self.root)
         self.assertEqual(undone["restored"], 6)
         self.assertFalse((self.tmp / "artes-training-348-20261008").is_symlink())

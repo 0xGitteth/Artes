@@ -20,6 +20,7 @@ BUCKETS = (
     ("modelonderzoek", ("moderation-v5", "nsfw", "model", "yolo", "siglip")),
     ("beeldbronnen", ("discovery", "research", "source")),
     ("eindtest", ("holdout",)),
+    ("testmateriaal", ("test-images", "test-set")),
 )
 
 
@@ -28,6 +29,8 @@ def category(name):
     lowered = name.lower()
     if "holdout" in lowered:
         return "eindtest"
+    if any(marker in lowered for marker in ("test-images", "test-set")):
+        return "testmateriaal"
     if "discovery" in lowered or "source" in lowered:
         return "beeldbronnen"
     if "moderation-v2" in lowered or "dataset" in lowered or "training" in lowered:
@@ -156,7 +159,7 @@ def undo(project):
                               target_is_directory=True)
             raise
     manifest.unlink()
-    for bucket in ("eindtest", "beeldbronnen", "modelonderzoek", "datasets", "overig"):
+    for bucket in ("eindtest", "testmateriaal", "beeldbronnen", "modelonderzoek", "datasets", "overig"):
         folder = collection / bucket
         if folder.exists():
             folder.rmdir()

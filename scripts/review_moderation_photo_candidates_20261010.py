@@ -68,7 +68,7 @@ function render(){
  return '<article class="card '+s+'" data-id="'+html(i.id)+'">'+
  '<img loading="lazy" src="/image/'+file+'" alt="Foto '+html(i.id)+'" data-zoom="/image/'+file+'">'+
  '<div class="info"><div class="meta"><strong>Bron: '+html(i.collection)+'</strong><br>'+
- html(i.id)+' · <a href="'+html(i.image_page)+'" target="_blank" rel="noopener">Originele fotopagina</a>'+(suggestions[i.id]?' · <b>Voorstel assistent, nog te bevestigen</b>':'')+'</div>'+ 
+ html(i.id)+' · <a href="'+html(i.image_page)+'" target="_blank" rel="noopener">Originele fotopagina</a>'+(suggestions[i.id]?' · <b>Voorstel assistent, nog te bevestigen</b>':'')+(suggestions[i.id]?.originalReviewNeeded?' · <b style="color:#ffcc85">Origineel extra controleren</b>':'')+(suggestions[i.id]?.note?'<br><b style="color:#ffcc85">'+html(suggestions[i.id].note)+'</b>':'')+'</div>'+ 
  '<label>Naaktheid<select data-field="nudity">'+options(nudity,p.nudity||"")+'</select></label>'+
  '<label>Seksuele context<select data-field="sexualContext">'+options(sexual,p.sexualContext||"")+'</select></label>'+
  '<label>Leeftijdscontrole<select data-field="ageSafety">'+options(age,p.ageSafety||"")+'</select></label>'+

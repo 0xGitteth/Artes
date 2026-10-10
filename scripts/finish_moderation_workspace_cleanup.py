@@ -130,7 +130,9 @@ def inspect(root):
             data = json.loads(settings.read_text(encoding="utf-8"))
         except (ValueError, UnicodeError):
             raise ValueError("vscode_settings_are_not_standard_json_no_overwrite")
-        if not isinstance(data, dict) or not isinstance(data.get("files.exclude", {}), dict):
+        if (not isinstance(data, dict)
+                or not isinstance(data.get("files.exclude", {}), dict)
+                or not isinstance(data.get("explorer.fileNesting.patterns", {}), dict)):
             raise ValueError("vscode_settings_invalid_format")
         old_text = settings.read_text(encoding="utf-8")
     else:
@@ -149,6 +151,9 @@ def set_explorer(root, old_text):
     # Avoid overriding explicit existing user's choices.
     for glob, desired in EDITOR_GLOBS.items():
         exclusions.setdefault(glob, desired)
+    parsed.setdefault("explorer.fileNesting.enabled", True)
+    nesting = parsed.setdefault("explorer.fileNesting.patterns", {})
+    nesting.setdefault("README-MODERATION.md", "moderation-*")
     settings.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(parsed, indent=2, ensure_ascii=False) + "\n"
     if settings.exists():

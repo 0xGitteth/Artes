@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path.cwd() if __file__ == "<stdin>" else Path(__file__).resolve().parents[1]
 DEFAULT_FOLDER = ROOT / ".tmp/moderation-research-discovery/public-photo-candidates-20261010"
 
-def make_sheets(folder, output=None, columns=4, rows=4):
+def make_sheets(folder, output=None, columns=4, rows=4, collection=None):
     try:
         from PIL import Image, ImageDraw, ImageFont, ImageOps
     except ImportError as exc:
@@ -34,6 +34,8 @@ def make_sheets(folder, output=None, columns=4, rows=4):
         entry = json.loads(raw)
         filename = Path(entry["filename"]).resolve()
         if filename.parent != folder or not filename.is_file():
+            continue
+        if collection and entry["collection"] != collection:
             continue
         items.append({
             "id": entry["id"],
@@ -119,7 +121,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--columns", type=int, default=4)
     parser.add_argument("--rows", type=int, default=4)
+    parser.add_argument("--collection", type=str, default=None)
     args=parser.parse_args()
     if not 2<=args.columns<=6 or not 2<=args.rows<=6:
         parser.error("Rows and columns must be between 2 and 6")
-    make_sheets(args.folder,args.output,args.columns,args.rows)
+    make_sheets(args.folder,args.output,args.columns,args.rows,args.collection)

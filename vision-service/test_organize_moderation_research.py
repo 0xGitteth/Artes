@@ -21,7 +21,8 @@ class ConsolidateArtesResearchTests(unittest.TestCase):
         tmp.mkdir()
         self.tmp = tmp
         for name in ('moderation-v2', 'moderation-nsfw-pilot',
-                     'moderation-independent-discovery'):
+                     'moderation-independent-discovery',
+                     'moderation-test-images', 'moderation-test-set'):
             d = tmp / name
             d.mkdir()
             (d / 'preserve.bin').write_bytes(b'important_private_model_data')
@@ -29,11 +30,13 @@ class ConsolidateArtesResearchTests(unittest.TestCase):
 
     def test_plan_does_not_modify_and_apply_preserves_old_paths(self):
         intended = plan(self.project)
-        self.assertEqual(len(intended), 3)
+        self.assertEqual(len(intended), 5)
         self.assertFalse((self.tmp / COLLECTION).exists())
         self.assertEqual(category('moderation-independent-holdout'), 'eindtest')
+        self.assertEqual(category('moderation-test-images'), 'testmateriaal')
+        self.assertEqual(category('moderation-test-set'), 'testmateriaal')
         result = apply(self.project)
-        self.assertEqual(result['moved'], 3)
+        self.assertEqual(result['moved'], 5)
         for rec in intended:
             original = self.tmp / rec['from']
             moved = self.tmp / rec['to']
@@ -46,7 +49,7 @@ class ConsolidateArtesResearchTests(unittest.TestCase):
             self.assertEqual((moved / 'result.json').read_text(), '{}\n')
         self.assertTrue((self.tmp / 'other_project_cache').exists())
         reverted = undo(self.project)
-        self.assertEqual(reverted['restored'], 3)
+        self.assertEqual(reverted['restored'], 5)
         self.assertFalse((self.tmp / COLLECTION).exists())
         for rec in intended:
             original = self.tmp / rec['from']

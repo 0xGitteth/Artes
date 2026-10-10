@@ -153,7 +153,10 @@ def main():
                 continue
             vals = {"nudity": entry.get("nudity", ""),
                     "sexualContext": entry.get("sexualContext", ""),
-                    "ageSafety": entry.get("ageSafety", "")}
+                    "ageSafety": entry.get("ageSafety", ""),
+                    "originalReviewNeeded": bool(entry.get("originalReviewNeeded")),
+                    "note": str(entry.get("note", ""))[:300],
+                    "assistantLabelConfidence": str(entry.get("assistantLabelConfidence", "medium"))}
             if vals["nudity"] in NUDITY and vals["sexualContext"] in SEXUAL and vals["ageSafety"] in AGE:
                 suggestions[ident] = vals
     progress_path = folder / "photo-review-progress.json"

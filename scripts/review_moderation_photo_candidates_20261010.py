@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path.cwd() if __file__ == "<stdin>" else Path(__file__).resolve().parents[1]
 DEFAULT_FOLDER = ROOT / ".tmp/moderation-research-discovery/public-photo-candidates-20261010"
 NUDITY = ["", "none", "underwear_swimwear", "implied_nude", "bare_buttocks", "female_bare_breasts", "genitalia", "male_topless"]
 SEXUAL = ["", "none", "suggestive", "bdsm_kink", "explicit_act"]

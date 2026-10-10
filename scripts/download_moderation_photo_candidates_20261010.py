@@ -104,8 +104,10 @@ def main():
         "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in unique),
         encoding="utf-8"
     )
+    archive = shutil.make_archive(str(out), "zip", root_dir=out)
     n = len(unique)
     print(f"Downloaded {n} distinct images out of {len(chosen)} candidates.")
+    print(f"ZIP archive: {archive}")
     print(f"Images and review manifest: {out}")
     print(f"Skipped: {len(chosen) - n}. Nothing was added to training or existing reviews.")
 

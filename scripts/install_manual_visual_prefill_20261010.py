@@ -52,8 +52,9 @@ def main():
         raise SystemExit("Download manifest not found: "+str(manifest))
     pictures=[json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines() if line.strip()]
     codes=TOKENS.split()
-    if len(pictures)!=350 or len(codes)!=350:
-        raise SystemExit("This review applies to EXACTLY 350 original photos; no files changed.")
+    if len(pictures)<350 or len(codes)!=350:
+        raise SystemExit("Original 350 photos missing; no files changed.")
+    pictures=pictures[:350]
     sha=hashlib.sha256("|".join(p["id"] for p in pictures).encode()).hexdigest()
     if sha!=EXPECTED_SHA:
         raise SystemExit("The original 350 photos or their order changed. Refusing to mismatch labels.")

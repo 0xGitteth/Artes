@@ -48,7 +48,7 @@ a{color:#85bfff}#notice{font-size:13px;color:#b7e2cb}
 <div id="overlay" title="Klik om te sluiten"><img alt="Uitvergroot voorbeeld"></div>
 <script>
 "use strict";
-var items=[], progress={}, page=0, pageSize=35, filter="unreviewed", gallery="all";
+var items=[], progress={}, suggestions={}, page=0, pageSize=35, filter="unreviewed", gallery="all";
 var nudity=["","none","underwear_swimwear","implied_nude","bare_buttocks","female_bare_breasts","genitalia","male_topless"];
 var sexual=["","none","suggestive","bdsm_kink","explicit_act"];
 var age=["","adult_clear","skip_minor_or_age_uncertain","not_required_nonadult_nonsexual"];
@@ -64,11 +64,11 @@ function render(){
  var subset=list.slice(page*pageSize,(page+1)*pageSize);
  var g=document.getElementById("grid");
  g.innerHTML=subset.map(function(i){
- var p=progress[i.id]||{},s=status(i),file=encodeURIComponent(i.filename);
+ var p=progress[i.id]||suggestions[i.id]||{},s=status(i),file=encodeURIComponent(i.filename);
  return '<article class="card '+s+'" data-id="'+html(i.id)+'">'+
  '<img loading="lazy" src="/image/'+file+'" alt="Foto '+html(i.id)+'" data-zoom="/image/'+file+'">'+
  '<div class="info"><div class="meta"><strong>Bron: '+html(i.collection)+'</strong><br>'+
- html(i.id)+' · <a href="'+html(i.image_page)+'" target="_blank" rel="noopener">Originele fotopagina</a></div>'+
+ html(i.id)+' · <a href="'+html(i.image_page)+'" target="_blank" rel="noopener">Originele fotopagina</a>'+(suggestions[i.id]?' · <b>Voorstel assistent, nog te bevestigen</b>':'')+'</div>'+ 
  '<label>Naaktheid<select data-field="nudity">'+options(nudity,p.nudity||"")+'</select></label>'+
  '<label>Seksuele context<select data-field="sexualContext">'+options(sexual,p.sexualContext||"")+'</select></label>'+
  '<label>Leeftijdscontrole<select data-field="ageSafety">'+options(age,p.ageSafety||"")+'</select></label>'+
@@ -81,7 +81,7 @@ function render(){
 }
 function idFor(el){return el.closest(".card").dataset.id}
 async function save(id,changes){
- var old=Object.assign({},progress[id]||{}),next=Object.assign({},old,changes);
+ var old=Object.assign({},progress[id]||suggestions[id]||{}),next=Object.assign({},old,changes);
  progress[id]=next;
  var res=await fetch("/api/review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:id,decision:next})});
  if(!res.ok){progress[id]=old;alert("Opslaan is mislukt: "+(await res.text()));return false}
@@ -97,7 +97,7 @@ document.getElementById("grid").addEventListener("click",function(event){
  var zoom=event.target.getAttribute("data-zoom");
  if(zoom){document.querySelector("#overlay img").src=zoom;document.getElementById("overlay").style.display="grid";return}
  var action=event.target.dataset.action;if(!action)return;
- var id=idFor(event.target),p=progress[id]||{};
+ var id=idFor(event.target),p=progress[id]||suggestions[id]||{};
  if(action==="reviewed"&&(!p.nudity||!p.sexualContext||!p.ageSafety)){
    alert("Vul naaktheid, seksuele context en leeftijdscontrole in.");return
  }
@@ -114,7 +114,7 @@ document.getElementById("backup").onclick=function(){
  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="Artes-photo-review-backup.json";a.click();setTimeout(function(){URL.revokeObjectURL(a.href)},1000);
 };
 fetch("/api/items").then(function(r){if(!r.ok)throw Error("Kan de beelden niet laden");return r.json()}).then(function(data){
- items=data.items;progress=data.progress;
+ items=data.items;progress=data.progress;suggestions=data.suggestions||{};
  var cats=[...new Set(items.map(function(i){return i.collection}))];
  document.getElementById("gallery").innerHTML='<option value="all">Alle brongalerijen</option>'+cats.map(function(c){return '<option value="'+html(c)+'">'+html(c)+'</option>'}).join("");
  render()
@@ -141,6 +141,21 @@ def main():
     if not items:
         raise SystemExit("Geen lokale afbeeldingen beschikbaar in " + str(folder))
     by_id = {item["id"]: item for item in items}
+    suggestions_path = folder / "assistant-visual-prefill.json"
+    suggestions = {}
+    if suggestions_path.is_file():
+        prefill = json.loads(suggestions_path.read_text(encoding="utf-8"))
+        if prefill.get("method") != "assistant_manual_visual_review":
+            raise SystemExit("Voorinvulling moet gebaseerd zijn op onafhankelijke visuele beoordeling.")
+        for entry in prefill.get("items", []):
+            ident = entry.get("id")
+            if ident not in by_id:
+                continue
+            vals = {"nudity": entry.get("nudity", ""),
+                    "sexualContext": entry.get("sexualContext", ""),
+                    "ageSafety": entry.get("ageSafety", "")}
+            if vals["nudity"] in NUDITY and vals["sexualContext"] in SEXUAL and vals["ageSafety"] in AGE:
+                suggestions[ident] = vals
     progress_path = folder / "photo-review-progress.json"
     if progress_path.is_file():
         progress = json.loads(progress_path.read_text(encoding="utf-8"))
@@ -159,7 +174,7 @@ def main():
             if parsed == "/":
                 return self.send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
             if parsed == "/api/items":
-                payload = json.dumps({"items": items, "progress": progress}, ensure_ascii=False).encode("utf-8")
+                payload = json.dumps({"items": items, "progress": progress, "suggestions": suggestions}, ensure_ascii=False).encode("utf-8")
                 return self.send(200, payload, "application/json; charset=utf-8")
             if parsed.startswith("/image/"):
                 name = unquote(parsed[len("/image/"):])
@@ -202,6 +217,7 @@ def main():
                 return self.send(400, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
     print("Artes beeldbeoordeling: " + str(len(items)) + " foto's")
     print("Open in Codespaces via Ports > 8794 > Open in Browser")
+    print("Voorstellen na visuele beoordeling: " + str(len(suggestions)))
     print("Voortgang wordt lokaal opgeslagen: " + str(progress_path))
     print("Stoppen: Ctrl+C")
     with ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as server:

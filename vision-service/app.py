@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel, Field
 from PIL import Image
 from detector import load_detector, infer_detector
+from nsfw_shadow import classify_nsfw, validate_revision
 
 MODEL_REVISION = os.getenv('ARTES_DINOV2_REVISION')
 DETECTOR_PATH = os.getenv('ARTES_DETECTOR_ARTIFACT')
@@ -19,6 +20,9 @@ MODEL_NAME = 'dinov2_vitb14'
 EMBEDDING_DIMENSION = 768
 MAX_IMAGE_BYTES = int(os.getenv('ARTES_VISION_MAX_IMAGE_BYTES', str(15 * 1024 * 1024)))
 AUTH_TOKEN = os.getenv('ARTES_VISION_AUTH_TOKEN')
+NSFW_SHADOW_ENABLED = os.getenv('ARTES_NSFW_SHADOW_ENABLED') == 'true'
+NSFW_SHADOW_TOKEN = os.getenv('ARTES_NSFW_SHADOW_TOKEN')
+NSFW_MODEL_REVISION = os.getenv('ARTES_NSFW_MODEL_REVISION')
 ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 logger = logging.getLogger('artes.vision')
 
@@ -128,6 +132,31 @@ def health():
 def authorize(authorization: str | None = Header(default=None)):
     if AUTH_TOKEN and not secrets.compare_digest(authorization or '', 'Bearer ' + AUTH_TOKEN):
         raise HTTPException(status_code=401, detail='unauthorized')
+
+
+@app.post('/v1/signals')
+def nsfw_shadow_signals(request: InferenceRequest, authorization: str | None = Header(default=None)):
+    # This route is disabled by default even when the existing vision service runs.
+    if not NSFW_SHADOW_ENABLED:
+        raise HTTPException(status_code=404, detail='shadow_not_enabled')
+    # Never accept image uploads into an unauthenticated model endpoint.
+    if not NSFW_SHADOW_TOKEN:
+        raise HTTPException(status_code=503, detail='shadow_token_not_configured')
+    if not secrets.compare_digest(authorization or '', 'Bearer ' + NSFW_SHADOW_TOKEN):
+        raise HTTPException(status_code=401, detail='unauthorized')
+    try:
+        revision = validate_revision(NSFW_MODEL_REVISION)
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail='shadow_model_revision_not_pinned') from error
+    if request.contractVersion != 1 or request.requestedOutputs != ['signals']:
+        raise HTTPException(status_code=400, detail='invalid_shadow_contract')
+    image = decode_image(request.image)
+    try:
+        return classify_nsfw(image, revision)
+    except Exception as error:
+        # No raw images, provider secrets or model exception text in the API response.
+        logger.error('Shadow NSFW inference failed (%s).', type(error).__name__)
+        raise HTTPException(status_code=503, detail='shadow_model_unavailable') from error
 
 
 @app.post('/v1/infer', response_model=InferenceResponse, dependencies=[Depends(authorize)])

@@ -36,6 +36,7 @@ import {
 import { composeModerationPolicyResult } from './moderationPolicy.js';
 import { MODERATION_RUNTIME_MODES, assertRuntimeProviderInvocationAllowed, buildManualReviewFallback, resolveModerationRuntimeMode } from './moderationRuntimeProvider.js';
 import { runCustomDetectorInference, enforceCustomDetectorReview } from './moderationCustomDetector.js';
+import { runStagingModerationShadow } from './moderationShadowProviders.js';
 import { runGeminiClassifier as runGeminiClassifierV2 } from './geminiModerationClassifier.js';
 import { GEMINI_MODERATION_PROMPT_VERSION } from './geminiModerationContract.js';
 import { routeGeminiForbiddenReasons } from './geminiModerationRouting.js';
@@ -1669,6 +1670,15 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
       })
     : null;
 
+  // Observation-only multi-provider diagnostics, never used by policy or publishing.
+  const shadowDiagnosticsTask = !cachedResult && !shouldRouteByPreviousExample
+    ? runStagingModerationShadow({
+        projectId: moderationRuntimeProjectId,
+        image: parsed.buffer,
+        mimeType: parsed.mimeType,
+      }).catch(() => ({ enabled: true, internalError: true, providers: [] }))
+    : null;
+
   const imageAnnotator = new ImageAnnotatorClient();
   let labels = [];
   let safeSearch = null;
@@ -1890,6 +1900,14 @@ export const moderateImage = onRequest({ cors: true, region: 'europe-west4', mem
     if (customDetectorEvidence) {
       appliedTriggers.push(...customDetectorEvidence.appliedTriggers);
       forbiddenReasons.push(...customDetectorEvidence.forbiddenReasons);
+    }
+  }
+
+  // Staging telemetry is deliberately disconnected from moderation authority.
+  if (shadowDiagnosticsTask) {
+    const shadowDiagnostics = await shadowDiagnosticsTask;
+    if (shadowDiagnostics.enabled) {
+      logger.info('moderation_shadow_observation', shadowDiagnostics);
     }
   }
 

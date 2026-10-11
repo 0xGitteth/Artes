@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-11",
+  "purpose": "alternative_explicit_image_source_candidates_not_labels",
+  "existingDetectorUsed": false,
+  "eligibleAfter": "assistant_independent_visual_inspection_and_user_confirmation",
+  "sources": [
+    {
+      "source_id": "hf_x1101_nsfw_full",
+      "publisher": "x1101",
+      "source_page": "https://huggingface.co/datasets/x1101/nsfw-full",
+      "type": "dataset_viewer_individual_images",
+      "expected_rows": 126,
+      "default_requested_images": 48,
+      "verified_public_api": true,
+      "sexualContext": "unreviewed"
+    },
+    {
+      "source_id": "hf_samo_vecto_nsfw_images",
+      "publisher": "samo-vecto",
+      "source_page": "https://huggingface.co/datasets/samo-vecto/nsfw-images",
+      "type": "public_image_archive",
+      "archive_url": "https://huggingface.co/datasets/samo-vecto/nsfw-images/resolve/main/images.tgz?download=true",
+      "published_archive_bytes": 37837771,
+      "default_requested_images": 24,
+      "verified_public_api": true,
+      "sexualContext": "unreviewed"
+    }
+  ]
+}

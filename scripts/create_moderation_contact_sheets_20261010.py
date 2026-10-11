@@ -35,7 +35,7 @@ def make_sheets(folder, output=None, columns=4, rows=4, collection=None):
         filename = Path(entry["filename"]).resolve()
         if filename.parent != folder or not filename.is_file():
             continue
-        if collection and entry["collection"] != collection:
+        if collection and entry["collection"] not in set(collection.split(",")):
             continue
         items.append({
             "id": entry["id"],

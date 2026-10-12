@@ -7,6 +7,17 @@ git fetch origin chatgpt/moderation-photo-candidates-20261010
 ROOT=".tmp/moderation-research-discovery"
 PHOTOS="$ROOT/public-photo-candidates-20261010"
 mkdir -p "$ROOT"
+echo "Voorcontrole: controleren of alle benodigde Python-scripts geldig zijn"
+for SCRIPT in \
+ scripts/download_explicit_candidates_20261010.py \
+ scripts/install_manual_visual_prefill_20261010.py \
+ scripts/merge_explicit_visual_prefill_20261010.py \
+ scripts/download_bdsm_photo_candidates_20261011.py \
+ scripts/download_explicit_alt_candidates_20261011.py \
+ scripts/download_ordinary_photo_candidates_20261012.py \
+ scripts/create_moderation_contact_sheets_20261010.py; do
+  git show "FETCH_HEAD:$SCRIPT" | python3 -c "import ast,sys; ast.parse(sys.stdin.read())" || exit 1
+done
 if [[ ! -f "$PHOTOS/unreviewed-images.jsonl" ]]; then
   echo "Fout: de eerste 350 gedownloade beelden ontbreken." >&2
   exit 1
